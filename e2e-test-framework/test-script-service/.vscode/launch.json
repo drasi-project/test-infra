@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'test-script-service'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=test-script-service",
+                    "--package=test-script-service"
+                ],
+                "filter": {
+                    "name": "test-script-service",
+                    "kind": "bin"
+                }
+            },
+            "args": ["-c", "./tests/config.json", "-d", "./tests/data_cache", "-e", "f", "-t", "n", "-l", "c"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'test-script-service'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=test-script-service",
+                    "--package=test-script-service"
+                ],
+                "filter": {
+                    "name": "test-script-service",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

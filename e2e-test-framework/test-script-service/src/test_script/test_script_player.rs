@@ -190,6 +190,21 @@ impl TestScriptPlayerSettings {
         let source_defaults = &service_state_reader.source_defaults;
         let service_settings = &service_state_reader.service_settings;
 
+        // If neither the SourceConfig nor the SourceDefaults contain a test_id, return an error.
+        let test_id = match &source_config.test_id {
+            Some(test_id) => test_id.clone(),
+            None => {
+                match &source_defaults.test_id {
+                    Some(test_id) => test_id.clone(),
+                    None => {
+                        let err = format!("No test_id provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
+                }
+            }
+        };
+
         // If the SourceConfig doesn't contain a test_run_id, create one based on current time.
         let test_run_id = match &source_config.test_run_id {
             Some(test_run_id) => test_run_id.clone(),
@@ -203,7 +218,11 @@ impl TestScriptPlayerSettings {
             None => {
                 match &source_defaults.test_storage_account {
                     Some(test_storage_account) => test_storage_account.clone(),
-                    None => return Err("No test_storage_account provided and no default value found.".to_string())
+                    None => {
+                        let err = format!("No test_storage_account provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
                 }
             }
         };
@@ -215,7 +234,11 @@ impl TestScriptPlayerSettings {
             None => {
                 match &source_defaults.test_storage_access_key {
                     Some(test_storage_access_key) => test_storage_access_key.clone(),
-                    None => return Err("No test_storage_access_key provided and no default value found.".to_string())
+                    None => {
+                        let err = format!("No test_storage_access_key provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
                 }
             }
         };
@@ -227,7 +250,11 @@ impl TestScriptPlayerSettings {
             None => {
                 match &source_defaults.test_storage_container {
                     Some(test_storage_container) => test_storage_container.clone(),
-                    None => return Err("No test_storage_container provided and no default value found.".to_string())
+                    None => {
+                        let err = format!("No test_storage_container provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
                 }
             }
         };
@@ -239,7 +266,11 @@ impl TestScriptPlayerSettings {
             None => {
                 match &source_defaults.test_storage_path {
                     Some(test_storage_path) => test_storage_path.clone(),
-                    None => return Err("No test_storage_path provided and no default value found.".to_string())
+                    None => {
+                        let err = format!("No test_storage_path provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
                 }
             }
         };
@@ -251,7 +282,11 @@ impl TestScriptPlayerSettings {
             None => {
                 match &source_defaults.source_id {
                     Some(source_id) => source_id.clone(),
-                    None => return Err("No source_id provided and no default value found.".to_string())
+                    None => {
+                        let err = format!("No source_id provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
                 }
             }
         };
@@ -261,9 +296,13 @@ impl TestScriptPlayerSettings {
         let change_queue_address = match &reactivator_config.change_queue_address {
             Some(change_queue_address) => change_queue_address.clone(),
             None => {
-                match &source_defaults.reactivator_change_queue_address {
+                match &source_defaults.reactivator.change_queue_address {
                     Some(change_queue_address) => change_queue_address.clone(),
-                    None => return Err("No change_queue_url provided and no default value found.".to_string())
+                    None => {
+                        let err = format!("No change_queue_address provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
                 }
             }
         };
@@ -273,9 +312,13 @@ impl TestScriptPlayerSettings {
         let change_queue_port = match &reactivator_config.change_queue_port {
             Some(change_queue_port) => change_queue_port.clone(),
             None => {
-                match &source_defaults.reactivator_change_queue_port {
+                match &source_defaults.reactivator.change_queue_port {
                     Some(change_queue_port) => change_queue_port.clone(),
-                    None => return Err("No change_queue_port provided and no default value found.".to_string())
+                    None => {
+                        let err = format!("No change_queue_port provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
                 }
             }
         };
@@ -285,35 +328,29 @@ impl TestScriptPlayerSettings {
         let change_queue_topic = match &reactivator_config.change_queue_topic {
             Some(change_queue_topic) => change_queue_topic.clone(),
             None => {
-                match &source_defaults.reactivator_change_queue_topic {
+                match &source_defaults.reactivator.change_queue_topic {
                     Some(change_queue_topic) => change_queue_topic.clone(),
-                    None => return Err("No change_queue_topic provided and no default value found.".to_string())
+                    None => {
+                        let err = format!("No change_queue_topic provided and no default value found.");
+                        log::error!("{}", err.as_str());
+                        return Err(err);    
+                    }
                 }
             }
         };
 
         let spacing_mode = match &reactivator_config.spacing_mode {
             Some(mode) => TestScriptPlayerSpacingMode::from_str(&mode).unwrap(),
-            None => {
-                match &source_defaults.reactivator_spacing_mode {
-                    Some(mode) => TestScriptPlayerSpacingMode::from_str(&mode).unwrap_or_default(),
-                    None => TestScriptPlayerSpacingMode::default()
-                }
-            }
+            None => TestScriptPlayerSpacingMode::from_str(&source_defaults.reactivator.spacing_mode).unwrap()
         };
 
         let time_mode = match &reactivator_config.time_mode {
             Some(mode) => TestScriptPlayerTimeMode::from_str(&mode).unwrap(),
-            None => {
-                match &source_defaults.reactivator_time_mode {
-                    Some(mode) => TestScriptPlayerTimeMode::from_str(&mode).unwrap_or_default(),
-                    None => TestScriptPlayerTimeMode::default()
-                }
-            }
+            None => TestScriptPlayerTimeMode::from_str(&source_defaults.reactivator.time_mode).unwrap()
         };
 
         Ok(TestScriptPlayerSettings {
-            test_id: source_config.test_id.clone(),
+            test_id,
             test_run_id,
             test_storage_account,
             test_storage_access_key,
@@ -323,8 +360,8 @@ impl TestScriptPlayerSettings {
             change_queue_address,
             change_queue_port,
             change_queue_topic,
-            ignore_scripted_pause_commands: reactivator_config.ignore_scripted_pause_commands.unwrap_or(source_defaults.reactivator_ignore_scripted_pause_commands),
-            start_immediately: reactivator_config.start_immediately.unwrap_or(source_defaults.reactivator_start_immediately),
+            ignore_scripted_pause_commands: reactivator_config.ignore_scripted_pause_commands.unwrap_or(source_defaults.reactivator.ignore_scripted_pause_commands),
+            start_immediately: reactivator_config.start_immediately.unwrap_or(source_defaults.reactivator.start_immediately),
             source_change_event_time_mode: time_mode,
             source_change_event_spacing_mode: spacing_mode,
             data_cache_path: service_settings.data_cache_path.clone(),

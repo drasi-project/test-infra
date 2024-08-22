@@ -127,23 +127,14 @@ pub struct SourceConfigDefaults {
     pub test_storage_access_key: Option<String>,
     pub test_storage_container: Option<String>,
     pub test_storage_path: Option<String>,
+    pub test_id: Option<String>,
     pub test_run_id: Option<String>,
     pub source_id: Option<String>,
-    pub proxy_time_mode: Option<String>,
-    pub reactivator_change_queue_address: Option<String>,
-    pub reactivator_change_queue_port: Option<u16>,
-    pub reactivator_change_queue_topic: Option<String>,
-    #[serde(default = "is_false")]
-    pub reactivator_ignore_scripted_pause_commands: bool,
     #[serde(default)]
-    pub reactivator_spacing_mode: Option<String>,
-    #[serde(default = "is_true")]
-    pub reactivator_start_immediately: bool,
+    pub proxy: ProxyConfigDefaults,
     #[serde(default)]
-    pub reactivator_time_mode: Option<String>,
+    pub reactivator: ReactivatorConfigDefaults,
 }
-fn is_true() -> bool { true }
-fn is_false() -> bool { false }
 
 impl Default for SourceConfigDefaults {
     fn default() -> Self {
@@ -152,19 +143,60 @@ impl Default for SourceConfigDefaults {
             test_storage_access_key: None,
             test_storage_container: None,
             test_storage_path: None,
+            test_id: None,
             test_run_id: None,
             source_id: None,
-            proxy_time_mode: None,
-            reactivator_change_queue_address: None,
-            reactivator_change_queue_port: None,
-            reactivator_change_queue_topic: None,
-            reactivator_ignore_scripted_pause_commands: false,
-            reactivator_spacing_mode: None,
-            reactivator_start_immediately: true,
-            reactivator_time_mode: None,
+            proxy: ProxyConfigDefaults::default(),
+            reactivator: ReactivatorConfigDefaults::default(),
         }
     }
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProxyConfigDefaults {
+    #[serde(default = "is_recorded")]
+    pub time_mode: String,
+}
+
+impl Default for ProxyConfigDefaults {
+    fn default() -> Self {
+        ProxyConfigDefaults {
+            time_mode: is_recorded(),
+        }
+    }
+}
+fn is_recorded() -> String { "recorded".to_string() }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ReactivatorConfigDefaults {
+    pub change_queue_address: Option<String>,
+    pub change_queue_port: Option<u16>,
+    pub change_queue_topic: Option<String>,
+    #[serde(default = "is_false")]
+    pub ignore_scripted_pause_commands: bool,
+    #[serde(default = "is_recorded")]
+    pub spacing_mode: String,
+    #[serde(default = "is_true")]
+    pub start_immediately: bool,
+    #[serde(default = "is_recorded")]
+    pub time_mode: String,
+}
+
+impl Default for ReactivatorConfigDefaults {
+    fn default() -> Self {
+        ReactivatorConfigDefaults {
+            change_queue_address: None,
+            change_queue_port: None,
+            change_queue_topic: None,
+            ignore_scripted_pause_commands: is_false(),
+            spacing_mode: is_recorded(),
+            start_immediately: is_true(),
+            time_mode: is_recorded(),
+        }
+    }
+}
+fn is_true() -> bool { true }
+fn is_false() -> bool { false }
 
 // The SourceConfig is what is loaded from the Service config file or passed in to the Web API 
 // to create a new Test Script Player.
@@ -183,7 +215,7 @@ pub struct SourceConfig {
     pub test_storage_path: Option<String>,
 
     // The Test ID.
-    pub test_id: String,
+    pub test_id: Option<String>,
 
     // The Test Run ID.
     pub test_run_id: Option<String>,

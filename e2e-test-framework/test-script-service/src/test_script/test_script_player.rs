@@ -126,6 +126,7 @@ pub struct TestScriptPlayerSettings {
     pub test_storage_account: String,
 
     // The Test Storage Access Key where the Test Repo is located.
+    #[serde(skip_serializing)]
     pub test_storage_access_key: String,
 
     // The Test Storage Container where the Test Repo is located.

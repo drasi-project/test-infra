@@ -210,8 +210,8 @@ struct PlayerInfo {
 
 #[derive(Debug, Clone, Serialize)]
 struct ServiceStateInfo {
-    reactivators: HashMap<String, TestScriptPlayerConfig>,
     service_status: ServiceStatus,
+    reactivators: HashMap<String, TestScriptPlayerConfig>,
 }
 
 // The main function that starts the starts the Test Script Service.

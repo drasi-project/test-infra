@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::{
-    config::{OutputType, PlayerConfig}, 
+    config::{OutputType, SourceConfig}, 
     source_change_dispatchers::{
         console_dispatcher::ConsoleSourceChangeEventDispatcher,
         dapr_dispatcher::DaprSourceChangeEventDispatcher,
@@ -110,12 +110,12 @@ impl Default for TestScriptPlayerSpacingMode {
     }
 }
 
-// The PlayerSettings struct holds the configuration settings that are used by the Test Script Player.
-// It is created based on the PlayerConfig either loaded from the Service config file or passed in to the Web API, and is 
+// The TestScriptPlayerSettings struct holds the configuration settings that are used by the Test Script Player.
+// It is created based on the SourceConfig either loaded from the Service config file or passed in to the Web API, and is 
 // combined with the ServiceSettings and default values to create the final set of configuration.
 // It is static and does not change during the execution of the Test Script Player, it is not used to track the active state of the Test Script Player.
 #[derive(Debug, Serialize, Clone)]
-pub struct PlayerSettings {
+pub struct TestScriptPlayerSettings {
     // The Test ID.
     pub test_id: String,
 
@@ -171,154 +171,162 @@ pub struct PlayerSettings {
     pub log_output: OutputType,
 }
 
-impl PlayerSettings {
-    // Function to create a new PlayerSettings by combining a PlayerConfig and the Service Settings.
-    // The PlayerSettings control the configuration and operation of a TestRun.   
-    pub async fn try_from_player_config(player_config: PlayerConfig, service_state: SharedState) -> Result<Self, String> {
+impl TestScriptPlayerSettings {
+    // Function to create a new TestScriptPlayerSettings by combining a SourceConfig and the Service Settings.
+    // The TestScriptPlayerSettings control the configuration and operation of a TestRun.   
+    pub async fn try_from_source_config(source_config: &SourceConfig, service_state: SharedState) -> Result<Self, String> {
+
+        // If the SourceConfig doesnt contain a ReactivatorConfig, log and return an error.
+        let reactivator_config = match &source_config.reactivator {
+            Some(reactivator_config) => reactivator_config,
+            None => {
+                let err = format!("No ReactivatorConfig provided in SourceConfig: {:?}", source_config);
+                log::error!("{}", err.as_str());
+                return Err(err);    
+            }
+        };
 
         let service_state_reader = service_state.read().await;
-        let player_defaults = &service_state_reader.player_defaults;
+        let source_defaults = &service_state_reader.source_defaults;
         let service_settings = &service_state_reader.service_settings;
 
-        // If the PlayerConfig doesn't contain a test_run_id, create one based on current time.
-        let test_run_id = match &player_config.test_run_id {
+        // If the SourceConfig doesn't contain a test_run_id, create one based on current time.
+        let test_run_id = match &source_config.test_run_id {
             Some(test_run_id) => test_run_id.clone(),
             None => chrono::Utc::now().format("%Y%m%d%H%M%S").to_string()
         };
 
-        // If the PlayerConfig doesn't contain a test_storage_account value, use the default value.
+        // If the SourceConfig doesn't contain a test_storage_account value, use the default value.
         // If there is no default value, return an error.
-        let test_storage_account = match &player_config.test_storage_account {
+        let test_storage_account = match &source_config.test_storage_account {
             Some(test_storage_account) => test_storage_account.clone(),
             None => {
-                match &player_defaults.test_storage_account {
+                match &source_defaults.test_storage_account {
                     Some(test_storage_account) => test_storage_account.clone(),
                     None => return Err("No test_storage_account provided and no default value found.".to_string())
                 }
             }
         };
 
-        // If the PlayerConfig doesn't contain a test_storage_access_key value, use the default value.
+        // If the SourceConfig doesn't contain a test_storage_access_key value, use the default value.
         // If there is no default value, return an error.
-        let test_storage_access_key = match &player_config.test_storage_access_key {
+        let test_storage_access_key = match &source_config.test_storage_access_key {
             Some(test_storage_access_key) => test_storage_access_key.clone(),
             None => {
-                match &player_defaults.test_storage_access_key {
+                match &source_defaults.test_storage_access_key {
                     Some(test_storage_access_key) => test_storage_access_key.clone(),
                     None => return Err("No test_storage_access_key provided and no default value found.".to_string())
                 }
             }
         };
 
-        // If the PlayerConfig doesn't contain a test_storage_access_key value, use the default value.
+        // If the SourceConfig doesn't contain a test_storage_access_key value, use the default value.
         // If there is no default value, return an error.
-        let test_storage_container = match &player_config.test_storage_container {
+        let test_storage_container = match &source_config.test_storage_container {
             Some(test_storage_container) => test_storage_container.clone(),
             None => {
-                match &player_defaults.test_storage_container {
+                match &source_defaults.test_storage_container {
                     Some(test_storage_container) => test_storage_container.clone(),
                     None => return Err("No test_storage_container provided and no default value found.".to_string())
                 }
             }
         };
 
-        // If the PlayerConfig doesn't contain a test_storage_path value, use the default value.
+        // If the SourceConfig doesn't contain a test_storage_path value, use the default value.
         // If there is no default value, return an error.
-        let test_storage_path = match &player_config.test_storage_path {
+        let test_storage_path = match &source_config.test_storage_path {
             Some(test_storage_path) => test_storage_path.clone(),
             None => {
-                match &player_defaults.test_storage_path {
+                match &source_defaults.test_storage_path {
                     Some(test_storage_path) => test_storage_path.clone(),
                     None => return Err("No test_storage_path provided and no default value found.".to_string())
                 }
             }
         };
 
-        // If the PlayerConfig doesn't contain a change_queue_address value, use the default value.
+        // If the SourceConfig doesn't contain a source_id value, use the default value.
         // If there is no default value, return an error.
-        let change_queue_address = match &player_config.change_queue_address {
-            Some(change_queue_address) => change_queue_address.clone(),
-            None => {
-                match &player_defaults.change_queue_address {
-                    Some(change_queue_address) => change_queue_address.clone(),
-                    None => return Err("No change_queue_url provided and no default value found.".to_string())
-                }
-            }
-        };
-
-        // If the PlayerConfig doesn't contain a change_queue_port value, use the default value.
-        // If there is no default value, return an error.
-        let change_queue_port = match &player_config.change_queue_port {
-            Some(change_queue_port) => change_queue_port.clone(),
-            None => {
-                match &player_defaults.change_queue_port {
-                    Some(change_queue_port) => change_queue_port.clone(),
-                    None => return Err("No change_queue_port provided and no default value found.".to_string())
-                }
-            }
-        };
-
-        // If the PlayerConfig doesn't contain a change_queue_topic value, use the default value.
-        // If there is no default value, return an error.
-        let change_queue_topic = match &player_config.change_queue_topic {
-            Some(change_queue_topic) => change_queue_topic.clone(),
-            None => {
-                match &player_defaults.change_queue_topic {
-                    Some(change_queue_topic) => change_queue_topic.clone(),
-                    None => return Err("No change_queue_topic provided and no default value found.".to_string())
-                }
-            }
-        };
-
-        // If the PlayerConfig doesn't contain a source_id value, use the default value.
-        // If there is no default value, return an error.
-        let source_id = match &player_config.source_id {
+        let source_id = match &source_config.source_id {
             Some(source_id) => source_id.clone(),
             None => {
-                match &player_defaults.source_id {
+                match &source_defaults.source_id {
                     Some(source_id) => source_id.clone(),
                     None => return Err("No source_id provided and no default value found.".to_string())
                 }
             }
         };
 
-        let time_mode = match player_config.source_change_event_time_mode {
-            Some(mode) => TestScriptPlayerTimeMode::from_str(&mode).unwrap(),
+        // If the SourceConfig doesn't contain a change_queue_address value, use the default value.
+        // If there is no default value, return an error.
+        let change_queue_address = match &reactivator_config.change_queue_address {
+            Some(change_queue_address) => change_queue_address.clone(),
             None => {
-                match &player_defaults.source_change_event_time_mode {
-                    Some(mode) => TestScriptPlayerTimeMode::from_str(&mode).unwrap_or_default(),
-                    None => TestScriptPlayerTimeMode::default()
+                match &source_defaults.reactivator_change_queue_address {
+                    Some(change_queue_address) => change_queue_address.clone(),
+                    None => return Err("No change_queue_url provided and no default value found.".to_string())
                 }
             }
         };
 
-        let spacing_mode = match player_config.source_change_event_spacing_mode {
+        // If the SourceConfig doesn't contain a change_queue_port value, use the default value.
+        // If there is no default value, return an error.
+        let change_queue_port = match &reactivator_config.change_queue_port {
+            Some(change_queue_port) => change_queue_port.clone(),
+            None => {
+                match &source_defaults.reactivator_change_queue_port {
+                    Some(change_queue_port) => change_queue_port.clone(),
+                    None => return Err("No change_queue_port provided and no default value found.".to_string())
+                }
+            }
+        };
+
+        // If the SourceConfig doesn't contain a change_queue_topic value, use the default value.
+        // If there is no default value, return an error.
+        let change_queue_topic = match &reactivator_config.change_queue_topic {
+            Some(change_queue_topic) => change_queue_topic.clone(),
+            None => {
+                match &source_defaults.reactivator_change_queue_topic {
+                    Some(change_queue_topic) => change_queue_topic.clone(),
+                    None => return Err("No change_queue_topic provided and no default value found.".to_string())
+                }
+            }
+        };
+
+        let spacing_mode = match &reactivator_config.spacing_mode {
             Some(mode) => TestScriptPlayerSpacingMode::from_str(&mode).unwrap(),
             None => {
-                match &player_defaults.source_change_event_spacing_mode {
+                match &source_defaults.reactivator_spacing_mode {
                     Some(mode) => TestScriptPlayerSpacingMode::from_str(&mode).unwrap_or_default(),
                     None => TestScriptPlayerSpacingMode::default()
                 }
             }
         };
 
-        Ok(PlayerSettings {
-            test_id: player_config.test_id.clone(),
+        let time_mode = match &reactivator_config.time_mode {
+            Some(mode) => TestScriptPlayerTimeMode::from_str(&mode).unwrap(),
+            None => {
+                match &source_defaults.reactivator_time_mode {
+                    Some(mode) => TestScriptPlayerTimeMode::from_str(&mode).unwrap_or_default(),
+                    None => TestScriptPlayerTimeMode::default()
+                }
+            }
+        };
+
+        Ok(TestScriptPlayerSettings {
+            test_id: source_config.test_id.clone(),
             test_run_id,
             test_storage_account,
             test_storage_access_key,
             test_storage_container,
             test_storage_path,
+            source_id,
             change_queue_address,
             change_queue_port,
             change_queue_topic,
-            source_id,
-            start_immediately: player_config.start_immediately.unwrap_or(player_defaults.start_immediately),
-            ignore_scripted_pause_commands: player_config.ignore_scripted_pause_commands.unwrap_or(player_defaults.ignore_scripted_pause_commands),
+            ignore_scripted_pause_commands: reactivator_config.ignore_scripted_pause_commands.unwrap_or(source_defaults.reactivator_ignore_scripted_pause_commands),
+            start_immediately: reactivator_config.start_immediately.unwrap_or(source_defaults.reactivator_start_immediately),
             source_change_event_time_mode: time_mode,
             source_change_event_spacing_mode: spacing_mode,
-            // source_change_event_time_mode: player_config.source_change_event_time_mode.unwrap_or(player_defaults.source_change_event_time_mode),
-            // source_change_event_spacing_mode: player_config.source_change_event_spacing_mode.unwrap_or(player_defaults.source_change_event_spacing_mode),
             data_cache_path: service_settings.data_cache_path.clone(),
             event_output: service_settings.event_output,
             telemetry_output: service_settings.telemetry_output,
@@ -375,7 +383,7 @@ impl Serialize for TestScriptPlayerStatus {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TestScriptPlayerConfig {
-    pub player_settings: PlayerSettings,
+    pub player_settings: TestScriptPlayerSettings,
     pub script_files: Vec<PathBuf>,
 }
 

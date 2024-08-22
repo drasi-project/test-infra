@@ -2,7 +2,7 @@ use clap::Parser;
 use std::{fmt, str::FromStr};
 use serde::{Deserialize, Serialize};
 
-// The OutputType enum is used to specify the destination for Test Script Player output of various sorts including:
+// The OutputType enum is used to specify the destination for output of various sorts including:
 //   - the SourceChangeEvents generated during the run
 //   - the Telemetry data generated during the run
 //   - the Log data generated during the run
@@ -79,16 +79,16 @@ pub struct ServiceSettings {
     pub log_output: OutputType,
 }
 
-// The PlayerConfig is what is loaded from the Service config File. It can contain the configurations for multiple Test Script Players,
+// The ServiceConfigFile is what is loaded from the Service config File. It can contain the configurations for multiple Test Script Players,
 // as well as default values that are used when a Test Script Player doesn't specify a value.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ServiceConfigFile {
     #[serde(default)]
-    pub player_defaults: PlayerConfigDefaults,
-    #[serde(default = "default_player_config_list")]
-    pub players: Vec<PlayerConfig>,
+    pub defaults: SourceConfigDefaults,
+    #[serde(default = "default_source_config_list")]
+    pub sources: Vec<SourceConfig>,
 }
-fn default_player_config_list() -> Vec<PlayerConfig> { Vec::new() }
+fn default_source_config_list() -> Vec<SourceConfig> { Vec::new() }
 
 impl ServiceConfigFile {
     pub fn from_file_path(config_file_path: &str) -> Result<Self, String> {
@@ -114,64 +114,62 @@ impl ServiceConfigFile {
 impl Default for ServiceConfigFile {
     fn default() -> Self {
         Self {
-            player_defaults: PlayerConfigDefaults::default(),
-            players: default_player_config_list(),
+            defaults: SourceConfigDefaults::default(),
+            sources: default_source_config_list(),
         }
     }
 }
 
-// The PlayerConfigDefaults struct holds the default values read from the Service config file that are used when a Player COnfig doesn't specify a value.
+// The SourceConfigDefaults struct holds the default values read from the Service config file that are used when a Player COnfig doesn't specify a value.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct PlayerConfigDefaults {
+pub struct SourceConfigDefaults {
     pub test_storage_account: Option<String>,
     pub test_storage_access_key: Option<String>,
     pub test_storage_container: Option<String>,
     pub test_storage_path: Option<String>,
+    pub test_run_id: Option<String>,
     pub source_id: Option<String>,
-    pub change_queue_address: Option<String>,
-    pub change_queue_port: Option<u16>,
-    pub change_queue_topic: Option<String>,
-    #[serde(default = "is_true")]
-    pub start_immediately: bool,
+    pub proxy_time_mode: Option<String>,
+    pub reactivator_change_queue_address: Option<String>,
+    pub reactivator_change_queue_port: Option<u16>,
+    pub reactivator_change_queue_topic: Option<String>,
     #[serde(default = "is_false")]
-    pub ignore_scripted_pause_commands: bool,
+    pub reactivator_ignore_scripted_pause_commands: bool,
     #[serde(default)]
-    pub source_change_event_time_mode: Option<String>,
+    pub reactivator_spacing_mode: Option<String>,
+    #[serde(default = "is_true")]
+    pub reactivator_start_immediately: bool,
     #[serde(default)]
-    pub source_change_event_spacing_mode: Option<String>,
+    pub reactivator_time_mode: Option<String>,
 }
 fn is_true() -> bool { true }
 fn is_false() -> bool { false }
 
-impl Default for PlayerConfigDefaults {
+impl Default for SourceConfigDefaults {
     fn default() -> Self {
-        PlayerConfigDefaults {
+        SourceConfigDefaults {
             test_storage_account: None,
             test_storage_access_key: None,
             test_storage_container: None,
             test_storage_path: None,
+            test_run_id: None,
             source_id: None,
-            change_queue_address: None,
-            change_queue_port: None,
-            change_queue_topic: None,
-            start_immediately: true,
-            ignore_scripted_pause_commands: false,
-            source_change_event_time_mode: None,
-            source_change_event_spacing_mode: None,
+            proxy_time_mode: None,
+            reactivator_change_queue_address: None,
+            reactivator_change_queue_port: None,
+            reactivator_change_queue_topic: None,
+            reactivator_ignore_scripted_pause_commands: false,
+            reactivator_spacing_mode: None,
+            reactivator_start_immediately: true,
+            reactivator_time_mode: None,
         }
     }
 }
 
-// The PlayerConfig is what is loaded from the Service config file or passed in to the Web API 
+// The SourceConfig is what is loaded from the Service config file or passed in to the Web API 
 // to create a new Test Script Player.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct PlayerConfig {
-    // The Test ID.
-    pub test_id: String,
-
-    // The Test Run ID.
-    pub test_run_id: Option<String>,
-
+pub struct SourceConfig {
     // The Test Storage Account where the Test Repo is located.
     pub test_storage_account: Option<String>,
 
@@ -184,12 +182,27 @@ pub struct PlayerConfig {
     // The Test Storage Path where the Test Repo is located.
     pub test_storage_path: Option<String>,
 
+    // The Test ID.
+    pub test_id: String,
+
+    // The Test Run ID.
+    pub test_run_id: Option<String>,
+
     // The Source ID for the Test Script Player.
     pub source_id: Option<String>,
 
-    // Flag to indicate if the Service should start the Test Script Player immediately after initialization.
-    pub start_immediately: Option<bool>,
+    pub proxy: Option<ProxyConfig>,
 
+    pub reactivator: Option<ReactivatorConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProxyConfig {
+    pub time_mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ReactivatorConfig {
     // *** The following fields are used to configure the Change Queue output destination. ***
     // *** These are used by default if the output destination is "queue". ***
     // The address of the change queue
@@ -201,15 +214,18 @@ pub struct PlayerConfig {
     // The PubSub topic for the change queue
     pub change_queue_topic: Option<String>,
 
-    // SourceChangeEvent Time Mode for the Test Script Player as a string.
-    // Either "live", "recorded", or a specific time in the format "YYYY-MM-DDTHH:MM:SS:SSS Z".
-    // If not provided, "recorded" is used.
-    pub source_change_event_time_mode: Option<String>,
-
-    // SourceChangeEvent Spacing Mode for the Test Script Player as a string.
-    // Either "none", "recorded", or a fixed spacing in the format "Xs", "Xm", "Xu", or "Xn".
-    pub source_change_event_spacing_mode: Option<String>,
-
     // Whether the player should ignore scripted pause commands.
     pub ignore_scripted_pause_commands: Option<bool>,
+
+    // Spacing Mode for the Test Script Player as a string.
+    // Either "none", "recorded", or a fixed spacing in the format "Xs", "Xm", "Xu", or "Xn".
+    pub spacing_mode: Option<String>,
+
+    // Flag to indicate if the Service should start the Test Script Player immediately after initialization.
+    pub start_immediately: Option<bool>,
+
+    // Time Mode for the Test Script Player as a string.
+    // Either "live", "recorded", or a specific time in the format "YYYY-MM-DDTHH:MM:SS:SSS Z".
+    // If not provided, "recorded" is used.
+    pub time_mode: Option<String>,
 }

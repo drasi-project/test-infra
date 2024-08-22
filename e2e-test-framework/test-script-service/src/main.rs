@@ -13,11 +13,11 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use config::{
-    PlayerConfig, PlayerConfigDefaults, ServiceSettings, ServiceConfigFile,
+    SourceConfig, SourceConfigDefaults, ServiceSettings, ServiceConfigFile,
 };
 use test_repo::initialize_test_data_cache;
 use test_script::test_script_player::{
-    self, PlayerSettings, ScheduledTestScriptRecord, TestScriptPlayer, 
+    self, TestScriptPlayerSettings, ScheduledTestScriptRecord, TestScriptPlayer, 
     TestScriptPlayerConfig, TestScriptPlayerSpacingMode, TestScriptPlayerState, 
     TestScriptPlayerStatus, TestScriptPlayerTimeMode
 };
@@ -183,17 +183,17 @@ impl From<test_script_player::TestScriptPlayerState> for PlayerStateResponse {
 pub struct ServiceState {
     pub service_settings: ServiceSettings,
     pub service_status: ServiceStatus,
-    pub player_defaults: PlayerConfigDefaults,
-    pub players: HashMap<String, TestScriptPlayer>,
+    pub source_defaults: SourceConfigDefaults,
+    pub reactivators: HashMap<String, TestScriptPlayer>,
 }
 
 impl ServiceState {
-    fn new(service_settings: ServiceSettings, player_defaults: Option<PlayerConfigDefaults>) -> Self {
+    fn new(service_settings: ServiceSettings, source_defaults: Option<SourceConfigDefaults>) -> Self {
         ServiceState {
             service_settings,
             service_status: ServiceStatus::Uninitialized,
-            player_defaults: player_defaults.unwrap_or_default(),
-            players: HashMap::new(),
+            source_defaults: source_defaults.unwrap_or_default(),
+            reactivators: HashMap::new(),
         }
     }
 }
@@ -203,14 +203,14 @@ pub type SharedState = Arc<RwLock<ServiceState>>;
 
 #[derive(Debug, Clone, Serialize)]
 struct PlayerInfo {
-    pub player_settings: PlayerSettings,
+    pub player_settings: TestScriptPlayerSettings,
     pub script_files: Vec<PathBuf>,
     pub state: TestScriptPlayerState,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ServiceStateInfo {
-    players: HashMap<String, TestScriptPlayerConfig>,
+    reactivators: HashMap<String, TestScriptPlayerConfig>,
     service_status: ServiceStatus,
 }
 
@@ -226,7 +226,7 @@ async fn main() {
     let service_settings = ServiceSettings::parse();
     log::trace!("{:#?}", service_settings);
 
-    let mut initial_player_configs : Vec<PlayerConfig> = Vec::new();
+    let mut initial_source_configs : Vec<SourceConfig> = Vec::new();
 
     // Load the Service Config file if a path is specified in the ServiceSettings.
     // If the file does not exist, return an error.
@@ -237,8 +237,8 @@ async fn main() {
                 Ok(service_config) => {
                     log::trace!("{:#?}", service_config);
 
-                    let service_state = ServiceState::new(service_settings, Some(service_config.player_defaults));
-                    initial_player_configs = service_config.players;
+                    let service_state = ServiceState::new(service_settings, Some(service_config.defaults));
+                    initial_source_configs = service_config.sources;
 
                     Arc::new(RwLock::new(service_state))
                 },
@@ -268,13 +268,11 @@ async fn main() {
         }
     }
 
-    // Loop through the PlayerConfigs and create a TestScriptPlayer for each one.
-    // This will download the test data from the Test Repo, BUT it will not start the player
-    for player_config in initial_player_configs {     
-
-        match create_player(player_config, shared_state.clone()).await {
+    // Create a TestScriptPlayer for each SourceConfig that has a ReactivatorConfig value.
+    for source_config in initial_source_configs.iter().filter(|s| (**s).reactivator.is_some()) {
+        match create_player(source_config, shared_state.clone()).await {
             Ok(player) => {
-                shared_state.write().await.players.insert(player.get_id(), player);
+                shared_state.write().await.reactivators.insert(player.get_id(), player);
             },
             Err(e) => {
                 log::error!("Error creating Player: {}", e);
@@ -283,7 +281,7 @@ async fn main() {
     }
 
     // Iterate over the active players and start each one if it is configured to start immediately.
-    for (_, active_player) in shared_state.read().await.players.iter() {
+    for (_, active_player) in shared_state.read().await.reactivators.iter() {
         if active_player.get_config().player_settings.start_immediately {
             match active_player.start().await {
                 Ok(_) => {},
@@ -301,7 +299,7 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     
-    let player_routes = Router::new()
+    let reactivator_routes = Router::new()
         .route("/", get(get_player))
         .route("/pause", post(pause_player))
         .route("/skip", post(skip_player))
@@ -311,8 +309,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(service_info))
-        .route("/players", get(get_player_list))
-        .nest("/players/:id", player_routes)
+        .route("/reactivators", get(get_player_list))
+        .nest("/reactivators/:id", reactivator_routes)
         .layer(axum::extract::Extension(shared_state));
 
     log::info!("Listening on {}", addr);
@@ -323,9 +321,9 @@ async fn main() {
         .unwrap();
 }
 
-async fn create_player(player_config: PlayerConfig, service_state: SharedState) -> Result<TestScriptPlayer, String> {
+async fn create_player(source_config: &SourceConfig, service_state: SharedState) -> Result<TestScriptPlayer, String> {
 
-    let player_settings = match PlayerSettings::try_from_player_config(player_config, service_state).await {
+    let player_settings = match TestScriptPlayerSettings::try_from_source_config(source_config, service_state).await {
         Ok(player_settings) => player_settings,
         Err(e) => {
             let msg = format!("Error creating PlayerSettings: {}", e);
@@ -363,7 +361,7 @@ async fn service_info(
     let state = state.read().await;
 
     let service_info = ServiceStateInfo {
-        players: state.players.iter().map(|(k, v)| (k.clone(), v.get_config())).collect(),
+        reactivators: state.reactivators.iter().map(|(k, v)| (k.clone(), v.get_config())).collect(),
         service_status: state.service_status.clone(),
     };
 
@@ -391,7 +389,7 @@ async fn get_player_list(
 
     let state = state.read().await;
 
-    let player_list: Vec<TestScriptPlayerConfig> = state.players.iter().map(|(_, v)| v.get_config()).collect();
+    let player_list: Vec<TestScriptPlayerConfig> = state.reactivators.iter().map(|(_, v)| v.get_config()).collect();
 
     Json(player_list)
 }
@@ -404,7 +402,7 @@ async fn get_player(
 
     let state = state.read().await;
 
-    if let Some(player) = state.players.get(&id) {
+    if let Some(player) = state.reactivators.get(&id) {
 
         let TestScriptPlayerConfig { player_settings, script_files } = player.get_config();
 
@@ -460,7 +458,7 @@ async fn pause_player(
 
     let state = state.read().await;
 
-    if let Some(active_player) = state.players.get(&id) {
+    if let Some(active_player) = state.reactivators.get(&id) {
         match active_player.pause().await {
             Ok(response) => {
                 let service_state = PlayerStateResponse::from(response.state);
@@ -496,7 +494,7 @@ async fn skip_player(
 
     let state = state.read().await;
 
-    if let Some(active_player) = state.players.get(&id) {
+    if let Some(active_player) = state.reactivators.get(&id) {
 
         let test_skip_config = body.0;
         log::debug!("{:?}", test_skip_config);
@@ -537,7 +535,7 @@ async fn start_player(
 
     let state = state.read().await;
 
-    if let Some(active_player) = state.players.get(&id) {
+    if let Some(active_player) = state.reactivators.get(&id) {
         match active_player.start().await {
             Ok(response) => {
                 let service_state = PlayerStateResponse::from(response.state);
@@ -573,7 +571,7 @@ async fn step_player(
 
     let state = state.read().await;
 
-    if let Some(active_player) = state.players.get(&id) {
+    if let Some(active_player) = state.reactivators.get(&id) {
 
         let test_step_config = body.0;
         log::debug!("{:?}", test_step_config);
@@ -614,7 +612,7 @@ async fn stop_player(
 
     let state = state.read().await;
 
-    if let Some(active_player) = state.players.get(&id) {
+    if let Some(active_player) = state.reactivators.get(&id) {
         match active_player.stop().await {
             Ok(response) => {
                 let service_state = PlayerStateResponse::from(response.state);

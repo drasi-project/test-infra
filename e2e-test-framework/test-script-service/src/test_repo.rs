@@ -6,9 +6,9 @@ use azure_storage_blobs::container::operations::BlobItem;
 use futures::stream::StreamExt;
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::test_script::test_script_player::PlayerSettings;
+use crate::test_script::test_script_player::TestScriptPlayerSettings;
 
-pub async fn initialize_test_data_cache(test_run_settings: &PlayerSettings) -> Result<Vec<PathBuf>, String> {
+pub async fn initialize_test_data_cache(test_run_settings: &TestScriptPlayerSettings) -> Result<Vec<PathBuf>, String> {
 
     log::info!("Initializing test data cache...");
 

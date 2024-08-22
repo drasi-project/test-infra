@@ -1,4 +1,4 @@
-use std::{error::Error, path::PathBuf};
+use std::{collections::HashMap, error::Error, path::PathBuf};
 
 use azure_storage::prelude::*;
 use azure_storage_blobs::prelude::*;
@@ -7,6 +7,60 @@ use futures::stream::StreamExt;
 use tokio::{fs::File, io::AsyncWriteExt};
 
 use crate::test_script::test_script_player::TestScriptPlayerSettings;
+
+pub struct TestSourceDataSet {
+    pub test_storage_account: String,
+    pub test_storage_access_key: String,
+    pub test_storage_container: String,
+    pub test_storage_path: String,
+    pub test_id: String,
+    pub source_id: String,
+}
+
+impl TestSourceDataSet {
+    pub fn _new(
+        test_storage_account: String,
+        test_storage_access_key: String,
+        test_storage_container: String,
+        test_storage_path: String,
+        test_id: String,
+        source_id: String,
+    ) -> Self {
+        TestSourceDataSet {
+            test_storage_account,
+            test_storage_access_key,
+            test_storage_container,
+            test_storage_path,
+            test_id,
+            source_id,
+        }
+    }
+}
+pub struct LocalTestRepo {
+    pub data_cache_path: String,
+    pub test_source_data_sets: HashMap<String, TestSourceDataSet>,
+}
+
+impl LocalTestRepo {
+    pub async fn new(data_cache_path: String) -> Self {
+
+        let data_cache_path_buf = PathBuf::from(&data_cache_path);
+        if !data_cache_path_buf.exists() {
+            match std::fs::create_dir_all(data_cache_path_buf) {
+                Ok(_) => {},
+                Err(e) => {
+                    log::error!("Error creating data cache folder {}: {}", &data_cache_path, e);
+                    panic!("Error creating data cache folder {}: {}", &data_cache_path, e);
+                }
+            }
+        }
+
+        LocalTestRepo {
+            data_cache_path,
+            test_source_data_sets: HashMap::new(),
+        }
+    }
+}
 
 pub async fn initialize_test_data_cache(test_run_settings: &TestScriptPlayerSettings) -> Result<Vec<PathBuf>, String> {
 

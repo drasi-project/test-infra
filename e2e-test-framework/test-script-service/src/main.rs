@@ -1,4 +1,3 @@
-use core::panic;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
@@ -15,7 +14,7 @@ use tokio::sync::RwLock;
 use config::{
     SourceConfig, SourceConfigDefaults, ServiceSettings, ServiceConfigFile,
 };
-use test_repo::{initialize_test_data_cache, LocalTestRepo};
+use test_repo::{DataSetSettings, LocalTestRepo};
 use test_script::test_script_player::{
     self, TestScriptPlayerSettings, ScheduledTestScriptRecord, TestScriptPlayer, 
     TestScriptPlayerConfig, TestScriptPlayerSpacingMode, TestScriptPlayerState, 
@@ -99,13 +98,12 @@ mod u64_as_string {
 //   * --error--> Error
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum ServiceStatus {
-    Uninitialized,
     // The Service is Initializing, which includes downloading the test data from the Test Repo.
     Initializing,
     // The Service has a working player.
-    Working,
+    Ready,
     // The Service is in an Error state.
-    Error,
+    Error(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -178,22 +176,49 @@ impl From<test_script_player::TestScriptPlayerState> for PlayerStateResponse {
     }
 }
 
-
 // The ServiceState struct holds the configuration and current state of the service.
 pub struct ServiceState {
     pub service_settings: ServiceSettings,
     pub service_status: ServiceStatus,
     pub source_defaults: SourceConfigDefaults,
     pub reactivators: HashMap<String, TestScriptPlayer>,
+    pub test_repo: Option<LocalTestRepo>,
 }
 
 impl ServiceState {
     fn new(service_settings: ServiceSettings, source_defaults: Option<SourceConfigDefaults>) -> Self {
+
+        // Attempt to create a local test repo with the data cache path from the ServiceSettings.
+        // If this fails, set the ServiceStatus to Error.
+        match LocalTestRepo::new(service_settings.data_cache_path.clone()) {
+            Ok(test_repo) => {
+                ServiceState {
+                    service_settings,
+                    service_status: ServiceStatus::Initializing,
+                    source_defaults: source_defaults.unwrap_or_default(),
+                    reactivators: HashMap::new(),
+                    test_repo: Some(test_repo),
+                }
+            },
+            Err(e) => {
+                ServiceState {
+                    service_settings,
+                    service_status: ServiceStatus::Error(e.to_string()),
+                    source_defaults: source_defaults.unwrap_or_default(),
+                    reactivators: HashMap::new(),
+                    test_repo: None,
+                }
+            }
+        }
+    }
+
+    fn error(service_settings: ServiceSettings, msg: String) -> Self {
         ServiceState {
             service_settings,
-            service_status: ServiceStatus::Uninitialized,
-            source_defaults: source_defaults.unwrap_or_default(),
+            service_status: ServiceStatus::Error(msg),
+            source_defaults: SourceConfigDefaults::default(),
             reactivators: HashMap::new(),
+            test_repo: None,
         }
     }
 }
@@ -226,57 +251,61 @@ async fn main() {
     let service_settings = ServiceSettings::parse();
     log::trace!("{:#?}", service_settings);
 
-    let mut initial_source_configs : Vec<SourceConfig> = Vec::new();
-
     // Load the Service Config file if a path is specified in the ServiceSettings.
-    // If the file does not exist, return an error.
+    // If the specified file does not exist, return an error.
     // If no file is specified, use defaults.
-    let shared_state = match &service_settings.config_file_path {
+    let mut service_state = match &service_settings.config_file_path {
         Some(config_file_path) => {
             match ServiceConfigFile::from_file_path(&config_file_path) {
                 Ok(service_config) => {
-                    log::trace!("{:#?}", service_config);
+                    log::trace!("Configuring Test Script Service from {:#?}", service_config);
+                    let mut service_state = ServiceState::new(service_settings, Some(service_config.defaults));
 
-                    let service_state = ServiceState::new(service_settings, Some(service_config.defaults));
-                    initial_source_configs = service_config.sources;
+                    // Iterate over the SourceConfigs in the ServiceConfigFile and create a TestScriptPlayer for each one.
+                    for source_config in service_config.sources {
+                        log::trace!("Initializing Source from {:#?}", source_config);
 
-                    Arc::new(RwLock::new(service_state))
+                        if source_config.reactivator.is_some() {
+                            log::trace!("Creating TestScriptPlayer from {:#?}", &source_config.reactivator);
+
+                            match create_test_script_player(source_config, &mut service_state).await {
+                                Ok(player) => {
+                                    service_state.reactivators.insert(player.get_id(), player);
+                                },
+                                Err(e) => {
+                                    let msg = format!("Error creating TestScriptPlayer: {}", e);
+                                    log::error!("{}", msg);
+                                    service_state.service_status = ServiceStatus::Error(msg);
+                                    break;
+                                }
+                            }
+                        }   
+                    }
+                    service_state
                 },
                 Err(e) => {
-                    log::error!("Error loading service config file: {}", e);
-                    panic!("Error loading service config file: {}", e);
+                    let msg = format!("Error loading service config file {:?}. Error {}", service_settings.config_file_path, e);
+                    log::error!("{}", msg);
+                    ServiceState::error(service_settings, e)
                 }
             }
         },
         None => {
-            let service_state = ServiceState::new(service_settings, None);
-
-            Arc::new(RwLock::new(service_state))
+            log::trace!("No config file specified. Using defaults.");
+            ServiceState::new(service_settings, None)
         }
     };
 
-    let _local_test_repo = LocalTestRepo::new(shared_state.read().await.service_settings.data_cache_path.clone()).await;
-
-    // Create a TestScriptPlayer for each SourceConfig that has a ReactivatorConfig value.
-    for source_config in initial_source_configs.iter().filter(|s| (**s).reactivator.is_some()) {
-        match create_player(source_config, shared_state.clone()).await {
-            Ok(player) => {
-                shared_state.write().await.reactivators.insert(player.get_id(), player);
-            },
-            Err(e) => {
-                log::error!("Error creating Player: {}", e);
-            }
-        }
-    }
-
-    // Iterate over the active players and start each one if it is configured to start immediately.
-    for (_, active_player) in shared_state.read().await.reactivators.iter() {
+    // Iterate over the initial Test Script Players and start each one if it is configured to start immediately.
+    for (_, active_player) in service_state.reactivators.iter() {
         if active_player.get_config().player_settings.start_immediately {
             match active_player.start().await {
                 Ok(_) => {},
                 Err(e) => {
-                    log::error!("Error starting TestScriptPlayer: {}", e);
-                    panic!("Error starting TestScriptPlayer: {}", e);
+                    let msg = format!("Error starting TestScriptPlayer: {}", e);
+                    log::error!("{}", msg);
+                    service_state.service_status = ServiceStatus::Error(msg);
+                    break;
                 }
             }
         }
@@ -284,10 +313,28 @@ async fn main() {
 
     // Start the Web API.
     // Get the port number the service will listen on from AppState.
-    let port = shared_state.read().await.service_settings.port.parse::<u16>().unwrap();
+    let addr = match service_state.service_settings.port.parse::<u16>() {
+        Ok(port) => SocketAddr::from(([0, 0, 0, 0], port)),
+        Err(e) => {
+            let msg = format!("Error parsing port number: {}", e);
+            log::error!("{}", msg);
+            service_state.service_status = ServiceStatus::Error(msg);
+            SocketAddr::from(([0, 0, 0, 0], 4000))
+        }
+    };
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    
+    // Set the ServiceStatus to Ready if it is not already in an Error state.
+    match &service_state.service_status {
+        ServiceStatus::Error(msg) => {
+            log::error!("Test Script Service failed to initialize correctly due to error: {}", msg);            
+        },
+        _ => {
+            log::info!("Test Script Service initialized successfully.");
+            service_state.service_status = ServiceStatus::Ready;
+        }
+    }
+    let shared_state = Arc::new(RwLock::new(service_state));
+
     let reactivator_routes = Router::new()
         .route("/", get(get_player))
         .route("/pause", post(pause_player))
@@ -310,9 +357,9 @@ async fn main() {
         .unwrap();
 }
 
-async fn create_player(source_config: &SourceConfig, service_state: SharedState) -> Result<TestScriptPlayer, String> {
+async fn create_test_script_player(source_config: SourceConfig, service_state: &mut ServiceState) -> Result<TestScriptPlayer, String> {
 
-    let player_settings = match TestScriptPlayerSettings::try_from_source_config(source_config, service_state).await {
+    let player_settings = match TestScriptPlayerSettings::try_from_source_config(&source_config, &service_state.source_defaults, &service_state.service_settings) {
         Ok(player_settings) => player_settings,
         Err(e) => {
             let msg = format!("Error creating PlayerSettings: {}", e);
@@ -320,21 +367,27 @@ async fn create_player(source_config: &SourceConfig, service_state: SharedState)
             return Err(msg);
         }
     };
-    log::trace!("{:#?}", player_settings);
 
-    log::info!("Creating Player - test_id: {}, test_run_id: {}", player_settings.test_id, player_settings.test_run_id);
-
-    let test_script_files = match initialize_test_data_cache(&player_settings).await {
-        Ok(files) => files,
+    let data_set_settings = DataSetSettings::from_test_script_player_settings(&player_settings);
+    
+    let test_script_files = match service_state.test_repo.as_mut().unwrap().add_data_set(&data_set_settings).await {
+        Ok(data_set_content) => match data_set_content.change_log_script_files {
+            Some(script_files) => script_files,
+            None => {
+                let msg = format!("No test script files found for data set: {}", &data_set_settings.get_id());
+                log::error!("{}", msg);
+                return Err(msg);
+            }
+        },
         Err(e) => {
-            let msg = format!("Error initializing test data cache for test_id: {}, test_run_id: {} - {}", player_settings.test_id, player_settings.test_run_id, e);
+            let msg = format!("Error getting test script files: {}", e);
             log::error!("{}", msg);
             return Err(msg);
         }
     };
 
     let cfg = TestScriptPlayerConfig {
-        player_settings: player_settings.clone(),
+        player_settings,
         script_files: test_script_files,
     };
     log::trace!("{:#?}", cfg);
@@ -378,9 +431,14 @@ async fn get_player_list(
 
     let state = state.read().await;
 
+    // If the service in is an Error state, return an error and the description of the error.
+    if let ServiceStatus::Error(msg) = &state.service_status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    }
+
     let player_list: Vec<TestScriptPlayerConfig> = state.reactivators.iter().map(|(_, v)| v.get_config()).collect();
 
-    Json(player_list)
+    return (StatusCode::OK,Json(player_list)).into_response();
 }
 
 async fn get_player(

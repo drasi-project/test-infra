@@ -7,13 +7,14 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::{
-    config::{OutputType, SourceConfig}, 
+    config::{OutputType, ServiceSettings, SourceConfig, SourceConfigDefaults}, 
     source_change_dispatchers::{
         console_dispatcher::ConsoleSourceChangeEventDispatcher,
         dapr_dispatcher::DaprSourceChangeEventDispatcher,
         file_dispatcher::JsonlFileSourceChangeDispatcher,
         null_dispatcher::NullSourceChangeEventDispatcher,
-    }, SharedState};
+    }
+};
 use crate::source_change_dispatchers::SourceChangeEventDispatcher;
 use crate::test_script::test_script_reader::{TestScriptReader, TestScriptRecord, SequencedTestScriptRecord};
 
@@ -175,7 +176,7 @@ pub struct TestScriptPlayerSettings {
 impl TestScriptPlayerSettings {
     // Function to create a new TestScriptPlayerSettings by combining a SourceConfig and the Service Settings.
     // The TestScriptPlayerSettings control the configuration and operation of a TestRun.   
-    pub async fn try_from_source_config(source_config: &SourceConfig, service_state: SharedState) -> Result<Self, String> {
+    pub fn try_from_source_config(source_config: &SourceConfig, source_defaults: &SourceConfigDefaults, service_settings: &ServiceSettings) -> Result<Self, String> {
 
         // If the SourceConfig doesnt contain a ReactivatorConfig, log and return an error.
         let reactivator_config = match &source_config.reactivator {
@@ -186,10 +187,6 @@ impl TestScriptPlayerSettings {
                 return Err(err);    
             }
         };
-
-        let service_state_reader = service_state.read().await;
-        let source_defaults = &service_state_reader.source_defaults;
-        let service_settings = &service_state_reader.service_settings;
 
         // If neither the SourceConfig nor the SourceDefaults contain a test_id, return an error.
         let test_id = match &source_config.test_id {

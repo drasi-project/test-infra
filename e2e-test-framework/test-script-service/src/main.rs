@@ -313,15 +313,7 @@ async fn main() {
 
     // Start the Web API.
     // Get the port number the service will listen on from AppState.
-    let addr = match service_state.service_settings.port.parse::<u16>() {
-        Ok(port) => SocketAddr::from(([0, 0, 0, 0], port)),
-        Err(e) => {
-            let msg = format!("Error parsing port number: {}", e);
-            log::error!("{}", msg);
-            service_state.service_status = ServiceStatus::Error(msg);
-            SocketAddr::from(([0, 0, 0, 0], 4000))
-        }
-    };
+    let addr = SocketAddr::from(([0, 0, 0, 0], service_state.service_settings.port));
 
     // Set the ServiceStatus to Ready if it is not already in an Error state.
     match &service_state.service_status {
@@ -333,6 +325,8 @@ async fn main() {
             service_state.service_status = ServiceStatus::Ready;
         }
     }
+
+    // Now the Service is initialized, create the shared state and start the Web API.
     let shared_state = Arc::new(RwLock::new(service_state));
 
     let reactivator_routes = Router::new()

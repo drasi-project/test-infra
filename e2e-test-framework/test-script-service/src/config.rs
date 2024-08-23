@@ -58,24 +58,24 @@ pub struct ServiceSettings {
 
     // The port number the Web API will listen on.
     // If not provided, the default_value is used.
-    #[arg(short = 'p', long = "port", env = "DRASI_PORT", default_value = "4000")]
-    pub port: String,
+    #[arg(short = 'p', long = "port", env = "DRASI_PORT", default_value_t = 4000)]
+    pub port: u16,
 
     // The OutputType for Source Change Events.
     // If not provided, the default_value "publish" is used. ensuring that SourceChangeEvents are published
     // to the Change Queue for downstream processing.
-    #[arg(short = 'e', long = "event_out", env = "DRASI_EVENT_OUTPUT", default_value = "none")]
+    #[arg(short = 'e', long = "event_out", env = "DRASI_EVENT_OUTPUT", default_value_t = OutputType::Publish)]
     pub event_output: OutputType,
 
     // The OutputType for Test Script Player Telemetry data.
     // If not provided, the default_value "publish" is used ensuring that Telemetry data is published
     // so it can be captured and logged against the test run for analysis.
-    #[arg(short = 't', long = "telem_out", env = "DRASI_TELEM_OUTPUT", default_value = "none")]
+    #[arg(short = 't', long = "telem_out", env = "DRASI_TELEM_OUTPUT", default_value_t = OutputType::Publish)]
     pub telemetry_output: OutputType,
 
     // The OutputType for Test Script Player Log data.
     // If not provided, the default_value "none" is used ensuring that Log data is not generated.
-    #[arg(short = 'l', long = "log_out", env = "DRASI_LOG_OUTPUT", default_value = "none")]
+    #[arg(short = 'l', long = "log_out", env = "DRASI_LOG_OUTPUT", default_value_t = OutputType::None)]
     pub log_output: OutputType,
 }
 

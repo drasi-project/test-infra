@@ -7,6 +7,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::{
+    mask_secret, 
     config::{OutputType, ServiceSettings, SourceConfig, SourceConfigDefaults}, 
     source_change_dispatchers::{
         console_dispatcher::ConsoleSourceChangeEventDispatcher,
@@ -127,7 +128,7 @@ pub struct TestScriptPlayerSettings {
     pub test_storage_account: String,
 
     // The Test Storage Access Key where the Test Repo is located.
-    #[serde(skip_serializing)]
+    #[serde(serialize_with = "mask_secret")]
     pub test_storage_access_key: String,
 
     // The Test Storage Container where the Test Repo is located.

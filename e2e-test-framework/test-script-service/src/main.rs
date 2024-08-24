@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, vec};
 
 use axum::{
     extract::{Extension, Path},
@@ -8,37 +8,35 @@ use axum::{
     Json, Router,
 };
 use clap::Parser;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use tokio::sync::RwLock;
 
 use config::{
     SourceConfig, SourceConfigDefaults, ServiceSettings, ServiceConfigFile,
 };
 use test_repo::{
-    dataset::DataSetSettings,
+    dataset::{DataSetContent, DataSetSettings},
     local_test_repo::LocalTestRepo,
 };
 use test_script::test_script_player::{
-    self, TestScriptPlayerSettings, ScheduledTestScriptRecord, TestScriptPlayer, 
-    TestScriptPlayerConfig, TestScriptPlayerSpacingMode, TestScriptPlayerState, 
-    TestScriptPlayerStatus, TestScriptPlayerTimeMode
+    TestScriptPlayerSettings, TestScriptPlayer, 
+    TestScriptPlayerConfig, TestScriptPlayerState, 
 };
-use test_script::test_script_reader::SequencedTestScriptRecord;
 
 mod config;
 mod source_change_dispatchers;
 mod test_repo;
 mod test_script;
 
-mod u64_as_string {
-    use serde::{self, Serializer};
+// mod u64_as_string {
+//     use serde::{self, Serializer};
 
-    pub fn serialize<S>(number: &u64, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&number.to_string())
-    }
+//     pub fn serialize<S>(number: &u64, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: Serializer,
+//     {
+//         serializer.serialize_str(&number.to_string())
+//     }
 
     // pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
     // where
@@ -47,7 +45,7 @@ mod u64_as_string {
     //     let s = String::deserialize(deserializer)?;
     //     s.parse::<u64>().map_err(serde::de::Error::custom)
     // }
-}
+// }
 
 // mod u64_as_string {
 //     use serde::{self, Deserialize, Deserializer, Serializer};
@@ -91,24 +89,6 @@ mod u64_as_string {
 //     }
 // }
 
-// An enum that represents the current state of the Test Script Service.
-// Valid transitions are:
-//   () --run_with_config_file--> Uninitialized --> Initializing --> Working
-//   () --run_with_no_config_file--> Uninitialized
-//   Uninitialized --init--> Initializing --> Working
-//   Initialized --start_immediately=true--> Working
-//   Initialized --start_immediately=false--> Working
-//   * --error--> Error
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub enum ServiceStatus {
-    // The Service is Initializing, which includes downloading the test data from the Test Repo.
-    Initializing,
-    // The Service has a working player.
-    Ready,
-    // The Service is in an Error state.
-    Error(String),
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct TestStepConfig {
     #[serde(default)]
@@ -137,46 +117,16 @@ impl Default for TestSkipConfig {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct ServiceResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub service_error_msg: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub player_state: Option<PlayerStateResponse>
-}
-
-#[derive(Debug, Serialize)]
-struct PlayerStateResponse {
-    pub status: TestScriptPlayerStatus,
-    pub error_message: Option<String>,
-    pub time_mode: TestScriptPlayerTimeMode,
-    pub spacing_mode: TestScriptPlayerSpacingMode, 
-    #[serde(with = "u64_as_string")]   
-    pub start_replay_time: u64,
-    #[serde(with = "u64_as_string")]
-    pub current_replay_time: u64,
-    pub skips_remaining: u64,
-    pub steps_remaining: u64,
-    pub delayed_record: Option<ScheduledTestScriptRecord>,
-    pub next_record: Option<SequencedTestScriptRecord>,
-}
-
-// Convert TestScriptPlayerState to ServiceState
-impl From<test_script_player::TestScriptPlayerState> for PlayerStateResponse {
-    fn from(player_state: test_script_player::TestScriptPlayerState) -> Self {
-        PlayerStateResponse {
-            status: player_state.status,
-            error_message: player_state.error_message,
-            time_mode: player_state.time_mode,
-            spacing_mode: player_state.spacing_mode,
-            start_replay_time: player_state.start_replay_time,
-            current_replay_time: player_state.current_replay_time,
-            skips_remaining: player_state.skips_remaining,
-            steps_remaining: player_state.steps_remaining,
-            delayed_record: player_state.delayed_record,
-            next_record: player_state.next_record,
-        }
-    }
+// An enum that represents the current state of the Test Script Service.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub enum ServiceStatus {
+    // The Service is Initializing, which includes downloading the test data from the Test Repo
+    // and creating the initial set of Test Script Players.
+    Initializing,
+    // The Service has finished initializing and has an active Web API.
+    Ready,
+    // The Service is in an Error state. and will not be able to process requests.
+    Error(String),
 }
 
 // The ServiceState struct holds the configuration and current state of the service.
@@ -187,6 +137,9 @@ pub struct ServiceState {
     pub reactivators: HashMap<String, TestScriptPlayer>,
     pub test_repo: Option<LocalTestRepo>,
 }
+
+// Type alias for the SharedState struct.
+pub type SharedState = Arc<RwLock<ServiceState>>;
 
 impl ServiceState {
     fn new(service_settings: ServiceSettings, source_defaults: Option<SourceConfigDefaults>) -> Self {
@@ -226,20 +179,81 @@ impl ServiceState {
     }
 }
 
-// Type alias for the SharedState struct.
-pub type SharedState = Arc<RwLock<ServiceState>>;
+#[derive(Debug, Serialize)]
+struct ServiceStateResponse {
+    service_status: ServiceStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service_error_msg: Option<String>,
+    local_test_repo: LocalTestRepoResponse,
+    reactivators: Vec<String>,
+}
 
-#[derive(Debug, Clone, Serialize)]
-struct PlayerInfo {
-    pub player_settings: TestScriptPlayerSettings,
-    pub script_files: Vec<PathBuf>,
+#[derive(Debug, Serialize)]
+struct LocalTestRepoResponse {
+    data_cache_path: String,
+    data_sets: Vec<DataSetResponse>,
+}
+
+#[derive(Debug, Serialize)]
+struct DataSetResponse {
+    id: String,
+    settings: DataSetSettings,
+    content: Option<DataSetContent>,
+}
+
+#[derive(Debug, Serialize)]
+struct PlayerInfoResponse {
+    pub config: TestScriptPlayerConfig,
     pub state: TestScriptPlayerState,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct ServiceStateInfo {
-    service_status: ServiceStatus,
-    reactivators: HashMap<String, TestScriptPlayerConfig>,
+// Create PlayerResponse from a TestScriptPlayer.
+impl PlayerInfoResponse {
+    fn new(config: TestScriptPlayerConfig, state: TestScriptPlayerState) -> Self {
+        PlayerInfoResponse {
+            config,
+            state,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct PlayerCommandResponse {
+    pub test_id: String,
+    pub test_run_id: String,
+    pub source_id: String,
+    pub state: TestScriptPlayerState,
+}
+
+// Create PlayerResponse from a TestScriptPlayer.
+impl PlayerCommandResponse {
+    fn new(config: TestScriptPlayerConfig, state: TestScriptPlayerState) -> Self {
+        PlayerCommandResponse {
+            test_id: config.player_settings.test_id.clone(),
+            test_run_id: config.player_settings.test_run_id.clone(),
+            source_id: config.player_settings.source_id.clone(),
+            state: state,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct PlayerCommandError {
+    pub test_id: String,
+    pub test_run_id: String,
+    pub source_id: String,
+    pub error_msg: String,
+}
+
+impl PlayerCommandError {
+    fn new(config: TestScriptPlayerConfig, error_msg: String) -> Self {
+        PlayerCommandError {
+            test_id: config.player_settings.test_id.clone(),
+            test_run_id: config.player_settings.test_run_id.clone(),
+            source_id: config.player_settings.source_id.clone(),
+            error_msg,
+        }
+    }
 }
 
 // The main function that starts the starts the Test Script Service.
@@ -399,27 +413,26 @@ async fn service_info(
 
     let state = state.read().await;
 
-    let service_info = ServiceStateInfo {
-        reactivators: state.reactivators.iter().map(|(k, v)| (k.clone(), v.get_config())).collect(),
-        service_status: state.service_status.clone(),
+    let local_test_repo = LocalTestRepoResponse {
+        data_cache_path: state.test_repo.as_ref().unwrap().data_cache_path.to_str().unwrap().to_string(),
+        data_sets: state.test_repo.as_ref().unwrap().data_sets.iter().map(|(k, v)| DataSetResponse {
+            id: k.clone(),
+            settings: v.settings.clone(),
+            content: v.content.clone(),
+        }).collect(),
     };
 
-    Json(service_info)
-}
+    Json(ServiceStateResponse {
+        service_status: state.service_status.clone(),
+        service_error_msg: match &state.service_status {
+            ServiceStatus::Error(msg) => Some(msg.clone()),
+            _ => None,
+        },
+        local_test_repo,
+        reactivators: state.reactivators.keys().cloned().collect(),
+    }).into_response()
 
-// async fn create_player(
-//     body: Json<CreatePlayer>,
-// ) -> impl IntoResponse {
-//     let mut active_players = active_players.write().await;
-//     let id = Uuid::new_v4().to_string();
-//     let player = TestScriptPlayerInfo {
-//         id: id.clone(),
-//         name: body.0.name,
-//         description: body.0.description,
-//     };
-//     active_players.insert(id, player.clone());
-//     Json(player)
-// }
+}
 
 async fn get_player_list(
     state: Extension<SharedState>,
@@ -428,36 +441,53 @@ async fn get_player_list(
 
     let state = state.read().await;
 
-    // If the service in is an Error state, return an error and the description of the error.
+    // If the service is an Error state, return an error and the description of the error.
     if let ServiceStatus::Error(msg) = &state.service_status {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    let player_list: Vec<TestScriptPlayerConfig> = state.reactivators.iter().map(|(_, v)| v.get_config()).collect();
+    // Otherwise, return the configuration and state of all the TestScriptPlayers.
+    let mut player_list = vec![];
+    for (_, player) in state.reactivators.iter() {
+        player_list.push(PlayerInfoResponse::new(player.get_config(), player.get_state().await.unwrap().state));
+    }
 
-    return (StatusCode::OK,Json(player_list)).into_response();
+    Json(player_list).into_response()
 }
 
 async fn get_player(
     Path(id): Path<String>,
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
+
     log::info!("Processing call - get_player: {}", id);
 
-    let state = state.read().await;
+    // Limit the scope of the Read Lock to the error check and player lookup.
+    let player = {
+        let state = state.read().await;
 
-    if let Some(player) = state.reactivators.get(&id) {
+        // Check if the service is an Error state.
+        if let ServiceStatus::Error(msg) = &state.service_status {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+        }
 
-        let TestScriptPlayerConfig { player_settings, script_files } = player.get_config();
+        // Look up the TestScriptPlayer by id.
+        match state.reactivators.get(&id) {
+            Some(player) => player.clone(),
+            None => {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+        }
+    };
 
-        let player_info = PlayerInfo {
-            player_settings,
-            script_files,
-            state: player.get_state().await.unwrap().state,
-        };
-        Json(player_info).into_response()
-    } else {
-        StatusCode::NOT_FOUND.into_response()
+    // Get the state of the TestScriptPlayer and return it.
+    match player.get_state().await {
+        Ok(response) => {
+            Json(PlayerInfoResponse::new(player.get_config(), response.state)).into_response()
+        },
+        Err(e) => {
+            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+        }
     }
 }
 
@@ -498,34 +528,35 @@ async fn pause_player(
     Path(id): Path<String>,
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
+
     log::info!("Processing call - pause_player: {}", id);
 
-    let state = state.read().await;
+    // Limit the scope of the Read Lock to the error check and player lookup.
+    let player = {
+        let state = state.read().await;
 
-    if let Some(active_player) = state.reactivators.get(&id) {
-        match active_player.pause().await {
-            Ok(response) => {
-                let service_state = PlayerStateResponse::from(response.state);
-                (StatusCode::OK, Json(ServiceResponse {
-                    service_error_msg: None,
-                    player_state: Some(service_state),
-                }))
-            }
-            Err(e) => {
-                log::error!("{}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ServiceResponse {
-                    service_error_msg: Some(e.to_string()),
-                    player_state: None,
-                }))
+        // Check if the service is an Error state.
+        if let ServiceStatus::Error(msg) = &state.service_status {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+        }
+
+        // Look up the TestScriptPlayer by id.
+        match state.reactivators.get(&id) {
+            Some(player) => player.clone(),
+            None => {
+                return StatusCode::NOT_FOUND.into_response();
             }
         }
-    } else {
-        let service_error_msg = format!("Player {} not found.", id); 
-        log::debug!("{}", service_error_msg);
-        (StatusCode::NOT_FOUND, Json(ServiceResponse {
-            service_error_msg: Some(service_error_msg),
-            player_state: None,
-        }))
+    };
+
+    // Pause the TestScriptPlayer and return the result.
+    match player.pause().await {
+        Ok(response) => {
+            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+        },
+        Err(e) => {
+            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+        }
     }
 }
 
@@ -536,38 +567,37 @@ async fn skip_player(
 ) -> impl IntoResponse {
     log::info!("Processing call - skip_player: {}", id);
 
-    let state = state.read().await;
+    // Limit the scope of the Read Lock to the error check and player lookup.
+    let player = {
+        let state = state.read().await;
 
-    if let Some(active_player) = state.reactivators.get(&id) {
+        // Check if the service is an Error state.
+        if let ServiceStatus::Error(msg) = &state.service_status {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+        }
 
-        let test_skip_config = body.0;
-        log::debug!("{:?}", test_skip_config);
-
-        let num_skips = test_skip_config.unwrap_or_default().num_skips;
-    
-        match active_player.skip(num_skips).await {
-            Ok(response) => {
-                let service_state = PlayerStateResponse::from(response.state);
-                (StatusCode::OK, Json(ServiceResponse {
-                    service_error_msg: None,
-                    player_state: Some(service_state),
-                }))
-            }
-            Err(e) => {
-                log::error!("{}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ServiceResponse {
-                    service_error_msg: Some(e.to_string()),
-                    player_state: None,
-                }))
+        // Look up the TestScriptPlayer by id.
+        match state.reactivators.get(&id) {
+            Some(player) => player.clone(),
+            None => {
+                return StatusCode::NOT_FOUND.into_response();
             }
         }
-    } else {
-        let service_error_msg = format!("Player {} not found.", id); 
-        log::debug!("{}", service_error_msg);
-        (StatusCode::NOT_FOUND, Json(ServiceResponse {
-            service_error_msg: Some(service_error_msg),
-            player_state: None,
-        }))
+    };
+
+    let test_skip_config = body.0;
+    log::debug!("{:?}", test_skip_config);
+
+    let num_skips = test_skip_config.unwrap_or_default().num_skips;
+
+    // Skip the TestScriptPlayer and return the result.
+    match player.skip(num_skips).await {
+        Ok(response) => {
+            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+        },
+        Err(e) => {
+            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+        }
     }
 }
 
@@ -577,32 +607,32 @@ async fn start_player(
 ) -> impl IntoResponse {
     log::info!("Processing call - start_player: {}", id);
 
-    let state = state.read().await;
+    // Limit the scope of the Read Lock to the error check and player lookup.
+    let player = {
+        let state = state.read().await;
 
-    if let Some(active_player) = state.reactivators.get(&id) {
-        match active_player.start().await {
-            Ok(response) => {
-                let service_state = PlayerStateResponse::from(response.state);
-                (StatusCode::OK, Json(ServiceResponse {
-                    service_error_msg: None,
-                    player_state: Some(service_state),
-                }))
-            }
-            Err(e) => {
-                log::error!("{}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ServiceResponse {
-                    service_error_msg: Some(e.to_string()),
-                    player_state: None,
-                }))
+        // Check if the service is an Error state.
+        if let ServiceStatus::Error(msg) = &state.service_status {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+        }
+
+        // Look up the TestScriptPlayer by id.
+        match state.reactivators.get(&id) {
+            Some(player) => player.clone(),
+            None => {
+                return StatusCode::NOT_FOUND.into_response();
             }
         }
-    } else {
-        let service_error_msg = format!("Player {} not found.", id); 
-        log::debug!("{}", service_error_msg);
-        (StatusCode::NOT_FOUND, Json(ServiceResponse {
-            service_error_msg: Some(service_error_msg),
-            player_state: None,
-        }))
+    };
+
+    // Start the TestScriptPlayer and return the result.
+    match player.start().await {
+        Ok(response) => {
+            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+        },
+        Err(e) => {
+            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+        }
     }
 }
 
@@ -613,39 +643,39 @@ async fn step_player(
 ) -> impl IntoResponse {
     log::info!("Processing call - step_player: {}", id);
 
-    let state = state.read().await;
+    // Limit the scope of the Read Lock to the error check and player lookup.
+    let player = {
+        let state = state.read().await;
 
-    if let Some(active_player) = state.reactivators.get(&id) {
+        // Check if the service is an Error state.
+        if let ServiceStatus::Error(msg) = &state.service_status {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+        }
 
-        let test_step_config = body.0;
-        log::debug!("{:?}", test_step_config);
-
-        let num_steps = test_step_config.unwrap_or_default().num_steps;
-    
-        match active_player.step(num_steps).await {
-            Ok(response) => {
-                let service_state = PlayerStateResponse::from(response.state);
-                (StatusCode::OK, Json(ServiceResponse {
-                    service_error_msg: None,
-                    player_state: Some(service_state),
-                }))
-            }
-            Err(e) => {
-                log::error!("{}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ServiceResponse {
-                    service_error_msg: Some(e.to_string()),
-                    player_state: None,
-                }))
+        // Look up the TestScriptPlayer by id.
+        match state.reactivators.get(&id) {
+            Some(player) => player.clone(),
+            None => {
+                return StatusCode::NOT_FOUND.into_response();
             }
         }
-    } else {
-        let service_error_msg = format!("Player {} not found.", id); 
-        log::debug!("{}", service_error_msg);
-        (StatusCode::NOT_FOUND, Json(ServiceResponse {
-            service_error_msg: Some(service_error_msg),
-            player_state: None,
-        }))
+    };
+
+    let test_step_config = body.0;
+    log::debug!("{:?}", test_step_config);
+
+    let num_steps = test_step_config.unwrap_or_default().num_steps;
+
+    // Step the TestScriptPlayer and return the result.
+    match player.step(num_steps).await {
+        Ok(response) => {
+            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+        },
+        Err(e) => {
+            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+        }
     }
+
 }
 
 async fn stop_player(
@@ -654,57 +684,38 @@ async fn stop_player(
 ) -> impl IntoResponse {
     log::info!("Processing call - stop_player: {}", id);
 
-    let state = state.read().await;
+    // Limit the scope of the Read Lock to the error check and player lookup.
+    let player = {
+        let state = state.read().await;
 
-    if let Some(active_player) = state.reactivators.get(&id) {
-        match active_player.stop().await {
-            Ok(response) => {
-                let service_state = PlayerStateResponse::from(response.state);
-                (StatusCode::OK, Json(ServiceResponse {
-                    service_error_msg: None,
-                    player_state: Some(service_state),
-                }))
-            }
-            Err(e) => {
-                log::error!("{}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(ServiceResponse {
-                    service_error_msg: Some(e.to_string()),
-                    player_state: None,
-                }))
+        // Check if the service is an Error state.
+        if let ServiceStatus::Error(msg) = &state.service_status {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+        }
+
+        // Look up the TestScriptPlayer by id.
+        match state.reactivators.get(&id) {
+            Some(player) => player.clone(),
+            None => {
+                return StatusCode::NOT_FOUND.into_response();
             }
         }
-    } else {
-        let service_error_msg = format!("Player {} not found.", id); 
-        log::debug!("{}", service_error_msg);
-        (StatusCode::NOT_FOUND, Json(ServiceResponse {
-            service_error_msg: Some(service_error_msg),
-            player_state: None,
-        }))
+    };
+
+    // Stop the TestScriptPlayer and return the result.
+    match player.stop().await {
+        Ok(response) => {
+            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+        },
+        Err(e) => {
+            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+        }
     }
 }
 
-
-
-// async fn state_handler(
-//     Path(id): Path<String>,
-//     state: Extension<SharedState>,
-// ) -> impl IntoResponse {
-
-//     log::info!("Processing call: state");
-
-//     let result = state.read().await.script_player.as_ref().unwrap().get_state().await;
-
-//     let response = match result {
-//         Ok(response) => {
-//             let service_state = PlayerStateResponse::from(response.state);
-//             (StatusCode::OK, Json(ServiceResponse{ service_error_msg: None, player_state: Some(service_state) }))
-//         },
-//         Err(e) => {           
-//             let service_error_msg = format!("{}", e); 
-//             log::error!("{}", service_error_msg);
-//             (StatusCode::INTERNAL_SERVER_ERROR, Json(ServiceResponse{ service_error_msg: Some(service_error_msg), player_state: None} ))
-//         }
-//     };
-
-//     response
-// }
+pub fn mask_secret<S>(_: &str, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str("******")
+}

@@ -1,12 +1,15 @@
 use std::{collections::HashMap, error::Error, path::PathBuf};
 
-use crate::test_script::test_script_player::TestScriptPlayerSettings;
+use serde::Serialize;
+
+use crate::{mask_secret, test_script::test_script_player::TestScriptPlayerSettings};
 
 use super::download_remote_repo_folder;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Serialize)]
 pub struct DataSetSettings {
     pub storage_account: String,
+    #[serde(serialize_with = "mask_secret")]
     pub storage_access_key: String,
     pub storage_container: String,
     pub storage_path: String,
@@ -28,11 +31,11 @@ impl DataSetSettings {
 
     pub fn get_id(&self) -> String {
         // Formulate a unique key for the TestSourceDataSet.
-        format!("{}-{}", &self.test_id, &self.source_id)
+        format!("{}::{}", &self.test_id, &self.source_id)
     }
 }
         
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Serialize)]
 pub struct DataSetContent {
     pub change_log_script_files: Option<Vec<PathBuf>>,
     pub bootstrap_script_files: Option<HashMap<String, Vec<PathBuf>>>,
@@ -49,9 +52,9 @@ impl DataSetContent {
 
 pub struct DataSet {
     pub id: String,
-    settings: DataSetSettings,
-    data_cache_path: PathBuf,
-    content: Option<DataSetContent>,
+    pub settings: DataSetSettings,
+    pub data_cache_path: PathBuf,
+    pub content: Option<DataSetContent>,
 }
 
 impl DataSet {
@@ -122,7 +125,7 @@ impl DataSet {
         &self,
         local_repo_folder: PathBuf
     ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-        let file_path_list = download_remote_repo_folder(
+        let mut file_path_list = download_remote_repo_folder(
             self.settings.storage_account.clone(),
             self.settings.storage_access_key.clone(),
             self.settings.storage_container.clone(),
@@ -132,6 +135,9 @@ impl DataSet {
         ).await?;
         log::trace!("Change Scripts: {:?}", file_path_list);
 
+        // Sort the list of files by the file name to get them in the correct order for processing.
+        file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
         Ok(file_path_list)
     }
 
@@ -139,7 +145,7 @@ impl DataSet {
         &self,
         local_repo_folder: PathBuf
     ) -> Result<HashMap<String, Vec<PathBuf>>, Box<dyn Error>> {
-        let file_path_list = download_remote_repo_folder(
+        let mut file_path_list = download_remote_repo_folder(
             self.settings.storage_account.clone(),
             self.settings.storage_access_key.clone(),
             self.settings.storage_container.clone(),
@@ -147,6 +153,9 @@ impl DataSet {
             format!("{}/{}/sources/{}/bootstrap_scripts/", self.settings.storage_path, self.settings.test_id, self.settings.source_id),
             local_repo_folder,
         ).await?;
+
+        // Sort the list of files by the file name to get them in the correct order for processing.
+        file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
         // Group the files by the data type name, which is the parent folder name of the file and turn it into a HashMap
         // using the data type name as the key and a vector of file paths as the value.

@@ -64,7 +64,6 @@ async fn download_remote_repo_folder(
                     }
                 },
                 BlobItem::BlobPrefix(prefix) => {
-                    log::error!("Blob Prefix: {:?}", prefix.name);
                     log::trace!("Ignoring Blob Prefix: {:?}", prefix.name);
                 }
             }

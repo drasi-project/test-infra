@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'test-script-service'",
+            "name": "Debug executable 'test-source-service'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=test-script-service",
-                    "--package=test-script-service"
+                    "--bin=test-source-service",
+                    "--package=test-source-service"
                 ],
                 "filter": {
-                    "name": "test-script-service",
+                    "name": "test-source-service",
                     "kind": "bin"
                 }
             },
@@ -25,16 +25,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'test-script-service'",
+            "name": "Debug unit tests in executable 'test-source-service'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=test-script-service",
-                    "--package=test-script-service"
+                    "--bin=test-source-service",
+                    "--package=test-source-service"
                 ],
                 "filter": {
-                    "name": "test-script-service",
+                    "name": "test-source-service",
                     "kind": "bin"
                 }
             },

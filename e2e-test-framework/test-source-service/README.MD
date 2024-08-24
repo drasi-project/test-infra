@@ -1,20 +1,20 @@
 # Introduction
 
-The Test Script Service is a a component of the Drasi E2E Test Framework. It allows developers and testers to create and use Drasi E2E Test Scripts. The Test Script Service supports multiple modes for event timing, including recorded, rebased, and live, providing flexibility in how tests are conducted. Additionally, it offers options for controlling the speed of event replay, ensuring that the system under test can handle different pacing scenarios effectively.
+The Test Source Service is a a component of the Drasi E2E Test Framework. It allows developers and testers to create and use Drasi E2E Test Scripts. The Test Source Service supports multiple modes for event timing, including recorded, rebased, and live, providing flexibility in how tests are conducted. Additionally, it offers options for controlling the speed of event replay, ensuring that the system under test can handle different pacing scenarios effectively.
 
 
-alljones-msft: @workspace suggest content for a section in this document describing how to run the Test Script Service Service, the configuration it needs and how to provide that configuration using wither command line arguments or environment variables. Give examples
+alljones-msft: @workspace suggest content for a section in this document describing how to run the Test Source Service Service, the configuration it needs and how to provide that configuration using wither command line arguments or environment variables. Give examples
 
 Workspace: Sure, here is a suggested section for the README.md document:
 
 ```markdown
-# Running The Test Script Service Service
+# Running The Test Source Service Service
 
-To run the Test Script Service Service, you need to provide the necessary configuration either through command line arguments or environment variables. Below are the details on how to configure and run the service.
+To run the Test Source Service Service, you need to provide the necessary configuration either through command line arguments or environment variables. Below are the details on how to configure and run the service.
 
 ## Configuration
 
-The Test Script Service Service requires the following configuration parameters:
+The Test Source Service Service requires the following configuration parameters:
 
 - `config_file_path`: The path of the Test Run Config file. If not provided, the service will start in an uninitialized state and wait to be initialized through the Web API.
 - `data_cache_path`: The path where data used and generated in the Test Run gets stored. Default is `./source_data_cache`.
@@ -54,11 +54,11 @@ cargo run
 
 ## Running a Test
 
-To run a test using the Test Script Service Service, you have two options for providing the configuration: passing a config file at startup or using the Web API to initialize the service. In this section, we will discuss both approaches and explain the contents of the config file and each argument.
+To run a test using the Test Source Service Service, you have two options for providing the configuration: passing a config file at startup or using the Web API to initialize the service. In this section, we will discuss both approaches and explain the contents of the config file and each argument.
 
 ### Config File
 
-The Test Script Service Service requires a config file to be provided for proper initialization. The config file should be in JSON format and contain the following parameters:
+The Test Source Service Service requires a config file to be provided for proper initialization. The config file should be in JSON format and contain the following parameters:
 
 - `config_file_path`: The path of the Test Run Config file. If not provided, the service will start in an uninitialized state and wait to be initialized through the Web API.
 - `data_cache_path`: The path where data used and generated in the Test Run gets stored. The default value is `./source_data_cache`.
@@ -85,7 +85,7 @@ Each argument corresponds to a configuration parameter mentioned earlier.
 
 ### Web API Initialization
 
-Alternatively, you can initialize the Test Script Service Service through the Web API by providing the necessary configuration parameters. This allows you to dynamically configure the service without restarting it. Details on how to interact with the Web API can be found in the API documentation.
+Alternatively, you can initialize the Test Source Service Service through the Web API by providing the necessary configuration parameters. This allows you to dynamically configure the service without restarting it. Details on how to interact with the Web API can be found in the API documentation.
 
 Remember to ensure that the configuration parameters are properly set before running the test.
 

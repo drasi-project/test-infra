@@ -1,5 +1,5 @@
 [package]
-name = "test-script-service"
+name = "test-source-service"
 version = "0.1.0"
 edition = "2021"
 

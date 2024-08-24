@@ -178,20 +178,9 @@ impl PlayerCommandError {
     }
 }
 
-pub(crate) async fn start_web_api(mut service_state: ServiceState) {
+pub(crate) async fn start_web_api(service_state: ServiceState) {
     // Get the port number the service will listen on from AppState.
     let addr = SocketAddr::from(([0, 0, 0, 0], service_state.service_settings.port));
-
-    // Set the ServiceStatus to Ready if it is not already in an Error state.
-    match &service_state.service_status {
-        ServiceStatus::Error(msg) => {
-            log::error!("Test Script Service failed to initialize correctly due to error: {}", msg);            
-        },
-        _ => {
-            log::info!("Test Script Service initialized successfully.");
-            service_state.service_status = ServiceStatus::Ready;
-        }
-    }
 
     // Now the Service is initialized, create the shared state and start the Web API.
     let shared_state = Arc::new(RwLock::new(service_state));

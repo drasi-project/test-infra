@@ -179,10 +179,9 @@ impl PlayerCommandError {
 }
 
 pub(crate) async fn start_web_api(service_state: ServiceState) {
-    // Get the port number the service will listen on from AppState.
     let addr = SocketAddr::from(([0, 0, 0, 0], service_state.service_settings.port));
 
-    // Now the Service is initialized, create the shared state and start the Web API.
+    // Now the Test Runner is initialized, create the shared state and start the Web API.
     let shared_state = Arc::new(RwLock::new(service_state));
 
     let reactivator_routes = Router::new()

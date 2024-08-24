@@ -24,12 +24,12 @@ mod web_api;
 // An enum that represents the current state of the Service.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum ServiceStatus {
-    // The Service is Initializing, which includes downloading the test data from the Test Repo
+    // The Test Runner is Initializing, which includes downloading the test data from the Test Repo
     // and creating the initial set of Test Script Players.
     Initializing,
-    // The Service has finished initializing and has an active Web API.
+    // The Test Runner has finished initializing and has an active Web API.
     Ready,
-    // The Service is in an Error state. and will not be able to process requests.
+    // The Test Runner is in an Error state. and will not be able to process requests.
     Error(String),
 }
 
@@ -84,8 +84,8 @@ impl ServiceState {
 }
 
 // The main function that starts the starts the Service.
-// If the Service is started with a config file, it will initialize the Service with the settings in the file.
-// If the Service is started with no config file, it will wait to be managed through the Web API.
+// If the Test Runner is started with a config file, it will initialize the Test Runner with the settings in the file.
+// If the Test Runner is started with no config file, it will wait to be managed through the Web API.
 #[tokio::main]
 async fn main() {
      
@@ -95,14 +95,14 @@ async fn main() {
     let service_settings = ServiceSettings::parse();
     log::trace!("{:#?}", service_settings);
 
-    // Load the Service Config file if a path is specified in the ServiceSettings.
+    // Load the Test Runner Config file if a path is specified in the ServiceSettings.
     // If the specified file does not exist, return an error.
     // If no file is specified, use defaults.
     let mut service_state = match &service_settings.config_file_path {
         Some(config_file_path) => {
             match ServiceConfigFile::from_file_path(&config_file_path) {
                 Ok(service_config) => {
-                    log::trace!("Configuring Test Runner Service from {:#?}", service_config);
+                    log::trace!("Configuring Test Runner from {:#?}", service_config);
                     let mut service_state = ServiceState::new(service_settings, Some(service_config.defaults));
 
                     // Iterate over the SourceConfigs in the ServiceConfigFile and create a TestScriptPlayer for each one.
@@ -128,7 +128,7 @@ async fn main() {
                     service_state
                 },
                 Err(e) => {
-                    let msg = format!("Error loading service config file {:?}. Error {}", service_settings.config_file_path, e);
+                    let msg = format!("Error loading Test Runner config file {:?}. Error {}", service_settings.config_file_path, e);
                     log::error!("{}", msg);
                     ServiceState::error(service_settings, e)
                 }
@@ -158,10 +158,10 @@ async fn main() {
     // Set the ServiceStatus to Ready if it is not already in an Error state.
     match &service_state.service_status {
         ServiceStatus::Error(msg) => {
-            log::error!("Test Runner Service failed to initialize correctly due to error: {}", msg);            
+            log::error!("Test Runner failed to initialize correctly due to error: {}", msg);            
         },
         _ => {
-            log::info!("Test Runner Service initialized successfully.");
+            log::info!("Test Runner initialized successfully.");
             service_state.service_status = ServiceStatus::Ready;
         }
     }

@@ -14,7 +14,10 @@ use tokio::sync::RwLock;
 use config::{
     SourceConfig, SourceConfigDefaults, ServiceSettings, ServiceConfigFile,
 };
-use test_repo::{DataSetSettings, LocalTestRepo};
+use test_repo::{
+    dataset::DataSetSettings,
+    local_test_repo::LocalTestRepo,
+};
 use test_script::test_script_player::{
     self, TestScriptPlayerSettings, ScheduledTestScriptRecord, TestScriptPlayer, 
     TestScriptPlayerConfig, TestScriptPlayerSpacingMode, TestScriptPlayerState, 

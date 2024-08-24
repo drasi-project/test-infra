@@ -102,7 +102,7 @@ async fn main() {
         Some(config_file_path) => {
             match ServiceConfigFile::from_file_path(&config_file_path) {
                 Ok(service_config) => {
-                    log::trace!("Configuring Test Source Service from {:#?}", service_config);
+                    log::trace!("Configuring Test Runner Service from {:#?}", service_config);
                     let mut service_state = ServiceState::new(service_settings, Some(service_config.defaults));
 
                     // Iterate over the SourceConfigs in the ServiceConfigFile and create a TestScriptPlayer for each one.
@@ -158,10 +158,10 @@ async fn main() {
     // Set the ServiceStatus to Ready if it is not already in an Error state.
     match &service_state.service_status {
         ServiceStatus::Error(msg) => {
-            log::error!("Test Source Service failed to initialize correctly due to error: {}", msg);            
+            log::error!("Test Runner Service failed to initialize correctly due to error: {}", msg);            
         },
         _ => {
-            log::info!("Test Source Service initialized successfully.");
+            log::info!("Test Runner Service initialized successfully.");
             service_state.service_status = ServiceStatus::Ready;
         }
     }

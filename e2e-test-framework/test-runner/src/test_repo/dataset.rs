@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, path::PathBuf};
+use std::{collections::{HashMap, HashSet}, error::Error, path::PathBuf};
 
 use azure_storage::prelude::*;
 use azure_storage_blobs::prelude::*;
@@ -53,11 +53,12 @@ impl DataSetContent {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
 pub struct DataSet {
     pub id: String,
-    pub settings: DataSetSettings,
-    pub data_cache_path: PathBuf,
-    pub content: Option<DataSetContent>,
+    settings: DataSetSettings,
+    data_cache_path: PathBuf,
+    content: Option<DataSetContent>,
 }
 
 impl DataSet {
@@ -78,7 +79,36 @@ impl DataSet {
         }
     }
 
-    pub async fn get_content(&mut self) -> Result<DataSetContent, Box<dyn Error>> {
+    pub fn get_content(&self) -> Option<DataSetContent> {
+        self.content.clone()
+    }
+
+    pub fn get_settings(&self) -> DataSetSettings {
+        self.settings.clone()
+    }
+
+    pub fn count_bootstrap_type_intersection(&self, requested_labels: &HashSet<String>) -> usize {
+        let mut match_count = 0;
+
+        match &self.content {
+            Some(content) => {
+                match &content.bootstrap_script_files {
+                    Some(bootstrap_script_files) => {
+                        // Iterate through the data type names and count the number of matches.
+                        bootstrap_script_files.keys().filter(|key| requested_labels.contains(*key)).for_each(|_| {
+                            match_count += 1;
+                        });
+                    }
+                    None => {}
+                }
+            },
+            None => {}
+        }
+
+        match_count
+    }
+
+    pub async fn download_content(&mut self) -> Result<DataSetContent, Box<dyn Error>> {
         log::info!("Getting content for DataSet {}", &self.id);
 
         if self.content.is_none() {

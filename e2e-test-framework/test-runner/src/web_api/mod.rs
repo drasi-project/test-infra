@@ -10,7 +10,7 @@ use serde::Serialize;
 use tokio::sync::RwLock;
 
 use crate::{test_repo::dataset::{DataSetContent, DataSetSettings}, ServiceState, ServiceStatus, SharedState};
-use proxy::bootstrap_data_handler;
+use proxy::acquire_handler;
 use reactivator::{get_player, get_player_list, pause_player, skip_player, start_player, step_player, stop_player};
 
 mod proxy;
@@ -115,7 +115,7 @@ pub(crate) async fn start_web_api(service_state: ServiceState) {
 
     let app = Router::new()
         .route("/", get(service_info))
-        .route("/acquire", post(bootstrap_data_handler))
+        .route("/acquire", post(acquire_handler))
         .route("/reactivators", get(get_player_list))
         .nest("/reactivators/:id", reactivator_routes)
         .layer(axum::extract::Extension(shared_state));
@@ -139,8 +139,8 @@ async fn service_info(
         data_cache_path: state.test_repo.as_ref().unwrap().data_cache_path.to_str().unwrap().to_string(),
         data_sets: state.test_repo.as_ref().unwrap().data_sets.iter().map(|(k, v)| DataSetResponse {
             id: k.clone(),
-            settings: v.settings.clone(),
-            content: v.content.clone(),
+            settings: v.get_settings(),
+            content: v.get_content(),
         }).collect(),
     };
 

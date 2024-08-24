@@ -45,7 +45,7 @@ impl LocalTestRepo {
 
         // For now, we will download the data content immediately.
         // In the future, we may want to defer this until the data is actually needed.
-        match data_set.get_content().await {
+        match data_set.download_content().await {
             Ok(content) => Ok(content),
             Err(e) => {
                 Err(e)

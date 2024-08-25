@@ -11,8 +11,8 @@ use test_repo::{
     dataset::DataSetSettings,
     local_test_repo::LocalTestRepo,
 };
-use test_script::test_script_player::{
-    TestScriptPlayerSettings, TestScriptPlayer, TestScriptPlayerConfig, 
+use test_script::change_script_player::{
+    ChangeScriptPlayerSettings, ChangeScriptPlayer, ChangeScriptPlayerConfig, 
 };
 
 mod config;
@@ -25,7 +25,7 @@ mod web_api;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum ServiceStatus {
     // The Test Runner is Initializing, which includes downloading the test data from the Test Repo
-    // and creating the initial set of Test Script Players.
+    // and creating the initial set of Change Script Players.
     Initializing,
     // The Test Runner has finished initializing and has an active Web API.
     Ready,
@@ -38,7 +38,7 @@ pub struct ServiceState {
     pub service_settings: ServiceSettings,
     pub service_status: ServiceStatus,
     pub source_defaults: SourceConfigDefaults,
-    pub reactivators: HashMap<String, TestScriptPlayer>,
+    pub reactivators: HashMap<String, ChangeScriptPlayer>,
     pub test_repo: Option<LocalTestRepo>,
 }
 
@@ -71,15 +71,9 @@ impl ServiceState {
             }
         }
     }
-
-    fn error(service_settings: ServiceSettings, msg: String) -> Self {
-        ServiceState {
-            service_settings,
-            service_status: ServiceStatus::Error(msg),
-            source_defaults: SourceConfigDefaults::default(),
-            reactivators: HashMap::new(),
-            test_repo: None,
-        }
+    
+    pub fn set_error(&mut self, error: String) {
+        self.service_status = ServiceStatus::Error(error);
     }
 }
 
@@ -105,19 +99,19 @@ async fn main() {
                     log::trace!("Configuring Test Runner from {:#?}", service_config);
                     let mut service_state = ServiceState::new(service_settings, Some(service_config.defaults));
 
-                    // Iterate over the SourceConfigs in the ServiceConfigFile and create a TestScriptPlayer for each one.
+                    // Iterate over the SourceConfigs in the ServiceConfigFile and create a ChangeScriptPlayer for each one.
                     for source_config in service_config.sources {
                         log::trace!("Initializing Source from {:#?}", source_config);
 
                         if source_config.reactivator.is_some() {
-                            log::trace!("Creating TestScriptPlayer from {:#?}", &source_config.reactivator);
+                            log::trace!("Creating ChangeScriptPlayer from {:#?}", &source_config.reactivator);
 
-                            match create_test_script_player(source_config, &mut service_state).await {
+                            match create_change_script_player(source_config, &mut service_state).await {
                                 Ok(player) => {
                                     service_state.reactivators.insert(player.get_id(), player);
                                 },
                                 Err(e) => {
-                                    let msg = format!("Error creating TestScriptPlayer: {}", e);
+                                    let msg = format!("Error creating ChangeScriptPlayer: {}", e);
                                     log::error!("{}", msg);
                                     service_state.service_status = ServiceStatus::Error(msg);
                                     break;
@@ -130,7 +124,10 @@ async fn main() {
                 Err(e) => {
                     let msg = format!("Error loading Test Runner config file {:?}. Error {}", service_settings.config_file_path, e);
                     log::error!("{}", msg);
-                    ServiceState::error(service_settings, e)
+                    
+                    let mut service_state = ServiceState::new(service_settings, None);
+                    service_state.set_error(msg);
+                    service_state
                 }
             }
         },
@@ -140,13 +137,13 @@ async fn main() {
         }
     };
 
-    // Iterate over the initial Test Script Players and start each one if it is configured to start immediately.
+    // Iterate over the initial Change Script Players and start each one if it is configured to start immediately.
     for (_, active_player) in service_state.reactivators.iter() {
         if active_player.get_config().player_settings.start_immediately {
             match active_player.start().await {
                 Ok(_) => {},
                 Err(e) => {
-                    let msg = format!("Error starting TestScriptPlayer: {}", e);
+                    let msg = format!("Error starting ChangeScriptPlayer: {}", e);
                     log::error!("{}", msg);
                     service_state.service_status = ServiceStatus::Error(msg);
                     break;
@@ -171,42 +168,26 @@ async fn main() {
 
 }
 
-async fn create_test_script_player(source_config: SourceConfig, service_state: &mut ServiceState) -> Result<TestScriptPlayer, String> {
+async fn create_change_script_player(source_config: SourceConfig, service_state: &mut ServiceState) -> anyhow::Result<ChangeScriptPlayer> {
 
-    let player_settings = match TestScriptPlayerSettings::try_from_source_config(&source_config, &service_state.source_defaults, &service_state.service_settings) {
-        Ok(player_settings) => player_settings,
-        Err(e) => {
-            let msg = format!("Error creating PlayerSettings: {}", e);
-            log::error!("{}", msg);
-            return Err(msg);
+    let player_settings = ChangeScriptPlayerSettings::try_from_source_config(&source_config, &service_state.source_defaults, &service_state.service_settings)?;
+    let data_set_settings = DataSetSettings::from_change_script_player_settings(&player_settings);    
+    let dataset_content = service_state.test_repo.as_mut().unwrap().add_or_get_data_set(&data_set_settings).await?; 
+
+    let script_files = match dataset_content.change_log_script_files {
+        Some(script_files) => script_files,
+        None => {
+            anyhow::bail!("No change script files available for player: {}", &data_set_settings.get_id());
         }
     };
 
-    let data_set_settings = DataSetSettings::from_test_script_player_settings(&player_settings);
-    
-    let test_script_files = match service_state.test_repo.as_mut().unwrap().add_data_set(&data_set_settings).await {
-        Ok(data_set_content) => match data_set_content.change_log_script_files {
-            Some(script_files) => script_files,
-            None => {
-                let msg = format!("No test script files found for data set: {}", &data_set_settings.get_id());
-                log::error!("{}", msg);
-                return Err(msg);
-            }
-        },
-        Err(e) => {
-            let msg = format!("Error getting test script files: {}", e);
-            log::error!("{}", msg);
-            return Err(msg);
-        }
-    };
-
-    let cfg = TestScriptPlayerConfig {
+    let cfg = ChangeScriptPlayerConfig {
         player_settings,
-        script_files: test_script_files,
+        script_files,
     };
     log::trace!("{:#?}", cfg);
 
-    Ok(TestScriptPlayer::new(cfg).await)
+    Ok(ChangeScriptPlayer::new(cfg).await)
 }
 
 pub fn mask_secret<S>(_: &str, serializer: S) -> Result<S::Ok, S::Error>

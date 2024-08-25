@@ -1,5 +1,6 @@
-pub mod test_script_player;
-pub mod test_script_reader;
+pub mod bootstrap_script_reader;
+pub mod change_script_player;
+pub mod change_script_reader;
 
 use serde::{Deserialize, Serialize};
 

@@ -1,13 +1,27 @@
-use std::{fs::File, io::{self, BufRead, BufReader}, path::PathBuf};
+use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf};
 
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 
 use super::SourceChangeEvent;
 
+#[derive(Debug, thiserror::Error)]
+pub enum ChangeScriptReaderError {
+    #[error("Script is missing Header record: {0}")]
+    MissingHeader(String),
+    #[error("Can't open script file: {0}")]
+    CantOpenFile(String),
+    #[error("Error reading file: {0}")]
+    FileReadError(String),
+    #[error("Offset_ns for record {0} is less than the previous record's offset_ns.")]
+    RecordOutOfSequence(u64),
+    #[error("Bad record format in file {0}: Error - {1}; Record - {2}")]
+    BadRecordFormat(String, String, String),
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")] // This will use the "type" field to determine the enum variant
-pub enum TestScriptRecord {
+pub enum ChangeScriptRecord {
     Comment(CommentRecord),
     Header(HeaderRecord),
     Label(LabelRecord),
@@ -71,32 +85,32 @@ pub struct SourceChangeRecord {
     pub source_change_event: SourceChangeEvent,
 }
 
-// The SequencedTestScriptRecord struct wraps a TestScriptRecord and ensures that each record has a 
+// The SequencedChangeScriptRecord struct wraps a ChangeScriptRecord and ensures that each record has a 
 // sequence number and an offset_ns field. The sequence number is the order in which the record was read
-// from the test script files. The offset_ns field the nanos since the start of the test script starting time, 
+// from the script files. The offset_ns field the nanos since the start of the script starting time, 
 // which is the start_time field in the Header record.
 #[derive(Clone, Debug, Serialize)]
-pub struct SequencedTestScriptRecord {
+pub struct SequencedChangeScriptRecord {
     pub seq: u64,
     pub offset_ns: u64,
-    pub record: TestScriptRecord,
+    pub record: ChangeScriptRecord,
 }
 
-pub struct TestScriptReader {
+pub struct ChangeScriptReader {
     files: Vec<PathBuf>,
-    current_file_index: usize,
+    next_file_index: usize,
     current_reader: Option<BufReader<File>>,
     header: HeaderRecord,
-    footer: Option<SequencedTestScriptRecord>,
+    footer: Option<SequencedChangeScriptRecord>,
     seq: u64,
     offset_ns: u64,
 }
 
-impl TestScriptReader {
-    pub fn new(files: Vec<PathBuf>) -> io::Result<Self> {
-        let mut reader = TestScriptReader {
+impl ChangeScriptReader {
+    pub fn new(files: Vec<PathBuf>) -> anyhow::Result<Self> {
+        let mut reader = ChangeScriptReader {
             files,
-            current_file_index: 0,
+            next_file_index: 0,
             current_reader: None,
             header: HeaderRecord::default(),
             footer: None,
@@ -104,39 +118,48 @@ impl TestScriptReader {
             offset_ns: 0,
         };
 
-        // TODO: The first record from a new TestScriptReader should always be a Header record.
-        // Read the first record from the TestScriptReader and check that it is a Header record; if not return an error.
+        // TODO: The first record from a new ChangeScriptReader should always be a Header record.
+        // Read the first record from the ChangeScriptReader and check that it is a Header record; if not return an error.
         // I made this decision to simplify the determination of script starting time. This may need to be revisited, as we could derive
         // the starting time from the first SourceChangeEvent record. However, we would also need to deal with Label and Pause records that
         // currently only have offsets, not absolute times. A Header record will do for now and may eventually be useful for other purposes.
         let read_result = reader.get_next_record();
         if let Ok(seq_rec) = read_result {
-            if let TestScriptRecord::Header(header) = seq_rec.record {
+            if let ChangeScriptRecord::Header(header) = seq_rec.record {
                 reader.header = header;
                 return Ok(reader);
             } else {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid test script format. Header record not found."));
+                return Err(ChangeScriptReaderError::MissingHeader(reader.get_current_file_name()).into());
             }
         } else {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid test script format. Header record not found."));
+            return Err(ChangeScriptReaderError::MissingHeader(reader.get_current_file_name()).into());
         }
     }
 
-    // Function that returns true if the TestScriptReader has finished reading all files.
+    // Function that returns true if the ChangeScriptReader has finished reading all files.
     // pub fn is_finished(&self) -> bool {
     //     self.current_file_index >= self.files.len() && self.current_reader.is_none()
     // }
 
-    // Function to get the header record from the test script.
+    // Function to get the header record from the script.
     pub fn get_header(&self) -> HeaderRecord {
         self.header.clone()
     }
 
-    // Function to get the next record from the TestScriptReader.
-    // The TestScriptReader reads lines from the sequence of test script files in the order they were provided.
+    pub fn get_current_file_name(&self) -> String {
+        if self.current_reader.is_some() {
+            let path = self.files[self.next_file_index-1].clone();
+            path.to_string_lossy().into_owned()
+        } else {
+            "None".to_string()
+        }
+    }
+
+    // Function to get the next record from the ChangeScriptReader.
+    // The ChangeScriptReader reads lines from the sequence of script files in the order they were provided.
     // If there are no more records to read, None is returned.
-    pub fn get_next_record(&mut self) -> io::Result<SequencedTestScriptRecord> {
-        // Once we have reached the end of the test script, always return the Finish record.
+    pub fn get_next_record(&mut self) -> anyhow::Result<SequencedChangeScriptRecord> {
+        // Once we have reached the end of the script, always return the Finish record.
         if self.footer.is_some() {
             return Ok(self.footer.as_ref().unwrap().clone());
         }
@@ -153,52 +176,58 @@ impl TestScriptReader {
                     self.get_next_record()
                 },
                 Ok(_) => {
-                    let record: TestScriptRecord = serde_json::from_str(&line)?;
+                    let record: ChangeScriptRecord = match serde_json::from_str(&line) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            return Err(ChangeScriptReaderError::BadRecordFormat(
+                                self.get_current_file_name(), e.to_string(), line).into());
+                        },
+                    };
 
                     let seq_rec = match &record {
-                        TestScriptRecord::Comment(_) => {
-                            // The TestScriptReader should never return a Comment record.
+                        ChangeScriptRecord::Comment(_) => {
+                            // The ChangeScriptReader should never return a Comment record.
                             // Return the next record, but need to increment sequence counter
                             self.seq += 1;
                             return self.get_next_record();
                         },
-                        TestScriptRecord::Header(_) => {
-                            let seq_rec = SequencedTestScriptRecord {
+                        ChangeScriptRecord::Header(_) => {
+                            let seq_rec = SequencedChangeScriptRecord {
                                 record: record.clone(),
                                 seq: self.seq,
                                 offset_ns: 0
                             };
 
-                            // Warn if there is a Header record in the middle of the test script.
+                            // Warn if there is a Header record in the middle of the script.
                             if seq_rec.seq > 0 {
-                                log::warn!("Header record found not at start of the test script: {:?}", seq_rec);
+                                log::warn!("Header record found not at start of the script: {:?}", seq_rec);
                             }
 
                             seq_rec
                         },
-                        TestScriptRecord::Finish(r) => {
-                            SequencedTestScriptRecord {
+                        ChangeScriptRecord::Finish(r) => {
+                            SequencedChangeScriptRecord {
                                 record: record.clone(),
                                 seq: self.seq,
                                 offset_ns: r.offset_ns
                             }
                         },
-                        TestScriptRecord::Label(r) => {
-                            SequencedTestScriptRecord {
+                        ChangeScriptRecord::Label(r) => {
+                            SequencedChangeScriptRecord {
                                 record: record.clone(),
                                 seq: self.seq,
                                 offset_ns: r.offset_ns
                             }
                         },
-                        TestScriptRecord::PauseCommand(r) => {
-                            SequencedTestScriptRecord {
+                        ChangeScriptRecord::PauseCommand(r) => {
+                            SequencedChangeScriptRecord {
                                 record: record.clone(),
                                 seq: self.seq,
                                 offset_ns: r.offset_ns
                             }
                         },
-                        TestScriptRecord::SourceChange(r) => {
-                            SequencedTestScriptRecord {
+                        ChangeScriptRecord::SourceChange(r) => {
+                            SequencedChangeScriptRecord {
                                 record: record.clone(),
                                 seq: self.seq,
                                 offset_ns: r.offset_ns
@@ -219,25 +248,23 @@ impl TestScriptReader {
                             // Throw an error if the offset_ns is less than the previous record's offset_ns.
                             let error_message = format!("Offset_ns for record {:?} is less than the previous record's offset_ns {}.", seq_rec, self.offset_ns);
                             log::error!("{}", error_message);
-                            return Err(io::Error::new(io::ErrorKind::InvalidData, error_message));
+                            return Err(ChangeScriptReaderError::RecordOutOfSequence(self.seq).into());
                         }
                     }
                     self.offset_ns = seq_rec.offset_ns;
 
                     // If the record is a Finish record, set the footer and return it so it is always returned in the future.
-                    if let TestScriptRecord::Finish(_) = seq_rec.record {
+                    if let ChangeScriptRecord::Finish(_) = seq_rec.record {
                         self.footer = Some(seq_rec.clone());
                     }
                     Ok(seq_rec)
                 },
-                Err(e) => {
-                    Err(e)
-                }
+                Err(e) => Err(ChangeScriptReaderError::FileReadError(e.to_string()).into()),
             }
         } else {
-            // Generate a synthetic Finish record to mark the end of the test script.
-            self.footer = Some(SequencedTestScriptRecord {
-                record: TestScriptRecord::Finish(FinishRecord { offset_ns: self.offset_ns, description: "Auto generated at end of test script.".to_string() }),
+            // Generate a synthetic Finish record to mark the end of the script.
+            self.footer = Some(SequencedChangeScriptRecord {
+                record: ChangeScriptRecord::Finish(FinishRecord { offset_ns: self.offset_ns, description: "Auto generated at end of script.".to_string() }),
                 seq: self.seq,
                 offset_ns: self.offset_ns
             });
@@ -245,13 +272,16 @@ impl TestScriptReader {
         }
     }
 
-    // Function to open the next file in the sequence of test script files.
-    fn open_next_file(&mut self) -> io::Result<()> {
-        if self.current_file_index < self.files.len() {
-            let file_path = &self.files[self.current_file_index];
-            let file = File::open(file_path)?;
+    // Function to open the next file in the sequence of script files.
+    fn open_next_file(&mut self) -> anyhow::Result<()> {
+        if self.next_file_index < self.files.len() {
+            let file_path = &self.files[self.next_file_index];
+            let file = match File::open(file_path) {
+                Ok(f) => f,
+                Err(_) => return Err(ChangeScriptReaderError::CantOpenFile(file_path.to_string_lossy().into_owned()).into()),
+            };
             self.current_reader = Some(BufReader::new(file));
-            self.current_file_index += 1;
+            self.next_file_index += 1;
         } else {
             self.current_reader = None;
         }

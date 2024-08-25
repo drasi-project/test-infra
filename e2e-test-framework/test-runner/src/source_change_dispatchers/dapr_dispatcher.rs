@@ -1,16 +1,16 @@
-use crate::test_script::{SourceChangeEvent, test_script_player::TestScriptPlayerConfig};
-use super::{SourceChangeEventDispatcher, SourceChangeDispatcherResult};
+use crate::test_script::{SourceChangeEvent, change_script_player::ChangeScriptPlayerConfig};
+use super::{SourceChangeEventDispatcher, SourceChangeDispatcherError};
 
 pub struct DaprSourceChangeEventDispatcher {}
 
 impl DaprSourceChangeEventDispatcher {
-    pub fn new(_app_config: &TestScriptPlayerConfig) -> Result<Box<dyn SourceChangeEventDispatcher>, SourceChangeDispatcherResult> {
-        Err(SourceChangeDispatcherResult::Error("DaprSourceChangeEventDispatcher not implemented.".to_string()))
+    pub fn new(_app_config: &ChangeScriptPlayerConfig) -> anyhow::Result<Box<dyn SourceChangeEventDispatcher>> {
+        Err(SourceChangeDispatcherError::NotImplemented("DaprSourceChangeEventDispatcher.".to_string()).into())
     }
 }  
 
 impl SourceChangeEventDispatcher for DaprSourceChangeEventDispatcher {
-    fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> Result<(), SourceChangeDispatcherResult> {
+    fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
         println!("SourceChangeEvent: {:?}", event);
         Ok(())
     }

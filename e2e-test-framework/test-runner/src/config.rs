@@ -47,11 +47,11 @@ impl fmt::Display for OutputType {
 #[command(author, version, about, long_about = None)]
 pub struct ServiceSettings {
     // The path of the Service config file.
-    // If not provided, the Service will start and wait for Test Script Players to be started through the Web API.
+    // If not provided, the Service will start and wait for Change Script Players to be started through the Web API.
     #[arg(short = 'c', long = "config", env = "DRASI_CONFIG_FILE")]
     pub config_file_path: Option<String>,
 
-    // The path where data used and generated in the Test Script Players gets stored.
+    // The path where data used and generated in the Change Script Players gets stored.
     // If not provided, the default_value is used.
     #[arg(short = 'd', long = "data", env = "DRASI_DATA_CACHE", default_value = "./source_data_cache")]
     pub data_cache_path: String,
@@ -67,20 +67,20 @@ pub struct ServiceSettings {
     #[arg(short = 'e', long = "event_out", env = "DRASI_EVENT_OUTPUT", default_value_t = OutputType::Publish)]
     pub event_output: OutputType,
 
-    // The OutputType for Test Script Player Telemetry data.
+    // The OutputType for Change Script Player Telemetry data.
     // If not provided, the default_value "publish" is used ensuring that Telemetry data is published
     // so it can be captured and logged against the test run for analysis.
     #[arg(short = 't', long = "telem_out", env = "DRASI_TELEM_OUTPUT", default_value_t = OutputType::Publish)]
     pub telemetry_output: OutputType,
 
-    // The OutputType for Test Script Player Log data.
+    // The OutputType for Change Script Player Log data.
     // If not provided, the default_value "none" is used ensuring that Log data is not generated.
     #[arg(short = 'l', long = "log_out", env = "DRASI_LOG_OUTPUT", default_value_t = OutputType::None)]
     pub log_output: OutputType,
 }
 
-// The ServiceConfigFile is what is loaded from the Service config File. It can contain the configurations for multiple Test Script Players,
-// as well as default values that are used when a Test Script Player doesn't specify a value.
+// The ServiceConfigFile is what is loaded from the Service config File. It can contain the configurations for multiple Change Script Players,
+// as well as default values that are used when a Change Script Player doesn't specify a value.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ServiceConfigFile {
     #[serde(default)]
@@ -91,23 +91,17 @@ pub struct ServiceConfigFile {
 fn default_source_config_list() -> Vec<SourceConfig> { Vec::new() }
 
 impl ServiceConfigFile {
-    pub fn from_file_path(config_file_path: &str) -> Result<Self, String> {
+    pub fn from_file_path(config_file_path: &str) -> anyhow::Result<Self> {
         // Validate that the file exists and if not return an error.
         if !std::path::Path::new(config_file_path).exists() {
-            return Err(format!("Service Config file not found: {}", config_file_path));
+            anyhow::bail!("Service Config file not found: {}", config_file_path);
         }
 
         // Read the file content into a string.
-        let config_file_json = match std::fs::read_to_string(config_file_path) {
-            Ok(config_file_json) => config_file_json,
-            Err(e) => return Err(format!("Error reading Service Config file: {}", e))
-        };
+        let config_file_json = std::fs::read_to_string(config_file_path)?;
 
         // Parse the string into a ServiceConfigFile struct.
-        match serde_json::from_str(&config_file_json) {
-            Ok(config_file) => Ok(config_file),
-            Err(e) => Err(format!("Error parsing Service Config JSON: {}", e))
-        }
+        Ok(serde_json::from_str(&config_file_json)?)
     }
 }
 
@@ -199,7 +193,7 @@ fn is_true() -> bool { true }
 fn is_false() -> bool { false }
 
 // The SourceConfig is what is loaded from the Service config file or passed in to the Web API 
-// to create a new Test Script Player.
+// to create a new Change Script Player.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SourceConfig {
     // The Test Storage Account where the Test Repo is located.
@@ -220,7 +214,7 @@ pub struct SourceConfig {
     // The Test Run ID.
     pub test_run_id: Option<String>,
 
-    // The Source ID for the Test Script Player.
+    // The Source ID for the Change Script Player.
     pub source_id: Option<String>,
 
     pub proxy: Option<ProxyConfig>,
@@ -249,14 +243,14 @@ pub struct ReactivatorConfig {
     // Whether the player should ignore scripted pause commands.
     pub ignore_scripted_pause_commands: Option<bool>,
 
-    // Spacing Mode for the Test Script Player as a string.
+    // Spacing Mode for the Change Script Player as a string.
     // Either "none", "recorded", or a fixed spacing in the format "Xs", "Xm", "Xu", or "Xn".
     pub spacing_mode: Option<String>,
 
-    // Flag to indicate if the Service should start the Test Script Player immediately after initialization.
+    // Flag to indicate if the Service should start the Change Script Player immediately after initialization.
     pub start_immediately: Option<bool>,
 
-    // Time Mode for the Test Script Player as a string.
+    // Time Mode for the Change Script Player as a string.
     // Either "live", "recorded", or a specific time in the format "YYYY-MM-DDTHH:MM:SS:SSS Z".
     // If not provided, "recorded" is used.
     pub time_mode: Option<String>,

@@ -17,33 +17,58 @@ use crate::{
     }
 };
 use crate::source_change_dispatchers::SourceChangeEventDispatcher;
-use crate::test_script::test_script_reader::{TestScriptReader, TestScriptRecord, SequencedTestScriptRecord};
+use crate::test_script::change_script_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};
+
+
+#[derive(Debug, thiserror::Error)]
+pub enum ChangeScriptPlayerError {
+    #[error("ChangeScriptPlayer is already finished.")]
+    AlreadyFinished,
+    #[error("ChangeScriptPlayer is already paused.")]
+    AlreadyPaused,
+    #[error("ChangeScriptPlayer is already running.")]
+    AlreadyRunning,
+    #[error("ChangeScriptPlayer is already stopped.")]
+    AlreadyStopped,
+    #[error("ChangeScriptPlayer is currently Skipping. {0} skips remaining.")]
+    CurrentlySkipping(u64),
+    #[error("ChangeScriptPlayer is currently Stepping. {0} steps remaining.")]
+    CurrentlyStepping(u64),
+    #[error("ChangeScriptPlayer is currently in an Error state - {0:?}")]
+    Error(ChangeScriptPlayerStatus),
+    #[error("ChangeScriptPlayer is currently Running. Pause before trying to Skip.")]
+    PauseToSkip,
+    #[error("ChangeScriptPlayer is currently Running. Pause before trying to Step.")]
+    PauseToStep,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum TestScriptPlayerTimeMode {
+pub enum ChangeScriptPlayerTimeMode {
     Live,
     Recorded,
     Rebased(u64),
 }
 
-impl FromStr for TestScriptPlayerTimeMode {
-    type Err = String;
+impl FromStr for ChangeScriptPlayerTimeMode {
+    type Err = anyhow::Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> anyhow::Result<Self> {
         match s {
             "live" => Ok(Self::Live),
             "recorded" => Ok(Self::Recorded),
             _ => {
                 match chrono::DateTime::parse_from_rfc3339(s) {
                     Ok(t) => Ok(Self::Rebased(t.timestamp_nanos_opt().unwrap() as u64)),
-                    Err(e) => Err(format!("Error parsing TestScriptPlayerTimeMode - value:{}, error:{}", s, e))
+                    Err(e) => {
+                        anyhow::bail!("Error parsing ChangeScriptPlayerTimeMode - value:{}, error:{}", s, e);
+                    }
                 }
             }
         }
     }
 }
 
-impl fmt::Display for TestScriptPlayerTimeMode {
+impl fmt::Display for ChangeScriptPlayerTimeMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Live => write!(f, "live"),
@@ -53,14 +78,14 @@ impl fmt::Display for TestScriptPlayerTimeMode {
     }
 }
 
-impl Default for TestScriptPlayerTimeMode {
+impl Default for ChangeScriptPlayerTimeMode {
     fn default() -> Self {
         Self::Recorded
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum TestScriptPlayerSpacingMode {
+pub enum ChangeScriptPlayerSpacingMode {
     None,
     Recorded,
     Fixed(u64),
@@ -70,10 +95,10 @@ pub enum TestScriptPlayerSpacingMode {
 // For the Fixed variant, the spacing is specified as a string duration such as '5s' or '100n'.
 // Supported units are seconds ('s'), milliseconds ('m'), microseconds ('u'), and nanoseconds ('n').
 // If the string can't be parsed as a TimeDelta, an error is returned.
-impl FromStr for TestScriptPlayerSpacingMode {
-    type Err = String;
+impl FromStr for ChangeScriptPlayerSpacingMode {
+    type Err = anyhow::Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> anyhow::Result<Self> {
         match s {
             "none" => Ok(Self::None),
             "recorded" => Ok(Self::Recorded),
@@ -82,21 +107,25 @@ impl FromStr for TestScriptPlayerSpacingMode {
                 let (num_str, unit_str) = s.split_at(s.len() - 1);
                 let num = match num_str.parse::<u64>() {
                     Ok(num) => num,
-                    Err(e) => return Err(format!("Error parsing TestScriptPlayerSpacingMode: {}", e))
+                    Err(e) => {
+                        anyhow::bail!("Error parsing ChangeScriptPlayerSpacingMode: {}", e);
+                    }
                 };
                 match unit_str {
                     "s" => Ok(Self::Fixed(num * 1000000000)),
                     "m" => Ok(Self::Fixed(num * 1000000)),
                     "u" => Ok(Self::Fixed(num * 1000)),
                     "n" => Ok(Self::Fixed(num)),
-                    _ => Err(format!("Invalid TestScriptPlayerSpacingMode: {}", s))
+                    _ => {
+                        anyhow::bail!("Invalid ChangeScriptPlayerSpacingMode: {}", s);
+                    }
                 }
             }
         }
     }
 }
 
-impl fmt::Display for TestScriptPlayerSpacingMode {
+impl fmt::Display for ChangeScriptPlayerSpacingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => write!(f, "none"),
@@ -106,18 +135,18 @@ impl fmt::Display for TestScriptPlayerSpacingMode {
     }
 }
 
-impl Default for TestScriptPlayerSpacingMode {
+impl Default for ChangeScriptPlayerSpacingMode {
     fn default() -> Self {
         Self::Recorded
     }
 }
 
-// The TestScriptPlayerSettings struct holds the configuration settings that are used by the Test Script Player.
+// The ChangeScriptPlayerSettings struct holds the configuration settings that are used by the Change Script Player.
 // It is created based on the SourceConfig either loaded from the Service config file or passed in to the Web API, and is 
 // combined with the ServiceSettings and default values to create the final set of configuration.
-// It is static and does not change during the execution of the Test Script Player, it is not used to track the active state of the Test Script Player.
+// It is static and does not change during the execution of the Change Script Player, it is not used to track the active state of the Change Script Player.
 #[derive(Debug, Serialize, Clone)]
-pub struct TestScriptPlayerSettings {
+pub struct ChangeScriptPlayerSettings {
     // The Test ID.
     pub test_id: String,
 
@@ -137,7 +166,7 @@ pub struct TestScriptPlayerSettings {
     // The Test Storage Path where the Test Repo is located.
     pub test_storage_path: String,
 
-    // The Source ID for the Test Script Player.
+    // The Source ID for the Change Script Player.
     pub source_id: String,
 
     // The address of the change queue.
@@ -149,43 +178,41 @@ pub struct TestScriptPlayerSettings {
     // The PubSub topic for the change queue.
     pub change_queue_topic: String,
     
-    // Flag to indicate if the Service should start the Test Script Player immediately after initialization.
+    // Flag to indicate if the Service should start the Change Script Player immediately after initialization.
     pub start_immediately: bool,
 
-    // Whether the TestScriptPlayer should ignore scripted pause commands.
+    // Whether the ChangeScriptPlayer should ignore scripted pause commands.
     pub ignore_scripted_pause_commands: bool,
 
-    // SourceChangeEvent Time Mode for the Test Script Player.
-    pub source_change_event_time_mode: TestScriptPlayerTimeMode,
+    // SourceChangeEvent Time Mode for the Change Script Player.
+    pub source_change_event_time_mode: ChangeScriptPlayerTimeMode,
 
-    // SourceChangeEvent Spacing Mode for the Test Script Player.
-    pub source_change_event_spacing_mode: TestScriptPlayerSpacingMode,
+    // SourceChangeEvent Spacing Mode for the Change Script Player.
+    pub source_change_event_spacing_mode: ChangeScriptPlayerSpacingMode,
 
-    // The path where data used and generated in the Test Script Player gets stored.
+    // The path where data used and generated in the Change Script Player gets stored.
     pub data_cache_path: String,
 
     // The OutputType for Source Change Events.
     pub event_output: OutputType,
 
-    // The OutputType for Test Script Player Telemetry data.
+    // The OutputType for Change Script Player Telemetry data.
     pub telemetry_output: OutputType,
 
-    // The OutputType for Test Script Player Log data.
+    // The OutputType for Change Script Player Log data.
     pub log_output: OutputType,
 }
 
-impl TestScriptPlayerSettings {
-    // Function to create a new TestScriptPlayerSettings by combining a SourceConfig and the Service Settings.
-    // The TestScriptPlayerSettings control the configuration and operation of a TestRun.   
-    pub fn try_from_source_config(source_config: &SourceConfig, source_defaults: &SourceConfigDefaults, service_settings: &ServiceSettings) -> Result<Self, String> {
+impl ChangeScriptPlayerSettings {
+    // Function to create a new ChangeScriptPlayerSettings by combining a SourceConfig and the Service Settings.
+    // The ChangeScriptPlayerSettings control the configuration and operation of a TestRun.   
+    pub fn try_from_source_config(source_config: &SourceConfig, source_defaults: &SourceConfigDefaults, service_settings: &ServiceSettings) -> anyhow::Result<Self> {
 
         // If the SourceConfig doesnt contain a ReactivatorConfig, log and return an error.
         let reactivator_config = match &source_config.reactivator {
             Some(reactivator_config) => reactivator_config,
             None => {
-                let err = format!("No ReactivatorConfig provided in SourceConfig: {:?}", source_config);
-                log::error!("{}", err.as_str());
-                return Err(err);    
+                anyhow::bail!("No ReactivatorConfig provided in SourceConfig: {:?}", source_config);
             }
         };
 
@@ -196,9 +223,7 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.test_id {
                     Some(test_id) => test_id.clone(),
                     None => {
-                        let err = format!("No test_id provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No test_id provided and no default value found.");
                     }
                 }
             }
@@ -218,9 +243,7 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.test_storage_account {
                     Some(test_storage_account) => test_storage_account.clone(),
                     None => {
-                        let err = format!("No test_storage_account provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No test_storage_account provided and no default value found.");
                     }
                 }
             }
@@ -234,9 +257,7 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.test_storage_access_key {
                     Some(test_storage_access_key) => test_storage_access_key.clone(),
                     None => {
-                        let err = format!("No test_storage_access_key provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No test_storage_access_key provided and no default value found.");
                     }
                 }
             }
@@ -250,9 +271,7 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.test_storage_container {
                     Some(test_storage_container) => test_storage_container.clone(),
                     None => {
-                        let err = format!("No test_storage_container provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No test_storage_container provided and no default value found.");
                     }
                 }
             }
@@ -266,9 +285,7 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.test_storage_path {
                     Some(test_storage_path) => test_storage_path.clone(),
                     None => {
-                        let err = format!("No test_storage_path provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No test_storage_path provided and no default value found.");
                     }
                 }
             }
@@ -282,9 +299,7 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.source_id {
                     Some(source_id) => source_id.clone(),
                     None => {
-                        let err = format!("No source_id provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No source_id provided and no default value found.");
                     }
                 }
             }
@@ -298,9 +313,7 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.reactivator.change_queue_address {
                     Some(change_queue_address) => change_queue_address.clone(),
                     None => {
-                        let err = format!("No change_queue_address provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No change_queue_address provided and no default value found.");
                     }
                 }
             }
@@ -314,9 +327,7 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.reactivator.change_queue_port {
                     Some(change_queue_port) => change_queue_port.clone(),
                     None => {
-                        let err = format!("No change_queue_port provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No change_queue_port provided and no default value found.");
                     }
                 }
             }
@@ -330,25 +341,23 @@ impl TestScriptPlayerSettings {
                 match &source_defaults.reactivator.change_queue_topic {
                     Some(change_queue_topic) => change_queue_topic.clone(),
                     None => {
-                        let err = format!("No change_queue_topic provided and no default value found.");
-                        log::error!("{}", err.as_str());
-                        return Err(err);    
+                        anyhow::bail!("No change_queue_topic provided and no default value found.");
                     }
                 }
             }
         };
 
         let spacing_mode = match &reactivator_config.spacing_mode {
-            Some(mode) => TestScriptPlayerSpacingMode::from_str(&mode).unwrap(),
-            None => TestScriptPlayerSpacingMode::from_str(&source_defaults.reactivator.spacing_mode).unwrap()
+            Some(mode) => ChangeScriptPlayerSpacingMode::from_str(&mode).unwrap(),
+            None => ChangeScriptPlayerSpacingMode::from_str(&source_defaults.reactivator.spacing_mode).unwrap()
         };
 
         let time_mode = match &reactivator_config.time_mode {
-            Some(mode) => TestScriptPlayerTimeMode::from_str(&mode).unwrap(),
-            None => TestScriptPlayerTimeMode::from_str(&source_defaults.reactivator.time_mode).unwrap()
+            Some(mode) => ChangeScriptPlayerTimeMode::from_str(&mode).unwrap(),
+            None => ChangeScriptPlayerTimeMode::from_str(&source_defaults.reactivator.time_mode).unwrap()
         };
 
-        Ok(TestScriptPlayerSettings {
+        Ok(ChangeScriptPlayerSettings {
             test_id,
             test_run_id,
             test_storage_account,
@@ -371,7 +380,7 @@ impl TestScriptPlayerSettings {
     }
 }
 
-// Enum of TestScriptPlayer status.
+// Enum of ChangeScriptPlayer status.
 // Running --start--> <ignore>
 // Running --step--> <ignore>
 // Running --pause--> Paused
@@ -391,8 +400,8 @@ impl TestScriptPlayerSettings {
 
 // Stopped --*--> <ignore>
 // Finished --*--> <ignore>
-#[derive(Clone, Debug, PartialEq)]
-pub enum TestScriptPlayerStatus {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ChangeScriptPlayerStatus {
     Running,
     Stepping,
     Skipping,
@@ -402,42 +411,42 @@ pub enum TestScriptPlayerStatus {
     Error
 }
 
-impl Serialize for TestScriptPlayerStatus {
+impl Serialize for ChangeScriptPlayerStatus {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         match self {
-            TestScriptPlayerStatus::Running => serializer.serialize_str("Running"),
-            TestScriptPlayerStatus::Stepping => serializer.serialize_str("Stepping"),
-            TestScriptPlayerStatus::Skipping => serializer.serialize_str("Skipping"),
-            TestScriptPlayerStatus::Paused => serializer.serialize_str("Paused"),
-            TestScriptPlayerStatus::Stopped => serializer.serialize_str("Stopped"),
-            TestScriptPlayerStatus::Finished => serializer.serialize_str("Finished"),
-            TestScriptPlayerStatus::Error => serializer.serialize_str("Error"),
+            ChangeScriptPlayerStatus::Running => serializer.serialize_str("Running"),
+            ChangeScriptPlayerStatus::Stepping => serializer.serialize_str("Stepping"),
+            ChangeScriptPlayerStatus::Skipping => serializer.serialize_str("Skipping"),
+            ChangeScriptPlayerStatus::Paused => serializer.serialize_str("Paused"),
+            ChangeScriptPlayerStatus::Stopped => serializer.serialize_str("Stopped"),
+            ChangeScriptPlayerStatus::Finished => serializer.serialize_str("Finished"),
+            ChangeScriptPlayerStatus::Error => serializer.serialize_str("Error"),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct TestScriptPlayerConfig {
-    pub player_settings: TestScriptPlayerSettings,
+pub struct ChangeScriptPlayerConfig {
+    pub player_settings: ChangeScriptPlayerSettings,
     pub script_files: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TestScriptPlayerState {
-    // Status of the TestScriptPlayer.
-    pub status: TestScriptPlayerStatus,
+pub struct ChangeScriptPlayerState {
+    // Status of the ChangeScriptPlayer.
+    pub status: ChangeScriptPlayerStatus,
 
-    // Error message if the TestScriptPlayer is in an Error state.
+    // Error message if the ChangeScriptPlayer is in an Error state.
     pub error_message: Option<String>,
 
-    // The time mode setting for the TestScriptPlayer.
-    // This setting determines how the player will adjust the time values in the TestScriptRecords.
-    pub time_mode: TestScriptPlayerTimeMode,
+    // The time mode setting for the ChangeScriptPlayer.
+    // This setting determines how the player will adjust the time values in the ChangeScriptRecords.
+    pub time_mode: ChangeScriptPlayerTimeMode,
 
-    // The spacing mode setting for the TestScriptPlayer.
-    // This setting determines how the player will space out the processing of the TestScriptRecords.
-    pub spacing_mode: TestScriptPlayerSpacingMode,
+    // The spacing mode setting for the ChangeScriptPlayer.
+    // This setting determines how the player will space out the processing of the ChangeScriptRecords.
+    pub spacing_mode: ChangeScriptPlayerSpacingMode,
 
     // The 'starting' time for the player based on config and what is being replayed.
     pub start_replay_time: u64,
@@ -447,26 +456,26 @@ pub struct TestScriptPlayerState {
     pub current_replay_time: u64,
     
     // Variable to manage the progress of skipping.
-    // Holds the number of TestScriptRecords to skip before returning to a Paused state.
+    // Holds the number of ChangeScriptRecords to skip before returning to a Paused state.
     pub skips_remaining: u64,
 
     // Variable to manage the progress of stepping.
-    // Holds the number of TestScriptRecords to step through before returning to a Paused state.
+    // Holds the number of ChangeScriptRecords to step through before returning to a Paused state.
     pub steps_remaining: u64,
 
-    // The TestScriptRecord that is currently being delayed prior to processing.
-    pub delayed_record: Option<ScheduledTestScriptRecord>,    
+    // The ChangeScriptRecord that is currently being delayed prior to processing.
+    pub delayed_record: Option<ScheduledChangeScriptRecord>,    
 
-    // The next TestScriptRecord to be processed.
-    pub next_record: Option<SequencedTestScriptRecord>,
+    // The next ChangeScriptRecord to be processed.
+    pub next_record: Option<SequencedChangeScriptRecord>,
 
     pub ignore_scripted_pause_commands: bool,
 }
 
-impl Default for TestScriptPlayerState {
+impl Default for ChangeScriptPlayerState {
     fn default() -> Self {
         Self {
-            status: TestScriptPlayerStatus::Paused,
+            status: ChangeScriptPlayerStatus::Paused,
             error_message: None,
             start_replay_time: 0,
             current_replay_time: 0,
@@ -474,21 +483,21 @@ impl Default for TestScriptPlayerState {
             next_record: None,
             skips_remaining: 0,
             steps_remaining: 0,
-            time_mode: TestScriptPlayerTimeMode::Live,
-            spacing_mode: TestScriptPlayerSpacingMode::None,
+            time_mode: ChangeScriptPlayerTimeMode::Live,
+            spacing_mode: ChangeScriptPlayerSpacingMode::None,
             ignore_scripted_pause_commands: false,
         }
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ScheduledTestScriptRecord {
+pub struct ScheduledChangeScriptRecord {
     pub replay_time_ns: u64,
-    pub seq_record: SequencedTestScriptRecord,
+    pub seq_record: SequencedChangeScriptRecord,
 }
 
-impl ScheduledTestScriptRecord {
-    pub fn new(record: SequencedTestScriptRecord, replay_time_ns: u64, ) -> Self {
+impl ScheduledChangeScriptRecord {
+    pub fn new(record: SequencedChangeScriptRecord, replay_time_ns: u64, ) -> Self {
         Self {
             replay_time_ns,
             seq_record: record,
@@ -496,62 +505,62 @@ impl ScheduledTestScriptRecord {
     }
 }
 
-// Enum of TestScriptPlayer commands sent from Web API handler functions.
+// Enum of ChangeScriptPlayer commands sent from Web API handler functions.
 #[derive(Debug)]
-pub enum TestScriptPlayerCommand {
-    // Command to start the TestScriptPlayer.
+pub enum ChangeScriptPlayerCommand {
+    // Command to start the ChangeScriptPlayer.
     Start,
-    // Command to process the delayed test script record. The param is the sequence nummber of the record to process.
+    // Command to process the delayed Change Script record. The param is the sequence nummber of the record to process.
     // It is used as a guard to ensure the timer is only processed if the sequence number matches the expected sequence number.
     ProcessDelayedRecord(u64),
-    // Command to step the TestScriptPlayer forward a specified number of TestScriptRecords.
+    // Command to step the ChangeScriptPlayer forward a specified number of ChangeScriptRecords.
     Step(u64),
-    // Command to skip the TestScriptPlayer forward a specified number of TestScriptRecords.
+    // Command to skip the ChangeScriptPlayer forward a specified number of ChangeScriptRecords.
     Skip(u64),
-    // Command to pause the TestScriptPlayer.
+    // Command to pause the ChangeScriptPlayer.
     Pause,
-    // Command to stop the TestScriptPlayer.
+    // Command to stop the ChangeScriptPlayer.
     Stop,
-    // Command to get the current state of the TestScriptPlayer.
+    // Command to get the current state of the ChangeScriptPlayer.
     GetState,
 }
 
-// Struct for messages sent to the TestScriptPlayer from the functions in the Web API.
+// Struct for messages sent to the ChangeScriptPlayer from the functions in the Web API.
 #[derive(Debug)]
-pub struct TestScriptPlayerMessage {
-    // Command sent to the TestScriptPlayer.
-    pub command: TestScriptPlayerCommand,
-    // One-shot channel for TestScriptPlayer to send a response back to the caller.
-    pub response_tx: Option<oneshot::Sender<TestScriptPlayerMessageResponse>>,
+pub struct ChangeScriptPlayerMessage {
+    // Command sent to the ChangeScriptPlayer.
+    pub command: ChangeScriptPlayerCommand,
+    // One-shot channel for ChangeScriptPlayer to send a response back to the caller.
+    pub response_tx: Option<oneshot::Sender<ChangeScriptPlayerMessageResponse>>,
 }
 
-// A struct for the Response sent back from the TestScriptPlayer to the calling Web API handler.
+// A struct for the Response sent back from the ChangeScriptPlayer to the calling Web API handler.
 #[derive(Debug)]
-pub struct TestScriptPlayerMessageResponse {
+pub struct ChangeScriptPlayerMessageResponse {
     // Result of the command.
-    pub result: Result<(), String>,
-    // State of the TestScriptPlayer after the command.
-    pub state: TestScriptPlayerState,
+    pub result: anyhow::Result<()>,
+    // State of the ChangeScriptPlayer after the command.
+    pub state: ChangeScriptPlayerState,
 }
 
 #[derive(Clone, Debug)]
-pub struct DelayTestScriptRecordMessage {
+pub struct DelayChangeScriptRecordMessage {
     pub delay_ns: u64,
     pub delay_sequence: u64,
 }
 
 #[derive(Clone, Debug)]
-pub struct TestScriptPlayer {
-    // Channel used to send messages to the TestScriptPlayer thread.
-    config: TestScriptPlayerConfig,
-    player_tx_channel: Sender<TestScriptPlayerMessage>,
-    _delayer_tx_channel: Sender<DelayTestScriptRecordMessage>,
+pub struct ChangeScriptPlayer {
+    // Channel used to send messages to the ChangeScriptPlayer thread.
+    config: ChangeScriptPlayerConfig,
+    player_tx_channel: Sender<ChangeScriptPlayerMessage>,
+    _delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>,
     _player_thread_handle: Arc<Mutex<JoinHandle<()>>>,
     _delayer_thread_handle: Arc<Mutex<JoinHandle<()>>>,
 }
 
-impl TestScriptPlayer {
-    pub async fn new(config: TestScriptPlayerConfig) -> Self {
+impl ChangeScriptPlayer {
+    pub async fn new(config: ChangeScriptPlayerConfig) -> Self {
         let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
         let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
 
@@ -571,83 +580,81 @@ impl TestScriptPlayer {
         self.config.player_settings.test_run_id.clone()
     }
 
-    pub fn get_config(&self) -> TestScriptPlayerConfig {
+    pub fn get_config(&self) -> ChangeScriptPlayerConfig {
         self.config.clone()
     }
 
-    pub async fn get_state(&self) -> Result<TestScriptPlayerMessageResponse, String> {
-        self.send_command(TestScriptPlayerCommand::GetState).await
+    pub async fn get_state(&self) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
+        self.send_command(ChangeScriptPlayerCommand::GetState).await
     }
 
-    pub async fn start(&self) -> Result<TestScriptPlayerMessageResponse, String> {
-        self.send_command(TestScriptPlayerCommand::Start).await
+    pub async fn start(&self) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
+        self.send_command(ChangeScriptPlayerCommand::Start).await
     }
 
-    pub async fn step(&self, steps: u64) -> Result<TestScriptPlayerMessageResponse, String>  {
-        self.send_command(TestScriptPlayerCommand::Step(steps)).await
+    pub async fn step(&self, steps: u64) -> anyhow::Result<ChangeScriptPlayerMessageResponse>  {
+        self.send_command(ChangeScriptPlayerCommand::Step(steps)).await
     }
 
-    pub async fn skip(&self, skips: u64) -> Result<TestScriptPlayerMessageResponse, String>  {
-        self.send_command(TestScriptPlayerCommand::Skip(skips)).await
+    pub async fn skip(&self, skips: u64) -> anyhow::Result<ChangeScriptPlayerMessageResponse>  {
+        self.send_command(ChangeScriptPlayerCommand::Skip(skips)).await
     }
 
-    pub async fn pause(&self) -> Result<TestScriptPlayerMessageResponse, String>  {
-        self.send_command(TestScriptPlayerCommand::Pause).await
+    pub async fn pause(&self) -> anyhow::Result<ChangeScriptPlayerMessageResponse>  {
+        self.send_command(ChangeScriptPlayerCommand::Pause).await
     }
 
-    pub async fn stop(&self) -> Result<TestScriptPlayerMessageResponse, String>  {
-        self.send_command(TestScriptPlayerCommand::Stop).await
+    pub async fn stop(&self) -> anyhow::Result<ChangeScriptPlayerMessageResponse>  {
+        self.send_command(ChangeScriptPlayerCommand::Stop).await
     }
 
-    async fn send_command(&self, command: TestScriptPlayerCommand) -> Result<TestScriptPlayerMessageResponse, String> {
+    async fn send_command(&self, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        let r = self.player_tx_channel.send(TestScriptPlayerMessage {
+        let r = self.player_tx_channel.send(ChangeScriptPlayerMessage {
             command,
             response_tx: Some(response_tx),
         }).await;
 
         match r {
-            Ok(_) => {
-                Ok(response_rx.await.unwrap())
-            },
-            Err(e) => Err(format!("Error sending command to TestScriptPlayer: {:?}", e)),
+            Ok(_) => Ok(response_rx.await.unwrap()),
+            Err(e) => anyhow::bail!("Error sending command to ChangeScriptPlayer: {:?}", e),
         }
     }
 }
 
-// Function that defines the operation of the TestScriptPlayer thread.
-// The TestScriptPlayer thread processes TestScriptPlayerCommands sent to it from the Web API handler functions.
-// The Web API function communicate via a channel and provide oneshot channels for the TestScriptPlayer to send responses back.
-pub async fn player_thread(mut player_rx_channel: Receiver<TestScriptPlayerMessage>, delayer_tx_channel: Sender<DelayTestScriptRecordMessage>, player_config: TestScriptPlayerConfig) {
+// Function that defines the operation of the ChangeScriptPlayer thread.
+// The ChangeScriptPlayer thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
+// The Web API function communicate via a channel and provide oneshot channels for the ChangeScriptPlayer to send responses back.
+pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMessage>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>, player_config: ChangeScriptPlayerConfig) {
 
-    log::info!("TestScriptPlayer thread started...");
+    log::info!("ChangeScriptPlayer thread started...");
 
-    // Initialize the TestScriptPlayer infrastructure.
-    // Create a TestScriptReader to read the TestScript files.
-    // Create a TestScriptPlayerState to hold the state of the TestScriptPlayer. The TestScriptPlayer always starts in a paused state.
+    // Initialize the ChangeScriptPlayer infrastructure.
+    // Create a ChangeScriptReader to read the ChangeScript files.
+    // Create a ChangeScriptPlayerState to hold the state of the ChangeScriptPlayer. The ChangeScriptPlayer always starts in a paused state.
     // Create a SourceChangeEventDispatcher to send SourceChangeEvents.
-    let (mut player_state, mut test_script_reader, mut dispatcher) = match TestScriptReader::new(player_config.script_files.clone()) {
+    let (mut player_state, mut test_script_reader, mut dispatcher) = match ChangeScriptReader::new(player_config.script_files.clone()) {
         Ok(mut reader) => {
             let header = reader.get_header();
-            log::info!("Loaded TestScript. {:?}", header);
+            log::info!("Loaded ChangeScript. {:?}", header);
 
-            let mut player_state = TestScriptPlayerState::default();
+            let mut player_state = ChangeScriptPlayerState::default();
             player_state.ignore_scripted_pause_commands = player_config.player_settings.ignore_scripted_pause_commands;
-            player_state.time_mode = TestScriptPlayerTimeMode::from(player_config.player_settings.source_change_event_time_mode.clone());
-            player_state.spacing_mode = TestScriptPlayerSpacingMode::from(player_config.player_settings.source_change_event_spacing_mode.clone());
+            player_state.time_mode = ChangeScriptPlayerTimeMode::from(player_config.player_settings.source_change_event_time_mode.clone());
+            player_state.spacing_mode = ChangeScriptPlayerSpacingMode::from(player_config.player_settings.source_change_event_spacing_mode.clone());
         
             // Set the start_replay_time based on the time mode and the script start time from the header.
             player_state.start_replay_time = match player_state.time_mode {
-                TestScriptPlayerTimeMode::Live => {
+                ChangeScriptPlayerTimeMode::Live => {
                     // Use the current system time.
                     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64
                 },
-                TestScriptPlayerTimeMode::Recorded => {
+                ChangeScriptPlayerTimeMode::Recorded => {
                     // Use the start time as provided in the Header.
                     header.start_time.timestamp_nanos_opt().unwrap() as u64
                 },
-                TestScriptPlayerTimeMode::Rebased(nanos) => {
+                ChangeScriptPlayerTimeMode::Rebased(nanos) => {
                     // Use the rebased time as provided in the AppConfig.
                     nanos
                 },
@@ -670,41 +677,41 @@ pub async fn player_thread(mut player_rx_channel: Receiver<TestScriptPlayerMessa
                 }
             };
     
-            // Read the first TestScriptRecord.
+            // Read the first ChangeScriptRecord.
             read_next_sequenced_test_script_record(&mut player_state, &mut reader);
 
             (player_state, Some(reader), dispatcher)    
         },
         Err(e) => {
-            let mut player_state = TestScriptPlayerState::default();
-            transition_to_error_state(format!("Error creating TestScriptReader: {:?}", e).as_str(), &mut player_state);
+            let mut player_state = ChangeScriptPlayerState::default();
+            transition_to_error_state(format!("Error creating ChangeScriptReader: {:?}", e).as_str(), &mut player_state);
             (player_state, None, NullSourceChangeEventDispatcher::new())
         }
     };
 
-    log::trace!("Starting TestScriptPlayer loop...");
+    log::trace!("Starting ChangeScriptPlayer loop...");
 
-    // Loop to process messages sent to the TestScriptPlayer and read data from test script.
+    // Loop to process messages sent to the ChangeScriptPlayer and read data from Change Script.
     // Always process all messages in the command channel and act on them first.
-    // If there are no messages and the TestScriptPlayer is running, stepping, or skipping, continue processing the test script.
+    // If there are no messages and the ChangeScriptPlayer is running, stepping, or skipping, continue processing the Change Script.
     loop {
-        log_test_script_player_state("Top of TestScriptPlayer loop", &player_state);
+        log_test_script_player_state("Top of ChangeScriptPlayer loop", &player_state);
 
-        // If the TestScriptPlayer needs a command to continue, block until a command is received.
-        // Otherwise, try to receive a command message without blocking and then process the next test script record.
+        // If the ChangeScriptPlayer needs a command to continue, block until a command is received.
+        // Otherwise, try to receive a command message without blocking and then process the next Change Script record.
         let block_on_message = 
             (player_state.delayed_record.is_some() && (
-                player_state.status == TestScriptPlayerStatus::Running 
-                || player_state.status == TestScriptPlayerStatus::Stepping 
-                || player_state.status == TestScriptPlayerStatus::Skipping
+                player_state.status == ChangeScriptPlayerStatus::Running 
+                || player_state.status == ChangeScriptPlayerStatus::Stepping 
+                || player_state.status == ChangeScriptPlayerStatus::Skipping
             ))
-            || player_state.status == TestScriptPlayerStatus::Paused 
-            || player_state.status == TestScriptPlayerStatus::Stopped 
-            || player_state.status == TestScriptPlayerStatus::Finished 
-            || player_state.status == TestScriptPlayerStatus::Error;
+            || player_state.status == ChangeScriptPlayerStatus::Paused 
+            || player_state.status == ChangeScriptPlayerStatus::Stopped 
+            || player_state.status == ChangeScriptPlayerStatus::Finished 
+            || player_state.status == ChangeScriptPlayerStatus::Error;
         
-        let message: Option<TestScriptPlayerMessage> = if block_on_message {
-            log::trace!("TestScriptPlayer Thread Blocked; waiting for a command message...");
+        let message: Option<ChangeScriptPlayerMessage> = if block_on_message {
+            log::trace!("ChangeScriptPlayer Thread Blocked; waiting for a command message...");
 
             match player_rx_channel.recv().await {
                 Some(message) => {
@@ -718,7 +725,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<TestScriptPlayerMessa
                 },
             }
         } else {
-            log::trace!("TestScriptPlayer Thread Unblocked; TRYing for a command message before processing next script record");
+            log::trace!("ChangeScriptPlayer Thread Unblocked; TRYing for a command message before processing next script record");
 
             match player_rx_channel.try_recv() {
                 Ok(message) => {
@@ -741,28 +748,28 @@ pub async fn player_thread(mut player_rx_channel: Receiver<TestScriptPlayerMessa
 
                 log::debug!("Processing command: {:?}", message.command);                
 
-                if let TestScriptPlayerCommand::ProcessDelayedRecord(seq) = message.command {
+                if let ChangeScriptPlayerCommand::ProcessDelayedRecord(seq) = message.command {
                     process_delayed_test_script_record(seq, &mut player_state, &mut dispatcher);
                 } else {
                     let transition_response = match player_state.status {
-                        TestScriptPlayerStatus::Running => transition_from_running_state(&message.command, &mut player_state),
-                        TestScriptPlayerStatus::Stepping => transition_from_stepping_state(&message.command, &mut player_state),
-                        TestScriptPlayerStatus::Skipping => transition_from_skipping_state(&message.command, &mut player_state),
-                        TestScriptPlayerStatus::Paused => transition_from_paused_state(&message.command, &mut player_state),
-                        TestScriptPlayerStatus::Stopped => transition_from_stopped_state(&message.command, &mut player_state),
-                        TestScriptPlayerStatus::Finished => transition_from_finished_state(&message.command, &mut player_state),
-                        TestScriptPlayerStatus::Error => transition_from_error_state(&message.command, &mut player_state),
+                        ChangeScriptPlayerStatus::Running => transition_from_running_state(&message.command, &mut player_state),
+                        ChangeScriptPlayerStatus::Stepping => transition_from_stepping_state(&message.command, &mut player_state),
+                        ChangeScriptPlayerStatus::Skipping => transition_from_skipping_state(&message.command, &mut player_state),
+                        ChangeScriptPlayerStatus::Paused => transition_from_paused_state(&message.command, &mut player_state),
+                        ChangeScriptPlayerStatus::Stopped => transition_from_stopped_state(&message.command, &mut player_state),
+                        ChangeScriptPlayerStatus::Finished => transition_from_finished_state(&message.command, &mut player_state),
+                        ChangeScriptPlayerStatus::Error => transition_from_error_state(&message.command, &mut player_state),
                     };
     
                     if message.response_tx.is_some() {
-                        let message_response = TestScriptPlayerMessageResponse {
+                        let message_response = ChangeScriptPlayerMessageResponse {
                             result: transition_response,
                             state: player_state.clone(),
                         };
         
                         let r = message.response_tx.unwrap().send(message_response);
                         if let Err(e) = r {
-                            log::error!("Error in TestScriptPlayer sending message response back to caller: {:?}", e);
+                            log::error!("Error in ChangeScriptPlayer sending message response back to caller: {:?}", e);
                         }
                     }
                 }
@@ -770,9 +777,9 @@ pub async fn player_thread(mut player_rx_channel: Receiver<TestScriptPlayerMessa
                 log_test_script_player_state(format!("Post {:?} command", message.command).as_str(), &player_state);
             },
             None => {
-                // Only process the next TestScriptRecord if the player is not in an error state.
-                if let TestScriptPlayerStatus::Error = player_state.status {
-                    log_test_script_player_state("Trying to process Next TestScriptRecord, but Player in error state", &player_state);
+                // Only process the next ChangeScriptRecord if the player is not in an error state.
+                if let ChangeScriptPlayerStatus::Error = player_state.status {
+                    log_test_script_player_state("Trying to process Next ChangeScriptRecord, but Player in error state", &player_state);
                 } else {
                     process_next_test_script_record(&mut player_state, &mut dispatcher, delayer_tx_channel.clone()).await;
                     read_next_sequenced_test_script_record(&mut player_state, &mut test_script_reader.as_mut().unwrap());
@@ -782,10 +789,10 @@ pub async fn player_thread(mut player_rx_channel: Receiver<TestScriptPlayerMessa
     }
 }
 
-fn read_next_sequenced_test_script_record(player_state: &mut TestScriptPlayerState, test_script_reader: &mut TestScriptReader) {
+fn read_next_sequenced_test_script_record(player_state: &mut ChangeScriptPlayerState, test_script_reader: &mut ChangeScriptReader) {
 
     // Do nothing if the player is already in an error state.
-    if let TestScriptPlayerStatus::Error = player_state.status {
+    if let ChangeScriptPlayerStatus::Error = player_state.status {
         log_test_script_player_state("Ignoring read_next_sequenced_test_script_record call due to error state", &player_state);
         return;
     }
@@ -796,48 +803,48 @@ fn read_next_sequenced_test_script_record(player_state: &mut TestScriptPlayerSta
             player_state.next_record = Some(seq_record);
         },
         Err(e) => {
-            transition_to_error_state(format!("Error reading TestScriptRecord: {:?}", e).as_str(), player_state);
+            transition_to_error_state(format!("Error reading ChangeScriptRecord: {:?}", e).as_str(), player_state);
         }
     }
 }
 
-async fn process_next_test_script_record(mut player_state: &mut TestScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>, delayer_tx_channel: Sender<DelayTestScriptRecordMessage>) {
+async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>) {
 
     // Do nothing if the player is already in an error state.
-    if let TestScriptPlayerStatus::Error = player_state.status {
+    if let ChangeScriptPlayerStatus::Error = player_state.status {
         log_test_script_player_state("Ignoring process_next_test_script_record call due to error state", &player_state);
         return;
     }
 
     // next_record should never be None.
     if player_state.next_record.is_none() {
-        transition_to_error_state(format!("TestScriptReader should never return None for next_record").as_str(), player_state);
+        transition_to_error_state(format!("ChangeScriptReader should never return None for next_record").as_str(), player_state);
         return;
     }
 
     let seq_record = player_state.next_record.as_ref().unwrap().clone();
-    log_sequeced_test_script_record("Next TestScriptRecord Pre-TimeShift", &seq_record);
+    log_sequeced_test_script_record("Next ChangeScriptRecord Pre-TimeShift", &seq_record);
 
-    // Check if the TestScriptPlayer has finished processing all records.
-    if let TestScriptRecord::Finish(_) = seq_record.record {
+    // Check if the ChangeScriptPlayer has finished processing all records.
+    if let ChangeScriptRecord::Finish(_) = seq_record.record {
         transition_to_finished_state(&mut player_state);
         return;
     }
 
-    // Time shift the TestScriptRecord based on the time mode settings.
+    // Time shift the ChangeScriptRecord based on the time mode settings.
     let next_record = time_shift_test_script_record(player_state, seq_record);
-    log_scheduled_test_script_record("Next TestScriptRecord Post-TimeShift", &next_record);
+    log_scheduled_test_script_record("Next ChangeScriptRecord Post-TimeShift", &next_record);
 
-    // Processing of TestScriptRecord depends on the spacing mode settings.
+    // Processing of ChangeScriptRecord depends on the spacing mode settings.
     let delay = match player_state.spacing_mode {
-        TestScriptPlayerSpacingMode::None => {
+        ChangeScriptPlayerSpacingMode::None => {
             // Process the record immediately.
             0
         },
-        TestScriptPlayerSpacingMode::Fixed(nanos) => {
+        ChangeScriptPlayerSpacingMode::Fixed(nanos) => {
             nanos
         },
-        TestScriptPlayerSpacingMode::Recorded => {
+        ChangeScriptPlayerSpacingMode::Recorded => {
             // Delay the record based on the difference between the record's replay time and the current replay time.
             // Ensure the delay is not negative.
             std::cmp::max(0, next_record.replay_time_ns - player_state.current_replay_time) as u64
@@ -864,7 +871,7 @@ async fn process_next_test_script_record(mut player_state: &mut TestScriptPlayer
             format!("Long delay of {}ns; delaying record", delay).as_str(), &next_record);
 
         // Delay the record.
-        let delay_msg = DelayTestScriptRecordMessage {
+        let delay_msg = DelayChangeScriptRecordMessage {
             delay_ns: delay,
             delay_sequence: next_record.seq_record.seq,
         };
@@ -876,15 +883,15 @@ async fn process_next_test_script_record(mut player_state: &mut TestScriptPlayer
         // Send a message to the ChangeDispatchTimer to process the delayed record.
         let delay_send_res = delayer_tx_channel.send(delay_msg).await;
         if let Err(e) = delay_send_res {
-            transition_to_error_state(format!("Error sending DelayTestScriptRecordMessage: {:?}", e).as_str(), player_state);
+            transition_to_error_state(format!("Error sending DelayChangeScriptRecordMessage: {:?}", e).as_str(), player_state);
         }
     };
 }
 
-fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mut TestScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
+fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
 
     // Do nothing if the player is already in an error state.
-    if let TestScriptPlayerStatus::Error = player_state.status {
+    if let ChangeScriptPlayerStatus::Error = player_state.status {
         log_test_script_player_state("Ignoring process_delayed_test_script_record call due to error state", &player_state);
         return;
     }
@@ -894,16 +901,16 @@ fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mu
         // Ensure the ProcessDelayedRecord command is only processed if the sequence number matches the expected sequence number.
         if delayed_record_seq != delayed_record.seq_record.seq {
             log_scheduled_test_script_record(
-                format!("Received command to process incorrect TestScript Record with seq:{}", delayed_record_seq).as_str()
+                format!("Received command to process incorrect ChangeScript Record with seq:{}", delayed_record_seq).as_str()
                 , &delayed_record);
             return;
         }        
 
-        log_scheduled_test_script_record("Processing Delayed TestScriptRecord", &delayed_record);
+        log_scheduled_test_script_record("Processing Delayed ChangeScriptRecord", &delayed_record);
 
-        // Adjust the time in the TestScriptRecord if the player is in Live Time Mode.
+        // Adjust the time in the ChangeScriptRecord if the player is in Live Time Mode.
         // This will make sure the times are as accurate as possible.
-        if player_state.time_mode == TestScriptPlayerTimeMode::Live {
+        if player_state.time_mode == ChangeScriptPlayerTimeMode::Live {
             // Live Time Mode means we just use the current time as the record's Replay Time regardless of offset.
             let replay_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
 
@@ -924,89 +931,89 @@ fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mu
     };
 }
 
-fn resolve_test_script_record_effect(record: ScheduledTestScriptRecord, player_state: &mut TestScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
+fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
 
     // Do nothing if the player is already in an error state.
-    if let TestScriptPlayerStatus::Error = player_state.status {
+    if let ChangeScriptPlayerStatus::Error = player_state.status {
         log_test_script_player_state("Ignoring resolve_test_script_record_effect call due to error state", &player_state);
         return;
     }
         
     match &record.seq_record.record {
-        TestScriptRecord::SourceChange(change_record) => {
+        ChangeScriptRecord::SourceChange(change_record) => {
             match player_state.status {
-                TestScriptPlayerStatus::Running => {
+                ChangeScriptPlayerStatus::Running => {
                     // Dispatch the SourceChangeEvent.
                     let _ = dispatcher.dispatch_source_change_event(&change_record.source_change_event);
                 },
-                TestScriptPlayerStatus::Stepping => {
+                ChangeScriptPlayerStatus::Stepping => {
                     // Dispatch the SourceChangeEvent.
                     if player_state.steps_remaining > 0 {
                         let _ = dispatcher.dispatch_source_change_event(&change_record.source_change_event);
 
                         player_state.steps_remaining -= 1;
                         if player_state.steps_remaining == 0 {
-                            let _ = transition_from_stepping_state(&TestScriptPlayerCommand::Pause, player_state);
+                            let _ = transition_from_stepping_state(&ChangeScriptPlayerCommand::Pause, player_state);
                         }
                     }
                 },
-                TestScriptPlayerStatus::Skipping => {
+                ChangeScriptPlayerStatus::Skipping => {
                     // Skip the SourceChangeEvent.
                     if player_state.skips_remaining > 0 {
-                        log::debug!("Skipping TestScriptRecord: {:?}", change_record);
+                        log::debug!("Skipping ChangeScriptRecord: {:?}", change_record);
 
                         player_state.skips_remaining -= 1;
                         if player_state.skips_remaining == 0 {
-                            let _ = transition_from_skipping_state(&TestScriptPlayerCommand::Pause, player_state);
+                            let _ = transition_from_skipping_state(&ChangeScriptPlayerCommand::Pause, player_state);
                         }
                     }
                 },
                 _ => {
-                    log::warn!("Should not be processing TestScriptRecord when in state {:?}", player_state.status);
+                    log::warn!("Should not be processing ChangeScriptRecord when in state {:?}", player_state.status);
                 },
             }
         },
-        TestScriptRecord::PauseCommand(_) => {
+        ChangeScriptRecord::PauseCommand(_) => {
             // Process the PauseCommand only if the Player is not configured to ignore them.
             if player_state.ignore_scripted_pause_commands {
-                log::info!("Ignoring Test Script Pause Command: {:?}", record);
+                log::info!("Ignoring Change Script Pause Command: {:?}", record);
             } else {
                 let _ = match player_state.status {
-                    TestScriptPlayerStatus::Running => transition_from_running_state(&TestScriptPlayerCommand::Pause, player_state),
-                    TestScriptPlayerStatus::Stepping => transition_from_stepping_state(&TestScriptPlayerCommand::Pause, player_state),
-                    TestScriptPlayerStatus::Skipping => transition_from_skipping_state(&TestScriptPlayerCommand::Pause, player_state),
-                    TestScriptPlayerStatus::Paused => transition_from_paused_state(&TestScriptPlayerCommand::Pause, player_state),
-                    TestScriptPlayerStatus::Stopped => transition_from_stopped_state(&TestScriptPlayerCommand::Pause, player_state),
-                    TestScriptPlayerStatus::Finished => transition_from_finished_state(&TestScriptPlayerCommand::Pause, player_state),
-                    TestScriptPlayerStatus::Error => transition_from_error_state(&TestScriptPlayerCommand::Pause, player_state),
+                    ChangeScriptPlayerStatus::Running => transition_from_running_state(&ChangeScriptPlayerCommand::Pause, player_state),
+                    ChangeScriptPlayerStatus::Stepping => transition_from_stepping_state(&ChangeScriptPlayerCommand::Pause, player_state),
+                    ChangeScriptPlayerStatus::Skipping => transition_from_skipping_state(&ChangeScriptPlayerCommand::Pause, player_state),
+                    ChangeScriptPlayerStatus::Paused => transition_from_paused_state(&ChangeScriptPlayerCommand::Pause, player_state),
+                    ChangeScriptPlayerStatus::Stopped => transition_from_stopped_state(&ChangeScriptPlayerCommand::Pause, player_state),
+                    ChangeScriptPlayerStatus::Finished => transition_from_finished_state(&ChangeScriptPlayerCommand::Pause, player_state),
+                    ChangeScriptPlayerStatus::Error => transition_from_error_state(&ChangeScriptPlayerCommand::Pause, player_state),
                 };
             }
         },
-        TestScriptRecord::Label(label_record) => {
-            log::info!("Reached Test Script Label: {:?}", label_record);
+        ChangeScriptRecord::Label(label_record) => {
+            log::info!("Reached Change Script Label: {:?}", label_record);
         },
-        TestScriptRecord::Finish(_) => {
+        ChangeScriptRecord::Finish(_) => {
             transition_to_finished_state(player_state);
         },
-        TestScriptRecord::Header(header_record) => {
-            // Only the first record should be a Header record, and this is handled in the TestScriptReader.
-            log::warn!("Ignoring unexpected Test Script Header: {:?}", header_record);
+        ChangeScriptRecord::Header(header_record) => {
+            // Only the first record should be a Header record, and this is handled in the ChangeScriptReader.
+            log::warn!("Ignoring unexpected Change Script Header: {:?}", header_record);
         },
-        TestScriptRecord::Comment(comment_record) => {
-            // The TestScriptReader should not return Comment records.
-            log::warn!("Ignoring unexpected Test Script Comment: {:?}", comment_record);
+        ChangeScriptRecord::Comment(comment_record) => {
+            // The ChangeScriptReader should not return Comment records.
+            log::warn!("Ignoring unexpected Change Script Comment: {:?}", comment_record);
         },
     };
 }
 
-fn time_shift_test_script_record(player_state: &TestScriptPlayerState, seq_record: SequencedTestScriptRecord) -> ScheduledTestScriptRecord {
+fn time_shift_test_script_record(player_state: &ChangeScriptPlayerState, seq_record: SequencedChangeScriptRecord) -> ScheduledChangeScriptRecord {
 
     let replay_time_ns = match player_state.time_mode {
-        TestScriptPlayerTimeMode::Live => {
+        ChangeScriptPlayerTimeMode::Live => {
             // Live Time Mode means we just use the current time as the record's Replay Time regardless of offset.
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64
         },
-        TestScriptPlayerTimeMode::Recorded | TestScriptPlayerTimeMode::Rebased(_) => {
+        ChangeScriptPlayerTimeMode::Recorded | ChangeScriptPlayerTimeMode::Rebased(_) => {
             // Recorded or Rebased Time Mode means we have to adjust the record's Replay Time based on the offset from
             // the start time. The player_state.start_replay_time has the base time regardless of the time mode.
             player_state.start_replay_time + seq_record.offset_ns
@@ -1015,214 +1022,214 @@ fn time_shift_test_script_record(player_state: &TestScriptPlayerState, seq_recor
 
     // TODO: Also need to adjust the time values in the data based on the time mode settings.
 
-    ScheduledTestScriptRecord::new(seq_record, replay_time_ns)
+    ScheduledChangeScriptRecord::new(seq_record, replay_time_ns)
 }
 
-fn transition_from_paused_state(command: &TestScriptPlayerCommand, player_state: &mut TestScriptPlayerState) -> Result<(), String> {
+fn transition_from_paused_state(command: &ChangeScriptPlayerCommand, player_state: &mut ChangeScriptPlayerState) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
 
     match command {
-        TestScriptPlayerCommand::Start => {
-            player_state.status = TestScriptPlayerStatus::Running;
+        ChangeScriptPlayerCommand::Start => {
+            player_state.status = ChangeScriptPlayerStatus::Running;
             Ok(())
         },
-        TestScriptPlayerCommand::ProcessDelayedRecord(_) => {
-            // The TestScriptPlayer is Paused, so we ignore the DispatchChangeEvent command.
+        ChangeScriptPlayerCommand::ProcessDelayedRecord(_) => {
+            // The ChangeScriptPlayer is Paused, so we ignore the DispatchChangeEvent command.
             Ok(())
         },
-        TestScriptPlayerCommand::Step(steps) => {
-            player_state.status = TestScriptPlayerStatus::Stepping;
+        ChangeScriptPlayerCommand::Step(steps) => {
+            player_state.status = ChangeScriptPlayerStatus::Stepping;
             player_state.steps_remaining = *steps;
             Ok(())
         },
-        TestScriptPlayerCommand::Skip(skips) => {
-            player_state.status = TestScriptPlayerStatus::Skipping;
+        ChangeScriptPlayerCommand::Skip(skips) => {
+            player_state.status = ChangeScriptPlayerStatus::Skipping;
             player_state.skips_remaining = *skips;
             Ok(())
         },
-        TestScriptPlayerCommand::Pause => {
-            Err("TestScriptPlayer is already Paused.".to_string())
+        ChangeScriptPlayerCommand::Pause => {
+            Err(ChangeScriptPlayerError::AlreadyPaused.into())
         },
-        TestScriptPlayerCommand::Stop => {
-            player_state.status = TestScriptPlayerStatus::Stopped;
+        ChangeScriptPlayerCommand::Stop => {
+            player_state.status = ChangeScriptPlayerStatus::Stopped;
             Ok(())
         },
-        TestScriptPlayerCommand::GetState => {
-            Ok(())
-        }
-    }
-}
-
-fn transition_from_running_state(command: &TestScriptPlayerCommand, player_state: &mut TestScriptPlayerState) -> Result<(), String> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
-
-    match command {
-        TestScriptPlayerCommand::Start => {
-            Err("TestScriptPlayer is already Running.".to_string())
-        },
-        TestScriptPlayerCommand::ProcessDelayedRecord(_) => {
-            // Should never get here.
-            log::warn!("Ignoring DispatchChangeEvent command while TestScriptPlayer is Running.");
-            Ok(())
-        },
-        TestScriptPlayerCommand::Step(_) => {
-            Err("TestScriptPlayer is currently Running. Pause before trying to Step.".to_string())
-        },
-        TestScriptPlayerCommand::Skip(_) => {
-            Err("TestScriptPlayer is currently Running. Pause before trying to Skip.".to_string())
-        },
-        TestScriptPlayerCommand::Pause => {
-            player_state.status = TestScriptPlayerStatus::Paused;
-            Ok(())
-        },
-        TestScriptPlayerCommand::Stop => {
-            player_state.status = TestScriptPlayerStatus::Stopped;
-            Ok(())
-        },
-        TestScriptPlayerCommand::GetState => {
+        ChangeScriptPlayerCommand::GetState => {
             Ok(())
         }
     }
 }
 
-fn transition_from_stepping_state(command: &TestScriptPlayerCommand, player_state: &mut TestScriptPlayerState) -> Result<(), String> {
+fn transition_from_running_state(command: &ChangeScriptPlayerCommand, player_state: &mut ChangeScriptPlayerState) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
 
     match command {
-        TestScriptPlayerCommand::Start => {
-            Err(format!("TestScriptPlayer is currently Stepping ({} steps remaining). Pause before trying to Start.", player_state.steps_remaining))
+        ChangeScriptPlayerCommand::Start => {
+            Err(ChangeScriptPlayerError::AlreadyRunning.into())
         },
-        TestScriptPlayerCommand::ProcessDelayedRecord(_) => {
+        ChangeScriptPlayerCommand::ProcessDelayedRecord(_) => {
             // Should never get here.
-            log::warn!("Ignoring DispatchChangeEvent command while TestScriptPlayer is Stepping.");
+            log::warn!("Ignoring DispatchChangeEvent command while ChangeScriptPlayer is Running.");
             Ok(())
         },
-        TestScriptPlayerCommand::Step(_) => {
-            Err(format!("TestScriptPlayer is already Stepping ({} steps remaining).", player_state.steps_remaining))
+        ChangeScriptPlayerCommand::Step(_) => {
+            Err(ChangeScriptPlayerError::PauseToStep.into())
         },
-        TestScriptPlayerCommand::Skip(_) => {
-            Err(format!("TestScriptPlayer is currently Stepping ({} steps remaining). Pause before trying to Skip.", player_state.steps_remaining))
+        ChangeScriptPlayerCommand::Skip(_) => {
+            Err(ChangeScriptPlayerError::PauseToSkip.into())
         },
-        TestScriptPlayerCommand::Pause => {
-            player_state.status = TestScriptPlayerStatus::Paused;
+        ChangeScriptPlayerCommand::Pause => {
+            player_state.status = ChangeScriptPlayerStatus::Paused;
+            Ok(())
+        },
+        ChangeScriptPlayerCommand::Stop => {
+            player_state.status = ChangeScriptPlayerStatus::Stopped;
+            Ok(())
+        },
+        ChangeScriptPlayerCommand::GetState => {
+            Ok(())
+        }
+    }
+}
+
+fn transition_from_stepping_state(command: &ChangeScriptPlayerCommand, player_state: &mut ChangeScriptPlayerState) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+
+    match command {
+        ChangeScriptPlayerCommand::Start => {
+            Err(ChangeScriptPlayerError::CurrentlyStepping(player_state.steps_remaining).into())
+        },
+        ChangeScriptPlayerCommand::ProcessDelayedRecord(_) => {
+            // Should never get here.
+            log::warn!("Ignoring DispatchChangeEvent command while ChangeScriptPlayer is Stepping.");
+            Ok(())
+        },
+        ChangeScriptPlayerCommand::Step(_) => {
+            Err(ChangeScriptPlayerError::CurrentlyStepping(player_state.steps_remaining).into())
+        },
+        ChangeScriptPlayerCommand::Skip(_) => {
+            Err(ChangeScriptPlayerError::CurrentlyStepping(player_state.steps_remaining).into())
+        },
+        ChangeScriptPlayerCommand::Pause => {
+            player_state.status = ChangeScriptPlayerStatus::Paused;
             player_state.steps_remaining = 0;
             Ok(())
         },
-        TestScriptPlayerCommand::Stop => {
-            player_state.status = TestScriptPlayerStatus::Stopped;
+        ChangeScriptPlayerCommand::Stop => {
+            player_state.status = ChangeScriptPlayerStatus::Stopped;
             player_state.steps_remaining = 0;
             Ok(())
         },
-        TestScriptPlayerCommand::GetState => {
+        ChangeScriptPlayerCommand::GetState => {
             Ok(())
         }
     }
 }
 
-fn transition_from_skipping_state(command: &TestScriptPlayerCommand, player_state: &mut TestScriptPlayerState) -> Result<(), String> {
+fn transition_from_skipping_state(command: &ChangeScriptPlayerCommand, player_state: &mut ChangeScriptPlayerState) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
 
     match command {
-        TestScriptPlayerCommand::Start => {
-            Err(format!("TestScriptPlayer is currently Skipping ({} skips remaining). Pause before trying to Start.", player_state.skips_remaining))
+        ChangeScriptPlayerCommand::Start => {
+            Err(ChangeScriptPlayerError::CurrentlySkipping(player_state.skips_remaining).into())
         },
-        TestScriptPlayerCommand::ProcessDelayedRecord(_) => {
+        ChangeScriptPlayerCommand::ProcessDelayedRecord(_) => {
             // Should never get here.
-            log::warn!("Ignoring DispatchChangeEvent command while TestScriptPlayer is Skipping.");
+            log::warn!("Ignoring DispatchChangeEvent command while ChangeScriptPlayer is Skipping.");
             Ok(())
         },
-        TestScriptPlayerCommand::Step(_) => {
-            Err(format!("TestScriptPlayer is currently Skipping ({} skips remaining). Pause before trying to Skip.", player_state.skips_remaining))
+        ChangeScriptPlayerCommand::Step(_) => {
+            Err(ChangeScriptPlayerError::CurrentlySkipping(player_state.skips_remaining).into())
         },
-        TestScriptPlayerCommand::Skip(_) => {
-            Err(format!("TestScriptPlayer is already Skipping ({} skips remaining).", player_state.skips_remaining))
+        ChangeScriptPlayerCommand::Skip(_) => {
+            Err(ChangeScriptPlayerError::CurrentlySkipping(player_state.skips_remaining).into())
         },
-        TestScriptPlayerCommand::Pause => {
-            player_state.status = TestScriptPlayerStatus::Paused;
+        ChangeScriptPlayerCommand::Pause => {
+            player_state.status = ChangeScriptPlayerStatus::Paused;
             player_state.skips_remaining = 0;
             Ok(())
         },
-        TestScriptPlayerCommand::Stop => {
-            player_state.status = TestScriptPlayerStatus::Stopped;
+        ChangeScriptPlayerCommand::Stop => {
+            player_state.status = ChangeScriptPlayerStatus::Stopped;
             player_state.skips_remaining = 0;
             Ok(())
         },
-        TestScriptPlayerCommand::GetState => {
+        ChangeScriptPlayerCommand::GetState => {
             Ok(())
         }
     }
 }
 
-fn transition_from_stopped_state(command: &TestScriptPlayerCommand, player_state: &mut TestScriptPlayerState) -> Result<(), String> {
+fn transition_from_stopped_state(command: &ChangeScriptPlayerCommand, player_state: &mut ChangeScriptPlayerState) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
 
-    Err("TestScriptPlayer is Stopped.".to_string())
+    Err(ChangeScriptPlayerError::AlreadyStopped.into())
 }
 
-fn transition_from_finished_state(command: &TestScriptPlayerCommand, player_state: &mut TestScriptPlayerState) -> Result<(), String> {
+fn transition_from_finished_state(command: &ChangeScriptPlayerCommand, player_state: &mut ChangeScriptPlayerState) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
 
-    Err("TestScriptPlayer is Finished.".to_string())
+    Err(ChangeScriptPlayerError::AlreadyFinished.into())
 }
 
-fn transition_from_error_state(command: &TestScriptPlayerCommand, player_state: &mut TestScriptPlayerState) -> Result<(), String> {
+fn transition_from_error_state(command: &ChangeScriptPlayerCommand, player_state: &mut ChangeScriptPlayerState) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
 
-    Err(format!("TestScriptPlayer is in an Error state - {:?}.", player_state.status))
+    Err(ChangeScriptPlayerError::Error(player_state.status).into())
 }
 
-fn transition_to_finished_state(player_state: &mut TestScriptPlayerState) {
-    player_state.status = TestScriptPlayerStatus::Finished;
+fn transition_to_finished_state(player_state: &mut ChangeScriptPlayerState) {
+    player_state.status = ChangeScriptPlayerStatus::Finished;
     player_state.skips_remaining = 0;
     player_state.steps_remaining = 0;
 }
 
-fn transition_to_error_state(error_message: &str, player_state: &mut TestScriptPlayerState) {
+fn transition_to_error_state(error_message: &str, player_state: &mut ChangeScriptPlayerState) {
     log::error!("{}", error_message);
-    player_state.status = TestScriptPlayerStatus::Error;
+    player_state.status = ChangeScriptPlayerStatus::Error;
     player_state.error_message = Some(error_message.to_string());
 }
 
-pub async fn delayer_thread(mut delayer_rx_channel: Receiver<DelayTestScriptRecordMessage>, player_tx_channel: Sender<TestScriptPlayerMessage>) {
-    log::info!("TestScriptRecord Delayer thread started...");
-    log::trace!("Starting TestScriptRecord Delayer loop...");
+pub async fn delayer_thread(mut delayer_rx_channel: Receiver<DelayChangeScriptRecordMessage>, player_tx_channel: Sender<ChangeScriptPlayerMessage>) {
+    log::info!("ChangeScriptRecord Delayer thread started...");
+    log::trace!("Starting ChangeScriptRecord Delayer loop...");
 
     loop {
-        log::trace!("Top of TestScriptRecord Delayer loop.");
+        log::trace!("Top of ChangeScriptRecord Delayer loop.");
 
         match delayer_rx_channel.recv().await {
             Some(message) => {
-                log::debug!("Processing DelayTestScriptRecordMessage: {:?}", message);
+                log::debug!("Processing DelayChangeScriptRecordMessage: {:?}", message);
 
                 // Sleep for the specified time.
                 sleep(Duration::from_nanos(message.delay_ns)).await;
 
-                // Send a DispatchChangeEvent command to the TestScriptPlayer.
-                let msg = TestScriptPlayerMessage {
-                    command: TestScriptPlayerCommand::ProcessDelayedRecord(message.delay_sequence),
+                // Send a DispatchChangeEvent command to the ChangeScriptPlayer.
+                let msg = ChangeScriptPlayerMessage {
+                    command: ChangeScriptPlayerCommand::ProcessDelayedRecord(message.delay_sequence),
                     response_tx: None,
                 };
                 let response = player_tx_channel.send(msg).await;
 
                 match response {
                     Ok(_) => {
-                        log::debug!("Sent ProcessDelayedRecord command to TestScriptPlayer.");
+                        log::debug!("Sent ProcessDelayedRecord command to ChangeScriptPlayer.");
                     },
                     Err(e) => {
-                        log::error!("Error sending ProcessDelayedRecord command to TestScriptPlayer: {:?}", e);
+                        log::error!("Error sending ProcessDelayedRecord command to ChangeScriptPlayer: {:?}", e);
                     }
                 }
             },
             None => {
-                log::error!("TestScriptRecord delayer channel closed.");
+                log::error!("ChangeScriptRecord delayer channel closed.");
                 break;
             }
         }
     }
 }
 
-// Function to log the current Delayed TestScriptRecord at varying levels of detail.
-fn log_scheduled_test_script_record(msg: &str, record: &ScheduledTestScriptRecord) {
+// Function to log the current Delayed ChangeScriptRecord at varying levels of detail.
+fn log_scheduled_test_script_record(msg: &str, record: &ScheduledChangeScriptRecord) {
     match log::max_level() {
         log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, record),
         log::LevelFilter::Debug => log::debug!("{} - seq:{:?}, offset_ns:{:?}, replay_time_ns:{:?}", 
@@ -1231,8 +1238,8 @@ fn log_scheduled_test_script_record(msg: &str, record: &ScheduledTestScriptRecor
     }
 }
 
-// Function to log the current Next TestScriptRecord at varying levels of detail.
-fn log_sequeced_test_script_record(msg: &str, record: &SequencedTestScriptRecord) {
+// Function to log the current Next ChangeScriptRecord at varying levels of detail.
+fn log_sequeced_test_script_record(msg: &str, record: &SequencedChangeScriptRecord) {
     match log::max_level() {
         log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, record),
         log::LevelFilter::Debug => log::debug!("{} - seq:{:?}, offset_ns:{:?}", msg, record.seq, record.offset_ns),
@@ -1241,7 +1248,7 @@ fn log_sequeced_test_script_record(msg: &str, record: &SequencedTestScriptRecord
 }
 
 // Function to log the Player State at varying levels of detail.
-fn log_test_script_player_state(msg: &str, state: &TestScriptPlayerState) {
+fn log_test_script_player_state(msg: &str, state: &ChangeScriptPlayerState) {
     match log::max_level() {
         log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, state),
         log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, state),

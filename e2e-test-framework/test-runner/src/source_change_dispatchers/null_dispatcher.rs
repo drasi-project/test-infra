@@ -1,6 +1,6 @@
 
 use crate::test_script::SourceChangeEvent;
-use super::{SourceChangeEventDispatcher, SourceChangeDispatcherResult};
+use super::SourceChangeEventDispatcher;
 
 pub struct NullSourceChangeEventDispatcher {}
 
@@ -14,7 +14,7 @@ impl NullSourceChangeEventDispatcher {
 }  
 
 impl SourceChangeEventDispatcher for NullSourceChangeEventDispatcher {
-    fn dispatch_source_change_event(&mut self, _event: &SourceChangeEvent) -> Result<(), SourceChangeDispatcherResult> {
+    fn dispatch_source_change_event(&mut self, _event: &SourceChangeEvent) -> anyhow::Result<()> {
         Ok(())
     }
 }

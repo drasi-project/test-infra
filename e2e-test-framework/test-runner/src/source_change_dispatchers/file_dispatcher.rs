@@ -1,8 +1,8 @@
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 
-use crate::test_script::{SourceChangeEvent, test_script_player::TestScriptPlayerConfig};
-use super::{SourceChangeEventDispatcher, SourceChangeDispatcherResult};
+use crate::test_script::{SourceChangeEvent, change_script_player::ChangeScriptPlayerConfig};
+use super::{SourceChangeEventDispatcher, SourceChangeDispatcherError};
 
 pub struct JsonlFileSourceChangeDispatcher {
     // file_path: String,
@@ -10,7 +10,7 @@ pub struct JsonlFileSourceChangeDispatcher {
 }
 
 impl JsonlFileSourceChangeDispatcher {
-    pub fn new(app_config: &TestScriptPlayerConfig) -> Result<Box<dyn SourceChangeEventDispatcher>, SourceChangeDispatcherResult> {
+    pub fn new(app_config: &ChangeScriptPlayerConfig) -> anyhow::Result<Box<dyn SourceChangeEventDispatcher>> {
 
         log::info!("Initializing JsonlFileSourceChangeDispatcher...");
 
@@ -28,10 +28,8 @@ impl JsonlFileSourceChangeDispatcher {
         if !std::path::Path::new(&local_dispatcher_folder).exists() {
             match std::fs::create_dir_all(&local_dispatcher_folder) {
                 Ok(_) => {},
-                Err(e) => {
-                    return Err(format!("Error creating change data folder {}: {}", local_dispatcher_folder, e).into());
-                }
-            }
+                Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
+            };
         }        
 
         let file_path = format!("{}/source_change_event_dispatcher.jsonl", local_dispatcher_folder);
@@ -41,7 +39,7 @@ impl JsonlFileSourceChangeDispatcher {
             .append(true)
             .open(&file_path) {
                 Ok(f) => BufWriter::new(f),
-                Err(e) => return Err(SourceChangeDispatcherResult::IoError(e)),
+                Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
             };
 
         Ok(Box::new( Self { 
@@ -52,20 +50,20 @@ impl JsonlFileSourceChangeDispatcher {
 }
 
 impl SourceChangeEventDispatcher for JsonlFileSourceChangeDispatcher {
-    fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> Result<(), SourceChangeDispatcherResult> {
+    fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
         let json_event = match serde_json::to_string(event) {
             Ok(e) => e,
-            Err(e) => return Err(SourceChangeDispatcherResult::SerdeError(e)),
+            Err(e) => return Err(SourceChangeDispatcherError::Serde(e).into()),
         };
 
         match writeln!(self.writer, "{}", json_event) {
             Ok(_) => {
                 match self.writer.flush() {
                     Ok(_) => {},
-                    Err(e) => return Err(SourceChangeDispatcherResult::IoError(e)),
+                    Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
                 }
             },
-            Err(e) => return Err(SourceChangeDispatcherResult::IoError(e)),
+            Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
         }
         Ok(())
     }

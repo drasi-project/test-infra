@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, error::Error, path::PathBuf};
+use std::{collections::{HashMap, HashSet}, path::PathBuf};
 
 use azure_storage::prelude::*;
 use azure_storage_blobs::prelude::*;
@@ -7,7 +7,7 @@ use futures::stream::StreamExt;
 use serde::Serialize;
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::{mask_secret, test_script::test_script_player::TestScriptPlayerSettings};
+use crate::{mask_secret, test_script::change_script_player::ChangeScriptPlayerSettings};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DataSetSettings {
@@ -21,7 +21,7 @@ pub struct DataSetSettings {
 }
 
 impl DataSetSettings {
-    pub fn from_test_script_player_settings(player_settings: &TestScriptPlayerSettings) -> Self {
+    pub fn from_change_script_player_settings(player_settings: &ChangeScriptPlayerSettings) -> Self {
         DataSetSettings {
             storage_account: player_settings.test_storage_account.clone(),
             storage_access_key: player_settings.test_storage_access_key.clone(),
@@ -50,6 +50,11 @@ impl DataSetContent {
             change_log_script_files,
             bootstrap_script_files,
         }
+    }
+
+    pub fn has_content(&self) -> bool {
+        (self.change_log_script_files.is_some() && self.change_log_script_files.as_ref().unwrap().len() > 0 ) 
+            || (self.bootstrap_script_files.is_some() && self.bootstrap_script_files.as_ref().unwrap().len() > 0)
     }
 }
 
@@ -108,7 +113,7 @@ impl DataSet {
         match_count
     }
 
-    pub async fn download_content(&mut self) -> Result<DataSetContent, Box<dyn Error>> {
+    pub async fn download_content(&mut self) -> anyhow::Result<DataSetContent> {
         log::info!("Getting content for DataSet {}", &self.id);
 
         if self.content.is_none() {
@@ -125,12 +130,8 @@ impl DataSet {
                     }
                 }
             }
-            let change_script_files = match self.download_change_script_files(change_scripts_path).await {
-                Ok(files) => files,
-                Err(e) => {
-                    return Err(e);
-                }
-            };
+            let change_script_files = self.download_change_script_files(change_scripts_path).await?;
+
             let mut bootstrap_scripts_path = self.data_cache_path.clone();
             bootstrap_scripts_path.push("bootstrap_scripts");
             if !bootstrap_scripts_path.exists() {
@@ -157,7 +158,7 @@ impl DataSet {
     async fn download_change_script_files(
         &self,
         local_repo_folder: PathBuf
-    ) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    ) -> anyhow::Result<Vec<PathBuf>> {
         let mut file_path_list = download_remote_repo_folder(
             self.settings.storage_account.clone(),
             self.settings.storage_access_key.clone(),
@@ -177,7 +178,7 @@ impl DataSet {
     async fn download_bootstrap_script_files(
         &self,
         local_repo_folder: PathBuf
-    ) -> Result<HashMap<String, Vec<PathBuf>>, Box<dyn Error>> {
+    ) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
         let mut file_path_list = download_remote_repo_folder(
             self.settings.storage_account.clone(),
             self.settings.storage_access_key.clone(),
@@ -214,7 +215,7 @@ async fn download_remote_repo_folder(
     storage_path: String,
     remote_repo_folder: String, 
     local_repo_folder: PathBuf,
-) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+) -> anyhow::Result<Vec<PathBuf>> {
     log::info!("Downloading Remote Repo Folder - {:?} : {:?}/{:?}", storage_account, storage_container, storage_path);
 
     let storage_credentials = StorageCredentials::access_key(&storage_account, storage_access_key.clone());
@@ -279,8 +280,8 @@ async fn download_remote_repo_folder(
 async fn download_file(
     blob_client: BlobClient, 
     local_file_path: PathBuf
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    log::debug!("Downloading test script file {} to {}", blob_client.blob_name(), local_file_path.to_str().unwrap());
+) -> anyhow::Result<()> {
+    log::debug!("Downloading  file {} to {}", blob_client.blob_name(), local_file_path.to_str().unwrap());
 
     // Create the local file to hold the blob data.
     let mut local_file = File::create(local_file_path).await?;

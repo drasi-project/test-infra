@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use super::dataset::{DataSet, DataSetSettings, DataSetContent};
 
@@ -8,7 +8,7 @@ pub struct LocalTestRepo {
 }
 
 impl LocalTestRepo {
-    pub fn new(data_cache_path: String) -> Result<Self, Box<dyn Error>> {
+    pub fn new(data_cache_path: String) -> anyhow::Result<Self> {
 
         let data_cache_path_buf = PathBuf::from(&data_cache_path);
 
@@ -30,7 +30,7 @@ impl LocalTestRepo {
         })
     }
 
-    pub async fn add_data_set( &mut self, settings: &DataSetSettings) -> Result<DataSetContent, Box<dyn Error>> {
+    pub async fn add_or_get_data_set( &mut self, settings: &DataSetSettings) -> anyhow::Result<DataSetContent> {
         let id = settings.get_id();
 
         if !self.data_sets.contains_key(&id) {
@@ -45,10 +45,11 @@ impl LocalTestRepo {
 
         // For now, we will download the data content immediately.
         // In the future, we may want to defer this until the data is actually needed.
-        match data_set.download_content().await {
-            Ok(content) => Ok(content),
-            Err(e) => {
-                Err(e)
+        let content = data_set.download_content().await?;
+        match content.has_content() {
+            true => Ok(content),
+            false => {
+                anyhow::bail!("No content downloaded for DataSet: {}", id);
             }
         }
     }

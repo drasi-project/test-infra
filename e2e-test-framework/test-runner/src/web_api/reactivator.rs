@@ -8,17 +8,17 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{test_script::test_script_player::{TestScriptPlayerConfig, TestScriptPlayerState}, ServiceStatus, SharedState};
+use crate::{test_script::change_script_player::{ChangeScriptPlayerConfig, ChangeScriptPlayerState}, ServiceStatus, SharedState};
 
 #[derive(Debug, Serialize)]
 struct PlayerInfoResponse {
-    pub config: TestScriptPlayerConfig,
-    pub state: TestScriptPlayerState,
+    pub config: ChangeScriptPlayerConfig,
+    pub state: ChangeScriptPlayerState,
 }
 
-// Create PlayerResponse from a TestScriptPlayer.
+// Create PlayerResponse from a ChangeScriptPlayer.
 impl PlayerInfoResponse {
-    fn new(config: TestScriptPlayerConfig, state: TestScriptPlayerState) -> Self {
+    fn new(config: ChangeScriptPlayerConfig, state: ChangeScriptPlayerState) -> Self {
         PlayerInfoResponse {
             config,
             state,
@@ -31,12 +31,12 @@ struct PlayerCommandResponse {
     pub test_id: String,
     pub test_run_id: String,
     pub source_id: String,
-    pub state: TestScriptPlayerState,
+    pub state: ChangeScriptPlayerState,
 }
 
-// Create PlayerResponse from a TestScriptPlayer.
+// Create PlayerResponse from a ChangeScriptPlayer.
 impl PlayerCommandResponse {
-    fn new(config: TestScriptPlayerConfig, state: TestScriptPlayerState) -> Self {
+    fn new(config: ChangeScriptPlayerConfig, state: ChangeScriptPlayerState) -> Self {
         PlayerCommandResponse {
             test_id: config.player_settings.test_id.clone(),
             test_run_id: config.player_settings.test_run_id.clone(),
@@ -55,7 +55,7 @@ struct PlayerCommandError {
 }
 
 impl PlayerCommandError {
-    fn new(config: TestScriptPlayerConfig, error_msg: String) -> Self {
+    fn new(config: ChangeScriptPlayerConfig, error_msg: String) -> Self {
         PlayerCommandError {
             test_id: config.player_settings.test_id.clone(),
             test_run_id: config.player_settings.test_run_id.clone(),
@@ -77,7 +77,7 @@ pub(super) async fn get_player_list(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    // Otherwise, return the configuration and state of all the TestScriptPlayers.
+    // Otherwise, return the configuration and state of all the ChangeScriptPlayers.
     let mut player_list = vec![];
     for (_, player) in state.reactivators.iter() {
         player_list.push(PlayerInfoResponse::new(player.get_config(), player.get_state().await.unwrap().state));
@@ -102,7 +102,7 @@ pub(super) async fn get_player(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
-        // Look up the TestScriptPlayer by id.
+        // Look up the ChangeScriptPlayer by id.
         match state.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
@@ -111,7 +111,7 @@ pub(super) async fn get_player(
         }
     };
 
-    // Get the state of the TestScriptPlayer and return it.
+    // Get the state of the ChangeScriptPlayer and return it.
     match player.get_state().await {
         Ok(response) => {
             Json(PlayerInfoResponse::new(player.get_config(), response.state)).into_response()
@@ -138,7 +138,7 @@ pub(super) async fn pause_player(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
-        // Look up the TestScriptPlayer by id.
+        // Look up the ChangeScriptPlayer by id.
         match state.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
@@ -147,7 +147,7 @@ pub(super) async fn pause_player(
         }
     };
 
-    // Pause the TestScriptPlayer and return the result.
+    // Pause the ChangeScriptPlayer and return the result.
     match player.pause().await {
         Ok(response) => {
             Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
@@ -188,7 +188,7 @@ pub(super) async fn skip_player(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
-        // Look up the TestScriptPlayer by id.
+        // Look up the ChangeScriptPlayer by id.
         match state.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
@@ -202,7 +202,7 @@ pub(super) async fn skip_player(
 
     let num_skips = test_skip_config.unwrap_or_default().num_skips;
 
-    // Skip the TestScriptPlayer and return the result.
+    // Skip the ChangeScriptPlayer and return the result.
     match player.skip(num_skips).await {
         Ok(response) => {
             Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
@@ -228,7 +228,7 @@ pub(super) async fn start_player(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
-        // Look up the TestScriptPlayer by id.
+        // Look up the ChangeScriptPlayer by id.
         match state.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
@@ -237,7 +237,7 @@ pub(super) async fn start_player(
         }
     };
 
-    // Start the TestScriptPlayer and return the result.
+    // Start the ChangeScriptPlayer and return the result.
     match player.start().await {
         Ok(response) => {
             Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
@@ -278,7 +278,7 @@ pub(super) async fn step_player(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
-        // Look up the TestScriptPlayer by id.
+        // Look up the ChangeScriptPlayer by id.
         match state.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
@@ -292,7 +292,7 @@ pub(super) async fn step_player(
 
     let num_steps = test_step_config.unwrap_or_default().num_steps;
 
-    // Step the TestScriptPlayer and return the result.
+    // Step the ChangeScriptPlayer and return the result.
     match player.step(num_steps).await {
         Ok(response) => {
             Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
@@ -319,7 +319,7 @@ pub(super) async fn stop_player(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
-        // Look up the TestScriptPlayer by id.
+        // Look up the ChangeScriptPlayer by id.
         match state.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
@@ -328,7 +328,7 @@ pub(super) async fn stop_player(
         }
     };
 
-    // Stop the TestScriptPlayer and return the result.
+    // Stop the ChangeScriptPlayer and return the result.
     match player.stop().await {
         Ok(response) => {
             Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()

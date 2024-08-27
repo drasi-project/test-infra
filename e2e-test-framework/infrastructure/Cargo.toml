@@ -1,9 +1,0 @@
-[workspace]
-
-members = [
-    "comms-abstractions",
-    "comms-dapr"
-]
-
-[workspace.package]
-version = "0.1.0"

@@ -1,0 +1,11 @@
+[workspace]
+
+members = [
+  "test-runner",
+  
+  # Internal
+  "infrastructure/comms-abstractions",
+  "infrastructure/comms-dapr",
+]
+
+resolver = "2"

@@ -1,2 +1,2 @@
-tests/config.json
-tests/data_cache
+tests/config/
+tests/data_cache/

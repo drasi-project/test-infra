@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: SourceProvider
+name: E2ETestSource
+spec:
+  services:
+    proxy:
+      image: e2e-test-proxy
+      dapr:
+        app-port: "4002"
+    reactivator:
+      image: e2e-test-runner
+      endpoints:
+        api:
+          setting: internal
+          target: $DRASI_PORT
+      config_schema:
+        type: object
+        properties:
+          DRASI_PORT:
+            type: number
+            default: 5000
+          DRASI_DATA_CACHE:
+            type: string
+#            default: "./data_cache"
+          DRASI_EVENT_OUTPUT:
+            type: string
+#            default: "file"
+          DRASI_TELEM_OUTPUT:
+            type: string
+#            default: "none"
+          DRASI_LOG_OUTPUT:
+            type: string
+#            default: "console"
+          DRASI_CONFIG_FILE:
+            type: string
+#            default: "./config.json"

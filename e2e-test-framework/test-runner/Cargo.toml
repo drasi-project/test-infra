@@ -10,6 +10,8 @@ azure_storage = "0.20.0"
 azure_storage_blobs = "0.20.0"
 chrono = { version = "0.4.38", features = ["serde"] }
 clap = { version = "4.3.21", features = ["derive", "env"] }
+drasi-comms-abstractions = { path = "../infrastructure/comms-abstractions" }
+drasi-comms-dapr = { path = "../infrastructure/comms-dapr" }
 futures = "0.3.3"
 log = "0.4"
 env_logger = "0.7.1"

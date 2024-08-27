@@ -7,9 +7,10 @@ COPY ./infrastructure ./infrastructure
 
 RUN cargo new test-runner
 WORKDIR /usr/src/test-runner
-COPY ./e2e-test-framework/test-runner/Cargo.toml . 
+
+COPY ./test-runner/Cargo.toml . 
 RUN cargo fetch
-COPY ./e2e-test-framework/test-runner .
+COPY ./test-runner .
 RUN cargo install --force --path .
 
     

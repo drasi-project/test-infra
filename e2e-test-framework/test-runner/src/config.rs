@@ -101,7 +101,9 @@ impl ServiceConfigFile {
         let config_file_json = std::fs::read_to_string(config_file_path)?;
 
         // Parse the string into a ServiceConfigFile struct.
-        Ok(serde_json::from_str(&config_file_json)?)
+        let source_config_file = serde_json::from_str(&config_file_json)?;
+
+        Ok(source_config_file)
     }
 }
 

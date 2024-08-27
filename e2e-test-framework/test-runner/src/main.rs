@@ -122,12 +122,13 @@ async fn main() {
                     service_state
                 },
                 Err(e) => {
-                    let msg = format!("Error loading Test Runner config file {:?}. Error {}", service_settings.config_file_path, e);
-                    log::error!("{}", msg);
-                    
-                    let mut service_state = ServiceState::new(service_settings, None);
-                    service_state.set_error(msg);
-                    service_state
+                    ServiceState {
+                        service_settings,
+                        service_status: ServiceStatus::Error(e.to_string()),
+                        source_defaults: SourceConfigDefaults::default(),
+                        reactivators: HashMap::new(),
+                        test_repo: None,
+                    }
                 }
             }
         },

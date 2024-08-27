@@ -79,11 +79,15 @@ mod reactivator;
 
 #[derive(Debug, Serialize)]
 struct ServiceStateResponse {
-    service_status: ServiceStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    service_error_msg: Option<String>,
+    service_status: String,
     local_test_repo: LocalTestRepoResponse,
     reactivators: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ServiceStateErrorResponse {
+    service_status: String,
+    service_status_msg: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -135,23 +139,28 @@ async fn service_info(
 
     let state = state.read().await;
 
-    let local_test_repo = LocalTestRepoResponse {
-        data_cache_path: state.test_repo.as_ref().unwrap().data_cache_path.to_str().unwrap().to_string(),
-        data_sets: state.test_repo.as_ref().unwrap().data_sets.iter().map(|(k, v)| DataSetResponse {
-            id: k.clone(),
-            settings: v.get_settings(),
-            content: v.get_content(),
-        }).collect(),
-    };
-
-    Json(ServiceStateResponse {
-        service_status: state.service_status.clone(),
-        service_error_msg: match &state.service_status {
-            ServiceStatus::Error(msg) => Some(msg.clone()),
-            _ => None,
+    match &state.service_status {
+        ServiceStatus::Error(msg) => {
+            Json(ServiceStateErrorResponse {
+                service_status: "Error".to_string(),
+                service_status_msg: msg.to_string(),
+            }).into_response()
         },
-        local_test_repo,
-        reactivators: state.reactivators.keys().cloned().collect(),
-    }).into_response()
-
+        _ => {
+            let local_test_repo = LocalTestRepoResponse {
+                data_cache_path: state.test_repo.as_ref().unwrap().data_cache_path.to_str().unwrap().to_string(),
+                data_sets: state.test_repo.as_ref().unwrap().data_sets.iter().map(|(k, v)| DataSetResponse {
+                    id: k.clone(),
+                    settings: v.get_settings(),
+                    content: v.get_content(),
+                }).collect(),
+            };
+        
+            Json(ServiceStateResponse {
+                service_status: format!("{:?}", &state.service_status),
+                local_test_repo,
+                reactivators: state.reactivators.keys().cloned().collect(),
+            }).into_response()
+        }
+    }
 }

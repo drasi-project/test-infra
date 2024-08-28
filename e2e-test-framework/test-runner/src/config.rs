@@ -168,9 +168,9 @@ fn is_recorded() -> String { "recorded".to_string() }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ReactivatorConfigDefaults {
-    pub change_queue_address: Option<String>,
-    pub change_queue_port: Option<u16>,
-    pub change_queue_topic: Option<String>,
+    pub dapr_pubsub_host: Option<String>,
+    pub dapr_pubsub_port: Option<u16>,
+    pub dapr_pubsub_name: Option<String>,
     #[serde(default = "is_false")]
     pub ignore_scripted_pause_commands: bool,
     #[serde(default = "is_recorded")]
@@ -184,9 +184,9 @@ pub struct ReactivatorConfigDefaults {
 impl Default for ReactivatorConfigDefaults {
     fn default() -> Self {
         ReactivatorConfigDefaults {
-            change_queue_address: None,
-            change_queue_port: None,
-            change_queue_topic: None,
+            dapr_pubsub_host: None,
+            dapr_pubsub_port: None,
+            dapr_pubsub_name: None,
             ignore_scripted_pause_commands: is_false(),
             spacing_mode: is_recorded(),
             start_immediately: is_true(),
@@ -239,13 +239,13 @@ pub struct ReactivatorConfig {
     // *** The following fields are used to configure the Change Queue output destination. ***
     // *** These are used by default if the output destination is "queue". ***
     // The address of the change queue
-    pub change_queue_address: Option<String>,
+    pub dapr_pubsub_host: Option<String>,
 
     // The port of the change queue
-    pub change_queue_port: Option<u16>,
+    pub dapr_pubsub_port: Option<u16>,
 
     // The PubSub topic for the change queue
-    pub change_queue_topic: Option<String>,
+    pub dapr_pubsub_name: Option<String>,
 
     // Whether the player should ignore scripted pause commands.
     pub ignore_scripted_pause_commands: Option<bool>,

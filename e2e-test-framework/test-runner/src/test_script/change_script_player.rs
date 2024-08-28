@@ -170,13 +170,13 @@ pub struct ChangeScriptPlayerSettings {
     pub source_id: String,
 
     // The address of the change queue.
-    pub change_queue_address: String,
+    pub dapr_pubsub_host: String,
 
     // The port of the change queue.
-    pub change_queue_port: u16,
+    pub dapr_pubsub_port: u16,
 
     // The PubSub topic for the change queue.
-    pub change_queue_topic: String,
+    pub dapr_pubsub_name: String,
     
     // Flag to indicate if the Service should start the Change Script Player immediately after initialization.
     pub start_immediately: bool,
@@ -307,43 +307,43 @@ impl ChangeScriptPlayerSettings {
             }
         };
 
-        // If the SourceConfig doesn't contain a change_queue_address value, use the default value.
+        // If the SourceConfig doesn't contain a dapr_pubsub_host value, use the default value.
         // If there is no default value, return an error.
-        let change_queue_address = match &reactivator_config.change_queue_address {
-            Some(change_queue_address) => change_queue_address.clone(),
+        let dapr_pubsub_host = match &reactivator_config.dapr_pubsub_host {
+            Some(dapr_pubsub_host) => dapr_pubsub_host.clone(),
             None => {
-                match &source_defaults.reactivator.change_queue_address {
-                    Some(change_queue_address) => change_queue_address.clone(),
+                match &source_defaults.reactivator.dapr_pubsub_host {
+                    Some(dapr_pubsub_host) => dapr_pubsub_host.clone(),
                     None => {
-                        anyhow::bail!("No change_queue_address provided and no default value found.");
+                        anyhow::bail!("No dapr_pubsub_host provided and no default value found.");
                     }
                 }
             }
         };
 
-        // If the SourceConfig doesn't contain a change_queue_port value, use the default value.
+        // If the SourceConfig doesn't contain a dapr_pubsub_port value, use the default value.
         // If there is no default value, return an error.
-        let change_queue_port = match &reactivator_config.change_queue_port {
-            Some(change_queue_port) => change_queue_port.clone(),
+        let dapr_pubsub_port = match &reactivator_config.dapr_pubsub_port {
+            Some(dapr_pubsub_port) => dapr_pubsub_port.clone(),
             None => {
-                match &source_defaults.reactivator.change_queue_port {
-                    Some(change_queue_port) => change_queue_port.clone(),
+                match &source_defaults.reactivator.dapr_pubsub_port {
+                    Some(dapr_pubsub_port) => dapr_pubsub_port.clone(),
                     None => {
-                        anyhow::bail!("No change_queue_port provided and no default value found.");
+                        anyhow::bail!("No dapr_pubsub_port provided and no default value found.");
                     }
                 }
             }
         };
 
-        // If the SourceConfig doesn't contain a change_queue_topic value, use the default value.
+        // If the SourceConfig doesn't contain a dapr_pubsub_name value, use the default value.
         // If there is no default value, return an error.
-        let change_queue_topic = match &reactivator_config.change_queue_topic {
-            Some(change_queue_topic) => change_queue_topic.clone(),
+        let dapr_pubsub_name = match &reactivator_config.dapr_pubsub_name {
+            Some(dapr_pubsub_name) => dapr_pubsub_name.clone(),
             None => {
-                match &source_defaults.reactivator.change_queue_topic {
-                    Some(change_queue_topic) => change_queue_topic.clone(),
+                match &source_defaults.reactivator.dapr_pubsub_name {
+                    Some(dapr_pubsub_name) => dapr_pubsub_name.clone(),
                     None => {
-                        anyhow::bail!("No change_queue_topic provided and no default value found.");
+                        anyhow::bail!("No dapr_pubsub_name provided and no default value found.");
                     }
                 }
             }
@@ -367,9 +367,9 @@ impl ChangeScriptPlayerSettings {
             test_storage_container,
             test_storage_path,
             source_id,
-            change_queue_address,
-            change_queue_port,
-            change_queue_topic,
+            dapr_pubsub_host,
+            dapr_pubsub_port,
+            dapr_pubsub_name,
             ignore_scripted_pause_commands: reactivator_config.ignore_scripted_pause_commands.unwrap_or(source_defaults.reactivator.ignore_scripted_pause_commands),
             start_immediately: reactivator_config.start_immediately.unwrap_or(source_defaults.reactivator.start_immediately),
             source_change_event_time_mode: time_mode,

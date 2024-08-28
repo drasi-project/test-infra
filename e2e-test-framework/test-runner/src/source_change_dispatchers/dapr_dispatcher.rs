@@ -13,16 +13,11 @@ pub struct DaprSourceChangeEventDispatcher {
 impl DaprSourceChangeEventDispatcher {
     pub fn new(app_config: &ChangeScriptPlayerConfig) -> anyhow::Result<Box<dyn SourceChangeEventDispatcher>> {
 
-        let dapr_host = "127.0.0.1".to_string();
-        let dapr_port = 3500;
-        let pubsub = "pubsub".to_string();
-        let topic = format!("{}-change", app_config.player_settings.source_id.clone());
-
         let publisher = DaprHttpPublisher::new(
-            dapr_host,
-            dapr_port,
-            pubsub,
-            topic,
+            app_config.player_settings.dapr_pubsub_host.clone(),
+            app_config.player_settings.dapr_pubsub_port,
+            app_config.player_settings.dapr_pubsub_name.clone(),
+            format!("{}-change", app_config.player_settings.source_id.clone())
         );
 
         Ok(Box::new(DaprSourceChangeEventDispatcher {

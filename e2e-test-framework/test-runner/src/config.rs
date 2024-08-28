@@ -70,7 +70,7 @@ pub struct ServiceSettings {
     // The OutputType for Change Script Player Telemetry data.
     // If not provided, the default_value "publish" is used ensuring that Telemetry data is published
     // so it can be captured and logged against the test run for analysis.
-    #[arg(short = 't', long = "telem_out", env = "DRASI_TELEM_OUTPUT", default_value_t = OutputType::Publish)]
+    #[arg(short = 't', long = "telem_out", env = "DRASI_TELEM_OUTPUT", default_value_t = OutputType::None)]
     pub telemetry_output: OutputType,
 
     // The OutputType for Change Script Player Log data.

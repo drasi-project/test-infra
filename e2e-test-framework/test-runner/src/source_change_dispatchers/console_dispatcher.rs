@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use crate::test_script::SourceChangeEvent;
 use super::SourceChangeEventDispatcher;
 
@@ -12,8 +14,9 @@ impl ConsoleSourceChangeEventDispatcher {
     }
 }  
 
+#[async_trait]
 impl SourceChangeEventDispatcher for ConsoleSourceChangeEventDispatcher {
-    fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
+    async fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
 
         log::info!("Initializing ConsoleSourceChangeEventDispatcher...");
 

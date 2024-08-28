@@ -109,6 +109,9 @@ pub(crate) async fn start_web_api(service_state: ServiceState) {
     // Now the Test Runner is initialized, create the shared state and start the Web API.
     let shared_state = Arc::new(RwLock::new(service_state));
 
+    // let source_routes = Router::new()
+    //     .route("/", get(get_source))
+
     let reactivator_routes = Router::new()
         .route("/", get(get_player))
         .route("/pause", post(pause_player))
@@ -122,6 +125,8 @@ pub(crate) async fn start_web_api(service_state: ServiceState) {
         .route("/acquire", post(acquire_handler))
         .route("/reactivators", get(get_player_list))
         .nest("/reactivators/:id", reactivator_routes)
+        // .route("/sources", get(get_source_list))
+        // .nest("/sources/:id", source_routes)
         .layer(axum::extract::Extension(shared_state));
 
     log::info!("Listening on {}", addr);

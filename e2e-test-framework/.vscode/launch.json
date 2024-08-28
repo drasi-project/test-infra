@@ -20,7 +20,7 @@
                 }
             },
             "args": ["-c", "./tests/config/config.json", "-d", "./tests/data_cache", "-e", "p", "-t", "n", "-l", "c"],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}/test-runner"
         },
         {
             "type": "lldb",

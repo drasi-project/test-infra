@@ -23,7 +23,7 @@ impl FromStr for OutputType {
             "console" | "c" => Ok(OutputType::Console),
             "file" | "f" => Ok(OutputType::File),
             "none" | "n" => Ok(OutputType::None),
-            "publish" | "qp" => Ok(OutputType::Publish),
+            "publish" | "p" => Ok(OutputType::Publish),
             _ => Err(format!("Invalid OutputType: {}", s))
         }
     }
@@ -119,6 +119,8 @@ impl Default for ServiceConfigFile {
 // The SourceConfigDefaults struct holds the default values read from the Service config file that are used when a Player COnfig doesn't specify a value.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SourceConfigDefaults {
+    #[serde(default = "is_false")]
+    pub force_test_repo_cache_refresh: bool,
     pub test_storage_account: Option<String>,
     pub test_storage_access_key: Option<String>,
     pub test_storage_container: Option<String>,
@@ -135,6 +137,7 @@ pub struct SourceConfigDefaults {
 impl Default for SourceConfigDefaults {
     fn default() -> Self {
         SourceConfigDefaults {
+            force_test_repo_cache_refresh: false,
             test_storage_account: None,
             test_storage_access_key: None,
             test_storage_container: None,
@@ -198,6 +201,8 @@ fn is_false() -> bool { false }
 // to create a new Change Script Player.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SourceConfig {
+    pub force_test_repo_cache_refresh: Option<bool>,
+
     // The Test Storage Account where the Test Repo is located.
     pub test_storage_account: Option<String>,
 

@@ -42,7 +42,13 @@ impl Publisher for DaprHttpPublisher {
         let response = request.send().await;
 
         match response {
-            Ok(_) => Ok(()),
+            Ok(res) => {
+                if res.status().is_success() {
+                    Ok(())
+                } else {
+                    Err(Box::new(res.error_for_status().unwrap_err()))
+                }
+            },
             Err(e) => Err(Box::new(e)),
         }
     }

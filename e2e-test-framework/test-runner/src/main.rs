@@ -8,7 +8,7 @@ use config::{
     SourceConfig, SourceConfigDefaults, ServiceSettings, ServiceConfigFile,
 };
 use test_repo::{
-    dataset::DataSetSettings,
+    dataset::{DataSet, DataSetSettings},
     local_test_repo::LocalTestRepo,
 };
 use test_script::change_script_player::{
@@ -99,26 +99,46 @@ async fn main() {
                     log::trace!("Configuring Test Runner from {:#?}", service_config);
                     let mut service_state = ServiceState::new(service_settings, Some(service_config.defaults));
 
-                    // Iterate over the SourceConfigs in the ServiceConfigFile and create a ChangeScriptPlayer for each one.
                     for source_config in service_config.sources {
-                        log::trace!("Initializing Source from {:#?}", source_config);
 
-                        if source_config.reactivator.is_some() {
-                            log::trace!("Creating ChangeScriptPlayer from {:#?}", &source_config.reactivator);
-
-                            match create_change_script_player(source_config, &mut service_state).await {
-                                Ok(player) => {
-                                    service_state.reactivators.insert(player.get_id(), player);
-                                },
-                                Err(e) => {
-                                    let msg = format!("Error creating ChangeScriptPlayer: {}", e);
-                                    log::error!("{}", msg);
-                                    service_state.service_status = ServiceStatus::Error(msg);
-                                    break;
-                                }
+                        match add_or_get_source(&source_config, &service_state.source_defaults, service_state.test_repo.as_mut().unwrap()).await {
+                            Ok(dataset) => {
+                                match create_change_script_player(source_config, &mut service_state, &dataset).await {
+                                    Ok(player) => {
+                                        service_state.reactivators.insert(player.get_id(), player);
+                                    },
+                                    Err(e) => {
+                                        let msg = format!("Error creating ChangeScriptPlayer: {}", e);
+                                        log::error!("{}", msg);
+                                        service_state.service_status = ServiceStatus::Error(msg);
+                                        break;
+                                    }
+                                }                                
+                            },
+                            Err(e) => {
+                                let msg = format!("Error creating Source: {}", e);
+                                log::error!("{}", msg);
+                                service_state.service_status = ServiceStatus::Error(msg);
+                                break;
                             }
-                        }   
-                    }
+                        }
+
+                        // if source_config.reactivator.is_some() {
+                        //     log::trace!("Creating ChangeScriptPlayer from {:#?}", &source_config.reactivator);
+
+                        //     match create_change_script_player(source_config, &mut service_state).await {
+                        //         Ok(player) => {
+                        //             service_state.reactivators.insert(player.get_id(), player);
+                        //         },
+                        //         Err(e) => {
+                        //             let msg = format!("Error creating ChangeScriptPlayer: {}", e);
+                        //             log::error!("{}", msg);
+                        //             service_state.service_status = ServiceStatus::Error(msg);
+                        //             break;
+                        //         }
+                        //     }
+                        // }   
+                    };
                     service_state
                 },
                 Err(e) => {
@@ -169,16 +189,30 @@ async fn main() {
 
 }
 
-async fn create_change_script_player(source_config: SourceConfig, service_state: &mut ServiceState) -> anyhow::Result<ChangeScriptPlayer> {
+async fn add_or_get_source(source_config: &SourceConfig, source_defaults: &SourceConfigDefaults, test_repo: &mut LocalTestRepo) -> anyhow::Result<DataSet> {
+    log::trace!("Initializing Source from {:#?}", source_config);
+
+    let data_set_settings = DataSetSettings::try_from_source_config(source_config, source_defaults )?;
+
+    Ok(test_repo.add_or_get_data_set(data_set_settings).await?)
+}
+
+async fn create_change_script_player(source_config: SourceConfig, service_state: &mut ServiceState, dataset: &DataSet) -> anyhow::Result<ChangeScriptPlayer> {
+    log::trace!("Creating ChangeScriptPlayer from {:#?}", &source_config.reactivator);
 
     let player_settings = ChangeScriptPlayerSettings::try_from_source_config(&source_config, &service_state.source_defaults, &service_state.service_settings)?;
-    let data_set_settings = DataSetSettings::from_change_script_player_settings(&player_settings);    
-    let dataset_content = service_state.test_repo.as_mut().unwrap().add_or_get_data_set(&data_set_settings).await?; 
 
-    let script_files = match dataset_content.change_log_script_files {
-        Some(script_files) => script_files,
+    let script_files = match dataset.get_content() {
+        Some(content) => {
+            match content.change_log_script_files {
+                Some(files) => files,
+                None => {
+                    anyhow::bail!("No change script files available for player: {}", &player_settings.get_id());
+                }
+            }
+        },
         None => {
-            anyhow::bail!("No change script files available for player: {}", &data_set_settings.get_id());
+            anyhow::bail!("No change script files available for player: {}", &player_settings.get_id());
         }
     };
 

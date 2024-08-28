@@ -1,4 +1,4 @@
-use std::{fmt, path::PathBuf, str::FromStr, sync::Arc, time::SystemTime};
+use std::{fmt::self, path::PathBuf, str::FromStr, sync::Arc, time::SystemTime};
 
 use serde::Serialize;
 use tokio::sync::{mpsc::{Receiver, Sender}, oneshot, Mutex};
@@ -201,6 +201,8 @@ pub struct ChangeScriptPlayerSettings {
 
     // The OutputType for Change Script Player Log data.
     pub log_output: OutputType,
+
+
 }
 
 impl ChangeScriptPlayerSettings {
@@ -377,6 +379,10 @@ impl ChangeScriptPlayerSettings {
             telemetry_output: service_settings.telemetry_output,
             log_output: service_settings.log_output,
         })
+    }
+
+    pub fn get_id(&self) -> String {
+        format!("{}::{}::{}", self.test_id, self.source_id, self.test_run_id)
     }
 }
 
@@ -749,7 +755,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                 log::debug!("Processing command: {:?}", message.command);                
 
                 if let ChangeScriptPlayerCommand::ProcessDelayedRecord(seq) = message.command {
-                    process_delayed_test_script_record(seq, &mut player_state, &mut dispatcher);
+                    process_delayed_test_script_record(seq, &mut player_state, &mut dispatcher).await;
                 } else {
                     let transition_response = match player_state.status {
                         ChangeScriptPlayerStatus::Running => transition_from_running_state(&message.command, &mut player_state),
@@ -859,13 +865,13 @@ async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlay
         // Process the record immediately.
         log_scheduled_test_script_record(
             format!("Minimal delay of {}ns; processing immediately", delay).as_str(), &next_record);
-        resolve_test_script_record_effect(next_record, player_state, dispatcher);
+        resolve_test_script_record_effect(next_record, player_state, dispatcher).await;
     } else if delay < 10_000_000 {
         // Sleep inproc for efficiency, then process the record.
         log_scheduled_test_script_record(
             format!("Short delay of {}ns; processing after in-proc sleep", delay).as_str(), &next_record);
         std::thread::sleep(Duration::from_nanos(delay));
-        resolve_test_script_record_effect(next_record, player_state, dispatcher);
+        resolve_test_script_record_effect(next_record, player_state, dispatcher).await;
     } else {
         log_scheduled_test_script_record(
             format!("Long delay of {}ns; delaying record", delay).as_str(), &next_record);
@@ -888,7 +894,7 @@ async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlay
     };
 }
 
-fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
+async fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
 
     // Do nothing if the player is already in an error state.
     if let ChangeScriptPlayerStatus::Error = player_state.status {
@@ -922,7 +928,7 @@ fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mu
         };
     
         // Process the delayed record.
-        resolve_test_script_record_effect(delayed_record, player_state, dispatcher);
+        resolve_test_script_record_effect(delayed_record, player_state, dispatcher).await;
     
         // Clear the delayed record.
         player_state.delayed_record = None;
@@ -931,7 +937,7 @@ fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mu
     };
 }
 
-fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
+async fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
 
     // Do nothing if the player is already in an error state.
     if let ChangeScriptPlayerStatus::Error = player_state.status {
@@ -944,12 +950,12 @@ fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, player
             match player_state.status {
                 ChangeScriptPlayerStatus::Running => {
                     // Dispatch the SourceChangeEvent.
-                    let _ = dispatcher.dispatch_source_change_event(&change_record.source_change_event);
+                    let _ = dispatcher.dispatch_source_change_event(&change_record.source_change_event).await;
                 },
                 ChangeScriptPlayerStatus::Stepping => {
                     // Dispatch the SourceChangeEvent.
                     if player_state.steps_remaining > 0 {
-                        let _ = dispatcher.dispatch_source_change_event(&change_record.source_change_event);
+                        let _ = dispatcher.dispatch_source_change_event(&change_record.source_change_event).await;
 
                         player_state.steps_remaining -= 1;
                         if player_state.steps_remaining == 0 {

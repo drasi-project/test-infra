@@ -1,4 +1,6 @@
 
+use async_trait::async_trait;
+
 use crate::test_script::SourceChangeEvent;
 use super::SourceChangeEventDispatcher;
 
@@ -13,8 +15,9 @@ impl NullSourceChangeEventDispatcher {
     }
 }  
 
+#[async_trait]
 impl SourceChangeEventDispatcher for NullSourceChangeEventDispatcher {
-    fn dispatch_source_change_event(&mut self, _event: &SourceChangeEvent) -> anyhow::Result<()> {
+    async fn dispatch_source_change_event(&mut self, _event: &SourceChangeEvent) -> anyhow::Result<()> {
         Ok(())
     }
 }

@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 
@@ -49,8 +51,9 @@ impl JsonlFileSourceChangeDispatcher {
     }
 }
 
+#[async_trait]
 impl SourceChangeEventDispatcher for JsonlFileSourceChangeDispatcher {
-    fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
+    async fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
         let json_event = match serde_json::to_string(event) {
             Ok(e) => e,
             Err(e) => return Err(SourceChangeDispatcherError::Serde(e).into()),

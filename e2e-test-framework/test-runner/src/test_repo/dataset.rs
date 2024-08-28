@@ -6,8 +6,9 @@ use azure_storage_blobs::container::operations::BlobItem;
 use futures::stream::StreamExt;
 use serde::Serialize;
 use tokio::{fs::File, io::AsyncWriteExt};
+use walkdir::WalkDir;
 
-use crate::{mask_secret, test_script::change_script_player::ChangeScriptPlayerSettings};
+use crate::{config::{SourceConfig, SourceConfigDefaults}, mask_secret };
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DataSetSettings {
@@ -18,19 +19,122 @@ pub struct DataSetSettings {
     pub storage_path: String,
     pub test_id: String,
     pub source_id: String,
+    pub force_test_repo_cache_refresh: bool,
 }
 
 impl DataSetSettings {
-    pub fn from_change_script_player_settings(player_settings: &ChangeScriptPlayerSettings) -> Self {
-        DataSetSettings {
-            storage_account: player_settings.test_storage_account.clone(),
-            storage_access_key: player_settings.test_storage_access_key.clone(),
-            storage_container: player_settings.test_storage_container.clone(),
-            storage_path: player_settings.test_storage_path.clone(),
-            test_id: player_settings.test_id.clone(),
-            source_id: player_settings.source_id.clone(),
-        }
+    pub fn try_from_source_config(source_config: &SourceConfig, source_defaults: &SourceConfigDefaults ) -> anyhow::Result<Self> {
+
+        // If the SourceConfig doesn't contain a test_storage_account value, use the default value.
+        // If there is no default value, return an error.
+        let storage_account = match &source_config.test_storage_account {
+            Some(test_storage_account) => test_storage_account.clone(),
+            None => {
+                match &source_defaults.test_storage_account {
+                    Some(test_storage_account) => test_storage_account.clone(),
+                    None => {
+                        anyhow::bail!("No test_storage_account provided and no default value found.");
+                    }
+                }
+            }
+        };
+
+        // If the SourceConfig doesn't contain a test_storage_access_key value, use the default value.
+        // If there is no default value, return an error.
+        let storage_access_key = match &source_config.test_storage_access_key {
+            Some(test_storage_access_key) => test_storage_access_key.clone(),
+            None => {
+                match &source_defaults.test_storage_access_key {
+                    Some(test_storage_access_key) => test_storage_access_key.clone(),
+                    None => {
+                        anyhow::bail!("No test_storage_access_key provided and no default value found.");
+                    }
+                }
+            }
+        };
+
+        // If the SourceConfig doesn't contain a test_storage_access_key value, use the default value.
+        // If there is no default value, return an error.
+        let storage_container = match &source_config.test_storage_container {
+            Some(test_storage_container) => test_storage_container.clone(),
+            None => {
+                match &source_defaults.test_storage_container {
+                    Some(test_storage_container) => test_storage_container.clone(),
+                    None => {
+                        anyhow::bail!("No test_storage_container provided and no default value found.");
+                    }
+                }
+            }
+        };
+
+        // If the SourceConfig doesn't contain a test_storage_path value, use the default value.
+        // If there is no default value, return an error.
+        let storage_path = match &source_config.test_storage_path {
+            Some(test_storage_path) => test_storage_path.clone(),
+            None => {
+                match &source_defaults.test_storage_path {
+                    Some(test_storage_path) => test_storage_path.clone(),
+                    None => {
+                        anyhow::bail!("No test_storage_path provided and no default value found.");
+                    }
+                }
+            }
+        };
+
+        // If neither the SourceConfig nor the SourceDefaults contain a test_id, return an error.
+        let test_id = match &source_config.test_id {
+            Some(test_id) => test_id.clone(),
+            None => {
+                match &source_defaults.test_id {
+                    Some(test_id) => test_id.clone(),
+                    None => {
+                        anyhow::bail!("No test_id provided and no default value found.");
+                    }
+                }
+            }
+        };
+
+        // If the SourceConfig doesn't contain a source_id value, use the default value.
+        // If there is no default value, return an error.
+        let source_id = match &source_config.source_id {
+            Some(source_id) => source_id.clone(),
+            None => {
+                match &source_defaults.source_id {
+                    Some(source_id) => source_id.clone(),
+                    None => {
+                        anyhow::bail!("No source_id provided and no default value found.");
+                    }
+                }
+            }
+        };
+
+        let force_test_repo_cache_refresh = match &source_config.force_test_repo_cache_refresh {
+            Some(force) => *force,
+            None => *&source_defaults.force_test_repo_cache_refresh
+        };
+
+        Ok(Self {
+            storage_account,
+            storage_access_key,
+            storage_container,
+            storage_path,
+            test_id,
+            source_id,
+            force_test_repo_cache_refresh,
+        })
     }
+
+    // pub fn from_change_script_player_settings(player_settings: &ChangeScriptPlayerSettings) -> Self {
+    //     DataSetSettings {
+    //         force_test_repo_cache_refresh: player_settings.
+    //         storage_account: player_settings.test_storage_account.clone(),
+    //         storage_access_key: player_settings.test_storage_access_key.clone(),
+    //         storage_container: player_settings.test_storage_container.clone(),
+    //         storage_path: player_settings.test_storage_path.clone(),
+    //         test_id: player_settings.test_id.clone(),
+    //         source_id: player_settings.source_id.clone(),
+    //     }
+    // }
 
     pub fn get_id(&self) -> String {
         // Formulate a unique key for the TestSourceDataSet.
@@ -67,21 +171,38 @@ pub struct DataSet {
 }
 
 impl DataSet {
-    pub fn new(
+    pub async fn new(
         data_cache_root: PathBuf,
         settings: DataSetSettings,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
 
         // Formulate the local folder path for the TestSourceDataSet.
         let mut data_cache_path = data_cache_root.clone();
         data_cache_path.push(format!("test_repo/{}/sources/{}/", &settings.test_id, &settings.source_id));
 
-        DataSet {
+        let mut dataset = DataSet {
             id: settings.get_id(),
             settings,
             data_cache_path,
             content: None,
-        }
+        };
+
+        // For now, we will download content immediately, we may want to change this later.
+
+        // If the folder for the DataSet already exists, we assume we want to keep the data unless the DataSet
+        // is configured to force_test_repo_cache_refresh.
+        if dataset.data_cache_path.exists() {
+            if dataset.settings.force_test_repo_cache_refresh {
+                tokio::fs::remove_dir_all(&dataset.data_cache_path).await?;
+                dataset.download_content().await?;
+            } else {
+                dataset.catalog_existing_content().await?;
+            }
+        } else {
+            dataset.download_content().await?;
+        };
+
+        Ok(dataset)
     }
 
     pub fn get_content(&self) -> Option<DataSetContent> {
@@ -113,7 +234,21 @@ impl DataSet {
         match_count
     }
 
-    pub async fn download_content(&mut self) -> anyhow::Result<DataSetContent> {
+    async fn catalog_existing_content(&mut self) -> anyhow::Result<()> {
+        let mut change_scripts_path = self.data_cache_path.clone();
+        change_scripts_path.push("change_scripts");
+        let change_log_script_files = get_files_in_folder(change_scripts_path);
+
+        let mut bootstrap_scripts_path = self.data_cache_path.clone();
+        bootstrap_scripts_path.push("bootstrap_scripts");
+        let bootstrap_script_files = build_folder_file_map(bootstrap_scripts_path);
+
+        self.content = Some(DataSetContent::new(Some(change_log_script_files), Some(bootstrap_script_files)));
+
+        Ok(())
+    }
+
+    async fn download_content(&mut self) -> anyhow::Result<DataSetContent> {
         log::info!("Getting content for DataSet {}", &self.id);
 
         if self.content.is_none() {
@@ -308,4 +443,46 @@ async fn download_file(
     }
 
     Ok(())
+}
+
+fn get_files_in_folder(root: PathBuf) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path().to_path_buf();
+        if path.is_file() {
+            paths.push(path);
+        }
+    }
+
+    // Sort the vector of file paths
+    paths.sort();
+    
+    paths
+}
+
+fn build_folder_file_map(root: PathBuf) -> HashMap<String, Vec<PathBuf>> {
+    let mut folder_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
+
+    for entry in WalkDir::new(&root).into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path().to_path_buf();
+
+        if path.is_file() {
+            if let Some(parent) = path.parent() {
+                if let Some(folder_name) = parent.file_name().and_then(|name| name.to_str()) {
+                    folder_map
+                        .entry(folder_name.to_string())
+                        .or_insert_with(Vec::new)
+                        .push(path);
+                }
+            }
+        }
+    }
+
+    // Sort the vectors in the HashMap
+    for files in folder_map.values_mut() {
+        files.sort();
+    }
+
+    folder_map
 }

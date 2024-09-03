@@ -101,7 +101,7 @@ async fn main() {
 
                     for source_config in service_config.sources {
 
-                        match add_or_get_source(&source_config, &service_state.source_defaults, service_state.test_repo.as_mut().unwrap()).await {
+                        match add_or_get_source(&source_config, &mut service_state).await {
                             Ok(dataset) => {
                                 match create_change_script_player(source_config, &mut service_state, &dataset).await {
                                     Ok(player) => {
@@ -122,22 +122,6 @@ async fn main() {
                                 break;
                             }
                         }
-
-                        // if source_config.reactivator.is_some() {
-                        //     log::trace!("Creating ChangeScriptPlayer from {:#?}", &source_config.reactivator);
-
-                        //     match create_change_script_player(source_config, &mut service_state).await {
-                        //         Ok(player) => {
-                        //             service_state.reactivators.insert(player.get_id(), player);
-                        //         },
-                        //         Err(e) => {
-                        //             let msg = format!("Error creating ChangeScriptPlayer: {}", e);
-                        //             log::error!("{}", msg);
-                        //             service_state.service_status = ServiceStatus::Error(msg);
-                        //             break;
-                        //         }
-                        //     }
-                        // }   
                     };
                     service_state
                 },
@@ -189,10 +173,11 @@ async fn main() {
 
 }
 
-async fn add_or_get_source(source_config: &SourceConfig, source_defaults: &SourceConfigDefaults, test_repo: &mut LocalTestRepo) -> anyhow::Result<DataSet> {
+async fn add_or_get_source(source_config: &SourceConfig, service_state: &mut ServiceState) -> anyhow::Result<DataSet> {
     log::trace!("Initializing Source from {:#?}", source_config);
 
-    let data_set_settings = DataSetSettings::try_from_source_config(source_config, source_defaults )?;
+    let data_set_settings = DataSetSettings::try_from_source_config(source_config, &service_state.source_defaults )?;
+    let test_repo = service_state.test_repo.as_mut().ok_or_else(|| anyhow::anyhow!("Test Repo not initialized."))?;
 
     Ok(test_repo.add_or_get_data_set(data_set_settings).await?)
 }

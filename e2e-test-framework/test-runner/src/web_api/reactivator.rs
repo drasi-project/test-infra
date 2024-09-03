@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{test_script::change_script_player::{ChangeScriptPlayerConfig, ChangeScriptPlayerState}, ServiceStatus, SharedState};
+use crate::{add_or_get_source, config::SourceConfig, create_change_script_player, test_script::change_script_player::{ChangeScriptPlayerConfig, ChangeScriptPlayerState}, ServiceStatus, SharedState};
 
 #[derive(Debug, Serialize)]
 struct PlayerInfoResponse {
@@ -61,6 +61,58 @@ impl PlayerCommandError {
             test_run_id: config.player_settings.test_run_id.clone(),
             source_id: config.player_settings.source_id.clone(),
             error_msg,
+        }
+    }
+}
+
+pub(super) async fn add_player(
+    state: Extension<SharedState>,
+    body: Json<SourceConfig>,
+) -> impl IntoResponse {
+    log::info!("Processing call - add_player");
+
+    let mut service_state = state.write().await;
+
+    // If the service is an Error state, return an error and the description of the error.
+    if let ServiceStatus::Error(msg) = &service_state.service_status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    }
+
+    let source_config = body.0;
+
+    match add_or_get_source(&source_config, &mut service_state).await {
+        Ok(dataset) => {
+            match create_change_script_player(source_config, &mut service_state, &dataset).await {
+                Ok(player) => {
+                    let key = player.get_id();
+
+                    service_state.reactivators.insert(key.clone(), player);
+
+                    let player = service_state.reactivators.get(&key).unwrap();
+
+                    // Get the state of the ChangeScriptPlayer and return it.
+                    match player.get_state().await {
+                        Ok(response) => {
+                            Json(PlayerInfoResponse::new(player.get_config(), response.state)).into_response()
+                        },
+                        Err(e) => {
+                            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+                        }
+                    }
+                },
+                Err(e) => {
+                    let msg = format!("Error creating ChangeScriptPlayer: {}", e);
+                    log::error!("{}", &msg);
+                    service_state.service_status = ServiceStatus::Error(msg.clone());
+                    (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
+                }
+            }                                
+        },
+        Err(e) => {
+            let msg = format!("Error creating Source: {}", e);
+            log::error!("{}", &msg);
+            service_state.service_status = ServiceStatus::Error(msg.clone());
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
         }
     }
 }

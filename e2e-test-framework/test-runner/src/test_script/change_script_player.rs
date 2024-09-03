@@ -1,4 +1,4 @@
-use std::{fmt::self, path::PathBuf, str::FromStr, sync::Arc, time::SystemTime};
+use std::{path::PathBuf, str::FromStr, sync::Arc, time::SystemTime};
 
 use serde::Serialize;
 use tokio::sync::{mpsc::{Receiver, Sender}, oneshot, Mutex};
@@ -18,7 +18,6 @@ use crate::{
 };
 use crate::source_change_dispatchers::SourceChangeEventDispatcher;
 use crate::test_script::change_script_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChangeScriptPlayerError {
@@ -68,8 +67,8 @@ impl FromStr for ChangeScriptPlayerTimeMode {
     }
 }
 
-impl fmt::Display for ChangeScriptPlayerTimeMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ChangeScriptPlayerTimeMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Live => write!(f, "live"),
             Self::Recorded => write!(f, "recorded"),
@@ -125,8 +124,8 @@ impl FromStr for ChangeScriptPlayerSpacingMode {
     }
 }
 
-impl fmt::Display for ChangeScriptPlayerSpacingMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ChangeScriptPlayerSpacingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::None => write!(f, "none"),
             Self::Recorded => write!(f, "recorded"),

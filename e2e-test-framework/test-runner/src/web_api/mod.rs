@@ -11,7 +11,7 @@ use tokio::sync::RwLock;
 
 use crate::{test_repo::dataset::{DataSetContent, DataSetSettings}, ServiceState, ServiceStatus, SharedState};
 use proxy::acquire_handler;
-use reactivator::{get_player, get_player_list, pause_player, skip_player, start_player, step_player, stop_player};
+use reactivator::{add_player, get_player, get_player_list, pause_player, skip_player, start_player, step_player, stop_player};
 
 mod proxy;
 mod reactivator;
@@ -124,6 +124,7 @@ pub(crate) async fn start_web_api(service_state: ServiceState) {
         .route("/", get(service_info))
         .route("/acquire", post(acquire_handler))
         .route("/reactivators", get(get_player_list))
+        .route("/reactivators", post(add_player))
         .nest("/reactivators/:id", reactivator_routes)
         // .route("/sources", get(get_source_list))
         // .nest("/sources/:id", source_routes)

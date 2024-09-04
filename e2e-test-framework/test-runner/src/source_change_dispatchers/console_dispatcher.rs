@@ -1,3 +1,5 @@
+use chrono::prelude::*;
+
 use async_trait::async_trait;
 
 use crate::test_script::SourceChangeEvent;
@@ -18,9 +20,16 @@ impl ConsoleSourceChangeEventDispatcher {
 impl SourceChangeEventDispatcher for ConsoleSourceChangeEventDispatcher {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
-        log::info!("Initializing ConsoleSourceChangeEventDispatcher...");
+        let time = Local::now().format("%Y-%m-%d %H:%M:%S%.f");
 
-        println!("SourceChangeEvents: {:?}", events);
+        let event_list = events
+            .iter()
+            .map(|event| event.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        
+        println!("ConsoleSourceChangeEventDispatcher - Time: {}, SourceChangeEvents: [{}]", time, event_list);
+
         Ok(())
     }
 }

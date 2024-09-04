@@ -146,15 +146,6 @@ impl ChangeScriptReader {
         self.header.clone()
     }
 
-    fn get_current_file_name(&self) -> String {
-        if self.current_reader.is_some() {
-            let path = self.files[self.next_file_index-1].clone();
-            path.to_string_lossy().into_owned()
-        } else {
-            "None".to_string()
-        }
-    }
-
     // Function to get the next record from the ChangeScriptReader.
     // The ChangeScriptReader reads lines from the sequence of script files in the order they were provided.
     // If there are no more records to read, None is returned.
@@ -269,6 +260,15 @@ impl ChangeScriptReader {
                 offset_ns: self.offset_ns
             });
             Ok(self.footer.as_ref().unwrap().clone())
+        }
+    }
+
+    fn get_current_file_name(&self) -> String {
+        if self.current_reader.is_some() {
+            let path = self.files[self.next_file_index-1].clone();
+            path.to_string_lossy().into_owned()
+        } else {
+            "None".to_string()
         }
     }
 

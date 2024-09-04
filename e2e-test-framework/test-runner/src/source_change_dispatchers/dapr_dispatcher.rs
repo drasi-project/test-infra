@@ -28,9 +28,9 @@ impl DaprSourceChangeEventDispatcher {
 
 #[async_trait]
 impl SourceChangeEventDispatcher for DaprSourceChangeEventDispatcher {
-    async fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
+    async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
-        let data = serde_json::to_value(event)?;
+        let data = serde_json::to_value(events)?;
 
         let headers: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         // let traceparent = "000".to_string();

@@ -17,7 +17,7 @@ impl NullSourceChangeEventDispatcher {
 
 #[async_trait]
 impl SourceChangeEventDispatcher for NullSourceChangeEventDispatcher {
-    async fn dispatch_source_change_event(&mut self, _event: &SourceChangeEvent) -> anyhow::Result<()> {
+    async fn dispatch_source_change_events(&mut self, _events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
         Ok(())
     }
 }

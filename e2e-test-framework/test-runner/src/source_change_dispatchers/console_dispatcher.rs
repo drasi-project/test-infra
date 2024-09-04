@@ -16,11 +16,11 @@ impl ConsoleSourceChangeEventDispatcher {
 
 #[async_trait]
 impl SourceChangeEventDispatcher for ConsoleSourceChangeEventDispatcher {
-    async fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
+    async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
         log::info!("Initializing ConsoleSourceChangeEventDispatcher...");
 
-        println!("SourceChangeEvent: {:?}", event);
+        println!("SourceChangeEvent: {:?}", events);
         Ok(())
     }
 }

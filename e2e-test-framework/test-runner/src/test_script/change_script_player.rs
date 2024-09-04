@@ -949,12 +949,12 @@ async fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, 
             match player_state.status {
                 ChangeScriptPlayerStatus::Running => {
                     // Dispatch the SourceChangeEvent.
-                    let _ = dispatcher.dispatch_source_change_event(&change_record.source_change_event).await;
+                    let _ = dispatcher.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
                 },
                 ChangeScriptPlayerStatus::Stepping => {
                     // Dispatch the SourceChangeEvent.
                     if player_state.steps_remaining > 0 {
-                        let _ = dispatcher.dispatch_source_change_event(&change_record.source_change_event).await;
+                        let _ = dispatcher.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
 
                         player_state.steps_remaining -= 1;
                         if player_state.steps_remaining == 0 {

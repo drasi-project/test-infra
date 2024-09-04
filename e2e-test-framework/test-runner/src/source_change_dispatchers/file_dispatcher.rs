@@ -53,8 +53,8 @@ impl JsonlFileSourceChangeDispatcher {
 
 #[async_trait]
 impl SourceChangeEventDispatcher for JsonlFileSourceChangeDispatcher {
-    async fn dispatch_source_change_event(&mut self, event: &SourceChangeEvent) -> anyhow::Result<()> {
-        let json_event = match serde_json::to_string(event) {
+    async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
+        let json_event = match serde_json::to_string(&events) {
             Ok(e) => e,
             Err(e) => return Err(SourceChangeDispatcherError::Serde(e).into()),
         };

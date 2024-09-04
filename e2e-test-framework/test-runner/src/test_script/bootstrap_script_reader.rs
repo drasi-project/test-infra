@@ -130,7 +130,7 @@ impl BootstrapScriptReader {
     }
 
     // Function to get the header record from the script.
-    pub fn _get_header(&self) -> HeaderRecord {
+    pub fn get_header(&self) -> HeaderRecord {
         self.header.clone()
     }
 

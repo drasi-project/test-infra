@@ -641,8 +641,9 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
     // Create a SourceChangeEventDispatcher to send SourceChangeEvents.
     let (mut player_state, mut test_script_reader, mut dispatcher) = match ChangeScriptReader::new(player_config.script_files.clone()) {
         Ok(mut reader) => {
+
             let header = reader.get_header();
-            log::info!("Loaded ChangeScript. {:?}", header);
+            log::debug!("Loaded ChangeScript. {:?}", header);
 
             let mut player_state = ChangeScriptPlayerState::default();
             player_state.ignore_scripted_pause_commands = player_config.player_settings.ignore_scripted_pause_commands;

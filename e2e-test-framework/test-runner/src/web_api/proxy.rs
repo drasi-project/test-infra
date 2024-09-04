@@ -157,6 +157,10 @@ pub(super) async fn acquire_handler(
             // Create a new BootstrapScriptReader and read the content.
             match BootstrapScriptReader::new(bootstrap_files.clone()) {
                 Ok(reader) => {
+                    
+                    let header = reader.get_header();
+                    log::debug!("Loaded BootstrapScript. {:?}", header);
+                
                     match response.add_data(reader) {
                         Ok(_) => {},
                         Err(e) => {

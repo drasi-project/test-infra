@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use drasi_comms_abstractions::comms::{Headers, Publisher};
 use drasi_comms_dapr::comms::DaprHttpPublisher;
 
-use crate::test_script::{SourceChangeEvent, change_script_player::ChangeScriptPlayerConfig};
+use crate::script_source::{SourceChangeEvent, change_script_player::ChangeScriptPlayerConfig};
 use super::SourceChangeEventDispatcher;
 
 pub struct DaprSourceChangeEventDispatcher {

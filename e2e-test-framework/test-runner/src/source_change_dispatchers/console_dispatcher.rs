@@ -2,7 +2,7 @@ use chrono::prelude::*;
 
 use async_trait::async_trait;
 
-use crate::test_script::SourceChangeEvent;
+use crate::script_source::SourceChangeEvent;
 use super::SourceChangeEventDispatcher;
 
 pub struct ConsoleSourceChangeEventDispatcher {}

@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 
-use crate::test_script::{SourceChangeEvent, change_script_player::ChangeScriptPlayerConfig};
+use crate::script_source::{SourceChangeEvent, change_script_player::ChangeScriptPlayerConfig};
 use super::{SourceChangeEventDispatcher, SourceChangeDispatcherError};
 
 pub struct JsonlFileSourceChangeDispatcher {

@@ -11,14 +11,14 @@ use test_repo::{
     dataset::{DataSet, DataSetSettings},
     local_test_repo::LocalTestRepo,
 };
-use test_script::change_script_player::{
+use script_source::change_script_player::{
     ChangeScriptPlayerSettings, ChangeScriptPlayer, ChangeScriptPlayerConfig, 
 };
 
 mod config;
 mod source_change_dispatchers;
 mod test_repo;
-mod test_script;
+mod script_source;
 mod web_api;
 
 // An enum that represents the current state of the Service.

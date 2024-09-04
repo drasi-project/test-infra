@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use serde::{Serialize, Deserialize};
 
-use crate::{test_script::bootstrap_script_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, ServiceStatus, SharedState};
+use crate::{script_source::bootstrap_script_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, ServiceStatus, SharedState};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct AcquireRequestBody {

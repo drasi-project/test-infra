@@ -9,6 +9,8 @@ spec:
         app-port: "4002"
     reactivator:
       image: e2e-test-runner
+      dapr:
+        app-port: "5000"
       endpoints:
         api:
           setting: internal

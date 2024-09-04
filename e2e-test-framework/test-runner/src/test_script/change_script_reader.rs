@@ -146,7 +146,7 @@ impl ChangeScriptReader {
         self.header.clone()
     }
 
-    pub fn get_current_file_name(&self) -> String {
+    fn get_current_file_name(&self) -> String {
         if self.current_reader.is_some() {
             let path = self.files[self.next_file_index-1].clone();
             path.to_string_lossy().into_owned()

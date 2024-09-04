@@ -20,7 +20,7 @@ impl SourceChangeEventDispatcher for ConsoleSourceChangeEventDispatcher {
 
         log::info!("Initializing ConsoleSourceChangeEventDispatcher...");
 
-        println!("SourceChangeEvent: {:?}", events);
+        println!("SourceChangeEvents: {:?}", events);
         Ok(())
     }
 }

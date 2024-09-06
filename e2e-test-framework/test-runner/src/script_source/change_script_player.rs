@@ -802,16 +802,25 @@ fn read_next_sequenced_test_script_record(player_state: &mut ChangeScriptPlayerS
         log_test_script_player_state("Ignoring read_next_sequenced_test_script_record call due to error state", &player_state);
         return;
     }
+
+    // Do nothing if the ChangeScriptPlayer has finished processing all records.
+    if let ChangeScriptPlayerStatus::Finished = player_state.status {
+        log_test_script_player_state("Ignoring read_next_sequenced_test_script_record call because script is already Finished", &player_state);
+        return;
+    }
     
-    match test_script_reader.get_next_record() {
-        Ok(seq_record) => {
+    match test_script_reader.next() {
+        Some(Ok(seq_record)) => {
             // Assign the next record to the player state.
             player_state.next_record = Some(seq_record);
         },
-        Err(e) => {
+        Some(Err(e)) => {
             transition_to_error_state(format!("Error reading ChangeScriptRecord: {:?}", e).as_str(), player_state);
+        },
+        None => {
+            log_test_script_player_state("ChangeScriptReader.next() returned None, shouldn't be seeing this.", &player_state);
         }
-    }
+    };
 }
 
 async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>) {

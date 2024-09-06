@@ -31,14 +31,15 @@ impl AcquireResponseBody {
         }
     }
 
-    pub fn add_data(&mut self, mut reader: BootstrapScriptReader) -> anyhow::Result<()>{
-        loop {
-            match reader.get_next_record()?.record {
-                BootstrapScriptRecord::Node(record) => {
-                    self.nodes.push(Node::from_script_record(record));
+    pub fn add_data(&mut self, reader: BootstrapScriptReader) -> anyhow::Result<()>{
+
+        for record in reader {
+            match record?.record {
+                BootstrapScriptRecord::Node(node) => {
+                    self.nodes.push(Node::from_script_record(node));
                 },
-                BootstrapScriptRecord::Relation(record) => {
-                    self.rels.push(Relation::from_script_record(record));
+                BootstrapScriptRecord::Relation(rel) => {
+                    self.rels.push(Relation::from_script_record(rel));
                 },
                 BootstrapScriptRecord::Finish(_) => break,
                 _ => {}

@@ -149,7 +149,7 @@ impl ChangeScriptReader {
     // Function to get the next record from the ChangeScriptReader.
     // The ChangeScriptReader reads lines from the sequence of script files in the order they were provided.
     // If there are no more records to read, None is returned.
-    pub fn get_next_record(&mut self) -> anyhow::Result<SequencedChangeScriptRecord> {
+    fn get_next_record(&mut self) -> anyhow::Result<SequencedChangeScriptRecord> {
         // Once we have reached the end of the script, always return the Finish record.
         if self.footer.is_some() {
             return Ok(self.footer.as_ref().unwrap().clone());
@@ -286,5 +286,19 @@ impl ChangeScriptReader {
             self.current_reader = None;
         }
         Ok(())
+    }
+}
+
+impl Iterator for ChangeScriptReader {
+    type Item = anyhow::Result<SequencedChangeScriptRecord>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // If the ChangeScriptReader has finished reading all files, return None.
+        // This is determined by the value of 'footer', which will be set to a Finish record when the last record is read.
+        if self.footer.is_some() {
+            None
+        } else {
+            Some(self.get_next_record())
+        }
     }
 }

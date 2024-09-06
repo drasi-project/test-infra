@@ -17,7 +17,7 @@ use crate::{
     }
 };
 use crate::source_change_dispatchers::SourceChangeEventDispatcher;
-use crate::script_source::change_script_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};
+use crate::script_source::change_script_file_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChangeScriptPlayerError {

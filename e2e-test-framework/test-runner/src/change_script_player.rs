@@ -1,5 +1,6 @@
 use std::{path::PathBuf, str::FromStr, sync::Arc, time::SystemTime};
 
+use futures::future::join_all;
 use serde::Serialize;
 use tokio::sync::{mpsc::{Receiver, Sender}, oneshot, Mutex};
 use tokio::sync::mpsc::error::TryRecvError::{Empty, Disconnected};
@@ -7,16 +8,15 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::{
-    mask_secret, 
-    config::{OutputType, ServiceSettings, SourceConfig, SourceConfigDefaults}, 
-    source_change_dispatchers::{
-        console_dispatcher::ConsoleSourceChangeEventDispatcher,
-        dapr_dispatcher::DaprSourceChangeEventDispatcher,
-        file_dispatcher::JsonlFileSourceChangeDispatcher,
-        null_dispatcher::NullSourceChangeEventDispatcher,
+    config::{
+        OutputType, ServiceSettings, SourceChangeDispatcherConfig, SourceConfig, SourceConfigDefaults
+    }, mask_secret, script_source::SourceChangeEvent, source_change_dispatchers::{
+        console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings},
+        dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings},
+        jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings},
     }
 };
-use crate::source_change_dispatchers::SourceChangeEventDispatcher;
+use crate::source_change_dispatchers::SourceChangeDispatcher;
 use crate::script_source::change_script_file_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};
 
 #[derive(Debug, thiserror::Error)]
@@ -168,14 +168,7 @@ pub struct ChangeScriptPlayerSettings {
     // The Source ID for the Change Script Player.
     pub source_id: String,
 
-    // The address of the change queue.
-    pub dapr_pubsub_host: String,
-
-    // The port of the change queue.
-    pub dapr_pubsub_port: u16,
-
-    // The PubSub topic for the change queue.
-    pub dapr_pubsub_name: String,
+    pub dispatcher_configs: Vec<SourceChangeDispatcherConfig>,
     
     // Flag to indicate if the Service should start the Change Script Player immediately after initialization.
     pub start_immediately: bool,
@@ -200,8 +193,6 @@ pub struct ChangeScriptPlayerSettings {
 
     // The OutputType for Change Script Player Log data.
     pub log_output: OutputType,
-
-
 }
 
 impl ChangeScriptPlayerSettings {
@@ -306,46 +297,9 @@ impl ChangeScriptPlayerSettings {
             }
         };
 
-        // If the SourceConfig doesn't contain a dapr_pubsub_host value, use the default value.
-        // If there is no default value, return an error.
-        let dapr_pubsub_host = match &reactivator_config.dapr_pubsub_host {
-            Some(dapr_pubsub_host) => dapr_pubsub_host.clone(),
-            None => {
-                match &source_defaults.reactivator.dapr_pubsub_host {
-                    Some(dapr_pubsub_host) => dapr_pubsub_host.clone(),
-                    None => {
-                        anyhow::bail!("No dapr_pubsub_host provided and no default value found.");
-                    }
-                }
-            }
-        };
-
-        // If the SourceConfig doesn't contain a dapr_pubsub_port value, use the default value.
-        // If there is no default value, return an error.
-        let dapr_pubsub_port = match &reactivator_config.dapr_pubsub_port {
-            Some(dapr_pubsub_port) => dapr_pubsub_port.clone(),
-            None => {
-                match &source_defaults.reactivator.dapr_pubsub_port {
-                    Some(dapr_pubsub_port) => dapr_pubsub_port.clone(),
-                    None => {
-                        anyhow::bail!("No dapr_pubsub_port provided and no default value found.");
-                    }
-                }
-            }
-        };
-
-        // If the SourceConfig doesn't contain a dapr_pubsub_name value, use the default value.
-        // If there is no default value, return an error.
-        let dapr_pubsub_name = match &reactivator_config.dapr_pubsub_name {
-            Some(dapr_pubsub_name) => dapr_pubsub_name.clone(),
-            None => {
-                match &source_defaults.reactivator.dapr_pubsub_name {
-                    Some(dapr_pubsub_name) => dapr_pubsub_name.clone(),
-                    None => {
-                        anyhow::bail!("No dapr_pubsub_name provided and no default value found.");
-                    }
-                }
-            }
+        let dispatcher_configs = match &reactivator_config.dispatchers {
+            Some(dispatcher_configs) => dispatcher_configs.clone(),
+            None => source_defaults.reactivator.dispatchers.as_ref().unwrap().clone()
         };
 
         let spacing_mode = match &reactivator_config.spacing_mode {
@@ -366,9 +320,7 @@ impl ChangeScriptPlayerSettings {
             test_storage_container,
             test_storage_path,
             source_id,
-            dapr_pubsub_host,
-            dapr_pubsub_port,
-            dapr_pubsub_name,
+            dispatcher_configs,
             ignore_scripted_pause_commands: reactivator_config.ignore_scripted_pause_commands.unwrap_or(source_defaults.reactivator.ignore_scripted_pause_commands),
             start_immediately: reactivator_config.start_immediately.unwrap_or(source_defaults.reactivator.start_immediately),
             source_change_event_time_mode: time_mode,
@@ -638,8 +590,8 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
     // Initialize the ChangeScriptPlayer infrastructure.
     // Create a ChangeScriptReader to read the ChangeScript files.
     // Create a ChangeScriptPlayerState to hold the state of the ChangeScriptPlayer. The ChangeScriptPlayer always starts in a paused state.
-    // Create a SourceChangeEventDispatcher to send SourceChangeEvents.
-    let (mut player_state, mut test_script_reader, mut dispatcher) = match ChangeScriptReader::new(player_config.script_files.clone()) {
+    // Create a SourceChangeDispatcher to send SourceChangeEvents.
+    let (mut player_state, mut test_script_reader, mut dispatchers) = match ChangeScriptReader::new(player_config.script_files.clone()) {
         Ok(mut reader) => {
 
             let header = reader.get_header();
@@ -667,31 +619,74 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
             };
             player_state.current_replay_time = player_state.start_replay_time;
 
-            // Create a dispatcher to send SourceChangeEvents.
-            let create_dispatcher_result = match player_config.player_settings.event_output {
-                OutputType::Console => ConsoleSourceChangeEventDispatcher::new().map_err(|e| e),
-                OutputType::File => JsonlFileSourceChangeDispatcher::new(&player_config).map_err(|e| e),
-                OutputType::Publish => DaprSourceChangeEventDispatcher::new(&player_config).map_err(|e| e),
-                OutputType::None => Ok(NullSourceChangeEventDispatcher::new()),
-            };
-        
-            let dispatcher = match create_dispatcher_result {
-                Ok(d) => d,
-                Err(e) => {
-                    transition_to_error_state(format!("Error creating dispatcher: {:?}", e).as_str(), &mut player_state);
-                    NullSourceChangeEventDispatcher::new()
+            let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
+
+            for dispatcher_config in player_config.player_settings.dispatcher_configs.iter() {
+                match dispatcher_config {
+                    SourceChangeDispatcherConfig::Dapr(dapr_config) => {
+                        match DaprSourceChangeDispatcherSettings::try_from_config(dapr_config, player_config.player_settings.source_id.clone()) {
+                            Ok(settings) => {
+                                match DaprSourceChangeDispatcher::new(settings) {
+                                    Ok(d) => dispatchers.push(d),
+                                    Err(e) => {
+                                        transition_to_error_state(format!("Error creating DaprSourceChangeDispatcher: {:?}", e).as_str(), &mut player_state);
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                transition_to_error_state(format!("Error creating DaprSourceChangeDispatcherSettings: {:?}", e).as_str(), &mut player_state);
+                            }
+                        }
+                    },
+                    SourceChangeDispatcherConfig::Console(console_config ) => {
+                        match ConsoleSourceChangeDispatcherSettings::try_from_config(console_config) {
+                            Ok(settings) => {
+                                match ConsoleSourceChangeDispatcher::new(settings) {
+                                    Ok(d) => dispatchers.push(d),
+                                    Err(e) => {
+                                        transition_to_error_state(format!("Error creating ConsoleSourceChangeDispatcher: {:?}", e).as_str(), &mut player_state);
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                transition_to_error_state(format!("Error creating ConsoleSourceChangeDispatcherSettings: {:?}", e).as_str(), &mut player_state);
+                            }
+                        }
+                    },
+                    SourceChangeDispatcherConfig::JsonlFile(jsonl_file_config) => {
+                        // Construct the path to the local file used to store the generated SourceChangeEvents.
+                        let folder_path = format!("{}/test_runs/{}/{}/logs/sources/{}", 
+                            player_config.player_settings.data_cache_path, 
+                            player_config.player_settings.test_id, 
+                            player_config.player_settings.test_run_id, 
+                            player_config.player_settings.source_id);
+
+                        match JsonlFileSourceChangeDispatcherSettings::try_from_config(jsonl_file_config, folder_path) {
+                            Ok(settings) => {
+                                match JsonlFileSourceChangeDispatcher::new(settings) {
+                                    Ok(d) => dispatchers.push(d),
+                                    Err(e) => {
+                                        transition_to_error_state(format!("Error creating JsonlFileSourceChangeDispatcher: {:?}", e).as_str(), &mut player_state);
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                transition_to_error_state(format!("Error creating JsonlFileSourceChangeDispatcherSettings: {:?}", e).as_str(), &mut player_state);
+                            }
+                        }                        
+                    },
                 }
-            };
-    
+            }
+
             // Read the first ChangeScriptRecord.
             read_next_sequenced_test_script_record(&mut player_state, &mut reader);
 
-            (player_state, Some(reader), dispatcher)    
+            (player_state, Some(reader), dispatchers)    
         },
         Err(e) => {
             let mut player_state = ChangeScriptPlayerState::default();
             transition_to_error_state(format!("Error creating ChangeScriptReader: {:?}", e).as_str(), &mut player_state);
-            (player_state, None, NullSourceChangeEventDispatcher::new())
+            (player_state, None, vec![])
         }
     };
 
@@ -755,7 +750,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                 log::debug!("Processing command: {:?}", message.command);                
 
                 if let ChangeScriptPlayerCommand::ProcessDelayedRecord(seq) = message.command {
-                    process_delayed_test_script_record(seq, &mut player_state, &mut dispatcher).await;
+                    process_delayed_test_script_record(seq, &mut player_state, &mut dispatchers).await;
                 } else {
                     let transition_response = match player_state.status {
                         ChangeScriptPlayerStatus::Running => transition_from_running_state(&message.command, &mut player_state),
@@ -787,7 +782,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                 if let ChangeScriptPlayerStatus::Error = player_state.status {
                     log_test_script_player_state("Trying to process Next ChangeScriptRecord, but Player in error state", &player_state);
                 } else {
-                    process_next_test_script_record(&mut player_state, &mut dispatcher, delayer_tx_channel.clone()).await;
+                    process_next_test_script_record(&mut player_state, &mut dispatchers, delayer_tx_channel.clone()).await;
                     read_next_sequenced_test_script_record(&mut player_state, &mut test_script_reader.as_mut().unwrap());
                 }
             }
@@ -823,7 +818,7 @@ fn read_next_sequenced_test_script_record(player_state: &mut ChangeScriptPlayerS
     };
 }
 
-async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>) {
+async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlayerState, dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>) {
 
     // Do nothing if the player is already in an error state.
     if let ChangeScriptPlayerStatus::Error = player_state.status {
@@ -874,13 +869,13 @@ async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlay
         // Process the record immediately.
         log_scheduled_test_script_record(
             format!("Minimal delay of {}ns; processing immediately", delay).as_str(), &next_record);
-        resolve_test_script_record_effect(next_record, player_state, dispatcher).await;
+        resolve_test_script_record_effect(next_record, player_state, dispatchers).await;
     } else if delay < 10_000_000 {
         // Sleep inproc for efficiency, then process the record.
         log_scheduled_test_script_record(
             format!("Short delay of {}ns; processing after in-proc sleep", delay).as_str(), &next_record);
         std::thread::sleep(Duration::from_nanos(delay));
-        resolve_test_script_record_effect(next_record, player_state, dispatcher).await;
+        resolve_test_script_record_effect(next_record, player_state, dispatchers).await;
     } else {
         log_scheduled_test_script_record(
             format!("Long delay of {}ns; delaying record", delay).as_str(), &next_record);
@@ -903,7 +898,7 @@ async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlay
     };
 }
 
-async fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
+async fn process_delayed_test_script_record(delayed_record_seq: u64, player_state: &mut ChangeScriptPlayerState, dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>) {
 
     // Do nothing if the player is already in an error state.
     if let ChangeScriptPlayerStatus::Error = player_state.status {
@@ -937,7 +932,7 @@ async fn process_delayed_test_script_record(delayed_record_seq: u64, player_stat
         };
     
         // Process the delayed record.
-        resolve_test_script_record_effect(delayed_record, player_state, dispatcher).await;
+        resolve_test_script_record_effect(delayed_record, player_state, dispatchers).await;
     
         // Clear the delayed record.
         player_state.delayed_record = None;
@@ -946,7 +941,7 @@ async fn process_delayed_test_script_record(delayed_record_seq: u64, player_stat
     };
 }
 
-async fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, player_state: &mut ChangeScriptPlayerState, dispatcher: &mut Box<dyn SourceChangeEventDispatcher>) {
+async fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, player_state: &mut ChangeScriptPlayerState, dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>) {
 
     // Do nothing if the player is already in an error state.
     if let ChangeScriptPlayerStatus::Error = player_state.status {
@@ -959,12 +954,14 @@ async fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, 
             match player_state.status {
                 ChangeScriptPlayerStatus::Running => {
                     // Dispatch the SourceChangeEvent.
-                    let _ = dispatcher.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
+                    dispatch_source_change_events(dispatchers, vec!(&change_record.source_change_event)).await;
+                    // let _ = dispatcher.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
                 },
                 ChangeScriptPlayerStatus::Stepping => {
                     // Dispatch the SourceChangeEvent.
                     if player_state.steps_remaining > 0 {
-                        let _ = dispatcher.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
+                        dispatch_source_change_events(dispatchers, vec!(&change_record.source_change_event)).await;
+                        // let _ = dispatcher.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
 
                         player_state.steps_remaining -= 1;
                         if player_state.steps_remaining == 0 {
@@ -1019,6 +1016,24 @@ async fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, 
             log::warn!("Ignoring unexpected Change Script Comment: {:?}", comment_record);
         },
     };
+}
+
+async fn dispatch_source_change_events(dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>, events: Vec<&SourceChangeEvent>) {
+    
+    log::debug!("Dispatching SourceChangeEvents - #dispatchers:{}, #events:{}", dispatchers.len(), events.len());
+
+    let futures: Vec<_> = dispatchers.iter_mut()
+        .map(|dispatcher| {
+            let events = events.clone();
+            async move {
+                let _ = dispatcher.dispatch_source_change_events(events).await;
+            }
+        })
+        .collect();
+
+    // Wait for all of them to complete
+    // TODO - Handle errors properly.
+    let _ = join_all(futures).await;
 }
 
 fn time_shift_test_script_record(player_state: &ChangeScriptPlayerState, seq_record: SequencedChangeScriptRecord) -> ScheduledChangeScriptRecord {

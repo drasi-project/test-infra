@@ -168,9 +168,6 @@ fn is_recorded() -> String { "recorded".to_string() }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ReactivatorConfigDefaults {
-    pub dapr_pubsub_host: Option<String>,
-    pub dapr_pubsub_port: Option<u16>,
-    pub dapr_pubsub_name: Option<String>,
     #[serde(default = "is_false")]
     pub ignore_scripted_pause_commands: bool,
     #[serde(default = "is_recorded")]
@@ -179,18 +176,18 @@ pub struct ReactivatorConfigDefaults {
     pub start_immediately: bool,
     #[serde(default = "is_recorded")]
     pub time_mode: String,
+    #[serde(default)]
+    pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
 }
 
 impl Default for ReactivatorConfigDefaults {
     fn default() -> Self {
         ReactivatorConfigDefaults {
-            dapr_pubsub_host: None,
-            dapr_pubsub_port: None,
-            dapr_pubsub_name: None,
             ignore_scripted_pause_commands: is_false(),
             spacing_mode: is_recorded(),
             start_immediately: is_true(),
             time_mode: is_recorded(),
+            dispatchers: None,
         }
     }
 }
@@ -236,17 +233,6 @@ pub struct ProxyConfig {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ReactivatorConfig {
-    // *** The following fields are used to configure the Change Queue output destination. ***
-    // *** These are used by default if the output destination is "queue". ***
-    // The address of the change queue
-    pub dapr_pubsub_host: Option<String>,
-
-    // The port of the change queue
-    pub dapr_pubsub_port: Option<u16>,
-
-    // The PubSub topic for the change queue
-    pub dapr_pubsub_name: Option<String>,
-
     // Whether the player should ignore scripted pause commands.
     pub ignore_scripted_pause_commands: Option<bool>,
 
@@ -261,4 +247,32 @@ pub struct ReactivatorConfig {
     // Either "live", "recorded", or a specific time in the format "YYYY-MM-DDTHH:MM:SS:SSS Z".
     // If not provided, "recorded" is used.
     pub time_mode: Option<String>,
+
+    pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SourceChangeDispatcherConfig {
+    Console(ConsoleSourceChangeDispatcherConfig),
+    Dapr(DaprSourceChangeDispatcherConfig),
+    JsonlFile(JsonlFileSourceChangeDispatcherConfig),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsoleSourceChangeDispatcherConfig {
+    pub date_time_format: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaprSourceChangeDispatcherConfig {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub pubsub_name: Option<String>,
+    pub pubsub_topic: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonlFileSourceChangeDispatcherConfig {
+    pub folder_path: Option<String>,
 }

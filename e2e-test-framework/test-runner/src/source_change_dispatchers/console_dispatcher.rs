@@ -2,25 +2,43 @@ use chrono::prelude::*;
 
 use async_trait::async_trait;
 
-use crate::script_source::SourceChangeEvent;
-use super::SourceChangeEventDispatcher;
+use crate::{config::ConsoleSourceChangeDispatcherConfig, script_source::SourceChangeEvent};
+use super::SourceChangeDispatcher;
 
-pub struct ConsoleSourceChangeEventDispatcher {}
+#[derive(Debug)]
 
-impl ConsoleSourceChangeEventDispatcher {
-    pub fn new() -> anyhow::Result<Box<dyn SourceChangeEventDispatcher>> {
+pub struct ConsoleSourceChangeDispatcherSettings {
+    pub date_time_format: String,
+}
 
-        log::info!("Initializing ConsoleSourceChangeEventDispatcher...");
+impl ConsoleSourceChangeDispatcherSettings {
+    pub fn try_from_config(config: &ConsoleSourceChangeDispatcherConfig) -> anyhow::Result<Self> {
+        return Ok(Self {
+            date_time_format: config.date_time_format.clone().unwrap_or("%Y-%m-%d %H:%M:%S%.f".to_string()),
+        });
+    }
+}
 
-        Ok(Box::new(Self {}))
+pub struct ConsoleSourceChangeDispatcher {
+    settings: ConsoleSourceChangeDispatcherSettings,
+}
+
+impl ConsoleSourceChangeDispatcher {
+    pub fn new(settings: ConsoleSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher>> {
+
+        log::info!("Initializing ConsoleSourceChangeDispatcher from {:?}", settings);
+
+        Ok(Box::new(Self { settings }))
     }
 }  
 
 #[async_trait]
-impl SourceChangeEventDispatcher for ConsoleSourceChangeEventDispatcher {
+impl SourceChangeDispatcher for ConsoleSourceChangeDispatcher {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
-        let time = Local::now().format("%Y-%m-%d %H:%M:%S%.f");
+        log::trace!("ConsoleSourceChangeDispatcher - dispatch_source_change_events");
+
+        let time = Local::now().format(&self.settings.date_time_format);
 
         let event_list = events
             .iter()
@@ -28,7 +46,7 @@ impl SourceChangeEventDispatcher for ConsoleSourceChangeEventDispatcher {
             .collect::<Vec<_>>()
             .join(",");
         
-        println!("ConsoleSourceChangeEventDispatcher - Time: {}, SourceChangeEvents: [{}]", time, event_list);
+        println!("ConsoleSourceChangeDispatcher - Time: {}, SourceChangeEvents: [{}]", time, event_list);
 
         Ok(())
     }

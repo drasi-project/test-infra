@@ -4,6 +4,9 @@ use clap::Parser;
 use serde::{Serialize, Serializer};
 use tokio::sync::RwLock;
 
+use change_script_player::{
+    ChangeScriptPlayerSettings, ChangeScriptPlayer, ChangeScriptPlayerConfig, 
+};
 use config::{
     SourceConfig, SourceConfigDefaults, ServiceSettings, ServiceConfigFile,
 };
@@ -11,10 +14,8 @@ use test_repo::{
     dataset::{DataSet, DataSetSettings},
     local_test_repo::LocalTestRepo,
 };
-use script_source::change_script_player::{
-    ChangeScriptPlayerSettings, ChangeScriptPlayer, ChangeScriptPlayerConfig, 
-};
 
+mod change_script_player;
 mod config;
 mod source_change_dispatchers;
 mod test_repo;

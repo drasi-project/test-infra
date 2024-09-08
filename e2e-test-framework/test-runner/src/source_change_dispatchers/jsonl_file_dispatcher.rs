@@ -3,38 +3,43 @@ use async_trait::async_trait;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 
-use crate::script_source::{SourceChangeEvent, change_script_player::ChangeScriptPlayerConfig};
-use super::{SourceChangeEventDispatcher, SourceChangeDispatcherError};
+use crate::config::JsonlFileSourceChangeDispatcherConfig;
+use crate::script_source::SourceChangeEvent;
+use super::{SourceChangeDispatcher, SourceChangeDispatcherError};
+
+#[derive(Debug)]
+pub struct JsonlFileSourceChangeDispatcherSettings {
+    pub folder_path: String,
+}
+
+impl JsonlFileSourceChangeDispatcherSettings {
+    pub fn try_from_config(_config: &JsonlFileSourceChangeDispatcherConfig, folder_path: String) -> anyhow::Result<Self> {
+        return Ok(Self {
+            folder_path,
+        });
+    }
+}
 
 pub struct JsonlFileSourceChangeDispatcher {
-    // file_path: String,
+    _settings: JsonlFileSourceChangeDispatcherSettings,
     writer: BufWriter<File>,
 }
 
 impl JsonlFileSourceChangeDispatcher {
-    pub fn new(app_config: &ChangeScriptPlayerConfig) -> anyhow::Result<Box<dyn SourceChangeEventDispatcher>> {
+    pub fn new(settings: JsonlFileSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher>> {
 
-        log::info!("Initializing JsonlFileSourceChangeDispatcher...");
+        log::info!("Initializing JsonlFileSourceChangeDispatcher from {:?}", settings);
 
-        // let test_run_settings = app_config.test_run_settings.as_ref().unwrap();
-
-        // Construct the path to the local file used to store the generated SourceChangeEvents.
-        let local_dispatcher_folder = format!("{}/test_runs/{}/{}/logs/sources/{}", 
-            app_config.player_settings.data_cache_path, 
-            app_config.player_settings.test_id, 
-            app_config.player_settings.test_run_id, 
-            app_config.player_settings.source_id);
-    
         // Make sure the local change_data_folder exists, if not, create it.
         // If the folder cannot be created, return an error.
-        if !std::path::Path::new(&local_dispatcher_folder).exists() {
-            match std::fs::create_dir_all(&local_dispatcher_folder) {
+        if !std::path::Path::new(&settings.folder_path).exists() {
+            match std::fs::create_dir_all(&settings.folder_path) {
                 Ok(_) => {},
                 Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
             };
         }        
 
-        let file_path = format!("{}/source_change_event_dispatcher.jsonl", local_dispatcher_folder);
+        let file_path = format!("{}/source_change_dispatcher.jsonl", &settings.folder_path);
 
         let writer = match OpenOptions::new()
             .create(true)
@@ -45,15 +50,18 @@ impl JsonlFileSourceChangeDispatcher {
             };
 
         Ok(Box::new( Self { 
-            // file_path, 
+            _settings: settings,
             writer,
         }))
     }
 }
 
 #[async_trait]
-impl SourceChangeEventDispatcher for JsonlFileSourceChangeDispatcher {
+impl SourceChangeDispatcher for JsonlFileSourceChangeDispatcher {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
+
+        log::trace!("JsonlFileSourceChangeDispatcher - dispatch_source_change_events");
+
         let json_event = match serde_json::to_string(&events) {
             Ok(e) => e,
             Err(e) => return Err(SourceChangeDispatcherError::Serde(e).into()),

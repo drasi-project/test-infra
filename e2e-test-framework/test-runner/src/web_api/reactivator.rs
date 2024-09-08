@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{add_or_get_source, config::SourceConfig, create_change_script_player, script_source::change_script_player::{ChangeScriptPlayerConfig, ChangeScriptPlayerState}, ServiceStatus, SharedState};
+use crate::{add_or_get_source, config::SourceConfig, create_change_script_player, change_script_player::{ChangeScriptPlayerConfig, ChangeScriptPlayerState}, ServiceStatus, SharedState};
 
 #[derive(Debug, Serialize)]
 struct PlayerInfoResponse {

@@ -4,8 +4,7 @@ use crate::script_source::SourceChangeEvent;
 
 pub mod console_dispatcher;
 pub mod dapr_dispatcher;
-pub mod file_dispatcher;
-pub mod null_dispatcher;
+pub mod jsonl_file_dispatcher;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeDispatcherError {
@@ -23,12 +22,12 @@ impl std::fmt::Display for SourceChangeDispatcherError {
 }
 
 #[async_trait]
-pub trait SourceChangeEventDispatcher : Send {
+pub trait SourceChangeDispatcher : Send + Sync {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()>;
 }
 
 #[async_trait]
-impl SourceChangeEventDispatcher for Box<dyn SourceChangeEventDispatcher> {
+impl SourceChangeDispatcher for Box<dyn SourceChangeDispatcher> {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
         (**self).dispatch_source_change_events(events).await
     }

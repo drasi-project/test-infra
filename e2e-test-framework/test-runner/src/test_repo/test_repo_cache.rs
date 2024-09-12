@@ -45,7 +45,7 @@ impl TestRepoCache {
             TestRepoConfig::AzureStorageBlob{common_config, unique_config} => {
                 // Formulate the local folder path where the files from the TestRepo should be stored.
                 let mut data_cache_repo_path = self.data_cache_root_path.clone();
-                data_cache_repo_path.push(format!("test_repo/{}/", &common_config.id));
+                data_cache_repo_path.push(format!("test_repos/{}/", &common_config.id));
 
                 let settings = AzureStorageBlobTestRepoSettings::try_from_config(data_cache_repo_path, common_config, unique_config).await?;
                 let test_repo = AzureStorageBlobTestRepo::new(settings).await?;    
@@ -90,7 +90,7 @@ impl TestRepoCache {
 
         // Formulate the local folder path where the DataSet files will be stored.
         let mut dataset_cache_path = self.data_cache_root_path.clone();
-        dataset_cache_path.push(format!("test_repo/{}/{}/sources/{}/", test_repo_id, test_id, source_id));
+        dataset_cache_path.push(format!("test_repos/{}/{}/sources/{}/", test_repo_id, test_id, source_id));
 
         let test_source_content = test_repo.download_test_source_content(test_id.clone(), source_id.clone(), dataset_cache_path).await?;
 

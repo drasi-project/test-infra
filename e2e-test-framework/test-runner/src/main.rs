@@ -73,7 +73,7 @@ impl ServiceState {
                 }
             },
             None => {
-                log::debug!("No config file specified. Using defaults.");
+                log::debug!("No config file specified. Using defaults and waiting to be configured via Web API.");
                 ServiceConfig::default()
             }
         };
@@ -159,7 +159,7 @@ impl ServiceState {
             anyhow::bail!("Service is in an Error state: {}", msg);
         };
         
-        let test_run_source = TestRunSource::try_from_config(source_config, &self.source_defaults)?;
+        let test_run_source = TestRunSource::try_from_config(source_config, &self.source_defaults, self.service_params.clone())?;
 
         // If adding the TestRunSource fails, return an error. If this happens during initialization, the service
         // will be disabled in an error state, but if it happens due to a call from the Web API then TestRunner
@@ -236,12 +236,12 @@ async fn main() {
 
     // Set the ServiceStatus to Ready if it is not already in an Error state.
     match &service_state.service_status {
-        ServiceStatus::Error(msg) => {
-            log::error!("Test Runner failed to initialize correctly due to error: {}", msg);            
+        ServiceStatus::Error(_) => {
+            log::error!("Test Runner failed to initialize correctly, ServiceState: {:?}", &service_state.service_status);            
         },
         _ => {
-            log::info!("Test Runner initialized successfully.");
             service_state.service_status = ServiceStatus::Ready;
+            log::info!("Test Runner initialized successfully, ServiceState: {:?}", &service_state.service_status);            
         }
     }
 

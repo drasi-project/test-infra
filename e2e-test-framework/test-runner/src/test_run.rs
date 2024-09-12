@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
-use crate::config::{ProxyConfig, ReactivatorConfig, SourceChangeDispatcherConfig, SourceConfig};
+use crate::config::{ProxyConfig, ReactivatorConfig, ServiceParams, SourceChangeDispatcherConfig, SourceConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum TimeMode {
@@ -106,6 +106,7 @@ impl Default for SpacingMode {
 #[derive(Clone, Debug, Serialize)]
 pub struct TestRunSource {
     pub id: String,
+    pub service_params: ServiceParams,
     pub source_id: String,
     pub test_id: String,
     pub test_repo_id: String,
@@ -115,7 +116,7 @@ pub struct TestRunSource {
 }
 
 impl TestRunSource {
-    pub fn try_from_config(config: &SourceConfig, defaults: &SourceConfig) -> anyhow::Result<Self> {
+    pub fn try_from_config(config: &SourceConfig, defaults: &SourceConfig, service_params: ServiceParams) -> anyhow::Result<Self> {
         // If neither the SourceConfig nor the SourceConfig defaults contain a source_id, return an error.
         let source_id = config.source_id.as_ref()
             .or_else( || defaults.source_id.as_ref())
@@ -176,6 +177,7 @@ impl TestRunSource {
 
         Ok(Self {
             id,
+            service_params,
             source_id,
             test_id,
             test_repo_id,

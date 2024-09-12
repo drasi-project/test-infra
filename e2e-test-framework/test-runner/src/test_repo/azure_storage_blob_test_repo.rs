@@ -141,7 +141,7 @@ impl TestRepo for AzureStorageBlobTestRepo {
         }
 
         // Formulate the remote repo path for the bootstrap script files
-        let bootstrap_scripts_repo_path = format!("{}/{}/sources/{}/change_scripts/", 
+        let bootstrap_scripts_repo_path = format!("{}/{}/sources/{}/bootstrap_scripts/", 
             self.settings.storage_root_path, test_id, source_id);
     
         // Download the bootstrap_script files

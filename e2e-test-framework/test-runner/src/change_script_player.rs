@@ -43,12 +43,12 @@ pub enum ChangeScriptPlayerError {
 pub struct ChangeScriptPlayerSettings {
     pub reactivator: TestRunReactivator,
     pub script_files: Vec<PathBuf>,
-    pub service_settings: ServiceParams,
+    pub service_params: ServiceParams,
     pub test_run_source: TestRunSource,
 }
 
 impl ChangeScriptPlayerSettings {
-    pub fn try_from_test_run_source(test_run_source: TestRunSource, service_settings: ServiceParams, script_files: Vec<PathBuf>) -> anyhow::Result<Self> {
+    pub fn try_from_test_run_source(test_run_source: TestRunSource, service_params: ServiceParams, script_files: Vec<PathBuf>) -> anyhow::Result<Self> {
 
         // If the SourceConfig doesnt contain a ReactivatorConfig, log and return an error.
         // Otherwise, clone the TestRunSource and extract the TestRunReactivator.
@@ -64,7 +64,7 @@ impl ChangeScriptPlayerSettings {
         Ok(ChangeScriptPlayerSettings {
             reactivator,
             script_files,
-            service_settings,
+            service_params,
             test_run_source,
         })
     }
@@ -363,8 +363,8 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                         // Construct the path to the local file used to store the generated SourceChangeEvents.
                         let folder_path = match &jsonl_file_config.folder_path {
                             Some(path) => path.clone(),
-                            None => format!("{}/test_runs/{}/{}/logs/sources/{}", 
-                                player_settings.service_settings.data_cache_path, 
+                            None => format!("{}/test_output/{}/{}/change_logs/{}", 
+                                player_settings.service_params.data_cache_path, 
                                 player_settings.test_run_source.test_id, 
                                 player_settings.test_run_source.test_run_id, 
                                 player_settings.test_run_source.source_id)

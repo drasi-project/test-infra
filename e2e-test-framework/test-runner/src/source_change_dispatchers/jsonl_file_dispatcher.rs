@@ -40,7 +40,7 @@ impl JsonlFileSourceChangeDispatcher {
             };
         }        
 
-        let file_path = format!("{}/source_change_dispatcher.jsonl", &settings.folder_path);
+        let file_path = format!("{}/source_change_events.jsonl", &settings.folder_path);
 
         let writer = match OpenOptions::new()
             .create(true)

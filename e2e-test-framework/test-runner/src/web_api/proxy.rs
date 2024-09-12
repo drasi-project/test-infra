@@ -120,26 +120,12 @@ pub(super) async fn acquire_handler(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
-        // Iterate through the datasets in the local test repo and identify the dataset that
-        // has the most matching labels.
-
+        // Identify the dataset that has the most matching labels.
         // Create a hashset of the requested node and relation labels.
         let label_set = HashSet::from_iter(requested_labels.clone());
 
-        let mut best_match = None;
-        let mut best_match_count = 0;
-
-        for (id, ds) in &state.test_repo.as_ref().unwrap().data_sets {
-            let match_count = ds.count_bootstrap_type_intersection(&label_set);
-
-            if match_count > best_match_count {
-                best_match = Some(id);
-                best_match_count = match_count;
-            }
-        }
-
-        match best_match {
-            Some(id) => state.test_repo.as_ref().unwrap().data_sets.get(id).unwrap().clone(),
+        match state.test_repo_cache.as_ref().unwrap().get_dataset_for_bootstrap(&label_set) {
+            Some(dataset) => dataset,
             None => return Json(AcquireResponseBody::new()).into_response()
         }
     };
@@ -147,7 +133,7 @@ pub(super) async fn acquire_handler(
     // Read the boostrap data for each node and relation type and return the response.
     let mut response = AcquireResponseBody::new();
 
-    let bootstrap_data = dataset.get_content().unwrap().bootstrap_script_files.unwrap();
+    let bootstrap_data = dataset.content.bootstrap_script_files.unwrap();
 
     for label in &requested_labels {
         if let Some(bootstrap_files) = bootstrap_data.get(label) {

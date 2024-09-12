@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr, sync::Arc, time::SystemTime};
+use std::{path::PathBuf, sync::Arc, time::SystemTime};
 
 use futures::future::join_all;
 use serde::Serialize;
@@ -8,13 +8,11 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::{
-    config::{
-        OutputType, ServiceSettings, SourceChangeDispatcherConfig, SourceConfig, SourceConfigDefaults
-    }, mask_secret, script_source::SourceChangeEvent, source_change_dispatchers::{
-        console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings},
-        dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings},
-        jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings},
-    }
+    config::{ServiceParams, SourceChangeDispatcherConfig}, 
+    script_source::SourceChangeEvent, source_change_dispatchers::{
+        console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
+    }, 
+    test_run::{SpacingMode, TestRunReactivator, TestRunSource, TimeMode}, 
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 use crate::script_source::change_script_file_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};
@@ -41,299 +39,38 @@ pub enum ChangeScriptPlayerError {
     PauseToStep,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum ChangeScriptPlayerTimeMode {
-    Live,
-    Recorded,
-    Rebased(u64),
-}
-
-impl FromStr for ChangeScriptPlayerTimeMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s {
-            "live" => Ok(Self::Live),
-            "recorded" => Ok(Self::Recorded),
-            _ => {
-                match chrono::DateTime::parse_from_rfc3339(s) {
-                    Ok(t) => Ok(Self::Rebased(t.timestamp_nanos_opt().unwrap() as u64)),
-                    Err(e) => {
-                        anyhow::bail!("Error parsing ChangeScriptPlayerTimeMode - value:{}, error:{}", s, e);
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for ChangeScriptPlayerTimeMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Live => write!(f, "live"),
-            Self::Recorded => write!(f, "recorded"),
-            Self::Rebased(time) => write!(f, "{}", time),
-        }
-    }
-}
-
-impl Default for ChangeScriptPlayerTimeMode {
-    fn default() -> Self {
-        Self::Recorded
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum ChangeScriptPlayerSpacingMode {
-    None,
-    Recorded,
-    Fixed(u64),
-}
-
-// Implementation of FromStr for ReplayEventSpacingMode.
-// For the Fixed variant, the spacing is specified as a string duration such as '5s' or '100n'.
-// Supported units are seconds ('s'), milliseconds ('m'), microseconds ('u'), and nanoseconds ('n').
-// If the string can't be parsed as a TimeDelta, an error is returned.
-impl FromStr for ChangeScriptPlayerSpacingMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s {
-            "none" => Ok(Self::None),
-            "recorded" => Ok(Self::Recorded),
-            _ => {
-                // Parse the string as a number, followed by a time unit character.
-                let (num_str, unit_str) = s.split_at(s.len() - 1);
-                let num = match num_str.parse::<u64>() {
-                    Ok(num) => num,
-                    Err(e) => {
-                        anyhow::bail!("Error parsing ChangeScriptPlayerSpacingMode: {}", e);
-                    }
-                };
-                match unit_str {
-                    "s" => Ok(Self::Fixed(num * 1000000000)),
-                    "m" => Ok(Self::Fixed(num * 1000000)),
-                    "u" => Ok(Self::Fixed(num * 1000)),
-                    "n" => Ok(Self::Fixed(num)),
-                    _ => {
-                        anyhow::bail!("Invalid ChangeScriptPlayerSpacingMode: {}", s);
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for ChangeScriptPlayerSpacingMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::None => write!(f, "none"),
-            Self::Recorded => write!(f, "recorded"),
-            Self::Fixed(d) => write!(f, "{}", d),
-        }
-    }
-}
-
-impl Default for ChangeScriptPlayerSpacingMode {
-    fn default() -> Self {
-        Self::Recorded
-    }
-}
-
-// The ChangeScriptPlayerSettings struct holds the configuration settings that are used by the Change Script Player.
-// It is created based on the SourceConfig either loaded from the Service config file or passed in to the Web API, and is 
-// combined with the ServiceSettings and default values to create the final set of configuration.
-// It is static and does not change during the execution of the Change Script Player, it is not used to track the active state of the Change Script Player.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ChangeScriptPlayerSettings {
-    // The Test ID.
-    pub test_id: String,
-
-    // The Test Run ID.
-    pub test_run_id: String,
-
-    // The Test Storage Account where the Test Repo is located.
-    pub test_storage_account: String,
-
-    // The Test Storage Access Key where the Test Repo is located.
-    #[serde(serialize_with = "mask_secret")]
-    pub test_storage_access_key: String,
-
-    // The Test Storage Container where the Test Repo is located.
-    pub test_storage_container: String,
-
-    // The Test Storage Path where the Test Repo is located.
-    pub test_storage_path: String,
-
-    // The Source ID for the Change Script Player.
-    pub source_id: String,
-
-    pub dispatcher_configs: Vec<SourceChangeDispatcherConfig>,
-    
-    // Flag to indicate if the Service should start the Change Script Player immediately after initialization.
-    pub start_immediately: bool,
-
-    // Whether the ChangeScriptPlayer should ignore scripted pause commands.
-    pub ignore_scripted_pause_commands: bool,
-
-    // SourceChangeEvent Time Mode for the Change Script Player.
-    pub source_change_event_time_mode: ChangeScriptPlayerTimeMode,
-
-    // SourceChangeEvent Spacing Mode for the Change Script Player.
-    pub source_change_event_spacing_mode: ChangeScriptPlayerSpacingMode,
-
-    // The path where data used and generated in the Change Script Player gets stored.
-    pub data_cache_path: String,
-
-    // The OutputType for Source Change Events.
-    pub event_output: OutputType,
-
-    // The OutputType for Change Script Player Telemetry data.
-    pub telemetry_output: OutputType,
-
-    // The OutputType for Change Script Player Log data.
-    pub log_output: OutputType,
+    pub reactivator: TestRunReactivator,
+    pub script_files: Vec<PathBuf>,
+    pub service_settings: ServiceParams,
+    pub test_run_source: TestRunSource,
 }
 
 impl ChangeScriptPlayerSettings {
-    // Function to create a new ChangeScriptPlayerSettings by combining a SourceConfig and the Service Settings.
-    // The ChangeScriptPlayerSettings control the configuration and operation of a TestRun.   
-    pub fn try_from_source_config(source_config: &SourceConfig, source_defaults: &SourceConfigDefaults, service_settings: &ServiceSettings) -> anyhow::Result<Self> {
+    pub fn try_from_test_run_source(test_run_source: TestRunSource, service_settings: ServiceParams, script_files: Vec<PathBuf>) -> anyhow::Result<Self> {
 
         // If the SourceConfig doesnt contain a ReactivatorConfig, log and return an error.
-        let reactivator_config = match &source_config.reactivator {
-            Some(reactivator_config) => reactivator_config,
+        // Otherwise, clone the TestRunSource and extract the TestRunReactivator.
+        let (test_run_source, reactivator) = match test_run_source.reactivator {
+            Some(reactivator) => {
+                (TestRunSource { reactivator: None, ..test_run_source }, reactivator)
+            },
             None => {
-                anyhow::bail!("No ReactivatorConfig provided in SourceConfig: {:?}", source_config);
+                anyhow::bail!("No ReactivatorConfig provided in TestRunSource: {:?}", test_run_source);
             }
-        };
-
-        // If neither the SourceConfig nor the SourceDefaults contain a test_id, return an error.
-        let test_id = match &source_config.test_id {
-            Some(test_id) => test_id.clone(),
-            None => {
-                match &source_defaults.test_id {
-                    Some(test_id) => test_id.clone(),
-                    None => {
-                        anyhow::bail!("No test_id provided and no default value found.");
-                    }
-                }
-            }
-        };
-
-        // If the SourceConfig doesn't contain a test_run_id, create one based on current time.
-        let test_run_id = match &source_config.test_run_id {
-            Some(test_run_id) => test_run_id.clone(),
-            None => chrono::Utc::now().format("%Y%m%d%H%M%S").to_string()
-        };
-
-        // If the SourceConfig doesn't contain a test_storage_account value, use the default value.
-        // If there is no default value, return an error.
-        let test_storage_account = match &source_config.test_storage_account {
-            Some(test_storage_account) => test_storage_account.clone(),
-            None => {
-                match &source_defaults.test_storage_account {
-                    Some(test_storage_account) => test_storage_account.clone(),
-                    None => {
-                        anyhow::bail!("No test_storage_account provided and no default value found.");
-                    }
-                }
-            }
-        };
-
-        // If the SourceConfig doesn't contain a test_storage_access_key value, use the default value.
-        // If there is no default value, return an error.
-        let test_storage_access_key = match &source_config.test_storage_access_key {
-            Some(test_storage_access_key) => test_storage_access_key.clone(),
-            None => {
-                match &source_defaults.test_storage_access_key {
-                    Some(test_storage_access_key) => test_storage_access_key.clone(),
-                    None => {
-                        anyhow::bail!("No test_storage_access_key provided and no default value found.");
-                    }
-                }
-            }
-        };
-
-        // If the SourceConfig doesn't contain a test_storage_access_key value, use the default value.
-        // If there is no default value, return an error.
-        let test_storage_container = match &source_config.test_storage_container {
-            Some(test_storage_container) => test_storage_container.clone(),
-            None => {
-                match &source_defaults.test_storage_container {
-                    Some(test_storage_container) => test_storage_container.clone(),
-                    None => {
-                        anyhow::bail!("No test_storage_container provided and no default value found.");
-                    }
-                }
-            }
-        };
-
-        // If the SourceConfig doesn't contain a test_storage_path value, use the default value.
-        // If there is no default value, return an error.
-        let test_storage_path = match &source_config.test_storage_path {
-            Some(test_storage_path) => test_storage_path.clone(),
-            None => {
-                match &source_defaults.test_storage_path {
-                    Some(test_storage_path) => test_storage_path.clone(),
-                    None => {
-                        anyhow::bail!("No test_storage_path provided and no default value found.");
-                    }
-                }
-            }
-        };
-
-        // If the SourceConfig doesn't contain a source_id value, use the default value.
-        // If there is no default value, return an error.
-        let source_id = match &source_config.source_id {
-            Some(source_id) => source_id.clone(),
-            None => {
-                match &source_defaults.source_id {
-                    Some(source_id) => source_id.clone(),
-                    None => {
-                        anyhow::bail!("No source_id provided and no default value found.");
-                    }
-                }
-            }
-        };
-
-        let dispatcher_configs = match &reactivator_config.dispatchers {
-            Some(dispatcher_configs) => dispatcher_configs.clone(),
-            None => source_defaults.reactivator.dispatchers.as_ref().unwrap().clone()
-        };
-
-        let spacing_mode = match &reactivator_config.spacing_mode {
-            Some(mode) => ChangeScriptPlayerSpacingMode::from_str(&mode).unwrap(),
-            None => ChangeScriptPlayerSpacingMode::from_str(&source_defaults.reactivator.spacing_mode).unwrap()
-        };
-
-        let time_mode = match &reactivator_config.time_mode {
-            Some(mode) => ChangeScriptPlayerTimeMode::from_str(&mode).unwrap(),
-            None => ChangeScriptPlayerTimeMode::from_str(&source_defaults.reactivator.time_mode).unwrap()
         };
 
         Ok(ChangeScriptPlayerSettings {
-            test_id,
-            test_run_id,
-            test_storage_account,
-            test_storage_access_key,
-            test_storage_container,
-            test_storage_path,
-            source_id,
-            dispatcher_configs,
-            ignore_scripted_pause_commands: reactivator_config.ignore_scripted_pause_commands.unwrap_or(source_defaults.reactivator.ignore_scripted_pause_commands),
-            start_immediately: reactivator_config.start_immediately.unwrap_or(source_defaults.reactivator.start_immediately),
-            source_change_event_time_mode: time_mode,
-            source_change_event_spacing_mode: spacing_mode,
-            data_cache_path: service_settings.data_cache_path.clone(),
-            event_output: service_settings.event_output,
-            telemetry_output: service_settings.telemetry_output,
-            log_output: service_settings.log_output,
+            reactivator,
+            script_files,
+            service_settings,
+            test_run_source,
         })
     }
 
     pub fn get_id(&self) -> String {
-        format!("{}::{}::{}", self.test_id, self.source_id, self.test_run_id)
+        self.test_run_source.id.clone()
     }
 }
 
@@ -383,66 +120,35 @@ impl Serialize for ChangeScriptPlayerStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ChangeScriptPlayerConfig {
-    pub player_settings: ChangeScriptPlayerSettings,
-    pub script_files: Vec<PathBuf>,
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct ChangeScriptPlayerState {
-    // Status of the ChangeScriptPlayer.
-    pub status: ChangeScriptPlayerStatus,
-
-    // Error message if the ChangeScriptPlayer is in an Error state.
-    pub error_message: Option<String>,
-
-    // The time mode setting for the ChangeScriptPlayer.
-    // This setting determines how the player will adjust the time values in the ChangeScriptRecords.
-    pub time_mode: ChangeScriptPlayerTimeMode,
-
-    // The spacing mode setting for the ChangeScriptPlayer.
-    // This setting determines how the player will space out the processing of the ChangeScriptRecords.
-    pub spacing_mode: ChangeScriptPlayerSpacingMode,
-
-    // The 'starting' time for the player based on config and what is being replayed.
-    pub start_replay_time: u64,
-
-    // The 'current' time as it is in the player based on config and what is being replayed.
-    // A None value means the current time is not set, and the player will always just use the system time.
     pub current_replay_time: u64,
-    
-    // Variable to manage the progress of skipping.
-    // Holds the number of ChangeScriptRecords to skip before returning to a Paused state.
-    pub skips_remaining: u64,
-
-    // Variable to manage the progress of stepping.
-    // Holds the number of ChangeScriptRecords to step through before returning to a Paused state.
-    pub steps_remaining: u64,
-
-    // The ChangeScriptRecord that is currently being delayed prior to processing.
     pub delayed_record: Option<ScheduledChangeScriptRecord>,    
-
-    // The next ChangeScriptRecord to be processed.
-    pub next_record: Option<SequencedChangeScriptRecord>,
-
+    pub error_message: Option<String>,
     pub ignore_scripted_pause_commands: bool,
+    pub next_record: Option<SequencedChangeScriptRecord>,
+    pub skips_remaining: u64,
+    pub spacing_mode: SpacingMode,
+    pub start_replay_time: u64,
+    pub status: ChangeScriptPlayerStatus,
+    pub steps_remaining: u64,
+    pub time_mode: TimeMode,
 }
 
 impl Default for ChangeScriptPlayerState {
     fn default() -> Self {
         Self {
-            status: ChangeScriptPlayerStatus::Paused,
-            error_message: None,
-            start_replay_time: 0,
             current_replay_time: 0,
             delayed_record: None,
+            error_message: None,
+            ignore_scripted_pause_commands: false,
             next_record: None,
             skips_remaining: 0,
+            spacing_mode: SpacingMode::None,
+            start_replay_time: 0,
+            status: ChangeScriptPlayerStatus::Paused,
             steps_remaining: 0,
-            time_mode: ChangeScriptPlayerTimeMode::Live,
-            spacing_mode: ChangeScriptPlayerSpacingMode::None,
-            ignore_scripted_pause_commands: false,
+            time_mode: TimeMode::Live,
         }
     }
 }
@@ -509,7 +215,7 @@ pub struct DelayChangeScriptRecordMessage {
 #[derive(Clone, Debug)]
 pub struct ChangeScriptPlayer {
     // Channel used to send messages to the ChangeScriptPlayer thread.
-    config: ChangeScriptPlayerConfig,
+    settings: ChangeScriptPlayerSettings,
     player_tx_channel: Sender<ChangeScriptPlayerMessage>,
     _delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>,
     _player_thread_handle: Arc<Mutex<JoinHandle<()>>>,
@@ -517,15 +223,15 @@ pub struct ChangeScriptPlayer {
 }
 
 impl ChangeScriptPlayer {
-    pub async fn new(config: ChangeScriptPlayerConfig) -> Self {
+    pub async fn new(settings: ChangeScriptPlayerSettings) -> Self {
         let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
         let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
 
-        let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, delayer_tx_channel.clone(), config.clone()));
+        let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, delayer_tx_channel.clone(), settings.clone()));
         let delayer_thread_handle = tokio::spawn(delayer_thread(delayer_rx_channel, player_tx_channel.clone()));
 
         Self {
-            config,
+            settings,
             player_tx_channel,
             _delayer_tx_channel: delayer_tx_channel,
             _player_thread_handle: Arc::new(Mutex::new(player_thread_handle)),
@@ -534,11 +240,11 @@ impl ChangeScriptPlayer {
     }
 
     pub fn get_id(&self) -> String {
-        self.config.player_settings.test_run_id.clone()
+        self.settings.get_id()
     }
 
-    pub fn get_config(&self) -> ChangeScriptPlayerConfig {
-        self.config.clone()
+    pub fn get_settings(&self) -> ChangeScriptPlayerSettings {
+        self.settings.clone()
     }
 
     pub async fn get_state(&self) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
@@ -583,7 +289,7 @@ impl ChangeScriptPlayer {
 // Function that defines the operation of the ChangeScriptPlayer thread.
 // The ChangeScriptPlayer thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
 // The Web API function communicate via a channel and provide oneshot channels for the ChangeScriptPlayer to send responses back.
-pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMessage>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>, player_config: ChangeScriptPlayerConfig) {
+pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMessage>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>, player_settings: ChangeScriptPlayerSettings) {
 
     log::info!("ChangeScriptPlayer thread started...");
 
@@ -591,28 +297,28 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
     // Create a ChangeScriptReader to read the ChangeScript files.
     // Create a ChangeScriptPlayerState to hold the state of the ChangeScriptPlayer. The ChangeScriptPlayer always starts in a paused state.
     // Create a SourceChangeDispatcher to send SourceChangeEvents.
-    let (mut player_state, mut test_script_reader, mut dispatchers) = match ChangeScriptReader::new(player_config.script_files.clone()) {
+    let (mut player_state, mut test_script_reader, mut dispatchers) = match ChangeScriptReader::new(player_settings.script_files.clone()) {
         Ok(mut reader) => {
 
             let header = reader.get_header();
             log::debug!("Loaded ChangeScript. {:?}", header);
 
             let mut player_state = ChangeScriptPlayerState::default();
-            player_state.ignore_scripted_pause_commands = player_config.player_settings.ignore_scripted_pause_commands;
-            player_state.time_mode = ChangeScriptPlayerTimeMode::from(player_config.player_settings.source_change_event_time_mode.clone());
-            player_state.spacing_mode = ChangeScriptPlayerSpacingMode::from(player_config.player_settings.source_change_event_spacing_mode.clone());
+            player_state.ignore_scripted_pause_commands = player_settings.reactivator.ignore_scripted_pause_commands;
+            player_state.time_mode = player_settings.reactivator.time_mode;
+            player_state.spacing_mode = player_settings.reactivator.spacing_mode;
         
             // Set the start_replay_time based on the time mode and the script start time from the header.
             player_state.start_replay_time = match player_state.time_mode {
-                ChangeScriptPlayerTimeMode::Live => {
+                TimeMode::Live => {
                     // Use the current system time.
                     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64
                 },
-                ChangeScriptPlayerTimeMode::Recorded => {
+                TimeMode::Recorded => {
                     // Use the start time as provided in the Header.
                     header.start_time.timestamp_nanos_opt().unwrap() as u64
                 },
-                ChangeScriptPlayerTimeMode::Rebased(nanos) => {
+                TimeMode::Rebased(nanos) => {
                     // Use the rebased time as provided in the AppConfig.
                     nanos
                 },
@@ -621,10 +327,10 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
 
             let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
 
-            for dispatcher_config in player_config.player_settings.dispatcher_configs.iter() {
+            for dispatcher_config in player_settings.reactivator.dispatchers.iter() {
                 match dispatcher_config {
                     SourceChangeDispatcherConfig::Dapr(dapr_config) => {
-                        match DaprSourceChangeDispatcherSettings::try_from_config(dapr_config, player_config.player_settings.source_id.clone()) {
+                        match DaprSourceChangeDispatcherSettings::try_from_config(dapr_config, player_settings.test_run_source.source_id.clone()) {
                             Ok(settings) => {
                                 match DaprSourceChangeDispatcher::new(settings) {
                                     Ok(d) => dispatchers.push(d),
@@ -655,11 +361,14 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                     },
                     SourceChangeDispatcherConfig::JsonlFile(jsonl_file_config) => {
                         // Construct the path to the local file used to store the generated SourceChangeEvents.
-                        let folder_path = format!("{}/test_runs/{}/{}/logs/sources/{}", 
-                            player_config.player_settings.data_cache_path, 
-                            player_config.player_settings.test_id, 
-                            player_config.player_settings.test_run_id, 
-                            player_config.player_settings.source_id);
+                        let folder_path = match &jsonl_file_config.folder_path {
+                            Some(path) => path.clone(),
+                            None => format!("{}/test_runs/{}/{}/logs/sources/{}", 
+                                player_settings.service_settings.data_cache_path, 
+                                player_settings.test_run_source.test_id, 
+                                player_settings.test_run_source.test_run_id, 
+                                player_settings.test_run_source.source_id)
+                        };
 
                         match JsonlFileSourceChangeDispatcherSettings::try_from_config(jsonl_file_config, folder_path) {
                             Ok(settings) => {
@@ -847,14 +556,14 @@ async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlay
 
     // Processing of ChangeScriptRecord depends on the spacing mode settings.
     let delay = match player_state.spacing_mode {
-        ChangeScriptPlayerSpacingMode::None => {
+        SpacingMode::None => {
             // Process the record immediately.
             0
         },
-        ChangeScriptPlayerSpacingMode::Fixed(nanos) => {
+        SpacingMode::Fixed(nanos) => {
             nanos
         },
-        ChangeScriptPlayerSpacingMode::Recorded => {
+        SpacingMode::Recorded => {
             // Delay the record based on the difference between the record's replay time and the current replay time.
             // Ensure the delay is not negative.
             std::cmp::max(0, next_record.replay_time_ns - player_state.current_replay_time) as u64
@@ -920,7 +629,7 @@ async fn process_delayed_test_script_record(delayed_record_seq: u64, player_stat
 
         // Adjust the time in the ChangeScriptRecord if the player is in Live Time Mode.
         // This will make sure the times are as accurate as possible.
-        if player_state.time_mode == ChangeScriptPlayerTimeMode::Live {
+        if player_state.time_mode == TimeMode::Live {
             // Live Time Mode means we just use the current time as the record's Replay Time regardless of offset.
             let replay_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
 
@@ -1039,11 +748,11 @@ async fn dispatch_source_change_events(dispatchers: &mut Vec<Box<dyn SourceChang
 fn time_shift_test_script_record(player_state: &ChangeScriptPlayerState, seq_record: SequencedChangeScriptRecord) -> ScheduledChangeScriptRecord {
 
     let replay_time_ns = match player_state.time_mode {
-        ChangeScriptPlayerTimeMode::Live => {
+        TimeMode::Live => {
             // Live Time Mode means we just use the current time as the record's Replay Time regardless of offset.
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64
         },
-        ChangeScriptPlayerTimeMode::Recorded | ChangeScriptPlayerTimeMode::Rebased(_) => {
+        TimeMode::Recorded | TimeMode::Rebased(_) => {
             // Recorded or Rebased Time Mode means we have to adjust the record's Replay Time based on the offset from
             // the start time. The player_state.start_replay_time has the base time regardless of the time mode.
             player_state.start_replay_time + seq_record.offset_ns

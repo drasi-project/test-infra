@@ -1,6 +1,6 @@
 use clap::Parser;
 use std::{fmt, str::FromStr};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 // The OutputType enum is used to specify the destination for output of various sorts including:
 //   - the SourceChangeEvents generated during the run
@@ -41,11 +41,11 @@ impl fmt::Display for OutputType {
     }
 }
 
-// A struct to hold Service Settings obtained from env vars and/or command line arguments.
+// A struct to hold Service Parameters obtained from env vars and/or command line arguments.
 // Command line args will override env vars. If neither is provided, default values are used.
 #[derive(Parser, Debug, Clone, Serialize)]
 #[command(author, version, about, long_about = None)]
-pub struct ServiceSettings {
+pub struct ServiceParams {
     // The path of the Service config file.
     // If not provided, the Service will start and wait for Change Script Players to be started through the Web API.
     #[arg(short = 'c', long = "config", env = "DRASI_CONFIG_FILE")]
@@ -79,18 +79,19 @@ pub struct ServiceSettings {
     pub log_output: OutputType,
 }
 
-// The ServiceConfigFile is what is loaded from the Service config File. It can contain the configurations for multiple Change Script Players,
+// The ServiceConfig is what is loaded from the Service config File. It can contain the configurations for multiple Change Script Players,
 // as well as default values that are used when a Change Script Player doesn't specify a value.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ServiceConfigFile {
+pub struct ServiceConfig {
     #[serde(default)]
-    pub defaults: SourceConfigDefaults,
-    #[serde(default = "default_source_config_list")]
+    pub source_defaults: SourceConfig,
+    #[serde(default)]
     pub sources: Vec<SourceConfig>,
+    #[serde(default)]
+    pub test_repos: Vec<TestRepoConfig>,
 }
-fn default_source_config_list() -> Vec<SourceConfig> { Vec::new() }
 
-impl ServiceConfigFile {
+impl ServiceConfig {
     pub fn from_file_path(config_file_path: &str) -> anyhow::Result<Self> {
         // Validate that the file exists and if not return an error.
         if !std::path::Path::new(config_file_path).exists() {
@@ -100,130 +101,46 @@ impl ServiceConfigFile {
         // Read the file content into a string.
         let config_file_json = std::fs::read_to_string(config_file_path)?;
 
-        // Parse the string into a ServiceConfigFile struct.
-        let source_config_file = serde_json::from_str(&config_file_json)?;
+        // Parse the string into a ServiceConfig struct.
+        let service_config_file = serde_json::from_str(&config_file_json)?;
 
-        Ok(source_config_file)
+        Ok(service_config_file)
     }
 }
 
-impl Default for ServiceConfigFile {
+impl Default for ServiceConfig {
     fn default() -> Self {
-        Self {
-            defaults: SourceConfigDefaults::default(),
-            sources: default_source_config_list(),
+        ServiceConfig {
+            source_defaults: SourceConfig::default(),
+            test_repos: Vec::new(),
+            sources: Vec::new(),
         }
     }
 }
-
-// The SourceConfigDefaults struct holds the default values read from the Service config file that are used when a Player COnfig doesn't specify a value.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SourceConfigDefaults {
-    #[serde(default = "is_false")]
-    pub force_test_repo_cache_refresh: bool,
-    pub test_storage_account: Option<String>,
-    pub test_storage_access_key: Option<String>,
-    pub test_storage_container: Option<String>,
-    pub test_storage_path: Option<String>,
-    pub test_id: Option<String>,
-    pub test_run_id: Option<String>,
-    pub source_id: Option<String>,
-    #[serde(default)]
-    pub proxy: ProxyConfigDefaults,
-    #[serde(default)]
-    pub reactivator: ReactivatorConfigDefaults,
-}
-
-impl Default for SourceConfigDefaults {
-    fn default() -> Self {
-        SourceConfigDefaults {
-            force_test_repo_cache_refresh: false,
-            test_storage_account: None,
-            test_storage_access_key: None,
-            test_storage_container: None,
-            test_storage_path: None,
-            test_id: None,
-            test_run_id: None,
-            source_id: None,
-            proxy: ProxyConfigDefaults::default(),
-            reactivator: ReactivatorConfigDefaults::default(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ProxyConfigDefaults {
-    #[serde(default = "is_recorded")]
-    pub time_mode: String,
-}
-
-impl Default for ProxyConfigDefaults {
-    fn default() -> Self {
-        ProxyConfigDefaults {
-            time_mode: is_recorded(),
-        }
-    }
-}
-fn is_recorded() -> String { "recorded".to_string() }
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ReactivatorConfigDefaults {
-    #[serde(default = "is_false")]
-    pub ignore_scripted_pause_commands: bool,
-    #[serde(default = "is_recorded")]
-    pub spacing_mode: String,
-    #[serde(default = "is_true")]
-    pub start_immediately: bool,
-    #[serde(default = "is_recorded")]
-    pub time_mode: String,
-    #[serde(default)]
-    pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
-}
-
-impl Default for ReactivatorConfigDefaults {
-    fn default() -> Self {
-        ReactivatorConfigDefaults {
-            ignore_scripted_pause_commands: is_false(),
-            spacing_mode: is_recorded(),
-            start_immediately: is_true(),
-            time_mode: is_recorded(),
-            dispatchers: None,
-        }
-    }
-}
-fn is_true() -> bool { true }
-fn is_false() -> bool { false }
 
 // The SourceConfig is what is loaded from the Service config file or passed in to the Web API 
 // to create a new Change Script Player.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SourceConfig {
-    pub force_test_repo_cache_refresh: Option<bool>,
-
-    // The Test Storage Account where the Test Repo is located.
-    pub test_storage_account: Option<String>,
-
-    // The Test Storage Access Key where the Test Repo is located.
-    pub test_storage_access_key: Option<String>,
-
-    // The Test Storage Container where the Test Repo is located.
-    pub test_storage_container: Option<String>,
-
-    // The Test Storage Path where the Test Repo is located.
-    pub test_storage_path: Option<String>,
-
-    // The Test ID.
+    pub test_repo_id: Option<String>,
     pub test_id: Option<String>,
-
-    // The Test Run ID.
     pub test_run_id: Option<String>,
-
-    // The Source ID for the Change Script Player.
     pub source_id: Option<String>,
-
     pub proxy: Option<ProxyConfig>,
-
     pub reactivator: Option<ReactivatorConfig>,
+}
+
+impl Default for SourceConfig {
+    fn default() -> Self {
+        SourceConfig {
+            test_repo_id: None,
+            test_id: None,
+            test_run_id: None,
+            source_id: None,
+            proxy: None,
+            reactivator: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -231,24 +148,33 @@ pub struct ProxyConfig {
     pub time_mode: Option<String>,
 }
 
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        ProxyConfig {
+            time_mode: Some("Recorded".to_string()),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ReactivatorConfig {
-    // Whether the player should ignore scripted pause commands.
-    pub ignore_scripted_pause_commands: Option<bool>,
-
-    // Spacing Mode for the Change Script Player as a string.
-    // Either "none", "recorded", or a fixed spacing in the format "Xs", "Xm", "Xu", or "Xn".
-    pub spacing_mode: Option<String>,
-
-    // Flag to indicate if the Service should start the Change Script Player immediately after initialization.
-    pub start_immediately: Option<bool>,
-
-    // Time Mode for the Change Script Player as a string.
-    // Either "live", "recorded", or a specific time in the format "YYYY-MM-DDTHH:MM:SS:SSS Z".
-    // If not provided, "recorded" is used.
-    pub time_mode: Option<String>,
-
     pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
+    pub ignore_scripted_pause_commands: Option<bool>,
+    pub spacing_mode: Option<String>,
+    pub start_immediately: Option<bool>,
+    pub time_mode: Option<String>,
+}
+
+impl Default for ReactivatorConfig {
+    fn default() -> Self {
+        ReactivatorConfig {
+            dispatchers: None,
+            ignore_scripted_pause_commands: Some(false),
+            spacing_mode: Some("Recorded".to_string()),
+            start_immediately: Some(true),
+            time_mode: Some("Recorded".to_string()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -275,4 +201,96 @@ pub struct DaprSourceChangeDispatcherConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlFileSourceChangeDispatcherConfig {
     pub folder_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum TestRepoConfig {
+    AzureStorageBlob {
+        #[serde(flatten)]
+        common_config: CommonTestRepoConfig,
+        #[serde(flatten)]
+        unique_config: AzureStorageBlobTestRepoConfig,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommonTestRepoConfig {
+    #[serde(default = "is_false")]
+    pub force_cache_refresh: bool,
+    pub id: String,
+}
+fn is_false() -> bool { false }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AzureStorageBlobTestRepoConfig {
+    pub account_name: String,
+    #[serde(serialize_with = "mask_secret")]
+    pub access_key: String,
+    pub container: String,
+    pub root_path: String,
+}
+pub fn mask_secret<S>(_: &str, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str("******")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+ 
+    #[test]
+    fn test_output_type_from_str() {
+        assert_eq!(OutputType::from_str("console").unwrap(), OutputType::Console);
+        assert_eq!(OutputType::from_str("c").unwrap(), OutputType::Console);
+        assert_eq!(OutputType::from_str("file").unwrap(), OutputType::File);
+        assert_eq!(OutputType::from_str("f").unwrap(), OutputType::File);
+        assert_eq!(OutputType::from_str("none").unwrap(), OutputType::None);
+        assert_eq!(OutputType::from_str("n").unwrap(), OutputType::None);
+        assert_eq!(OutputType::from_str("publish").unwrap(), OutputType::Publish);
+        assert_eq!(OutputType::from_str("p").unwrap(), OutputType::Publish);
+        assert!(OutputType::from_str("invalid").is_err());
+    }
+
+    #[test]
+    fn test_output_type_display() {
+        assert_eq!(OutputType::Console.to_string(), "console");
+        assert_eq!(OutputType::File.to_string(), "file");
+        assert_eq!(OutputType::None.to_string(), "none");
+        assert_eq!(OutputType::Publish.to_string(), "publish");
+    }
+
+    #[test]
+    fn test_service_config_file_from_file_path() {
+        // Create a temporary file with valid JSON content
+        let temp_file_path = "/tmp/test_service_config.json";
+        let json_content = r#"
+        {
+            "test_repos": {
+                "repo1": {
+                    "type": "AzureStorageBlob",
+                    "id": "repo1"
+                }
+            },
+            "defaults": {},
+            "sources": []
+        }
+        "#;
+        std::fs::write(temp_file_path, json_content).unwrap();
+
+        // Test loading the config file
+        let config = ServiceConfig::from_file_path(temp_file_path);
+        assert!(config.is_ok());
+
+        // Clean up the temporary file
+        std::fs::remove_file(temp_file_path).unwrap();
+    }
+
+    #[test]
+    fn test_service_config_file_from_file_path_not_found() {
+        let result = ServiceConfig::from_file_path("/path/does/not/exist.json");
+        assert!(result.is_err());
+    }
 }

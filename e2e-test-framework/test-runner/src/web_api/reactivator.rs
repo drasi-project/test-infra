@@ -8,19 +8,19 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{add_or_get_source, config::SourceConfig, create_change_script_player, change_script_player::{ChangeScriptPlayerConfig, ChangeScriptPlayerState}, ServiceStatus, SharedState};
+use crate::{change_script_player::{ChangeScriptPlayerSettings, ChangeScriptPlayerState}, config::SourceConfig, ServiceStatus, SharedState};
 
 #[derive(Debug, Serialize)]
 struct PlayerInfoResponse {
-    pub config: ChangeScriptPlayerConfig,
+    pub settings: ChangeScriptPlayerSettings,
     pub state: ChangeScriptPlayerState,
 }
 
 // Create PlayerResponse from a ChangeScriptPlayer.
 impl PlayerInfoResponse {
-    fn new(config: ChangeScriptPlayerConfig, state: ChangeScriptPlayerState) -> Self {
+    fn new(settings: ChangeScriptPlayerSettings, state: ChangeScriptPlayerState) -> Self {
         PlayerInfoResponse {
-            config,
+            settings,
             state,
         }
     }
@@ -36,11 +36,11 @@ struct PlayerCommandResponse {
 
 // Create PlayerResponse from a ChangeScriptPlayer.
 impl PlayerCommandResponse {
-    fn new(config: ChangeScriptPlayerConfig, state: ChangeScriptPlayerState) -> Self {
+    fn new(settings: ChangeScriptPlayerSettings, state: ChangeScriptPlayerState) -> Self {
         PlayerCommandResponse {
-            test_id: config.player_settings.test_id.clone(),
-            test_run_id: config.player_settings.test_run_id.clone(),
-            source_id: config.player_settings.source_id.clone(),
+            test_id: settings.test_run_source.test_id.clone(),
+            test_run_id: settings.test_run_source.test_run_id.clone(),
+            source_id: settings.test_run_source.source_id.clone(),
             state: state,
         }
     }
@@ -55,17 +55,17 @@ struct PlayerCommandError {
 }
 
 impl PlayerCommandError {
-    fn new(config: ChangeScriptPlayerConfig, error_msg: String) -> Self {
+    fn new(settings: ChangeScriptPlayerSettings, error_msg: String) -> Self {
         PlayerCommandError {
-            test_id: config.player_settings.test_id.clone(),
-            test_run_id: config.player_settings.test_run_id.clone(),
-            source_id: config.player_settings.source_id.clone(),
+            test_id: settings.test_run_source.test_id.clone(),
+            test_run_id: settings.test_run_source.test_run_id.clone(),
+            source_id: settings.test_run_source.source_id.clone(),
             error_msg,
         }
     }
 }
 
-pub(super) async fn add_player(
+pub(super) async fn add_player (
     state: Extension<SharedState>,
     body: Json<SourceConfig>,
 ) -> impl IntoResponse {
@@ -80,40 +80,34 @@ pub(super) async fn add_player(
 
     let source_config = body.0;
 
-    match add_or_get_source(&source_config, &mut service_state).await {
-        Ok(dataset) => {
-            match create_change_script_player(source_config, &mut service_state, &dataset).await {
-                Ok(player) => {
-                    let key = player.get_id();
-
-                    service_state.reactivators.insert(key.clone(), player);
-
-                    let player = service_state.reactivators.get(&key).unwrap();
-
+    match service_state.add_test_run_source(&source_config).await {
+        Ok(result) => {
+            match result {
+                Some(player) => {
                     // Get the state of the ChangeScriptPlayer and return it.
                     match player.get_state().await {
                         Ok(response) => {
-                            Json(PlayerInfoResponse::new(player.get_config(), response.state)).into_response()
+                            Json(PlayerInfoResponse::new(player.get_settings(), response.state)).into_response()
                         },
                         Err(e) => {
-                            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+                            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
                         }
                     }
                 },
-                Err(e) => {
-                    let msg = format!("Error creating ChangeScriptPlayer: {}", e);
+                None => {
+                    let msg = format!("Error creating ChangeScriptPlayer: {:?}", source_config);
                     log::error!("{}", &msg);
                     service_state.service_status = ServiceStatus::Error(msg.clone());
-                    (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
                 }
-            }                                
+            }
         },
         Err(e) => {
             let msg = format!("Error creating Source: {}", e);
             log::error!("{}", &msg);
             service_state.service_status = ServiceStatus::Error(msg.clone());
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
-        }
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+        }   
     }
 }
 
@@ -132,7 +126,7 @@ pub(super) async fn get_player_list(
     // Otherwise, return the configuration and state of all the ChangeScriptPlayers.
     let mut player_list = vec![];
     for (_, player) in state.reactivators.iter() {
-        player_list.push(PlayerInfoResponse::new(player.get_config(), player.get_state().await.unwrap().state));
+        player_list.push(PlayerInfoResponse::new(player.get_settings(), player.get_state().await.unwrap().state));
     }
 
     Json(player_list).into_response()
@@ -166,10 +160,10 @@ pub(super) async fn get_player(
     // Get the state of the ChangeScriptPlayer and return it.
     match player.get_state().await {
         Ok(response) => {
-            Json(PlayerInfoResponse::new(player.get_config(), response.state)).into_response()
+            Json(PlayerInfoResponse::new(player.get_settings(), response.state)).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
         }
     }
 }
@@ -202,10 +196,10 @@ pub(super) async fn pause_player(
     // Pause the ChangeScriptPlayer and return the result.
     match player.pause().await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
         }
     }
 }
@@ -257,10 +251,10 @@ pub(super) async fn skip_player(
     // Skip the ChangeScriptPlayer and return the result.
     match player.skip(num_skips).await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
         }
     }
 }
@@ -292,10 +286,10 @@ pub(super) async fn start_player(
     // Start the ChangeScriptPlayer and return the result.
     match player.start().await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
         }
     }
 }
@@ -347,10 +341,10 @@ pub(super) async fn step_player(
     // Step the ChangeScriptPlayer and return the result.
     match player.step(num_steps).await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
         }
     }
 
@@ -383,10 +377,10 @@ pub(super) async fn stop_player(
     // Stop the ChangeScriptPlayer and return the result.
     match player.stop().await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_config(), response.state)).into_response()
+            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_config(), e.to_string())).into_response()
+            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
         }
     }
 }

@@ -7,6 +7,7 @@ use crate::config::JsonlFileSourceChangeDispatcherConfig;
 use crate::script_source::SourceChangeEvent;
 use super::{SourceChangeDispatcher, SourceChangeDispatcherError};
 
+
 #[derive(Debug)]
 pub struct JsonlFileSourceChangeDispatcherSettings {
     pub folder_path: String,

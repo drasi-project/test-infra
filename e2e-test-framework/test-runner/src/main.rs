@@ -1,25 +1,20 @@
 use std::{collections::HashMap, sync::Arc};
 
 use clap::Parser;
-use serde::{Serialize, Serializer};
+use serde::Serialize;
+use test_run::TestRunSource;
 use tokio::sync::RwLock;
 
-use change_script_player::{
-    ChangeScriptPlayerSettings, ChangeScriptPlayer, ChangeScriptPlayerConfig, 
-};
-use config::{
-    SourceConfig, SourceConfigDefaults, ServiceSettings, ServiceConfigFile,
-};
-use test_repo::{
-    dataset::{DataSet, DataSetSettings},
-    local_test_repo::LocalTestRepo,
-};
+use change_script_player::{ ChangeScriptPlayerSettings, ChangeScriptPlayer};
+use config::{ ServiceConfig, ServiceParams, SourceConfig, TestRepoConfig};
+use test_repo::test_repo_cache::TestRepoCache;
 
 mod change_script_player;
 mod config;
+mod script_source;
 mod source_change_dispatchers;
 mod test_repo;
-mod script_source;
+mod test_run;
 mod web_api;
 
 // An enum that represents the current state of the Service.
@@ -34,47 +29,177 @@ pub enum ServiceStatus {
     Error(String),
 }
 
-// The ServiceState struct holds the configuration and current state of the service.
-pub struct ServiceState {
-    pub service_settings: ServiceSettings,
-    pub service_status: ServiceStatus,
-    pub source_defaults: SourceConfigDefaults,
-    pub reactivators: HashMap<String, ChangeScriptPlayer>,
-    pub test_repo: Option<LocalTestRepo>,
-}
-
 // Type alias for the SharedState struct.
 pub type SharedState = Arc<RwLock<ServiceState>>;
 
-impl ServiceState {
-    fn new(service_settings: ServiceSettings, source_defaults: Option<SourceConfigDefaults>) -> Self {
+// The ServiceState struct holds the configuration and current state of the service.
+#[derive(Debug)]
+pub struct ServiceState {
+    pub reactivators: HashMap<String, ChangeScriptPlayer>,
+    pub service_params: ServiceParams,
+    pub service_status: ServiceStatus,
+    pub source_defaults: SourceConfig,
+    pub test_repo_cache: Option<TestRepoCache>,
+}
 
-        // Attempt to create a local test repo with the data cache path from the ServiceSettings.
-        // If this fails, set the ServiceStatus to Error.
-        match LocalTestRepo::new(service_settings.data_cache_path.clone()) {
-            Ok(test_repo) => {
+impl ServiceState {
+    async fn new(service_params: ServiceParams) -> Self {   
+
+        log::debug!("Creating ServiceState from {:#?}", service_params);
+
+        // Load the Test Runner Config file if a path is specified in the ServiceParams.
+        // If the specified file does not exist, configure the service in an error state.
+        // If no file is specified, use defaults.
+        let ServiceConfig { source_defaults, sources, test_repos } = match service_params.config_file_path.as_ref() {
+            Some(config_file_path) => {
+                log::debug!("Loading Test Runner config from {:#?}", config_file_path);
+
+                match ServiceConfig::from_file_path(&config_file_path) {
+                    Ok(service_config) => {
+                        log::debug!("Loaded Test Runner config {:?}", service_config);
+                        service_config
+                    },
+                    Err(e) => {
+                        let msg = format!("Error loading Test Runner config: {}", e);
+                        log::error!("{}", msg);
+                        return ServiceState {
+                            reactivators: HashMap::new(),
+                            service_params,
+                            service_status: ServiceStatus::Error(msg),
+                            source_defaults: SourceConfig::default(),
+                            test_repo_cache: None,
+                        };
+                    }
+                }
+            },
+            None => {
+                log::debug!("No config file specified. Using defaults.");
+                ServiceConfig::default()
+            }
+        };
+
+        // Attempt to create a local test repo cache with the data cache path from the ServiceParams.
+        // If this fails, configure the service in an error state.
+        let mut service_state = match TestRepoCache::new(service_params.data_cache_path.clone()).await {
+            Ok(test_repo_cache) => {
                 ServiceState {
-                    service_settings,
-                    service_status: ServiceStatus::Initializing,
-                    source_defaults: source_defaults.unwrap_or_default(),
                     reactivators: HashMap::new(),
-                    test_repo: Some(test_repo),
+                    service_params,
+                    service_status: ServiceStatus::Initializing,
+                    source_defaults,
+                    test_repo_cache: Some(test_repo_cache),
                 }
             },
             Err(e) => {
-                ServiceState {
-                    service_settings,
-                    service_status: ServiceStatus::Error(e.to_string()),
-                    source_defaults: source_defaults.unwrap_or_default(),
+                return ServiceState {
                     reactivators: HashMap::new(),
-                    test_repo: None,
+                    service_params,
+                    service_status: ServiceStatus::Error(e.to_string()),
+                    source_defaults: source_defaults,
+                    test_repo_cache: None,
+                };
+            }
+        };
+        
+        // Create the set of TestRepos that are defined in the ServiceConfig.
+        // If there is an error creating one of the pre-configured TestRepos, set the ServiceStatus to Error,
+        // log the error, and return the ServiceState.
+        for ref test_repo_config in test_repos {
+            match service_state.add_test_repo(test_repo_config).await {
+                Ok(_) => {},
+                Err(e) => {
+                    let msg = format!("Error creating pre-configured TestRepo - TestRepo: {:?}, Error: {}", test_repo_config, e);
+                    log::error!("{}", msg);
+                    service_state.service_status = ServiceStatus::Error(msg);
+                    return service_state;
+                }
+            }
+        };
+
+        // Create the set of TestRunSources that are defined in the ServiceConfig.
+        // If there is an error creating one of the pre-configured Sources, set the ServiceStatus to Error,
+        // log the error, and return the ServiceState.
+        for ref source_config in sources {
+            match service_state.add_test_run_source(source_config).await {
+                Ok(_) => {},
+                Err(e) => {
+                    let msg = format!("Error creating pre-configured TestRunSource - TestRunSource: {:?}, Error: {}", source_config, e);
+                    log::error!("{}", msg);
+                    service_state.service_status = ServiceStatus::Error(msg);
+                    return service_state;
+                }
+            }
+        };
+
+        service_state.service_status = ServiceStatus::Ready;
+        service_state
+    }
+    
+    pub async fn add_test_repo(&mut self, test_repo_config: &TestRepoConfig ) -> anyhow::Result<()> {
+        log::trace!("Adding Test Repo from: {:#?}", test_repo_config);
+        
+        // If the ServiceState is already in an Error state, return an error.
+        if let ServiceStatus::Error(msg) = &self.service_status {
+            anyhow::bail!("Service is in an Error state: {}", msg);
+        };
+
+        // If adding the TestRepo fails, return an error. If this happens during initialization, the service
+        // will be disabled in an error state, but if it happens due to a call from the Web API then TestRunner
+        // will return an error response.
+        self.test_repo_cache.as_mut().unwrap().add_test_repo(test_repo_config.clone()).await?;
+
+        Ok(())
+    }
+
+    pub async fn add_test_run_source(&mut self, source_config: &SourceConfig) -> anyhow::Result<Option<ChangeScriptPlayer>> {
+        log::trace!("Adding TestRunSource from {:#?}", source_config);
+
+        // If the ServiceState is in an Error state, return an error.
+        if let ServiceStatus::Error(msg) = &self.service_status {
+            anyhow::bail!("Service is in an Error state: {}", msg);
+        };
+        
+        let test_run_source = TestRunSource::try_from_config(source_config, &self.source_defaults)?;
+
+        // If adding the TestRunSource fails, return an error. If this happens during initialization, the service
+        // will be disabled in an error state, but if it happens due to a call from the Web API then TestRunner
+        // will return an error response.
+        let dataset = self.test_repo_cache.as_mut().unwrap().get_data_set(test_run_source.clone()).await?;
+
+        // Determine if the TestRunSource has a ChangeScriptPlayer that should be created and 
+        // possibly started.
+        if test_run_source.reactivator.is_some() {
+            match dataset.content.change_log_script_files {
+                Some(change_log_script_files) => {
+                    if change_log_script_files.len() > 0 {
+                        let player_settings = ChangeScriptPlayerSettings::try_from_test_run_source(test_run_source, self.service_params.clone(), change_log_script_files)?;
+
+                        log::debug!("Creating ChangeScriptPlayer from {:#?}", &player_settings);
+
+                        let player = ChangeScriptPlayer::new(player_settings).await;
+
+                        self.reactivators.insert(player.get_id().clone(), player.clone());
+
+                        return Ok(Some(player));
+                    } else {
+                        anyhow::bail!("No change script files available for player: {:?}", &test_run_source);
+                    }
+                },
+                None => {
+                    anyhow::bail!("No change script files available for player: {:?}", &test_run_source);
                 }
             }
         }
+
+        Ok(None)
     }
-    
-    pub fn set_error(&mut self, error: String) {
-        self.service_status = ServiceStatus::Error(error);
+
+    pub fn contains_source(&self, source_id: &str) -> bool {
+        self.reactivators.contains_key(source_id)
+    }
+
+    pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
+        self.test_repo_cache.as_ref().unwrap().contains_test_repo(test_repo_id)
     }
 }
 
@@ -86,67 +211,18 @@ async fn main() {
      
      env_logger::init();
 
-    // Parse the command line and env var args into an ServiceSettings struct. If the args are invalid, return an error.
-    let service_settings = ServiceSettings::parse();
-    log::trace!("{:#?}", service_settings);
+    // Parse the command line and env var args into an ServiceParams struct. If the args are invalid, return an error.
+    let service_params = ServiceParams::parse();
+    log::trace!("{:#?}", service_params);
 
-    // Load the Test Runner Config file if a path is specified in the ServiceSettings.
-    // If the specified file does not exist, return an error.
-    // If no file is specified, use defaults.
-    let mut service_state = match &service_settings.config_file_path {
-        Some(config_file_path) => {
-            match ServiceConfigFile::from_file_path(&config_file_path) {
-                Ok(service_config) => {
-                    log::trace!("Configuring Test Runner from {:#?}", service_config);
-                    let mut service_state = ServiceState::new(service_settings, Some(service_config.defaults));
-
-                    for source_config in service_config.sources {
-
-                        match add_or_get_source(&source_config, &mut service_state).await {
-                            Ok(dataset) => {
-                                match create_change_script_player(source_config, &mut service_state, &dataset).await {
-                                    Ok(player) => {
-                                        service_state.reactivators.insert(player.get_id(), player);
-                                    },
-                                    Err(e) => {
-                                        let msg = format!("Error creating ChangeScriptPlayer: {}", e);
-                                        log::error!("{}", msg);
-                                        service_state.service_status = ServiceStatus::Error(msg);
-                                        break;
-                                    }
-                                }                                
-                            },
-                            Err(e) => {
-                                let msg = format!("Error creating Source: {}", e);
-                                log::error!("{}", msg);
-                                service_state.service_status = ServiceStatus::Error(msg);
-                                break;
-                            }
-                        }
-                    };
-                    service_state
-                },
-                Err(e) => {
-                    ServiceState {
-                        service_settings,
-                        service_status: ServiceStatus::Error(e.to_string()),
-                        source_defaults: SourceConfigDefaults::default(),
-                        reactivators: HashMap::new(),
-                        test_repo: None,
-                    }
-                }
-            }
-        },
-        None => {
-            log::trace!("No config file specified. Using defaults.");
-            ServiceState::new(service_settings, None)
-        }
-    };
+    // Create the initial ServiceState
+    let mut service_state = ServiceState::new(service_params).await;
+    log::debug!("Initial ServiceState {:?}", &service_state);
 
     // Iterate over the initial Change Script Players and start each one if it is configured to start immediately.
-    for (_, active_player) in service_state.reactivators.iter() {
-        if active_player.get_config().player_settings.start_immediately {
-            match active_player.start().await {
+    for (_, player) in service_state.reactivators.iter() {
+        if player.get_settings().reactivator.start_immediately {
+            match player.start().await {
                 Ok(_) => {},
                 Err(e) => {
                     let msg = format!("Error starting ChangeScriptPlayer: {}", e);
@@ -172,48 +248,4 @@ async fn main() {
     // Start the Web API.
     web_api::start_web_api(service_state).await;
 
-}
-
-async fn add_or_get_source(source_config: &SourceConfig, service_state: &mut ServiceState) -> anyhow::Result<DataSet> {
-    log::trace!("Initializing Source from {:#?}", source_config);
-
-    let data_set_settings = DataSetSettings::try_from_source_config(source_config, &service_state.source_defaults )?;
-    let test_repo = service_state.test_repo.as_mut().ok_or_else(|| anyhow::anyhow!("Test Repo not initialized."))?;
-
-    Ok(test_repo.add_or_get_data_set(data_set_settings).await?)
-}
-
-async fn create_change_script_player(source_config: SourceConfig, service_state: &mut ServiceState, dataset: &DataSet) -> anyhow::Result<ChangeScriptPlayer> {
-    log::trace!("Creating ChangeScriptPlayer from {:#?}", &source_config.reactivator);
-
-    let player_settings = ChangeScriptPlayerSettings::try_from_source_config(&source_config, &service_state.source_defaults, &service_state.service_settings)?;
-
-    let script_files = match dataset.get_content() {
-        Some(content) => {
-            match content.change_log_script_files {
-                Some(files) => files,
-                None => {
-                    anyhow::bail!("No change script files available for player: {}", &player_settings.get_id());
-                }
-            }
-        },
-        None => {
-            anyhow::bail!("No change script files available for player: {}", &player_settings.get_id());
-        }
-    };
-
-    let cfg = ChangeScriptPlayerConfig {
-        player_settings,
-        script_files,
-    };
-    log::trace!("{:#?}", cfg);
-
-    Ok(ChangeScriptPlayer::new(cfg).await)
-}
-
-pub fn mask_secret<S>(_: &str, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str("******")
 }

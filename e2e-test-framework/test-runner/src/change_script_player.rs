@@ -12,7 +12,7 @@ use crate::{
     script_source::SourceChangeEvent, source_change_dispatchers::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
     }, 
-    test_run::{SpacingMode, TestRunReactivator, TestRunSource, TimeMode}, 
+    runner::{SpacingMode, TestRunReactivator, TestRunSource, TimeMode}, 
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 use crate::script_source::change_script_file_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};

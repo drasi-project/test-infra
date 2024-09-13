@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, path::PathBuf};
 
-use crate::{config::TestRepoConfig, test_run::TestRunSource};
+use crate::{config::TestRepoConfig, runner::TestRunSource};
 
 use super::{
     azure_storage_blob_test_repo::{AzureStorageBlobTestRepo, AzureStorageBlobTestRepoSettings}, 

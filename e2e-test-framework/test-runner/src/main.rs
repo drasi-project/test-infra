@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use clap::Parser;
 use serde::Serialize;
-use test_run::TestRunSource;
+use runner::TestRunSource;
 use tokio::sync::RwLock;
 
 use change_script_player::{ ChangeScriptPlayerSettings, ChangeScriptPlayer};
@@ -11,10 +11,10 @@ use test_repo::test_repo_cache::TestRepoCache;
 
 mod change_script_player;
 mod config;
+mod runner;
 mod script_source;
 mod source_change_dispatchers;
 mod test_repo;
-mod test_run;
 mod web_api;
 
 // An enum that represents the current state of the Service.

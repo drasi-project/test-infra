@@ -31,7 +31,7 @@ pub struct DaprSourceChangeDispatcher {
 }
 
 impl DaprSourceChangeDispatcher {
-    pub fn new(settings: DaprSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher>> {
+    pub fn new(settings: DaprSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
 
         log::info!("Initializing DaprSourceChangeDispatcher from {:?}", settings);
 

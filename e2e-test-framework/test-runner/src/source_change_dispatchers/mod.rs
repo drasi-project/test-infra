@@ -27,7 +27,7 @@ pub trait SourceChangeDispatcher : Send + Sync {
 }
 
 #[async_trait]
-impl SourceChangeDispatcher for Box<dyn SourceChangeDispatcher> {
+impl SourceChangeDispatcher for Box<dyn SourceChangeDispatcher + Send + Sync> {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
         (**self).dispatch_source_change_events(events).await
     }

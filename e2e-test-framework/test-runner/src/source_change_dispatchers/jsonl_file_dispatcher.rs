@@ -27,7 +27,7 @@ pub struct JsonlFileSourceChangeDispatcher {
 }
 
 impl JsonlFileSourceChangeDispatcher {
-    pub fn new(settings: JsonlFileSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher>> {
+    pub fn new(settings: JsonlFileSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
 
         log::info!("Initializing JsonlFileSourceChangeDispatcher from {:?}", settings);
 

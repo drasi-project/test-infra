@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use serde::{Serialize, Deserialize};
 
-use crate::{script_source::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, ServiceStatus, SharedState};
+use crate::{
+    script_source::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, 
+    runner::{ServiceStatus, SharedTestRunner}
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct AcquireRequestBody {
@@ -97,7 +100,7 @@ impl Relation {
 }
 
 pub(super) async fn acquire_handler(
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
     body: Json<AcquireRequestBody>,
 ) -> impl IntoResponse {
     log::info!("Processing call - acquire_handler");

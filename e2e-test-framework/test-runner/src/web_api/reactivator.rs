@@ -9,10 +9,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    config::SourceConfig, 
-    runner::change_script_player::{ChangeScriptPlayerSettings, ChangeScriptPlayerState},
-    ServiceStatus, 
-    SharedState
+    runner::config::SourceConfig, 
+    runner::{change_script_player::{ChangeScriptPlayerSettings, ChangeScriptPlayerState}, ServiceStatus, SharedTestRunner },
 };
 
 #[derive(Debug, Serialize)]
@@ -71,7 +69,7 @@ impl PlayerCommandError {
 }
 
 pub(super) async fn add_source_handler (
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
     body: Json<SourceConfig>,
 ) -> impl IntoResponse {
     log::info!("Processing call - add_reactivator");
@@ -117,7 +115,7 @@ pub(super) async fn add_source_handler (
 }
 
 pub(super) async fn get_source_list_handler(
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
     log::info!("Processing call - get_source_list");
 
@@ -139,7 +137,7 @@ pub(super) async fn get_source_list_handler(
 
 pub(super) async fn get_source_handler(
     Path(id): Path<String>,
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
 
     log::info!("Processing call - get_source: {}", id);
@@ -175,7 +173,7 @@ pub(super) async fn get_source_handler(
 
 pub(super) async fn pause_reactivator_handler(
     Path(id): Path<String>,
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
 
     log::info!("Processing call - pause_reactivator: {}", id);
@@ -225,7 +223,7 @@ impl Default for TestSkipConfig {
 
 pub(super) async fn skip_reactivator_handler(
     Path(id): Path<String>,
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
     body: Json<Option<TestSkipConfig>>,
 ) -> impl IntoResponse {
     log::info!("Processing call - skip_reactivator: {}", id);
@@ -266,7 +264,7 @@ pub(super) async fn skip_reactivator_handler(
 
 pub(super) async fn start_reactivator_handler(
     Path(id): Path<String>,
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
     log::info!("Processing call - start_reactivator: {}", id);
 
@@ -315,7 +313,7 @@ impl Default for TestStepConfig {
 
 pub(super) async fn step_reactivator_handler(
     Path(id): Path<String>,
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
     body: Json<Option<TestStepConfig>>,
 ) -> impl IntoResponse {
     log::info!("Processing call - step_reactivator: {}", id);
@@ -357,7 +355,7 @@ pub(super) async fn step_reactivator_handler(
 
 pub(super) async fn stop_reactivator_handler(
     Path(id): Path<String>,
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
     log::info!("Processing call - stop_reactivator: {}", id);
 

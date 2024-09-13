@@ -1,205 +1,90 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{fmt, str::FromStr};
 
 use clap::Parser;
-use serde::Serialize;
-use runner::TestRunSource;
-use tokio::sync::RwLock;
+use runner::{ServiceStatus, TestRunner};
+use serde::{Deserialize, Serialize};
 
-use config::{ ServiceConfig, ServiceParams, SourceConfig, TestRepoConfig};
-use runner::change_script_player::{ ChangeScriptPlayerSettings, ChangeScriptPlayer};
-use test_repo::test_repo_cache::TestRepoCache;
-
-mod config;
 mod runner;
 mod script_source;
 mod source_change_dispatchers;
 mod test_repo;
 mod web_api;
 
-// An enum that represents the current state of the Service.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub enum ServiceStatus {
-    // The Test Runner is Initializing, which includes downloading the test data from the Test Repo
-    // and creating the initial set of Change Script Players.
-    Initializing,
-    // The Test Runner has finished initializing and has an active Web API.
-    Ready,
-    // The Test Runner is in an Error state. and will not be able to process requests.
-    Error(String),
+// The OutputType enum is used to specify the destination for output of various sorts including:
+//   - the SourceChangeEvents generated during the run
+//   - the Telemetry data generated during the run
+//   - the Log data generated during the run
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Copy)]
+pub enum OutputType {
+    Console,
+    File,
+    None,
+    Publish,
 }
 
-// Type alias for the SharedState struct.
-pub type SharedState = Arc<RwLock<ServiceState>>;
+// Implement the FromStr trait for OutputType to allow parsing from a string.
+impl FromStr for OutputType {
+    type Err = String;
 
-// The ServiceState struct holds the configuration and current state of the service.
-#[derive(Debug)]
-pub struct ServiceState {
-    pub reactivators: HashMap<String, ChangeScriptPlayer>,
-    pub service_params: ServiceParams,
-    pub service_status: ServiceStatus,
-    pub source_defaults: SourceConfig,
-    pub test_repo_cache: Option<TestRepoCache>,
-}
-
-impl ServiceState {
-    async fn new(service_params: ServiceParams) -> Self {   
-
-        log::debug!("Creating ServiceState from {:#?}", service_params);
-
-        // Load the Test Runner Config file if a path is specified in the ServiceParams.
-        // If the specified file does not exist, configure the service in an error state.
-        // If no file is specified, use defaults.
-        let ServiceConfig { source_defaults, sources, test_repos } = match service_params.config_file_path.as_ref() {
-            Some(config_file_path) => {
-                log::debug!("Loading Test Runner config from {:#?}", config_file_path);
-
-                match ServiceConfig::from_file_path(&config_file_path) {
-                    Ok(service_config) => {
-                        log::debug!("Loaded Test Runner config {:?}", service_config);
-                        service_config
-                    },
-                    Err(e) => {
-                        let msg = format!("Error loading Test Runner config: {}", e);
-                        log::error!("{}", msg);
-                        return ServiceState {
-                            reactivators: HashMap::new(),
-                            service_params,
-                            service_status: ServiceStatus::Error(msg),
-                            source_defaults: SourceConfig::default(),
-                            test_repo_cache: None,
-                        };
-                    }
-                }
-            },
-            None => {
-                log::debug!("No config file specified. Using defaults and waiting to be configured via Web API.");
-                ServiceConfig::default()
-            }
-        };
-
-        // Attempt to create a local test repo cache with the data cache path from the ServiceParams.
-        // If this fails, configure the service in an error state.
-        let mut service_state = match TestRepoCache::new(service_params.data_cache_path.clone()).await {
-            Ok(test_repo_cache) => {
-                ServiceState {
-                    reactivators: HashMap::new(),
-                    service_params,
-                    service_status: ServiceStatus::Initializing,
-                    source_defaults,
-                    test_repo_cache: Some(test_repo_cache),
-                }
-            },
-            Err(e) => {
-                return ServiceState {
-                    reactivators: HashMap::new(),
-                    service_params,
-                    service_status: ServiceStatus::Error(e.to_string()),
-                    source_defaults: source_defaults,
-                    test_repo_cache: None,
-                };
-            }
-        };
-        
-        // Create the set of TestRepos that are defined in the ServiceConfig.
-        // If there is an error creating one of the pre-configured TestRepos, set the ServiceStatus to Error,
-        // log the error, and return the ServiceState.
-        for ref test_repo_config in test_repos {
-            match service_state.add_test_repo(test_repo_config).await {
-                Ok(_) => {},
-                Err(e) => {
-                    let msg = format!("Error creating pre-configured TestRepo - TestRepo: {:?}, Error: {}", test_repo_config, e);
-                    log::error!("{}", msg);
-                    service_state.service_status = ServiceStatus::Error(msg);
-                    return service_state;
-                }
-            }
-        };
-
-        // Create the set of TestRunSources that are defined in the ServiceConfig.
-        // If there is an error creating one of the pre-configured Sources, set the ServiceStatus to Error,
-        // log the error, and return the ServiceState.
-        for ref source_config in sources {
-            match service_state.add_test_run_source(source_config).await {
-                Ok(_) => {},
-                Err(e) => {
-                    let msg = format!("Error creating pre-configured TestRunSource - TestRunSource: {:?}, Error: {}", source_config, e);
-                    log::error!("{}", msg);
-                    service_state.service_status = ServiceStatus::Error(msg);
-                    return service_state;
-                }
-            }
-        };
-
-        service_state.service_status = ServiceStatus::Ready;
-        service_state
-    }
-    
-    pub async fn add_test_repo(&mut self, test_repo_config: &TestRepoConfig ) -> anyhow::Result<()> {
-        log::trace!("Adding Test Repo from: {:#?}", test_repo_config);
-        
-        // If the ServiceState is already in an Error state, return an error.
-        if let ServiceStatus::Error(msg) = &self.service_status {
-            anyhow::bail!("Service is in an Error state: {}", msg);
-        };
-
-        // If adding the TestRepo fails, return an error. If this happens during initialization, the service
-        // will be disabled in an error state, but if it happens due to a call from the Web API then TestRunner
-        // will return an error response.
-        self.test_repo_cache.as_mut().unwrap().add_test_repo(test_repo_config.clone()).await?;
-
-        Ok(())
-    }
-
-    pub async fn add_test_run_source(&mut self, source_config: &SourceConfig) -> anyhow::Result<Option<ChangeScriptPlayer>> {
-        log::trace!("Adding TestRunSource from {:#?}", source_config);
-
-        // If the ServiceState is in an Error state, return an error.
-        if let ServiceStatus::Error(msg) = &self.service_status {
-            anyhow::bail!("Service is in an Error state: {}", msg);
-        };
-        
-        let test_run_source = TestRunSource::try_from_config(source_config, &self.source_defaults, self.service_params.clone())?;
-
-        // If adding the TestRunSource fails, return an error. If this happens during initialization, the service
-        // will be disabled in an error state, but if it happens due to a call from the Web API then TestRunner
-        // will return an error response.
-        let dataset = self.test_repo_cache.as_mut().unwrap().get_data_set(test_run_source.clone()).await?;
-
-        // Determine if the TestRunSource has a ChangeScriptPlayer that should be created and 
-        // possibly started.
-        if test_run_source.reactivator.is_some() {
-            match dataset.content.change_log_script_files {
-                Some(change_log_script_files) => {
-                    if change_log_script_files.len() > 0 {
-                        let player_settings = ChangeScriptPlayerSettings::try_from_test_run_source(test_run_source, self.service_params.clone(), change_log_script_files)?;
-
-                        log::debug!("Creating ChangeScriptPlayer from {:#?}", &player_settings);
-
-                        let player = ChangeScriptPlayer::new(player_settings).await;
-
-                        self.reactivators.insert(player.get_id().clone(), player.clone());
-
-                        return Ok(Some(player));
-                    } else {
-                        anyhow::bail!("No change script files available for player: {:?}", &test_run_source);
-                    }
-                },
-                None => {
-                    anyhow::bail!("No change script files available for player: {:?}", &test_run_source);
-                }
-            }
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "console" | "c" => Ok(OutputType::Console),
+            "file" | "f" => Ok(OutputType::File),
+            "none" | "n" => Ok(OutputType::None),
+            "publish" | "p" => Ok(OutputType::Publish),
+            _ => Err(format!("Invalid OutputType: {}", s))
         }
-
-        Ok(None)
     }
+}
 
-    pub fn contains_source(&self, source_id: &str) -> bool {
-        self.reactivators.contains_key(source_id)
+// Implement the Display trait on OutputType for better error messages
+impl fmt::Display for OutputType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OutputType::Console => write!(f, "console"),
+            OutputType::File => write!(f, "file"),
+            OutputType::None => write!(f, "none"),
+            OutputType::Publish => write!(f, "publish"),
+        }
     }
+}
 
-    pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.test_repo_cache.as_ref().unwrap().contains_test_repo(test_repo_id)
-    }
+// A struct to hold Service Parameters obtained from env vars and/or command line arguments.
+// Command line args will override env vars. If neither is provided, default values are used.
+#[derive(Parser, Debug, Clone, Serialize)]
+#[command(author, version, about, long_about = None)]
+pub struct ServiceParams {
+    // The path of the Service config file.
+    // If not provided, the Service will start and wait for Change Script Players to be started through the Web API.
+    #[arg(short = 'c', long = "config", env = "DRASI_CONFIG_FILE")]
+    pub config_file_path: Option<String>,
+
+    // The path where data used and generated in the Change Script Players gets stored.
+    // If not provided, the default_value is used.
+    #[arg(short = 'd', long = "data", env = "DRASI_DATA_CACHE", default_value = "./source_data_cache")]
+    pub data_cache_path: String,
+
+    // The port number the Web API will listen on.
+    // If not provided, the default_value is used.
+    #[arg(short = 'p', long = "port", env = "DRASI_PORT", default_value_t = 4000)]
+    pub port: u16,
+
+    // The OutputType for Source Change Events.
+    // If not provided, the default_value "publish" is used. ensuring that SourceChangeEvents are published
+    // to the Change Queue for downstream processing.
+    #[arg(short = 'e', long = "event_out", env = "DRASI_EVENT_OUTPUT", default_value_t = OutputType::Publish)]
+    pub event_output: OutputType,
+
+    // The OutputType for Change Script Player Telemetry data.
+    // If not provided, the default_value "publish" is used ensuring that Telemetry data is published
+    // so it can be captured and logged against the test run for analysis.
+    #[arg(short = 't', long = "telem_out", env = "DRASI_TELEM_OUTPUT", default_value_t = OutputType::None)]
+    pub telemetry_output: OutputType,
+
+    // The OutputType for Change Script Player Log data.
+    // If not provided, the default_value "none" is used ensuring that Log data is not generated.
+    #[arg(short = 'l', long = "log_out", env = "DRASI_LOG_OUTPUT", default_value_t = OutputType::None)]
+    pub log_output: OutputType,
 }
 
 // The main function that starts the starts the Service.
@@ -215,7 +100,7 @@ async fn main() {
     log::trace!("{:#?}", service_params);
 
     // Create the initial ServiceState
-    let mut service_state = ServiceState::new(service_params).await;
+    let mut service_state = TestRunner::new(service_params).await;
     log::debug!("Initial ServiceState {:?}", &service_state);
 
     // Iterate over the initial Change Script Players and start each one if it is configured to start immediately.

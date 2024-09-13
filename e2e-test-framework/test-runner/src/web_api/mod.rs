@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc,};
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{Extension, Path}, http::StatusCode, response::IntoResponse, routing::{get, post}, Json, Router
@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::RwLock;
 
-use crate::{config::TestRepoConfig, test_repo::{dataset::DataSet, TestSourceContent}, ServiceState, ServiceStatus, SharedState};
+use crate::{runner::{config::TestRepoConfig, ServiceStatus, SharedTestRunner, TestRunner}, test_repo::{dataset::DataSet, TestSourceContent}};
 use proxy::acquire_handler;
 use reactivator::{add_source_handler, get_source_handler, get_source_list_handler, pause_reactivator_handler, skip_reactivator_handler, start_reactivator_handler, step_reactivator_handler, stop_reactivator_handler};
 
@@ -115,7 +115,7 @@ impl From<&DataSet> for DataSetResponse {
     }
 }
 
-pub(crate) async fn start_web_api(service_state: ServiceState) {
+pub(crate) async fn start_web_api(service_state: TestRunner) {
     let addr = SocketAddr::from(([0, 0, 0, 0], service_state.service_params.port));
 
     // Now the Test Runner is initialized, create the shared state and start the Web API.
@@ -150,7 +150,7 @@ pub(crate) async fn start_web_api(service_state: ServiceState) {
 }
 
 async fn service_info_handler(
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
     log::info!("Processing call - service_info");
 
@@ -179,7 +179,7 @@ async fn service_info_handler(
 }
 
 pub(super) async fn add_test_repo_handler (
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
     body: Json<Value>,
 ) -> impl IntoResponse {
     log::info!("Processing call - add_test_repo");
@@ -232,7 +232,7 @@ pub(super) async fn add_test_repo_handler (
 }
 
 pub(super) async fn get_test_repo_list_handler(
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
     log::info!("Processing call - get_test_repo_list");
 
@@ -251,7 +251,7 @@ pub(super) async fn get_test_repo_list_handler(
 
 pub(super) async fn get_test_repo_handler (
     Path(id): Path<String>,
-    state: Extension<SharedState>,
+    state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
 
     log::info!("Processing call - get_test_repo: {}", id);

@@ -1,5 +1,5 @@
-FROM rust:1.74 as builder
-
+FROM rust@sha256:fd45a543ed41160eae2ce9e749e5b3c972625b0778104e8962e9bfb113535301 as builder
+# rust:1.74
 RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
 
 WORKDIR /usr/src

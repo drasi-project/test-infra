@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 
 use crate::{config::TestRepoConfig, test_repo::{dataset::DataSet, TestSourceContent}, ServiceState, ServiceStatus, SharedState};
 use proxy::acquire_handler;
-use reactivator::{add_player, get_player, get_player_list, pause_player, skip_player, start_player, step_player, stop_player};
+use reactivator::{add_source_handler, get_source_handler, get_source_list_handler, pause_reactivator_handler, skip_reactivator_handler, start_reactivator_handler, step_reactivator_handler, stop_reactivator_handler};
 
 mod proxy;
 mod reactivator;
@@ -124,25 +124,21 @@ pub(crate) async fn start_web_api(service_state: ServiceState) {
     // let source_routes = Router::new()
     //     .route("/", get(get_source))
 
-    let reactivator_routes = Router::new()
-        .route("/", get(get_player))
-        .route("/pause", post(pause_player))
-        .route("/skip", post(skip_player))
-        .route("/start", post(start_player))
-        .route("/step", post(step_player))
-        .route("/stop", post(stop_player));
+    let sources_routes = Router::new()
+        .route("/", get(get_source_handler))
+        .route("/pause_reactivator", post(pause_reactivator_handler))
+        .route("/skip_reactivator", post(skip_reactivator_handler))
+        .route("/start_reactivator", post(start_reactivator_handler))
+        .route("/step_reactivator", post(step_reactivator_handler))
+        .route("/stop_reactivator", post(stop_reactivator_handler));
 
     let app = Router::new()
-        .route("/", get(service_info))
+        .route("/", get(service_info_handler))
         .route("/acquire", post(acquire_handler))
-        .route("/reactivators", get(get_player_list))
-        .route("/reactivators", post(add_player))
-        .nest("/reactivators/:id", reactivator_routes)
-        .route("/test_repos", get(get_test_repo_list))
-        .route("/test_repos", post(add_test_repo))
-        .route("/test_repos/:id", get(get_test_repo))
-        // .route("/sources", get(get_source_list))
-        // .nest("/sources/:id", source_routes)
+        .route("/sources", get(get_source_list_handler).post(add_source_handler))
+        .nest("/sources/:id", sources_routes)
+        .route("/test_repos", get(get_test_repo_list_handler).post(add_test_repo_handler))
+        .route("/test_repos/:id", get(get_test_repo_handler))
         .layer(axum::extract::Extension(shared_state));
 
     log::info!("Listening on {}", addr);
@@ -153,7 +149,7 @@ pub(crate) async fn start_web_api(service_state: ServiceState) {
         .unwrap();
 }
 
-async fn service_info(
+async fn service_info_handler(
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
     log::info!("Processing call - service_info");
@@ -182,7 +178,7 @@ async fn service_info(
     }
 }
 
-pub(super) async fn add_test_repo (
+pub(super) async fn add_test_repo_handler (
     state: Extension<SharedState>,
     body: Json<Value>,
 ) -> impl IntoResponse {
@@ -235,7 +231,7 @@ pub(super) async fn add_test_repo (
     }
 }
 
-pub(super) async fn get_test_repo_list(
+pub(super) async fn get_test_repo_list_handler(
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
     log::info!("Processing call - get_test_repo_list");
@@ -253,7 +249,7 @@ pub(super) async fn get_test_repo_list(
     Json(test_repo_configs).into_response()
 }
 
-pub(super) async fn get_test_repo (
+pub(super) async fn get_test_repo_handler (
     Path(id): Path<String>,
     state: Extension<SharedState>,
 ) -> impl IntoResponse {

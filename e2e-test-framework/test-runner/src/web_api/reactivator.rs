@@ -65,11 +65,11 @@ impl PlayerCommandError {
     }
 }
 
-pub(super) async fn add_player (
+pub(super) async fn add_source_handler (
     state: Extension<SharedState>,
     body: Json<SourceConfig>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - add_player");
+    log::info!("Processing call - add_reactivator");
 
     let mut service_state = state.write().await;
 
@@ -111,10 +111,10 @@ pub(super) async fn add_player (
     }
 }
 
-pub(super) async fn get_player_list(
+pub(super) async fn get_source_list_handler(
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - get_player_list");
+    log::info!("Processing call - get_source_list");
 
     let state = state.read().await;
 
@@ -132,12 +132,12 @@ pub(super) async fn get_player_list(
     Json(player_list).into_response()
 }
 
-pub(super) async fn get_player(
+pub(super) async fn get_source_handler(
     Path(id): Path<String>,
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
 
-    log::info!("Processing call - get_player: {}", id);
+    log::info!("Processing call - get_source: {}", id);
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
@@ -168,12 +168,12 @@ pub(super) async fn get_player(
     }
 }
 
-pub(super) async fn pause_player(
+pub(super) async fn pause_reactivator_handler(
     Path(id): Path<String>,
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
 
-    log::info!("Processing call - pause_player: {}", id);
+    log::info!("Processing call - pause_reactivator: {}", id);
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
@@ -218,12 +218,12 @@ impl Default for TestSkipConfig {
     }
 }
 
-pub(super) async fn skip_player(
+pub(super) async fn skip_reactivator_handler(
     Path(id): Path<String>,
     state: Extension<SharedState>,
     body: Json<Option<TestSkipConfig>>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - skip_player: {}", id);
+    log::info!("Processing call - skip_reactivator: {}", id);
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
@@ -259,11 +259,11 @@ pub(super) async fn skip_player(
     }
 }
 
-pub(super) async fn start_player(
+pub(super) async fn start_reactivator_handler(
     Path(id): Path<String>,
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - start_player: {}", id);
+    log::info!("Processing call - start_reactivator: {}", id);
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
@@ -308,12 +308,12 @@ impl Default for TestStepConfig {
     }
 }
 
-pub(super) async fn step_player(
+pub(super) async fn step_reactivator_handler(
     Path(id): Path<String>,
     state: Extension<SharedState>,
     body: Json<Option<TestStepConfig>>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - step_player: {}", id);
+    log::info!("Processing call - step_reactivator: {}", id);
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
@@ -350,11 +350,11 @@ pub(super) async fn step_player(
 
 }
 
-pub(super) async fn stop_player(
+pub(super) async fn stop_reactivator_handler(
     Path(id): Path<String>,
     state: Extension<SharedState>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - stop_player: {}", id);
+    log::info!("Processing call - stop_reactivator: {}", id);
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {

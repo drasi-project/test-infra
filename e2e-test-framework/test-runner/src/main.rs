@@ -5,11 +5,10 @@ use serde::Serialize;
 use runner::TestRunSource;
 use tokio::sync::RwLock;
 
-use change_script_player::{ ChangeScriptPlayerSettings, ChangeScriptPlayer};
 use config::{ ServiceConfig, ServiceParams, SourceConfig, TestRepoConfig};
+use runner::change_script_player::{ ChangeScriptPlayerSettings, ChangeScriptPlayer};
 use test_repo::test_repo_cache::TestRepoCache;
 
-mod change_script_player;
 mod config;
 mod runner;
 mod script_source;

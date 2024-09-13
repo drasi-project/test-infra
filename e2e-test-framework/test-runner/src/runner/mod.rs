@@ -4,6 +4,8 @@ use serde::Serialize;
 
 use crate::config::{ProxyConfig, ReactivatorConfig, ServiceParams, SourceChangeDispatcherConfig, SourceConfig};
 
+pub mod change_script_player;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum TimeMode {
     Live,

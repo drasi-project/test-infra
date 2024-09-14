@@ -11,8 +11,7 @@ use crate::{
     runner::{config::SourceChangeDispatcherConfig, SpacingMode, TestRunReactivator, TestRunSource, TimeMode}, 
     script_source::SourceChangeEvent, source_change_dispatchers::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
-    }, 
-    ServiceParams, 
+    }
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 use crate::script_source::change_script_file_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};
@@ -41,14 +40,14 @@ pub enum ChangeScriptPlayerError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ChangeScriptPlayerSettings {
+    pub data_store_path: String,
     pub reactivator: TestRunReactivator,
     pub script_files: Vec<PathBuf>,
-    pub service_params: ServiceParams,
     pub test_run_source: TestRunSource,
 }
 
 impl ChangeScriptPlayerSettings {
-    pub fn try_from_test_run_source(test_run_source: TestRunSource, service_params: ServiceParams, script_files: Vec<PathBuf>) -> anyhow::Result<Self> {
+    pub fn try_from_test_run_source(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: String) -> anyhow::Result<Self> {
 
         // If the SourceConfig doesnt contain a ReactivatorConfig, log and return an error.
         // Otherwise, clone the TestRunSource and extract the TestRunReactivator.
@@ -62,9 +61,9 @@ impl ChangeScriptPlayerSettings {
         };
 
         Ok(ChangeScriptPlayerSettings {
+            data_store_path,
             reactivator,
             script_files,
-            service_params,
             test_run_source,
         })
     }
@@ -361,14 +360,11 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                     },
                     SourceChangeDispatcherConfig::JsonlFile(jsonl_file_config) => {
                         // Construct the path to the local file used to store the generated SourceChangeEvents.
-                        let folder_path = match &jsonl_file_config.folder_path {
-                            Some(path) => path.clone(),
-                            None => format!("{}/test_output/{}/{}/change_logs/{}", 
-                                player_settings.service_params.data_cache_path, 
-                                player_settings.test_run_source.test_id, 
-                                player_settings.test_run_source.test_run_id, 
-                                player_settings.test_run_source.source_id)
-                        };
+                        let folder_path = format!("./{}/test_output/{}/{}/change_logs/{}", 
+                            jsonl_file_config.folder_path.clone().unwrap_or(player_settings.data_store_path.clone()),
+                            player_settings.test_run_source.test_id, 
+                            player_settings.test_run_source.test_run_id, 
+                            player_settings.test_run_source.source_id);
 
                         match JsonlFileSourceChangeDispatcherSettings::try_from_config(jsonl_file_config, folder_path) {
                             Ok(settings) => {

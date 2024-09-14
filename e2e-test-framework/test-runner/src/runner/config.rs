@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize, Serializer};
 
-// The ServiceConfig is what is loaded from the Service config File. It can contain the configurations for multiple Change Script Players,
-// as well as default values that are used when a Change Script Player doesn't specify a value.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ServiceConfig {
+pub struct TestRunnerConfig {
+    #[serde(default = "default_data_store_path")]
+    pub data_store_path: String,
+    #[serde(default = "prune_data_store_path")]
+    pub prune_data_store_path: bool,
     #[serde(default)]
     pub source_defaults: SourceConfig,
     #[serde(default)]
@@ -11,27 +13,14 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub test_repos: Vec<TestRepoConfig>,
 }
+fn default_data_store_path() -> String { "./test_runner_data".to_string() }
+fn prune_data_store_path() -> bool { false }
 
-impl ServiceConfig {
-    pub fn from_file_path(config_file_path: &str) -> anyhow::Result<Self> {
-        // Validate that the file exists and if not return an error.
-        if !std::path::Path::new(config_file_path).exists() {
-            anyhow::bail!("Service Config file not found: {}", config_file_path);
-        }
-
-        // Read the file content into a string.
-        let config_file_json = std::fs::read_to_string(config_file_path)?;
-
-        // Parse the string into a ServiceConfig struct.
-        let service_config_file = serde_json::from_str(&config_file_json)?;
-
-        Ok(service_config_file)
-    }
-}
-
-impl Default for ServiceConfig {
+impl Default for TestRunnerConfig {
     fn default() -> Self {
-        ServiceConfig {
+        TestRunnerConfig {
+            data_store_path: default_data_store_path(),
+            prune_data_store_path: false,
             source_defaults: SourceConfig::default(),
             test_repos: Vec::new(),
             sources: Vec::new(),
@@ -39,8 +28,8 @@ impl Default for ServiceConfig {
     }
 }
 
-// The SourceConfig is what is loaded from the Service config file or passed in to the Web API 
-// to create a new Change Script Player.
+// The SourceConfig is what is loaded from the TestRunner config file or passed in to the Web API 
+// to create a new Source.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SourceConfig {
     pub test_repo_id: Option<String>,

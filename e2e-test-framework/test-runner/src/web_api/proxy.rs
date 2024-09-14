@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::{
     script_source::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, 
-    runner::{ServiceStatus, SharedTestRunner}
+    runner::{TestRunnerStatus, SharedTestRunner}
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -118,8 +118,8 @@ pub(super) async fn acquire_handler(
     let dataset = {
         let state = state.read().await;
 
-        // Check if the service is an Error state.
-        if let ServiceStatus::Error(msg) = &state.service_status {
+        // If the TestRunner is an Error state, return an error and a description of the error.
+        if let TestRunnerStatus::Errorz(msg) = &state.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
@@ -127,7 +127,7 @@ pub(super) async fn acquire_handler(
         // Create a hashset of the requested node and relation labels.
         let label_set = HashSet::from_iter(requested_labels.clone());
 
-        match state.test_repo_cache.as_ref().unwrap().get_dataset_for_bootstrap(&label_set) {
+        match state.test_repo_cache.get_dataset_for_bootstrap(&label_set) {
             Some(dataset) => dataset,
             None => return Json(AcquireResponseBody::new()).into_response()
         }

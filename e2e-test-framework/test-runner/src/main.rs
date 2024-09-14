@@ -1,8 +1,7 @@
-use std::{fmt, str::FromStr};
-
 use clap::Parser;
-use runner::{ServiceStatus, TestRunner};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+use runner::{config::TestRunnerConfig, TestRunner};
 
 mod runner;
 mod script_source;
@@ -10,126 +9,89 @@ mod source_change_dispatchers;
 mod test_repo;
 mod web_api;
 
-// The OutputType enum is used to specify the destination for output of various sorts including:
-//   - the SourceChangeEvents generated during the run
-//   - the Telemetry data generated during the run
-//   - the Log data generated during the run
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Copy)]
-pub enum OutputType {
-    Console,
-    File,
-    None,
-    Publish,
-}
-
-// Implement the FromStr trait for OutputType to allow parsing from a string.
-impl FromStr for OutputType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "console" | "c" => Ok(OutputType::Console),
-            "file" | "f" => Ok(OutputType::File),
-            "none" | "n" => Ok(OutputType::None),
-            "publish" | "p" => Ok(OutputType::Publish),
-            _ => Err(format!("Invalid OutputType: {}", s))
-        }
-    }
-}
-
-// Implement the Display trait on OutputType for better error messages
-impl fmt::Display for OutputType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OutputType::Console => write!(f, "console"),
-            OutputType::File => write!(f, "file"),
-            OutputType::None => write!(f, "none"),
-            OutputType::Publish => write!(f, "publish"),
-        }
-    }
-}
-
-// A struct to hold Service Parameters obtained from env vars and/or command line arguments.
+// A struct to hold parameters obtained from env vars and/or command line arguments.
 // Command line args will override env vars. If neither is provided, default values are used.
 #[derive(Parser, Debug, Clone, Serialize)]
 #[command(author, version, about, long_about = None)]
-pub struct ServiceParams {
-    // The path of the Service config file.
-    // If not provided, the Service will start and wait for Change Script Players to be started through the Web API.
+pub struct HostParams {
+    // The path of the config file.
+    // If not provided, the the TestRunner will be stared with no active configuration
+    // and wait to be configured through the Web API.
     #[arg(short = 'c', long = "config", env = "DRASI_CONFIG_FILE")]
     pub config_file_path: Option<String>,
 
-    // The path where data used and generated in the Change Script Players gets stored.
-    // If not provided, the default_value is used.
-    #[arg(short = 'd', long = "data", env = "DRASI_DATA_CACHE", default_value = "./source_data_cache")]
-    pub data_cache_path: String,
+    // The path where data used and generated in the TestRunner gets stored.
+    // This will override the value in the config file if it is present.
+    #[arg(short = 'd', long = "data", env = "DRASI_DATA_STORE_PATH")]
+    pub data_store_path: Option<String>,
+
+    // Flag to enable pruning of the data store at startup.
+    #[arg(short = 'x', long = "prune", env = "DRASI_PRUNE_DATA_STORE")]
+    pub prune_data_store : bool,
 
     // The port number the Web API will listen on.
     // If not provided, the default_value is used.
     #[arg(short = 'p', long = "port", env = "DRASI_PORT", default_value_t = 4000)]
-    pub port: u16,
-
-    // The OutputType for Source Change Events.
-    // If not provided, the default_value "publish" is used. ensuring that SourceChangeEvents are published
-    // to the Change Queue for downstream processing.
-    #[arg(short = 'e', long = "event_out", env = "DRASI_EVENT_OUTPUT", default_value_t = OutputType::Publish)]
-    pub event_output: OutputType,
-
-    // The OutputType for Change Script Player Telemetry data.
-    // If not provided, the default_value "publish" is used ensuring that Telemetry data is published
-    // so it can be captured and logged against the test run for analysis.
-    #[arg(short = 't', long = "telem_out", env = "DRASI_TELEM_OUTPUT", default_value_t = OutputType::None)]
-    pub telemetry_output: OutputType,
-
-    // The OutputType for Change Script Player Log data.
-    // If not provided, the default_value "none" is used ensuring that Log data is not generated.
-    #[arg(short = 'l', long = "log_out", env = "DRASI_LOG_OUTPUT", default_value_t = OutputType::None)]
-    pub log_output: OutputType,
+    pub port: u16
 }
 
-// The main function that starts the starts the Service.
-// If the Test Runner is started with a config file, it will initialize the Test Runner with the settings in the file.
-// If the Test Runner is started with no config file, it will wait to be managed through the Web API.
+// The main function that starts the starts the Test Runner Host.
 #[tokio::main]
 async fn main() {
      
      env_logger::init();
 
-    // Parse the command line and env var args into an ServiceParams struct. If the args are invalid, return an error.
-    let service_params = ServiceParams::parse();
-    log::trace!("{:#?}", service_params);
+    // Parse the command line and env var args. If the args are invalid, return an error.
+    let host_params = HostParams::parse();
+    log::info!("Using settings - {:#?}", host_params);
 
-    // Create the initial ServiceState
-    let mut service_state = TestRunner::new(service_params).await;
-    log::debug!("Initial ServiceState {:?}", &service_state);
+    // Load the config from a file if a path is specified in the HostParams.
+    // If the specified file does not exist, return an error.
+    // If no config file is specified, create the TestRunner with a default configuration.
+    let mut test_runner_config = match host_params.config_file_path.as_ref() {
+        Some(config_file_path) => {
+            log::info!("Loading Test Runner config from {:#?}", config_file_path);
 
-    // Iterate over the initial Change Script Players and start each one if it is configured to start immediately.
-    for (_, player) in service_state.reactivators.iter() {
-        if player.get_settings().reactivator.start_immediately {
-            match player.start().await {
-                Ok(_) => {},
-                Err(e) => {
-                    let msg = format!("Error starting ChangeScriptPlayer: {}", e);
-                    log::error!("{}", msg);
-                    service_state.service_status = ServiceStatus::Error(msg);
-                    break;
-                }
+            // Validate that the file exists and if not return an error.
+            if !std::path::Path::new(config_file_path).exists() {
+                panic!("Config file not found: {}", config_file_path);
             }
+
+            // Read the file content into a string.
+            let config_file_json = std::fs::read_to_string(config_file_path).unwrap_or_else(|err| {
+                panic!("Error reading config file: {}", err);
+            });
+
+            serde_json::from_str::<TestRunnerConfig>(&config_file_json).unwrap_or_else(|err| {
+                panic!("Error parsing config TestRunner: {}", err);
+            })
+        },
+        None => {
+            log::info!("No config file specified.; using default configuration.");
+            TestRunnerConfig::default()
         }
+    };
+
+    // If a data_store_path is specified in the HostParams, update the TestRunnerConfig.
+    if host_params.data_store_path.is_some() {
+        test_runner_config.data_store_path = host_params.data_store_path.unwrap();
     }
 
-    // Set the ServiceStatus to Ready if it is not already in an Error state.
-    match &service_state.service_status {
-        ServiceStatus::Error(_) => {
-            log::error!("Test Runner failed to initialize correctly, ServiceState: {:?}", &service_state.service_status);            
-        },
-        _ => {
-            service_state.service_status = ServiceStatus::Ready;
-            log::info!("Test Runner initialized successfully, ServiceState: {:?}", &service_state.service_status);            
-        }
+    // If the prune_data_store flag is set, update the TestRunnerConfig
+    if host_params.prune_data_store {
+        test_runner_config.prune_data_store_path = true;
     }
+
+    log::debug!("Creating Test Runner with config {:?}", test_runner_config);
+    let mut test_runner = TestRunner::new(test_runner_config).await.unwrap_or_else(|err| {
+        panic!("Error creating TestRunner: {}", err);
+    });
+
+    // Start the TestRunner. This will start any players that are configured to start on launch.
+    test_runner.start().await.unwrap_or_else(|err| {
+        panic!("Error starting TestRunner: {}", err);
+    });
 
     // Start the Web API.
-    web_api::start_web_api(service_state).await;
-
+    web_api::start_web_api(host_params.port, test_runner).await;
 }

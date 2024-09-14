@@ -60,16 +60,6 @@ impl TestRepoCache {
         self.test_repos.contains_key(test_repo_id)
     }
 
-    // pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<TestRepoConfig> {
-    //     match self.test_repos.get(test_repo_id) {
-    //         Some(test_repo) => Ok(test_repo.settings.clone()),
-    //         None => {
-    //             let msg = format!("TestRepo {:?} not found in cache", test_repo_id);
-    //             anyhow::bail!(msg);
-    //         }
-    //     }
-    // }
-
     pub async fn get_data_set(&mut self, test_run_source: TestRunSource) -> anyhow::Result<DataSet> {
 
         let TestRunSource { ref id, ref source_id, ref test_id, ref test_repo_id, .. } = test_run_source;

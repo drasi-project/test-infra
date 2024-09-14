@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::RwLock;
 
-use crate::{runner::{config::TestRepoConfig, ServiceStatus, SharedTestRunner, TestRunner}, test_repo::{dataset::DataSet, TestSourceContent}};
+use crate::{runner::{config::TestRepoConfig, TestRunnerStatus, SharedTestRunner, TestRunner}, test_repo::{dataset::DataSet, TestSourceContent}};
 use proxy::acquire_handler;
 use reactivator::{add_source_handler, get_source_handler, get_source_list_handler, pause_reactivator_handler, skip_reactivator_handler, start_reactivator_handler, step_reactivator_handler, stop_reactivator_handler};
 
@@ -79,7 +79,7 @@ mod reactivator;
 struct ServiceStateResponse {
     service_status: String,
     local_test_repo: LocalTestRepoResponse,
-    reactivators: Vec<String>,
+    sources: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -115,14 +115,11 @@ impl From<&DataSet> for DataSetResponse {
     }
 }
 
-pub(crate) async fn start_web_api(service_state: TestRunner) {
-    let addr = SocketAddr::from(([0, 0, 0, 0], service_state.service_params.port));
+pub(crate) async fn start_web_api(port: u16, test_runner: TestRunner) {
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
     // Now the Test Runner is initialized, create the shared state and start the Web API.
-    let shared_state = Arc::new(RwLock::new(service_state));
-
-    // let source_routes = Router::new()
-    //     .route("/", get(get_source))
+    let shared_test_runner = Arc::new(RwLock::new(test_runner));
 
     let sources_routes = Router::new()
         .route("/", get(get_source_handler))
@@ -139,7 +136,7 @@ pub(crate) async fn start_web_api(service_state: TestRunner) {
         .nest("/sources/:id", sources_routes)
         .route("/test_repos", get(get_test_repo_list_handler).post(add_test_repo_handler))
         .route("/test_repos/:id", get(get_test_repo_handler))
-        .layer(axum::extract::Extension(shared_state));
+        .layer(axum::extract::Extension(shared_test_runner));
 
     log::info!("Listening on {}", addr);
 
@@ -154,10 +151,10 @@ async fn service_info_handler(
 ) -> impl IntoResponse {
     log::info!("Processing call - service_info");
 
-    let state = state.read().await;
+    let test_runner = state.read().await;
 
-    match &state.service_status {
-        ServiceStatus::Error(msg) => {
+    match &test_runner.status {
+        TestRunnerStatus::Errorz(msg) => {
             Json(ServiceStateErrorResponse {
                 service_status: "Error".to_string(),
                 service_status_msg: msg.to_string(),
@@ -165,14 +162,14 @@ async fn service_info_handler(
         },
         _ => {
             let local_test_repo = LocalTestRepoResponse {
-                data_cache_path: state.test_repo_cache.as_ref().unwrap().data_cache_root_path.to_str().unwrap().to_string(),
-                data_sets: state.test_repo_cache.as_ref().unwrap().datasets.iter().map(|(_, v)| v.into()).collect(),
+                data_cache_path: test_runner.test_repo_cache.data_cache_root_path.to_str().unwrap().to_string(),
+                data_sets: test_runner.test_repo_cache.datasets.iter().map(|(_, v)| v.into()).collect(),
             };
         
             Json(ServiceStateResponse {
-                service_status: format!("{:?}", &state.service_status),
+                service_status: format!("{:?}", &test_runner.status),
                 local_test_repo,
-                reactivators: state.reactivators.keys().cloned().collect(),
+                sources: test_runner.reactivators.keys().cloned().collect(),
             }).into_response()
         }
     }
@@ -184,10 +181,10 @@ pub(super) async fn add_test_repo_handler (
 ) -> impl IntoResponse {
     log::info!("Processing call - add_test_repo");
 
-    let mut service_state = state.write().await;
+    let mut test_runner = state.write().await;
 
     // If the service is an Error state, return an error and the description of the error.
-    if let ServiceStatus::Error(msg) = &service_state.service_status {
+    if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -205,7 +202,7 @@ pub(super) async fn add_test_repo_handler (
 
         // Check if the TestRepoConfig already exists.
         // If it does, return an error.
-        if service_state.contains_test_repo(&id) {
+        if test_runner.contains_test_repo(&id) {
             return (StatusCode::CONFLICT, Json(format!("TestRepoConfig with id {} already exists", id))).into_response();
         };
 
@@ -216,8 +213,8 @@ pub(super) async fn add_test_repo_handler (
             Err(e) => return (StatusCode::BAD_REQUEST, Json(format!("Error parsing TestRepoConfig: {}", e))).into_response(),
         };
 
-        // Add the TestRepoConfig to the service_state.test_repo_configs HashMap.
-        match service_state.add_test_repo(&test_repo_config).await {
+        // Add the TestRepoConfig to the test_runner.test_repo_configs HashMap.
+        match test_runner.add_test_repo(&test_repo_config).await {
             Ok(_) => {
                 log::info!("Added TestRepoConfig: {}", id);
                 return Json(test_repo_config).into_response();
@@ -236,10 +233,10 @@ pub(super) async fn get_test_repo_list_handler(
 ) -> impl IntoResponse {
     log::info!("Processing call - get_test_repo_list");
 
-    let state = state.read().await;
+    let test_runner = state.read().await;
 
-    // Check if the service is an Error state.
-    if let ServiceStatus::Error(msg) = &state.service_status {
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -256,10 +253,10 @@ pub(super) async fn get_test_repo_handler (
 
     log::info!("Processing call - get_test_repo: {}", id);
 
-    let state = state.read().await;
+    let test_runner = state.read().await;
 
-    // Check if the service is an Error state.
-    if let ServiceStatus::Error(msg) = &state.service_status {
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 

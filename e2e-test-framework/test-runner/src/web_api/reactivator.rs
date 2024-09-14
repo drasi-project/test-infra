@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     runner::config::SourceConfig, 
-    runner::{change_script_player::{ChangeScriptPlayerSettings, ChangeScriptPlayerState}, ServiceStatus, SharedTestRunner },
+    runner::{change_script_player::{ChangeScriptPlayerSettings, ChangeScriptPlayerState}, TestRunnerStatus, SharedTestRunner },
 };
 
 #[derive(Debug, Serialize)]
@@ -74,16 +74,16 @@ pub(super) async fn add_source_handler (
 ) -> impl IntoResponse {
     log::info!("Processing call - add_reactivator");
 
-    let mut service_state = state.write().await;
+    let mut test_runner = state.write().await;
 
-    // If the service is an Error state, return an error and the description of the error.
-    if let ServiceStatus::Error(msg) = &service_state.service_status {
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
     let source_config = body.0;
 
-    match service_state.add_test_run_source(&source_config).await {
+    match test_runner.add_test_run_source(&source_config).await {
         Ok(result) => {
             match result {
                 Some(player) => {
@@ -100,7 +100,6 @@ pub(super) async fn add_source_handler (
                 None => {
                     let msg = format!("Error creating ChangeScriptPlayer: {:?}", source_config);
                     log::error!("{}", &msg);
-                    service_state.service_status = ServiceStatus::Error(msg.clone());
                     return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
                 }
             }
@@ -108,7 +107,6 @@ pub(super) async fn add_source_handler (
         Err(e) => {
             let msg = format!("Error creating Source: {}", e);
             log::error!("{}", &msg);
-            service_state.service_status = ServiceStatus::Error(msg.clone());
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }   
     }
@@ -119,16 +117,16 @@ pub(super) async fn get_source_list_handler(
 ) -> impl IntoResponse {
     log::info!("Processing call - get_source_list");
 
-    let state = state.read().await;
+    let test_runner = state.read().await;
 
-    // If the service is an Error state, return an error and the description of the error.
-    if let ServiceStatus::Error(msg) = &state.service_status {
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
     // Otherwise, return the configuration and state of all the ChangeScriptPlayers.
     let mut player_list = vec![];
-    for (_, player) in state.reactivators.iter() {
+    for (_, player) in test_runner.reactivators.iter() {
         player_list.push(PlayerInfoResponse::new(player.get_settings(), player.get_state().await.unwrap().state));
     }
 
@@ -144,15 +142,15 @@ pub(super) async fn get_source_handler(
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
-        let state = state.read().await;
+        let test_runner = state.read().await;
 
         // Check if the service is an Error state.
-        if let ServiceStatus::Error(msg) = &state.service_status {
+        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match state.reactivators.get(&id) {
+        match test_runner.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -180,15 +178,15 @@ pub(super) async fn pause_reactivator_handler(
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
-        let state = state.read().await;
+        let test_runner = state.read().await;
 
-        // Check if the service is an Error state.
-        if let ServiceStatus::Error(msg) = &state.service_status {
+        // If the TestRunner is an Error state, return an error and a description of the error.
+        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match state.reactivators.get(&id) {
+        match test_runner.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -230,15 +228,15 @@ pub(super) async fn skip_reactivator_handler(
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
-        let state = state.read().await;
+        let test_runner = state.read().await;
 
-        // Check if the service is an Error state.
-        if let ServiceStatus::Error(msg) = &state.service_status {
+        // If the TestRunner is an Error state, return an error and a description of the error.
+        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match state.reactivators.get(&id) {
+        match test_runner.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -270,15 +268,15 @@ pub(super) async fn start_reactivator_handler(
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
-        let state = state.read().await;
+        let test_runner = state.read().await;
 
-        // Check if the service is an Error state.
-        if let ServiceStatus::Error(msg) = &state.service_status {
+        // If the TestRunner is an Error state, return an error and a description of the error.
+        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match state.reactivators.get(&id) {
+        match test_runner.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -320,15 +318,15 @@ pub(super) async fn step_reactivator_handler(
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
-        let state = state.read().await;
+        let test_runner = state.read().await;
 
-        // Check if the service is an Error state.
-        if let ServiceStatus::Error(msg) = &state.service_status {
+        // If the TestRunner is an Error state, return an error and a description of the error.
+        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match state.reactivators.get(&id) {
+        match test_runner.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -361,15 +359,15 @@ pub(super) async fn stop_reactivator_handler(
 
     // Limit the scope of the Read Lock to the error check and player lookup.
     let player = {
-        let state = state.read().await;
+        let test_runner = state.read().await;
 
-        // Check if the service is an Error state.
-        if let ServiceStatus::Error(msg) = &state.service_status {
+        // If the TestRunner is an Error state, return an error and a description of the error.
+        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match state.reactivators.get(&id) {
+        match test_runner.reactivators.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();

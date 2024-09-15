@@ -9,7 +9,7 @@ use crate::{runner::{config::TestRepoConfig, SharedTestRunner, TestRunnerStatus}
 #[derive(Debug, Serialize)]
 pub struct LocalTestRepoResponse {
     pub data_cache_path: String,
-    pub data_sets: Vec<DataSetResponse>,
+    pub datasets: Vec<DataSetResponse>,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,10 +98,16 @@ pub(super) async fn get_test_repo_list_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    // TODO: Implement this function.
-    let test_repo_configs: Vec<TestRepoConfig> = Vec::new();
-
-    Json(test_repo_configs).into_response()
+    match test_runner.get_test_repos() {
+        Ok(sources) => {
+            Json(sources).into_response()
+        },
+        Err(e) => {
+            let msg = format!("Error getting source list, error: {}", e);
+            log::error!("{}", &msg);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
+        }
+    }
 }
 
 pub(super) async fn get_test_repo_handler (
@@ -118,12 +124,21 @@ pub(super) async fn get_test_repo_handler (
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    // Look up the TestRepoConfig by id.
-    // state.test_repo_configs.get(&id)
-    //     .map_or_else(
-    //         || StatusCode::NOT_FOUND.into_response(),
-    //         |test_repo_config| Json(test_repo_config).into_response()
-    //     )
-
-    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    match test_runner.get_test_repo(&id) {
+        Ok(source) => {
+            match source {
+                Some(source) => {
+                    Json(source).into_response()
+                },
+                None => {
+                    StatusCode::NOT_FOUND.into_response()
+                }
+            }
+        },
+        Err(e) => {
+            let msg = format!("Error getting source - source: {}, error: {}", id, e);
+            log::error!("{}", &msg);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
+        }
+    }
 }

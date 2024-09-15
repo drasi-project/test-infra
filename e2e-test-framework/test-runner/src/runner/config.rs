@@ -4,17 +4,20 @@ use serde::{Deserialize, Serialize, Serializer};
 pub struct TestRunnerConfig {
     #[serde(default = "default_data_store_path")]
     pub data_store_path: String,
-    #[serde(default = "prune_data_store_path")]
+    #[serde(default = "default_prune_data_store_path")]
     pub prune_data_store_path: bool,
     #[serde(default)]
     pub source_defaults: SourceConfig,
     #[serde(default)]
     pub sources: Vec<SourceConfig>,
+    #[serde(default = "default_start_reactivators_together")]
+    pub start_reactivators_together: bool,
     #[serde(default)]
     pub test_repos: Vec<TestRepoConfig>,
 }
 fn default_data_store_path() -> String { "./test_runner_data".to_string() }
-fn prune_data_store_path() -> bool { false }
+fn default_prune_data_store_path() -> bool { false }
+fn default_start_reactivators_together() -> bool { true }
 
 impl Default for TestRunnerConfig {
     fn default() -> Self {
@@ -22,6 +25,7 @@ impl Default for TestRunnerConfig {
             data_store_path: default_data_store_path(),
             prune_data_store_path: false,
             source_defaults: SourceConfig::default(),
+            start_reactivators_together: default_start_reactivators_together(),
             test_repos: Vec::new(),
             sources: Vec::new(),
         }

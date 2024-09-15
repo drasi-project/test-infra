@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-c", "./tests/config/config.json", "-d", "./tests/data_cache", "-e", "p", "-t", "n", "-l", "c"],
+            "args": ["-c", "./tests/config/config_full.json", "-x"],
             "cwd": "${workspaceFolder}/test-runner"
         },
         {

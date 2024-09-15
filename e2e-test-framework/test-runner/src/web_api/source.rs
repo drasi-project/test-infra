@@ -1,5 +1,3 @@
-use std::vec;
-
 use axum::{
     extract::{Extension, Path},
     http::StatusCode,
@@ -124,16 +122,52 @@ pub(super) async fn get_source_list_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    // Otherwise, return the configuration and state of all the ChangeScriptPlayers.
-    let mut player_list = vec![];
-    for (_, player) in test_runner.reactivators.iter() {
-        player_list.push(PlayerInfoResponse::new(player.get_settings(), player.get_state().await.unwrap().state));
+    match test_runner.get_test_run_sources() {
+        Ok(sources) => {
+            Json(sources).into_response()
+        },
+        Err(e) => {
+            let msg = format!("Error getting source list, error: {}", e);
+            log::error!("{}", &msg);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
+        }
     }
-
-    Json(player_list).into_response()
 }
 
 pub(super) async fn get_source_handler(
+    Path(id): Path<String>,
+    state: Extension<SharedTestRunner>,
+) -> impl IntoResponse {
+
+    log::info!("Processing call - get_source: {}", id);
+
+    let test_runner = state.read().await;
+
+    // Check if the service is an Error state.
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    }
+
+    match test_runner.get_test_run_source(&id) {
+        Ok(source) => {
+            match source {
+                Some(source) => {
+                    Json(source).into_response()
+                },
+                None => {
+                    StatusCode::NOT_FOUND.into_response()
+                }
+            }
+        },
+        Err(e) => {
+            let msg = format!("Error getting source - source: {}, error: {}", id, e);
+            log::error!("{}", &msg);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
+        }
+    }
+}
+
+pub(super) async fn get_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
@@ -150,7 +184,7 @@ pub(super) async fn get_source_handler(
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match test_runner.reactivators.get(&id) {
+        match test_runner.change_script_players.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -169,7 +203,7 @@ pub(super) async fn get_source_handler(
     }
 }
 
-pub(super) async fn pause_reactivator_handler(
+pub(super) async fn pause_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
@@ -186,7 +220,7 @@ pub(super) async fn pause_reactivator_handler(
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match test_runner.reactivators.get(&id) {
+        match test_runner.change_script_players.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -219,7 +253,7 @@ impl Default for TestSkipConfig {
     }
 }
 
-pub(super) async fn skip_reactivator_handler(
+pub(super) async fn skip_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
     body: Json<Option<TestSkipConfig>>,
@@ -236,7 +270,7 @@ pub(super) async fn skip_reactivator_handler(
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match test_runner.reactivators.get(&id) {
+        match test_runner.change_script_players.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -260,7 +294,7 @@ pub(super) async fn skip_reactivator_handler(
     }
 }
 
-pub(super) async fn start_reactivator_handler(
+pub(super) async fn start_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
@@ -276,7 +310,7 @@ pub(super) async fn start_reactivator_handler(
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match test_runner.reactivators.get(&id) {
+        match test_runner.change_script_players.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -309,7 +343,7 @@ impl Default for TestStepConfig {
     }
 }
 
-pub(super) async fn step_reactivator_handler(
+pub(super) async fn step_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
     body: Json<Option<TestStepConfig>>,
@@ -326,7 +360,7 @@ pub(super) async fn step_reactivator_handler(
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match test_runner.reactivators.get(&id) {
+        match test_runner.change_script_players.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();
@@ -351,7 +385,7 @@ pub(super) async fn step_reactivator_handler(
 
 }
 
-pub(super) async fn stop_reactivator_handler(
+pub(super) async fn stop_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
@@ -367,7 +401,7 @@ pub(super) async fn stop_reactivator_handler(
         }
 
         // Look up the ChangeScriptPlayer by id.
-        match test_runner.reactivators.get(&id) {
+        match test_runner.change_script_players.get(&id) {
             Some(player) => player.clone(),
             None => {
                 return StatusCode::NOT_FOUND.into_response();

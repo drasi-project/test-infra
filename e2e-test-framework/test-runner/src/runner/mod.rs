@@ -4,9 +4,9 @@ use anyhow::bail;
 use serde::Serialize;
 use tokio::{fs::remove_dir_all, sync::RwLock};
 
-use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerSettings};
+use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse, ChangeScriptPlayerSettings};
 use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig, TestRepoConfig};
-use crate::test_repo::test_repo_cache::TestRepoCache;
+use crate::test_repo::{dataset::DataSet, test_repo_cache::TestRepoCache};
 
 pub mod change_script_player;
 pub mod config;
@@ -118,7 +118,7 @@ pub struct TestRunSource {
     pub test_repo_id: String,
     pub test_run_id: String,
     pub proxy: Option<TestRunProxy>,
-    pub reactivator: Option<TestRunReactivator>,
+    pub reactivator: Option<TestRunReactivator>,    
 }
 
 impl TestRunSource {
@@ -305,10 +305,13 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 
 #[derive(Debug)]
 pub struct TestRunner {
+    pub change_script_players: HashMap<String, ChangeScriptPlayer>,
     pub data_store_path: String,
-    pub reactivators: HashMap<String, ChangeScriptPlayer>,
     pub source_defaults: SourceConfig,
+    pub sources: HashMap<String, TestRunSource>,
     pub status: TestRunnerStatus,
+    pub start_reactivators_together: bool,
+    pub test_repos: HashMap<String, TestRepoConfig>,
     pub test_repo_cache: TestRepoCache,
 }
 
@@ -318,10 +321,13 @@ impl TestRunner {
         log::debug!("Creating TestRunner from {:#?}", config);
 
         let mut test_runner = TestRunner {
+            change_script_players: HashMap::new(),
             data_store_path: config.data_store_path.clone(),
-            status: TestRunnerStatus::Initialized,
-            reactivators: HashMap::new(),
             source_defaults: config.source_defaults,
+            sources: HashMap::new(),
+            status: TestRunnerStatus::Initialized,
+            start_reactivators_together: config.start_reactivators_together,
+            test_repos: HashMap::new(),
             test_repo_cache: TestRepoCache::new(config.data_store_path.clone()).await?,
         };
 
@@ -358,7 +364,8 @@ impl TestRunner {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
 
-        self.test_repo_cache.add_test_repo(test_repo_config.clone()).await?;
+        let test_repo_id = self.test_repo_cache.add_test_repo(test_repo_config.clone()).await?;  
+        self.test_repos.insert(test_repo_id, test_repo_config.clone());
 
         Ok(())
     }
@@ -373,7 +380,13 @@ impl TestRunner {
         
         let test_run_source = TestRunSource::try_from_config(source_config, &self.source_defaults)?;
 
-        let dataset = self.test_repo_cache.get_data_set(test_run_source.clone()).await?;
+        // Fail if the TestRunner already contains the TestRunSource.
+        if self.contains_test_run_source(&test_run_source.id) {
+            anyhow::bail!("TestRunSource already exists: {:?}", &test_run_source);
+        }
+
+        // Get the DataSet for the TestRunSource.
+        let dataset = self.test_repo_cache.download_data_set(test_run_source.clone()).await?;
 
         // Determine if the TestRunSource has a reactivator, in which case a ChangeScriptPlayer should 
         // be created and possibly started.
@@ -383,13 +396,14 @@ impl TestRunner {
                     if change_log_script_files.len() > 0 {
                         let player_settings = 
                             ChangeScriptPlayerSettings::try_from_test_run_source(
-                                test_run_source, change_log_script_files, self.data_store_path.clone())?;
+                                test_run_source.clone(), change_log_script_files, self.data_store_path.clone())?;
 
                         log::debug!("Creating ChangeScriptPlayer from {:#?}", &player_settings);
 
                         let player = ChangeScriptPlayer::new(player_settings).await;
 
-                        self.reactivators.insert(player.get_id().clone(), player.clone());
+                        self.sources.insert(test_run_source.id.clone(), test_run_source);
+                        self.change_script_players.insert(player.get_id().clone(), player.clone());
 
                         return Ok(Some(player));
                     } else {
@@ -405,8 +419,81 @@ impl TestRunner {
         Ok(None)
     }
 
+    pub async fn _control_player(&mut self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
+        log::trace!("Control Player - player_id:{}, command:{:?}", player_id, command);
+
+        // If the TestRunner is in an Error state, return an error.
+        if let TestRunnerStatus::Error(msg) = &self.status {
+            anyhow::bail!("TestRunner is in an Error state: {}", msg);
+        };
+
+        // Get the ChangeScriptPlayer from the TestRunner or fail if it doesn't exist.
+        match self.change_script_players.get(player_id) {
+            Some(player) => {
+                match command {
+                    ChangeScriptPlayerCommand::GetState => {
+                        player.get_state().await
+                    },
+                    ChangeScriptPlayerCommand::Start => {
+                        player.start().await
+                    },
+                    ChangeScriptPlayerCommand::Step(steps) => {
+                        player.step(steps).await
+                    },
+                    ChangeScriptPlayerCommand::Skip(skips) => {
+                        player.skip(skips).await
+                    },
+                    ChangeScriptPlayerCommand::Pause => {
+                        player.pause().await
+                    },
+                    ChangeScriptPlayerCommand::Stop => {
+                        player.stop().await
+                    },
+                    ChangeScriptPlayerCommand::ProcessDelayedRecord(_) => {
+                        anyhow::bail!("ProcessDelayedRecord not supported");
+                    },
+                }
+            },
+            None => {
+                anyhow::bail!("ChangeScriptPlayer not found: {}", player_id);
+            }
+        }
+    }
+
     pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.test_repo_cache.contains_test_repo(test_repo_id)
+        self.test_repos.contains_key(test_repo_id)
+    }
+
+    pub fn contains_test_run_source(&self, test_run_source_id: &str) -> bool {
+        self.sources.contains_key(test_run_source_id)
+    }
+
+    pub fn get_datasets(&self) -> anyhow::Result<Vec<DataSet>> {
+        self.test_repo_cache.get_datasets()
+    }
+
+    pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoConfig>> {
+        Ok(self.test_repos.get(test_repo_id).cloned())
+    }
+
+    pub fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoConfig>> {
+        Ok(self.test_repos.values().cloned().collect())
+    }
+
+    pub fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.test_repos.keys().cloned().collect())
+    }
+
+    pub fn get_test_run_source(&self, test_run_source_id: &str) -> anyhow::Result<Option<TestRunSource>> {
+        Ok(self.sources.get(test_run_source_id).cloned())
+    }
+
+    pub fn get_test_run_sources(&self) -> anyhow::Result<Vec<TestRunSource>> {
+        Ok(self.sources.values().cloned().collect())
+    }
+
+    pub fn get_test_run_source_ids(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.sources.keys().cloned().collect())
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
@@ -429,7 +516,7 @@ impl TestRunner {
 
         // Iterate over the reactivators and start each one if it is configured to start immediately.
         // If any of the reactivators fail to start, set the TestRunnerStatus to Error and return an error.
-        for (_, player) in &self.reactivators {
+        for (_, player) in &self.change_script_players {
             if player.get_settings().reactivator.start_immediately {
                 match player.start().await {
                     Ok(_) => {},

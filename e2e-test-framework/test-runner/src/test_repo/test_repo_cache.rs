@@ -40,7 +40,7 @@ impl TestRepoCache {
         })
     }
 
-    pub async fn add_test_repo(&mut self, test_repo_config: TestRepoConfig ) -> anyhow::Result<()> {
+    pub async fn add_test_repo(&mut self, test_repo_config: TestRepoConfig ) -> anyhow::Result<String> {
         match test_repo_config {
             TestRepoConfig::AzureStorageBlob{common_config, unique_config} => {
                 // Formulate the local folder path where the files from the TestRepo should be stored.
@@ -48,19 +48,19 @@ impl TestRepoCache {
                 data_cache_repo_path.push(format!("test_repos/{}/", &common_config.id));
 
                 let settings = AzureStorageBlobTestRepoSettings::try_from_config(data_cache_repo_path, common_config, unique_config).await?;
-                let test_repo = AzureStorageBlobTestRepo::new(settings).await?;    
-                self.test_repos.insert(test_repo.settings.test_repo_id.clone(), Box::new(test_repo));
+                let id = settings.test_repo_id.clone();
+                let test_repo = AzureStorageBlobTestRepo::new(settings).await?;   
+                self.test_repos.insert(id.clone(), Box::new(test_repo));
+                Ok(id)
             }
         }
-
-        Ok(())
     }
 
-    pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.test_repos.contains_key(test_repo_id)
+    pub fn get_datasets(&self) -> anyhow::Result<Vec<DataSet>> {
+        Ok(self.datasets.values().cloned().collect())
     }
 
-    pub async fn get_data_set(&mut self, test_run_source: TestRunSource) -> anyhow::Result<DataSet> {
+    pub async fn download_data_set(&mut self, test_run_source: TestRunSource) -> anyhow::Result<DataSet> {
 
         let TestRunSource { ref id, ref source_id, ref test_id, ref test_repo_id, .. } = test_run_source;
 

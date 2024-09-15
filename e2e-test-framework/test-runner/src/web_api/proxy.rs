@@ -119,7 +119,7 @@ pub(super) async fn acquire_handler(
         let state = state.read().await;
 
         // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Errorz(msg) = &state.status {
+        if let TestRunnerStatus::Error(msg) = &state.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 

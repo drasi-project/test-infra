@@ -298,7 +298,7 @@ pub enum TestRunnerStatus {
     // The Test Runner has been started.
     Started,
     // The Test Runner is in an Error state. and will not be able to process requests.
-    Errorz(String),
+    Error(String),
 }
 
 pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
@@ -354,7 +354,7 @@ impl TestRunner {
         log::trace!("Adding TestRepo from {:#?}", test_repo_config);
 
         // If the TestRunner is in an Error state, return an error.
-        if let TestRunnerStatus::Errorz(msg) = &self.status {
+        if let TestRunnerStatus::Error(msg) = &self.status {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
 
@@ -367,7 +367,7 @@ impl TestRunner {
         log::trace!("Adding TestRunSource from {:#?}", source_config);
 
         // If the TestRunner is in an Error state, return an error.
-        if let TestRunnerStatus::Errorz(msg) = &self.status {
+        if let TestRunnerStatus::Error(msg) = &self.status {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
         
@@ -420,7 +420,7 @@ impl TestRunner {
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
             },
-            TestRunnerStatus::Errorz(_) => {
+            TestRunnerStatus::Error(_) => {
                 let msg = format!("Test Runner is in an error state, cannot start. TestRunnerStatus: {:?}", &self.status);
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
@@ -435,7 +435,7 @@ impl TestRunner {
                     Ok(_) => {},
                     Err(e) => {
                         let msg = format!("Error starting ChangeScriptPlayer: {}", e);
-                        self.status = TestRunnerStatus::Errorz(msg);
+                        self.status = TestRunnerStatus::Error(msg);
                         bail!("{:?}", self.status);
                     }
                 }

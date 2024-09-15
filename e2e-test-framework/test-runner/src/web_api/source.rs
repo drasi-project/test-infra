@@ -72,12 +72,12 @@ pub(super) async fn add_source_handler (
     state: Extension<SharedTestRunner>,
     body: Json<SourceConfig>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - add_reactivator");
+    log::info!("Processing call - add_source");
 
     let mut test_runner = state.write().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -120,7 +120,7 @@ pub(super) async fn get_source_list_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -145,7 +145,7 @@ pub(super) async fn get_source_handler(
         let test_runner = state.read().await;
 
         // Check if the service is an Error state.
-        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
+        if let TestRunnerStatus::Error(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
@@ -181,7 +181,7 @@ pub(super) async fn pause_reactivator_handler(
         let test_runner = state.read().await;
 
         // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
+        if let TestRunnerStatus::Error(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
@@ -231,7 +231,7 @@ pub(super) async fn skip_reactivator_handler(
         let test_runner = state.read().await;
 
         // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
+        if let TestRunnerStatus::Error(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
@@ -271,7 +271,7 @@ pub(super) async fn start_reactivator_handler(
         let test_runner = state.read().await;
 
         // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
+        if let TestRunnerStatus::Error(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
@@ -321,7 +321,7 @@ pub(super) async fn step_reactivator_handler(
         let test_runner = state.read().await;
 
         // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
+        if let TestRunnerStatus::Error(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
@@ -362,7 +362,7 @@ pub(super) async fn stop_reactivator_handler(
         let test_runner = state.read().await;
 
         // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Errorz(msg) = &test_runner.status {
+        if let TestRunnerStatus::Error(msg) = &test_runner.status {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 

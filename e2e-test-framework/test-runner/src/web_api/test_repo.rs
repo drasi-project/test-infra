@@ -14,21 +14,15 @@ pub struct LocalTestRepoResponse {
 
 #[derive(Debug, Serialize)]
 pub struct DataSetResponse {
-    pub content: TestSourceContent,
     pub id: String,
-    pub test_repo_id: String,
-    pub test_id: String,
-    pub source_id: String,
+    pub content: TestSourceContent,
 }
 
 impl From<&DataSet> for DataSetResponse {
     fn from(dataset: &DataSet) -> Self {
         DataSetResponse {
-            content: dataset.content.clone(),
             id: dataset.id.clone(),
-            test_repo_id: dataset.test_run_source.test_repo_id.clone(),
-            test_id: dataset.test_run_source.test_id.clone(),
-            source_id: dataset.test_run_source.source_id.clone(),
+            content: dataset.content.clone(),
         }
     }
 }

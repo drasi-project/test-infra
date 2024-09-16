@@ -15,12 +15,15 @@ pub struct DataSet {
 
 impl DataSet {
     pub fn new(test_run_source: TestRunSource, content: TestSourceContent) -> Self {
+
+        let id = format!("{}::{}::{}", &test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id);
         DataSet {
-            id: test_run_source.id.clone(),
+            id,
             content,
             test_run_source,
         }
     }
+    
     pub fn count_bootstrap_type_intersection(&self, requested_labels: &HashSet<String>) -> usize {
         let mut match_count = 0;
 

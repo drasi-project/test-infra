@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize, Serializer };
+use serde_json::{json, Value};
 
 use crate::{
     script_source::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, 
@@ -55,9 +56,12 @@ impl AcquireResponseBody {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Node {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub labels: Vec<String>,
-    pub properties: serde_json::Value
+    #[serde(serialize_with = "serialize_properties")] 
+    pub properties: Value
 }
 
 impl Node {
@@ -72,17 +76,20 @@ impl Node {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Relation {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub labels: Vec<String>,
-    #[serde(rename = "startId")]
+    #[serde(default, rename = "startId")]
     pub start_id: String,
-    #[serde(rename = "startLabel", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "startLabel")]
     pub start_label: Option<String>,
-    #[serde(rename = "endId")]
+    #[serde(default, rename = "endId")]
     pub end_id: String,
-    #[serde(rename = "endLabel", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "endLabel")]
     pub end_label: Option<String>,
-    pub properties: serde_json::Value
+    #[serde(serialize_with = "serialize_properties")]
+    pub properties: Value
 }
 
 impl Relation {
@@ -96,6 +103,21 @@ impl Relation {
             end_label: record.end_label.clone(),
             properties: record.properties.clone()
         }
+    }
+}
+
+fn serialize_properties<S>(value: &serde_json::Value, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        // If properties is Null, serialize it as an empty object `{}`.
+        Value::Null => {
+            let empty_obj = json!({});
+            empty_obj.serialize(serializer)
+        },
+        // Otherwise, serialize the value as-is.
+        _ => value.serialize(serializer),
     }
 }
 

@@ -141,7 +141,7 @@ pub(super) async fn acquire_handler(
         let state = state.read().await;
 
         // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Error(msg) = &state.status {
+        if let TestRunnerStatus::Error(msg) = &state.get_status() {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
         }
 
@@ -149,9 +149,14 @@ pub(super) async fn acquire_handler(
         // Create a hashset of the requested node and relation labels.
         let label_set = HashSet::from_iter(requested_labels.clone());
 
-        match state.test_repo_cache.get_dataset_for_bootstrap(&label_set) {
-            Some(dataset) => dataset,
-            None => return Json(AcquireResponseBody::new()).into_response()
+        match state.match_bootstrap_dataset(&label_set) {
+            Ok(Some(dataset)) => dataset,
+            Ok(None) => return Json(AcquireResponseBody::new()).into_response(),
+            Err(e) => {
+                let msg = format!("Error matching dataset: {}", e);
+                log::error!("{}", msg);
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+            }
         }
     };
 

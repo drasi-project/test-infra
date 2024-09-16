@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, str::FromStr, sync::Arc};
 
 use anyhow::bail;
 use serde::Serialize;
@@ -306,13 +306,13 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 #[derive(Debug)]
 pub struct TestRunner {
     change_script_players: HashMap<String, ChangeScriptPlayer>,
-    pub data_store_path: String,
+    data_store_path: String,
     source_defaults: SourceConfig,
     sources: HashMap<String, TestRunSource>,
-    pub status: TestRunnerStatus,
+    status: TestRunnerStatus,
     _start_reactivators_together: bool,
     test_repos: HashMap<String, TestRepoConfig>,
-    pub test_repo_cache: TestRepoCache,
+    test_repo_cache: TestRepoCache,
 }
 
 impl TestRunner {
@@ -468,8 +468,16 @@ impl TestRunner {
         self.sources.contains_key(test_run_source_id)
     }
 
+    pub fn get_data_store_path(&self) -> &str {
+        &self.data_store_path
+    }
+
     pub fn get_datasets(&self) -> anyhow::Result<Vec<DataSet>> {
         self.test_repo_cache.get_datasets()
+    }
+
+    pub fn get_status(&self) -> &TestRunnerStatus {
+        &self.status
     }
 
     pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoConfig>> {
@@ -494,6 +502,10 @@ impl TestRunner {
 
     pub fn get_test_run_source_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.sources.keys().cloned().collect())
+    }
+
+    pub fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<DataSet>> {
+        self.test_repo_cache.match_bootstrap_dataset(requested_labels)
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {

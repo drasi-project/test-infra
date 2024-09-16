@@ -72,7 +72,7 @@ pub(super) async fn add_source_handler (
     let mut test_runner = state.write().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -115,7 +115,7 @@ pub(super) async fn get_source_list_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -141,7 +141,7 @@ pub(super) async fn get_source_handler(
     let test_runner = state.read().await;
 
     // Check if the service is an Error state.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -173,7 +173,7 @@ pub(super) async fn get_player_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -196,7 +196,7 @@ pub(super) async fn pause_player_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -239,7 +239,7 @@ pub(super) async fn skip_player_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -262,7 +262,7 @@ pub(super) async fn start_player_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -305,7 +305,7 @@ pub(super) async fn step_player_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -328,7 +328,7 @@ pub(super) async fn stop_player_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 

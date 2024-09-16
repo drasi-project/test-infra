@@ -36,7 +36,7 @@ pub(super) async fn add_test_repo_handler (
     let mut test_runner = state.write().await;
 
     // If the service is an Error state, return an error and the description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -88,7 +88,7 @@ pub(super) async fn get_test_repo_list_handler(
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
@@ -114,7 +114,7 @@ pub(super) async fn get_test_repo_handler (
     let test_runner = state.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+    if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 

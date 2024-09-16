@@ -97,7 +97,7 @@ impl TestRepoCache {
     // the SourceProxy it is connected to will only be dealing with a single DB connection, whereas the 
     // TestRunner can be simulating multiple sources concurrently. Would be better to do something else here, 
     // but it is sufficient for now.
-    pub fn get_dataset_for_bootstrap(&self, requested_labels: &HashSet<String>) -> Option<DataSet> {
+    pub fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<DataSet>> {
         let mut best_match = None;
         let mut best_match_count = 0;
 
@@ -110,6 +110,6 @@ impl TestRepoCache {
             }
         }
 
-        best_match.map(|ds| ds.clone())
+        Ok(best_match.map(|ds| ds.clone()))
     }
 }

@@ -129,7 +129,7 @@ async fn service_info_handler(
 
     let test_runner = state.read().await;
 
-    match &test_runner.status {
+    match &test_runner.get_status() {
         TestRunnerStatus::Error(msg) => {
             Json(ServiceStateErrorResponse {
                 status: "Error".to_string(),
@@ -165,12 +165,12 @@ async fn service_info_handler(
             };
 
             let data_cache = LocalTestRepoResponse {
-                data_cache_path: test_runner.data_store_path.clone(),
+                data_cache_path: test_runner.get_data_store_path().to_string(),
                 datasets
             };
         
             Json(ServiceStateResponse {
-                status: format!("{:?}", &test_runner.status),
+                status: format!("{:?}", &test_runner.get_status()),
                 test_repo_ids,
                 test_run_source_ids,
                 data_cache,

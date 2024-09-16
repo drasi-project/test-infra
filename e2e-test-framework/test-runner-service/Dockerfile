@@ -5,17 +5,17 @@ RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get c
 WORKDIR /usr/src
 COPY ./infrastructure ./infrastructure
 
-RUN cargo new test-runner
-WORKDIR /usr/src/test-runner
+RUN cargo new test-runner-service
+WORKDIR /usr/src/test-runner-service
 
-COPY ./test-runner/Cargo.toml . 
+COPY ./test-runner-service/Cargo.toml . 
 RUN cargo fetch
-COPY ./test-runner .
+COPY ./test-runner-service .
 RUN cargo install --force --path .
 
     
 FROM  gcr.io/distroless/cc
 ENV RUST_BACKTRACE=1
-COPY --from=builder /usr/local/cargo/bin/test-runner /usr/local/bin/test-runner
+COPY --from=builder /usr/local/cargo/bin/test-runner-service /usr/local/bin/test-runner-service
 # RUN apt-get update && apt install -y openssl
-CMD ["test-runner"]
+CMD ["test-runner-service"]

@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-  "test-runner",
+  "test-runner-service",
   
   # Internal
   "infrastructure/comms-abstractions",

@@ -17,8 +17,8 @@ pub enum TestRepoError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TestSourceContent {
-    pub change_log_script_files: Option<Vec<PathBuf>>,
     pub bootstrap_script_files: Option<HashMap<String, Vec<PathBuf>>>,
+    pub change_log_script_files: Option<Vec<PathBuf>>,
 }
 
 #[async_trait]

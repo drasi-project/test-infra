@@ -6,10 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    runner::config::SourceConfig, 
-    runner::{change_script_player::{ChangeScriptPlayerSettings, ChangeScriptPlayerState}, TestRunnerStatus, SharedTestRunner },
-};
+use crate::runner::{change_script_player::{ChangeScriptPlayerCommand, ChangeScriptPlayerSettings, ChangeScriptPlayerState}, config::SourceConfig, SharedTestRunner, TestRunnerStatus};
 
 #[derive(Debug, Serialize)]
 struct PlayerInfoResponse {
@@ -27,25 +24,25 @@ impl PlayerInfoResponse {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct PlayerCommandResponse {
-    pub test_id: String,
-    pub test_run_id: String,
-    pub source_id: String,
-    pub state: ChangeScriptPlayerState,
-}
+// #[derive(Debug, Serialize)]
+// struct PlayerCommandResponse {
+//     pub test_id: String,
+//     pub test_run_id: String,
+//     pub source_id: String,
+//     pub state: ChangeScriptPlayerState,
+// }
 
-// Create PlayerResponse from a ChangeScriptPlayer.
-impl PlayerCommandResponse {
-    fn new(settings: ChangeScriptPlayerSettings, state: ChangeScriptPlayerState) -> Self {
-        PlayerCommandResponse {
-            test_id: settings.test_run_source.test_id.clone(),
-            test_run_id: settings.test_run_source.test_run_id.clone(),
-            source_id: settings.test_run_source.source_id.clone(),
-            state: state,
-        }
-    }
-}
+// // Create PlayerResponse from a ChangeScriptPlayer.
+// impl PlayerCommandResponse {
+//     fn new(settings: ChangeScriptPlayerSettings, state: ChangeScriptPlayerState) -> Self {
+//         PlayerCommandResponse {
+//             test_id: settings.test_run_source.test_id.clone(),
+//             test_run_id: settings.test_run_source.test_run_id.clone(),
+//             source_id: settings.test_run_source.source_id.clone(),
+//             state: state,
+//         }
+//     }
+// }
 
 #[derive(Debug, Serialize)]
 struct PlayerCommandError {
@@ -171,72 +168,46 @@ pub(super) async fn get_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
+    log::info!("Processing call - get_player: {}", id);
 
-    log::info!("Processing call - get_source: {}", id);
+    let test_runner = state.read().await;
 
-    // Limit the scope of the Read Lock to the error check and player lookup.
-    let player = {
-        let test_runner = state.read().await;
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    }
 
-        // Check if the service is an Error state.
-        if let TestRunnerStatus::Error(msg) = &test_runner.status {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
-        }
-
-        // Look up the ChangeScriptPlayer by id.
-        match test_runner.change_script_players.get(&id) {
-            Some(player) => player.clone(),
-            None => {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-        }
-    };
-
-    // Get the state of the ChangeScriptPlayer and return it.
-    match player.get_state().await {
+    match test_runner.control_player(&id, ChangeScriptPlayerCommand::GetState).await {
         Ok(response) => {
-            Json(PlayerInfoResponse::new(player.get_settings(), response.state)).into_response()
+            Json(response.state).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response();
         }
-    }
+    }  
 }
 
 pub(super) async fn pause_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
+    log::info!("Processing call - pause_player: {}", id);
 
-    log::info!("Processing call - pause_reactivator: {}", id);
+    let test_runner = state.read().await;
 
-    // Limit the scope of the Read Lock to the error check and player lookup.
-    let player = {
-        let test_runner = state.read().await;
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    }
 
-        // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Error(msg) = &test_runner.status {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
-        }
-
-        // Look up the ChangeScriptPlayer by id.
-        match test_runner.change_script_players.get(&id) {
-            Some(player) => player.clone(),
-            None => {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-        }
-    };
-
-    // Pause the ChangeScriptPlayer and return the result.
-    match player.pause().await {
+    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Pause).await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
+            Json(response.state).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response();
         }
-    }
+    }   
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -258,75 +229,51 @@ pub(super) async fn skip_player_handler(
     state: Extension<SharedTestRunner>,
     body: Json<Option<TestSkipConfig>>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - skip_reactivator: {}", id);
-
-    // Limit the scope of the Read Lock to the error check and player lookup.
-    let player = {
-        let test_runner = state.read().await;
-
-        // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Error(msg) = &test_runner.status {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
-        }
-
-        // Look up the ChangeScriptPlayer by id.
-        match test_runner.change_script_players.get(&id) {
-            Some(player) => player.clone(),
-            None => {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-        }
-    };
+    log::info!("Processing call - skip_player: {}", id);
 
     let test_skip_config = body.0;
     log::debug!("{:?}", test_skip_config);
 
     let num_skips = test_skip_config.unwrap_or_default().num_skips;
 
-    // Skip the ChangeScriptPlayer and return the result.
-    match player.skip(num_skips).await {
+    let test_runner = state.read().await;
+
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    }
+
+    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Skip(num_skips)).await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
+            Json(response.state).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response();
         }
-    }
+    }  
 }
 
 pub(super) async fn start_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - start_reactivator: {}", id);
+    log::info!("Processing call - start_player: {}", id);
 
-    // Limit the scope of the Read Lock to the error check and player lookup.
-    let player = {
-        let test_runner = state.read().await;
+    let test_runner = state.read().await;
 
-        // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Error(msg) = &test_runner.status {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
-        }
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    }
 
-        // Look up the ChangeScriptPlayer by id.
-        match test_runner.change_script_players.get(&id) {
-            Some(player) => player.clone(),
-            None => {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-        }
-    };
-
-    // Start the ChangeScriptPlayer and return the result.
-    match player.start().await {
+    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Start).await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
+            Json(response.state).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response();
         }
-    }
+    }   
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -348,74 +295,49 @@ pub(super) async fn step_player_handler(
     state: Extension<SharedTestRunner>,
     body: Json<Option<TestStepConfig>>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - step_reactivator: {}", id);
-
-    // Limit the scope of the Read Lock to the error check and player lookup.
-    let player = {
-        let test_runner = state.read().await;
-
-        // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Error(msg) = &test_runner.status {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
-        }
-
-        // Look up the ChangeScriptPlayer by id.
-        match test_runner.change_script_players.get(&id) {
-            Some(player) => player.clone(),
-            None => {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-        }
-    };
+    log::info!("Processing call - step_player: {}", id);
 
     let test_step_config = body.0;
     log::debug!("{:?}", test_step_config);
 
     let num_steps = test_step_config.unwrap_or_default().num_steps;
 
-    // Step the ChangeScriptPlayer and return the result.
-    match player.step(num_steps).await {
-        Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
-        },
-        Err(e) => {
-            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
-        }
+    let test_runner = state.read().await;
+
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
+    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Step(num_steps)).await {
+        Ok(response) => {
+            Json(response.state).into_response()
+        },
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response();
+        }
+    }  
 }
 
 pub(super) async fn stop_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
-    log::info!("Processing call - stop_reactivator: {}", id);
+    log::info!("Processing call - stop_player: {}", id);
 
-    // Limit the scope of the Read Lock to the error check and player lookup.
-    let player = {
-        let test_runner = state.read().await;
+    let test_runner = state.read().await;
 
-        // If the TestRunner is an Error state, return an error and a description of the error.
-        if let TestRunnerStatus::Error(msg) = &test_runner.status {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
-        }
+    // If the TestRunner is an Error state, return an error and a description of the error.
+    if let TestRunnerStatus::Error(msg) = &test_runner.status {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    }
 
-        // Look up the ChangeScriptPlayer by id.
-        match test_runner.change_script_players.get(&id) {
-            Some(player) => player.clone(),
-            None => {
-                return StatusCode::NOT_FOUND.into_response();
-            }
-        }
-    };
-
-    // Stop the ChangeScriptPlayer and return the result.
-    match player.stop().await {
+    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Stop).await {
         Ok(response) => {
-            Json(PlayerCommandResponse::new(player.get_settings(), response.state)).into_response()
+            Json(response.state).into_response()
         },
         Err(e) => {
-            Json(PlayerCommandError::new(player.get_settings(), e.to_string())).into_response()
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response();
         }
-    }
+    }  
 }

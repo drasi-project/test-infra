@@ -305,13 +305,13 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 
 #[derive(Debug)]
 pub struct TestRunner {
-    pub change_script_players: HashMap<String, ChangeScriptPlayer>,
+    change_script_players: HashMap<String, ChangeScriptPlayer>,
     pub data_store_path: String,
-    pub source_defaults: SourceConfig,
-    pub sources: HashMap<String, TestRunSource>,
+    source_defaults: SourceConfig,
+    sources: HashMap<String, TestRunSource>,
     pub status: TestRunnerStatus,
-    pub start_reactivators_together: bool,
-    pub test_repos: HashMap<String, TestRepoConfig>,
+    _start_reactivators_together: bool,
+    test_repos: HashMap<String, TestRepoConfig>,
     pub test_repo_cache: TestRepoCache,
 }
 
@@ -326,7 +326,7 @@ impl TestRunner {
             source_defaults: config.source_defaults,
             sources: HashMap::new(),
             status: TestRunnerStatus::Initialized,
-            start_reactivators_together: config.start_reactivators_together,
+            _start_reactivators_together: config.start_reactivators_together,
             test_repos: HashMap::new(),
             test_repo_cache: TestRepoCache::new(config.data_store_path.clone()).await?,
         };
@@ -419,7 +419,7 @@ impl TestRunner {
         Ok(None)
     }
 
-    pub async fn _control_player(&mut self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
+    pub async fn control_player(&self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
         log::trace!("Control Player - player_id:{}, command:{:?}", player_id, command);
 
         // If the TestRunner is in an Error state, return an error.

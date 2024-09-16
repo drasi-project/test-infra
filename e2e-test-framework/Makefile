@@ -16,7 +16,7 @@ kind-load:
 	kind load docker-image $(IMAGE_PREFIX)/e2e-test-proxy:$(DOCKER_TAG_VERSION) --name $(CLUSTER_NAME)
 
 drasi-apply:
-	drasi apply -f test-source/e2e-test-source-provider.yaml
+	drasi apply -f test-source-provider/e2e-test-source-provider.yaml
 
 test:
 	echo "No tests to run yet"

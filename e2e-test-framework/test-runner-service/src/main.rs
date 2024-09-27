@@ -1,13 +1,11 @@
 use clap::Parser;
 use serde::Serialize;
+use test_runner::{config::TestRunnerConfig, TestRunner};
 
-use runner::{config::TestRunnerConfig, TestRunner};
-
-mod runner;
-mod script_source;
-mod source_change_dispatchers;
-mod test_repo;
 mod web_api;
+mod proxy;
+mod source;
+mod test_repo;
 
 // A struct to hold parameters obtained from env vars and/or command line arguments.
 // Command line args will override env vars. If neither is provided, default values are used.

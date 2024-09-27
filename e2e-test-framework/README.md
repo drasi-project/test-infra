@@ -1,4 +1,44 @@
-# Building
+# OPTIONAL: Build and Install Drasi CLI
+
+To build CLI, from drasi-platform/cli, run:
+
+```
+make
+```
+
+To install drasi cli, run:
+
+```
+sudo make install
+```
+
+# Build and Install Drasi 
+
+To build Drasi images, from drasi-platform, run:
+
+```
+make
+```
+
+To install drasi images on kind, run:
+
+```
+make kind-load
+```
+
+Install drasi, run:
+
+```
+drasi init --local --version latest
+```
+
+View the images on kind:
+
+```
+docker exec -it $(kind get clusters | head -1)-control-plane crictl image
+```
+
+# Building E2E
 
 To create the docker images for the ETF, from the e2e-test-framework folder, run make:
 
@@ -55,7 +95,6 @@ You will see output like the following:
   CosmosGremlin
   E2ETestSource
 ```
-
 
 # Using ETF
 You can now create instances of E2ETestSource to use for testing.

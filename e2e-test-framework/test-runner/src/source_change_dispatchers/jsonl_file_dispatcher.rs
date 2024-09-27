@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 
-use crate::runner::config::JsonlFileSourceChangeDispatcherConfig;
+use crate::config::JsonlFileSourceChangeDispatcherConfig;
 use crate::script_source::SourceChangeEvent;
 use super::{SourceChangeDispatcher, SourceChangeDispatcherError};
 

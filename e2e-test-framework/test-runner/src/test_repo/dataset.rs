@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::runner::TestRunSource;
+use crate::TestRunSource;
 
 use super::TestSourceContent;
 

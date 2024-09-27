@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::runner::{change_script_player::{ChangeScriptPlayerCommand, ChangeScriptPlayerSettings, ChangeScriptPlayerState}, config::SourceConfig, SharedTestRunner, TestRunnerStatus};
+use test_runner::{change_script_player::{ChangeScriptPlayerCommand, ChangeScriptPlayerSettings, ChangeScriptPlayerState}, config::SourceConfig, SharedTestRunner, TestRunnerStatus};
 
 #[derive(Debug, Serialize)]
 struct PlayerInfoResponse {
@@ -63,7 +63,7 @@ impl PlayerCommandError {
     }
 }
 
-pub(super) async fn add_source_handler (
+pub async fn add_source_handler (
     state: Extension<SharedTestRunner>,
     body: Json<SourceConfig>,
 ) -> impl IntoResponse {
@@ -107,7 +107,7 @@ pub(super) async fn add_source_handler (
     }
 }
 
-pub(super) async fn get_source_list_handler(
+pub async fn get_source_list_handler(
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
     log::info!("Processing call - get_source_list");
@@ -131,7 +131,7 @@ pub(super) async fn get_source_list_handler(
     }
 }
 
-pub(super) async fn get_source_handler(
+pub async fn get_source_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
@@ -164,7 +164,7 @@ pub(super) async fn get_source_handler(
     }
 }
 
-pub(super) async fn get_player_handler(
+pub async fn get_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
@@ -187,7 +187,7 @@ pub(super) async fn get_player_handler(
     }  
 }
 
-pub(super) async fn pause_player_handler(
+pub async fn pause_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
@@ -211,7 +211,7 @@ pub(super) async fn pause_player_handler(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(super) struct TestSkipConfig {
+pub struct TestSkipConfig {
     #[serde(default)]
     pub num_skips: u64,
 }
@@ -224,7 +224,7 @@ impl Default for TestSkipConfig {
     }
 }
 
-pub(super) async fn skip_player_handler(
+pub async fn skip_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
     body: Json<Option<TestSkipConfig>>,
@@ -253,7 +253,7 @@ pub(super) async fn skip_player_handler(
     }  
 }
 
-pub(super) async fn start_player_handler(
+pub async fn start_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
@@ -277,7 +277,7 @@ pub(super) async fn start_player_handler(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(super) struct TestStepConfig {
+pub struct TestStepConfig {
     #[serde(default)]
     pub num_steps: u64,
 }
@@ -290,7 +290,7 @@ impl Default for TestStepConfig {
     }
 }
 
-pub(super) async fn step_player_handler(
+pub async fn step_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
     body: Json<Option<TestStepConfig>>,
@@ -319,7 +319,7 @@ pub(super) async fn step_player_handler(
     }  
 }
 
-pub(super) async fn stop_player_handler(
+pub async fn stop_player_handler(
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {

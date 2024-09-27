@@ -6,14 +6,10 @@ use axum::{
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-use crate::runner::{ SharedTestRunner, TestRunner, TestRunnerStatus};
-use proxy::acquire_handler;
-use source::{add_source_handler, get_player_handler, get_source_handler, get_source_list_handler, pause_player_handler, skip_player_handler, start_player_handler, step_player_handler, stop_player_handler};
-use test_repo::{add_test_repo_handler, get_test_repo_handler, get_test_repo_list_handler, LocalTestRepoResponse};
-
-mod proxy;
-mod source;
-mod test_repo;
+use test_runner::{ SharedTestRunner, TestRunner, TestRunnerStatus};
+use crate::proxy::acquire_handler;
+use crate::source::{add_source_handler, get_player_handler, get_source_handler, get_source_list_handler, pause_player_handler, skip_player_handler, start_player_handler, step_player_handler, stop_player_handler};
+use crate::test_repo::{add_test_repo_handler, get_test_repo_handler, get_test_repo_list_handler, LocalTestRepoResponse};
 
 // mod u64_as_string {
 //     use serde::{self, Serializer};

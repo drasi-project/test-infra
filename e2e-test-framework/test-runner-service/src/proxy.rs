@@ -4,13 +4,10 @@ use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
 use serde::{Deserialize, Serialize, Serializer };
 use serde_json::{json, Value};
 
-use crate::{
-    script_source::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, 
-    runner::{TestRunnerStatus, SharedTestRunner}
-};
+use test_runner::{script_source::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, SharedTestRunner, TestRunnerStatus};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(super) struct AcquireRequestBody {
+pub struct AcquireRequestBody {
     #[serde(rename = "queryId")]
     pub query_id: String,
     #[serde(rename = "queryNodeId")]
@@ -121,7 +118,7 @@ where
     }
 }
 
-pub(super) async fn acquire_handler(
+pub async fn acquire_handler(
     state: Extension<SharedTestRunner>,
     body: Json<AcquireRequestBody>,
 ) -> impl IntoResponse {

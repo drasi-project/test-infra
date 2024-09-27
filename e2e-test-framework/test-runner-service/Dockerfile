@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get c
 
 WORKDIR /usr/src
 COPY ./infrastructure ./infrastructure
+COPY ./test-runner ./test-runner
 
 RUN cargo new test-runner-service
 WORKDIR /usr/src/test-runner-service

@@ -4,7 +4,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{runner::{config::TestRepoConfig, SharedTestRunner, TestRunnerStatus}, test_repo::{dataset::DataSet, TestSourceContent}};
+use test_runner::{config::TestRepoConfig, test_repo::{dataset::DataSet, TestSourceContent}, SharedTestRunner, TestRunnerStatus};
 
 #[derive(Debug, Serialize)]
 pub struct LocalTestRepoResponse {
@@ -27,7 +27,7 @@ impl From<&DataSet> for DataSetResponse {
     }
 }
 
-pub(super) async fn add_test_repo_handler (
+pub async fn add_test_repo_handler (
     state: Extension<SharedTestRunner>,
     body: Json<Value>,
 ) -> impl IntoResponse {
@@ -80,7 +80,7 @@ pub(super) async fn add_test_repo_handler (
     }
 }
 
-pub(super) async fn get_test_repo_list_handler(
+pub async fn get_test_repo_list_handler(
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {
     log::info!("Processing call - get_test_repo_list");
@@ -104,7 +104,7 @@ pub(super) async fn get_test_repo_list_handler(
     }
 }
 
-pub(super) async fn get_test_repo_handler (
+pub async fn get_test_repo_handler (
     Path(id): Path<String>,
     state: Extension<SharedTestRunner>,
 ) -> impl IntoResponse {

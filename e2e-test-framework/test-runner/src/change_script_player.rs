@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::{
-    runner::{config::SourceChangeDispatcherConfig, SpacingMode, TestRunReactivator, TestRunSource, TimeMode}, 
+    config::SourceChangeDispatcherConfig, SpacingMode, TestRunReactivator, TestRunSource, TimeMode, 
     script_source::SourceChangeEvent, source_change_dispatchers::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
     }

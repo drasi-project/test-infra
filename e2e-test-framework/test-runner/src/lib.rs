@@ -10,6 +10,9 @@ use crate::test_repo::{dataset::DataSet, test_repo_cache::TestRepoCache};
 
 pub mod change_script_player;
 pub mod config;
+pub mod script_source;
+pub mod source_change_dispatchers;
+pub mod test_repo;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum TimeMode {

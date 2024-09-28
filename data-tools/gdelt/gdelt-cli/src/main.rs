@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, hash::{Hash, Hasher}, path::PathBuf};
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// String constant containing the address of GDELT data on the Web
-const _GDELT_DATA_URL: &str = "http://data.gdeltproject.org/gdeltv2";
+const GDELT_DATA_URL: &str = "http://data.gdeltproject.org/gdeltv2";
 
 /// String constant representing the default GDELT data cache folder path
 /// This is the folder where GDELT data files are downloaded and stored if not provided by the user.
@@ -16,6 +16,16 @@ enum DataType {
     Event,
     Graph,
     Mention,
+}
+
+impl Hash for DataType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            DataType::Event => "event".hash(state),
+            DataType::Graph => "graph".hash(state),
+            DataType::Mention => "mention".hash(state),
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -87,7 +97,8 @@ struct DataSelectionArgs {
     file_end: Option<String>,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let params = Params::parse();
 
     match params.command {
@@ -203,14 +214,14 @@ fn parse_datetime(datetime_str: &str) -> anyhow::Result<NaiveDateTime> {
 
 fn handle_get_command(data_selection: DataSelectionArgs, overwrite: bool, unzip: bool) {
     println!("Get command:");
-    match data_selection.file_start {
+    match &data_selection.file_start {
         Some(start) => {
             println!("  - Start: {:?}, Adjusted Start: {:?}", &start, parse_start_datetime(&start).unwrap());
         }
         None => println!("  - Start: None"),
         
     };
-    match data_selection.file_end {
+    match &data_selection.file_end {
         Some(end) => {
             println!("  - End: {:?}, Adjusted End: {:?}", &end, parse_end_datetime(&end).unwrap());
         }
@@ -220,6 +231,22 @@ fn handle_get_command(data_selection: DataSelectionArgs, overwrite: bool, unzip:
     println!("  - Data Types: {:?}", data_selection.data_type);
     println!("  - Overwrite: {}", overwrite);
     println!("  - Unzip: {}", unzip);
+
+    let downloads = create_gdelt_download_list(
+        parse_start_datetime(data_selection.file_start.as_ref().unwrap()).unwrap(),
+        parse_end_datetime(data_selection.file_end.as_ref().unwrap()).unwrap(),
+        data_selection.data_type.iter().cloned().collect(),
+        PathBuf::from("./gdelt_data_cache"),
+        overwrite,
+    ).unwrap();
+
+    // Display the list of files to be downloaded
+    println!("Files to be downloaded:");
+    for (url, path) in downloads {
+        println!("  - URL: {}", url);
+        println!("  - Path: {:?}", path);
+    };
+
 }
 
 fn handle_unzip_command(data_selection: DataSelectionArgs, overwrite: bool) {
@@ -263,3 +290,59 @@ fn handle_load_command(data_selection: DataSelectionArgs, database_url: Option<S
     println!("  - Database User: {:?}", database_user);
     println!("  - Database Password: {:?}", database_password);
 }
+
+fn create_gdelt_download_list(start_datetime: NaiveDateTime, end_datetime: NaiveDateTime, file_types: HashSet<DataType>, cache_folder_path: PathBuf, overwrite: bool) -> anyhow::Result<Vec<(String, PathBuf)>> {
+
+    let mut downloads: Vec<(String, PathBuf)> = Vec::new();
+
+    // Create the cache_folder_path if it does not exist
+    if !cache_folder_path.exists() {
+        std::fs::create_dir_all(&cache_folder_path)?;
+    }
+
+    // Construct the list of urls and local paths for the files to be downloaded
+    let mut current_datetime = start_datetime;
+    while current_datetime <= end_datetime {
+        let timestamp = current_datetime.format("%Y%m%d%H%M%S").to_string();
+        // println!("Timestamp: {}", timestamp);
+
+        // Events
+        if file_types.contains(&DataType::Event) {
+            let path = cache_folder_path.join(format!("zip/{}.export.CSV.zip", timestamp));
+            if !path.exists() || overwrite {
+                let url = format!("{}/{}.export.CSV.zip", GDELT_DATA_URL, timestamp);
+                downloads.push((url, path));
+            }
+        }
+
+        // Graph
+        if file_types.contains(&DataType::Graph) {
+            let path = cache_folder_path.join(format!("zip/{}.gkg.csv.zip", timestamp));
+            if !path.exists() || overwrite {
+                let url = format!("{}/{}.gkg.csv.zip", GDELT_DATA_URL, timestamp);
+                downloads.push((url, path));
+            }
+        }
+
+        // Mentions
+        if file_types.contains(&DataType::Mention) {
+            let path = cache_folder_path.join(format!("zip/{}.mentions.CSV.zip", timestamp));
+            if !path.exists() || overwrite {
+                let url = format!("{}/{}.mentions.CSV.zip", GDELT_DATA_URL, timestamp);
+                downloads.push((url, path));
+            }
+        }
+
+        // Increment the current_datetime by 15 minutes
+        current_datetime = current_datetime.checked_add_signed(TimeDelta::minutes(15)).unwrap();
+    }
+
+    // Return a Vec of the urls and local paths for the files to be downloaded
+    Ok(downloads)
+}
+
+// async fn download_gdelt_zip_files(urls: Vec<String>, cache_folder_path: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+//     let mut files : Vec<PathBuf> = Vec::new();
+
+// }
+

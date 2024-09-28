@@ -1,9 +1,11 @@
 use std::{collections::HashSet, hash::{Hash, Hasher}, path::PathBuf};
 
+use async_zip::tokio::read::seek::ZipFileReader;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use reqwest::Client;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::{fs::{File, OpenOptions}, io::{AsyncWriteExt, BufReader}};
+use tokio_util::compat::TokioAsyncWriteCompatExt;
 
 /// String constant containing the address of GDELT data on the Web
 const GDELT_DATA_URL: &str = "http://data.gdeltproject.org/gdeltv2";
@@ -258,7 +260,7 @@ fn get_date_range(data_selection: &DataSelectionArgs) -> anyhow::Result<(NaiveDa
 
 }
 
-async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, overwrite: bool, _unzip: bool) -> anyhow::Result<()> {
+async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, overwrite: bool, unzip: bool) -> anyhow::Result<()> {
     log::debug!("Get command:");
 
     let (start_datetime, end_datetime) = get_date_range(&data_selection)?;
@@ -270,8 +272,8 @@ async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path
     println!("  - cache folder: {:?}", cache_folder_path);
     println!("  - overwrite: {}", overwrite);
 
-    let downloads = create_gdelt_download_list
-        (start_datetime, 
+    let downloads = create_gdelt_file_list(
+        start_datetime, 
         end_datetime,
         data_selection.data_type.iter().cloned().collect(),
         cache_folder_path,
@@ -292,7 +294,15 @@ async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path
         println!("  - {:?}", download);
     }
 
-    // TODO: Unzip the files if the unzip flag is set
+    // Unzip the files if the unzip flag is set
+    if unzip {
+        let unzip_results = unzip_gdelt_files(download_results).await.unwrap();
+
+        println!("File unzip results:");
+        for unzip in &unzip_results {
+            println!("  - {:?}", unzip);
+        }
+    }
 
     Ok(())
 }
@@ -308,6 +318,21 @@ async fn handle_unzip_command(data_selection: DataSelectionArgs, cache_folder_pa
     println!("  - data types: {:?}", data_selection.data_type);
     println!("  - cache folder: {:?}", cache_folder_path);
     println!("  - overwrite: {}", overwrite);
+
+    let unzips = create_gdelt_file_list(
+        start_datetime, 
+        end_datetime,
+        data_selection.data_type.iter().cloned().collect(),
+        cache_folder_path,
+        overwrite,
+    ).unwrap();
+
+    let unzip_results = unzip_gdelt_files(unzips).await.unwrap();
+
+    println!("File unzip results:");
+    for unzip in &unzip_results {
+        println!("  - {:?}", unzip);
+    }
 
     Ok(())
 }
@@ -330,19 +355,21 @@ async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_pat
 }
 
 #[derive(Debug)]
-struct DownloadFileTask {
+struct FileInfo {
     url: String,
-    path: PathBuf,
+    zip_path: PathBuf,
+    unzip_path: PathBuf,
     overwrite: bool,
     download_result: Option<anyhow::Result<()>>,
     extract_result: Option<anyhow::Result<()>>,
 }
 
-impl DownloadFileTask {
-    fn new(url: String, path: PathBuf, overwrite: bool) -> Self {
+impl FileInfo {
+    fn new(url: String, zip_path: PathBuf, unzip_path: PathBuf, overwrite: bool) -> Self {
         Self {
             url,
-            path,
+            zip_path,
+            unzip_path,
             overwrite,
             download_result: None,
             extract_result: None,
@@ -358,9 +385,9 @@ impl DownloadFileTask {
     }
 }
 
-fn create_gdelt_download_list(start_datetime: NaiveDateTime, end_datetime: NaiveDateTime, file_types: HashSet<DataType>, cache_folder_path: PathBuf, overwrite: bool) -> anyhow::Result<Vec<DownloadFileTask>> {
+fn create_gdelt_file_list(start_datetime: NaiveDateTime, end_datetime: NaiveDateTime, file_types: HashSet<DataType>, cache_folder_path: PathBuf, overwrite: bool) -> anyhow::Result<Vec<FileInfo>> {
 
-    let mut download_tasks: Vec<DownloadFileTask> = Vec::new();
+    let mut download_tasks: Vec<FileInfo> = Vec::new();
 
     // Create the cache_folder_path if it does not exist
     if !cache_folder_path.exists() {
@@ -375,23 +402,26 @@ fn create_gdelt_download_list(start_datetime: NaiveDateTime, end_datetime: Naive
 
         // Events
         if file_types.contains(&DataType::Event) {
-            let path = cache_folder_path.join(format!("zip/{}.export.CSV.zip", timestamp));
+            let zip_path = cache_folder_path.join(format!("zip/{}.export.CSV.zip", timestamp));
+            let unzip_path = cache_folder_path.join(format!("event/{}.export.CSV", timestamp));
             let url = format!("{}/{}.export.CSV.zip", GDELT_DATA_URL, timestamp);
-            download_tasks.push(DownloadFileTask::new(url, path, overwrite));
+            download_tasks.push(FileInfo::new(url, zip_path, unzip_path, overwrite));
         }
 
         // Graph
         if file_types.contains(&DataType::Graph) {
-            let path = cache_folder_path.join(format!("zip/{}.gkg.csv.zip", timestamp));
+            let zip_path = cache_folder_path.join(format!("zip/{}.gkg.csv.zip", timestamp));
+            let unzip_path = cache_folder_path.join(format!("graph/{}.gkg.CSV", timestamp));
             let url = format!("{}/{}.gkg.csv.zip", GDELT_DATA_URL, timestamp);
-            download_tasks.push(DownloadFileTask::new(url, path, overwrite));
+            download_tasks.push(FileInfo::new(url, zip_path, unzip_path, overwrite));
         }
 
         // Mentions
         if file_types.contains(&DataType::Mention) {
-            let path = cache_folder_path.join(format!("zip/{}.mentions.CSV.zip", timestamp));
+            let zip_path = cache_folder_path.join(format!("zip/{}.mentions.CSV.zip", timestamp));
+            let unzip_path = cache_folder_path.join(format!("mention/{}.mentions.CSV", timestamp));
             let url = format!("{}/{}.mentions.CSV.zip", GDELT_DATA_URL, timestamp);
-            download_tasks.push(DownloadFileTask::new(url, path, overwrite));
+            download_tasks.push(FileInfo::new(url, zip_path, unzip_path, overwrite));
         }
 
         // Increment the current_datetime by 15 minutes
@@ -402,7 +432,7 @@ fn create_gdelt_download_list(start_datetime: NaiveDateTime, end_datetime: Naive
     Ok(download_tasks)
 }
 
-async fn download_gdelt_zip_files(mut download_tasks: Vec<DownloadFileTask>) -> anyhow::Result<Vec<DownloadFileTask>> {
+async fn download_gdelt_zip_files(mut download_tasks: Vec<FileInfo>) -> anyhow::Result<Vec<FileInfo>> {
     let client = Client::new();
 
     // Create a collection of futures for downloading files
@@ -410,13 +440,12 @@ async fn download_gdelt_zip_files(mut download_tasks: Vec<DownloadFileTask>) -> 
 
     for task in &mut download_tasks {
         let url = task.url.clone();
-        let path = task.path.clone();
+        let path = task.zip_path.clone();
         let client = client.clone();
 
-        // Spawn the download task and update the result in the DownloadFileTask
+        // Spawn the download task and update the result in the FileInfo
         let fut = async move {
-            let result = download_file(client, url, path, task.overwrite).await;
-            result
+            download_file(client, url, path, task.overwrite).await
         };
 
         tasks.push(fut);
@@ -453,4 +482,74 @@ async fn download_file(client: Client, url: String, path: PathBuf, overwrite: bo
     file.flush().await?;
 
     Ok(())
+}
+
+async fn unzip_gdelt_files(mut unzip_tasks: Vec<FileInfo>) -> anyhow::Result<Vec<FileInfo>> {
+    // Create a collection of futures for downloading files
+    let mut tasks = Vec::new();
+
+    for task in &mut unzip_tasks {
+        let src_path = task.zip_path.clone();
+        let dest_path = task.unzip_path.clone();
+
+        // Spawn the unzip task and update the result in the FileInfo
+        let fut = async move {
+            unzip_file(src_path, dest_path, task.overwrite).await
+        };
+
+        tasks.push(fut);
+    }
+
+    // Await all the tasks and update the results
+    for (i, task_result) in futures::future::join_all(tasks).await.into_iter().enumerate() {
+        unzip_tasks[i].set_extract_result(task_result);
+    }
+
+    Ok(unzip_tasks)
+}
+
+
+// Helper function to unzip a file from the source PathBuf and save it in the dest PathBuf
+async fn unzip_file(src: PathBuf, dest: PathBuf, overwrite: bool) -> anyhow::Result<()> {
+
+    // Make sure the source file exists
+    if !src.exists() {
+        anyhow::bail!("File does not exist: {:?}", src);
+    }
+
+    // Only proceed if the destination file does not exist or if it exists and the overwrite flag is set
+    if !overwrite && dest.exists() {
+        log::info!("File already exists: {:?}", dest);
+        return Ok(());
+    }
+
+    // Make sure the parent directory of the destination exists
+    if let Some(parent) = dest.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
+    // Unzip the file
+    // Open the source zip file asynchronously
+    let mut file = BufReader::new(File::open(&src).await?);
+    let mut zip_reader = ZipFileReader::with_tokio(&mut file).await?;
+
+    // There SHOULD be only 1 entry in each zip file. If there are more, we will only process the first one.
+    if zip_reader.file().entries().len() > 1 {
+        log::warn!("Zip file contains more than one entry. Only the first entry will be processed - {:?}", src);
+    }
+
+    let mut entry_reader = zip_reader.reader_with_entry(0).await?;
+
+    let writer = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&dest)
+        .await?;
+
+    futures_lite::io::copy(&mut entry_reader, &mut writer.compat_write())
+        .await?;
+
+    Ok(())    
 }

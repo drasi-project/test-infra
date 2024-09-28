@@ -1,11 +1,12 @@
 {
     "cSpell.words": [
         "chrono",
+        "compat",
         "datetime",
         "gdelt",
-        "Timelike",
+        "Hasher",
         "reqwest",
-        "Hasher"
+        "Timelike"
     ],
     "cSpell.ignorePaths": [
         "package-lock.json",

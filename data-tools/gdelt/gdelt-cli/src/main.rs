@@ -258,7 +258,7 @@ fn get_date_range(data_selection: &DataSelectionArgs) -> anyhow::Result<(NaiveDa
 
 }
 
-async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, overwrite: bool, unzip: bool) -> anyhow::Result<()> {
+async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, overwrite: bool, _unzip: bool) -> anyhow::Result<()> {
     log::debug!("Get command:");
 
     let (start_datetime, end_datetime) = get_date_range(&data_selection)?;
@@ -333,20 +333,28 @@ async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_pat
 struct DownloadFileTask {
     url: String,
     path: PathBuf,
-    result: Option<anyhow::Result<()>>,
+    overwrite: bool,
+    download_result: Option<anyhow::Result<()>>,
+    extract_result: Option<anyhow::Result<()>>,
 }
 
 impl DownloadFileTask {
-    fn new(url: String, path: PathBuf) -> Self {
+    fn new(url: String, path: PathBuf, overwrite: bool) -> Self {
         Self {
             url,
             path,
-            result: None,
+            overwrite,
+            download_result: None,
+            extract_result: None,
         }
     }
 
-    fn set_result(&mut self, result: anyhow::Result<()>) {
-        self.result = Some(result);
+    fn set_download_result(&mut self, result: anyhow::Result<()>) {
+        self.download_result = Some(result);
+    }
+
+    fn set_extract_result(&mut self, result: anyhow::Result<()>) {
+        self.extract_result = Some(result);
     }
 }
 
@@ -368,28 +376,22 @@ fn create_gdelt_download_list(start_datetime: NaiveDateTime, end_datetime: Naive
         // Events
         if file_types.contains(&DataType::Event) {
             let path = cache_folder_path.join(format!("zip/{}.export.CSV.zip", timestamp));
-            if !path.exists() || overwrite {
-                let url = format!("{}/{}.export.CSV.zip", GDELT_DATA_URL, timestamp);
-                download_tasks.push(DownloadFileTask::new(url, path));
-            }
+            let url = format!("{}/{}.export.CSV.zip", GDELT_DATA_URL, timestamp);
+            download_tasks.push(DownloadFileTask::new(url, path, overwrite));
         }
 
         // Graph
         if file_types.contains(&DataType::Graph) {
             let path = cache_folder_path.join(format!("zip/{}.gkg.csv.zip", timestamp));
-            if !path.exists() || overwrite {
-                let url = format!("{}/{}.gkg.csv.zip", GDELT_DATA_URL, timestamp);
-                download_tasks.push(DownloadFileTask::new(url, path));
-            }
+            let url = format!("{}/{}.gkg.csv.zip", GDELT_DATA_URL, timestamp);
+            download_tasks.push(DownloadFileTask::new(url, path, overwrite));
         }
 
         // Mentions
         if file_types.contains(&DataType::Mention) {
             let path = cache_folder_path.join(format!("zip/{}.mentions.CSV.zip", timestamp));
-            if !path.exists() || overwrite {
-                let url = format!("{}/{}.mentions.CSV.zip", GDELT_DATA_URL, timestamp);
-                download_tasks.push(DownloadFileTask::new(url, path));
-            }
+            let url = format!("{}/{}.mentions.CSV.zip", GDELT_DATA_URL, timestamp);
+            download_tasks.push(DownloadFileTask::new(url, path, overwrite));
         }
 
         // Increment the current_datetime by 15 minutes
@@ -413,7 +415,7 @@ async fn download_gdelt_zip_files(mut download_tasks: Vec<DownloadFileTask>) -> 
 
         // Spawn the download task and update the result in the DownloadFileTask
         let fut = async move {
-            let result = download_file(client, url, path).await;
+            let result = download_file(client, url, path, task.overwrite).await;
             result
         };
 
@@ -422,14 +424,19 @@ async fn download_gdelt_zip_files(mut download_tasks: Vec<DownloadFileTask>) -> 
 
     // Await all the tasks and update the results
     for (i, task_result) in futures::future::join_all(tasks).await.into_iter().enumerate() {
-        download_tasks[i].set_result(task_result);
+        download_tasks[i].set_download_result(task_result);
     }
 
     Ok(download_tasks)
 }
 
 // Helper function to download a file from the URL and save it to the given path
-async fn download_file(client: Client, url: String, path: PathBuf) -> anyhow::Result<()> {
+async fn download_file(client: Client, url: String, path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
+
+    if !overwrite && path.exists() {
+        log::info!("File already exists: {:?}", path);
+        return Ok(());
+    }
 
     // Make sure the parent directory exists
     if let Some(parent) = path.parent() {

@@ -56,7 +56,7 @@ enum Commands {
         overwrite: bool,
 
         /// A flag to indicate whether the downloaded files should be unzipped automatically
-        #[arg(short = 'u', long, default_value_t = true)]
+        #[arg(short = 'u', long, default_value_t = false)]
         unzip: bool,
     },
     /// Extracts the text data files from the zip file in the local file cache
@@ -65,7 +65,7 @@ enum Commands {
         data_selection: DataSelectionArgs,
 
         /// A flag to indicate whether existing files should be overwritten
-        #[arg(short = 'o', long, default_value_t = true)]
+        #[arg(short = 'o', long, default_value_t = false)]
         overwrite: bool,
     },
     /// Loads GDELT data from the local file cache into a database.
@@ -271,6 +271,7 @@ async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path
     println!("  - data types: {:?}", data_selection.data_type);
     println!("  - cache folder: {:?}", cache_folder_path);
     println!("  - overwrite: {}", overwrite);
+    println!("  - unzip: {}", unzip);
 
     let downloads = create_gdelt_file_list(
         start_datetime, 

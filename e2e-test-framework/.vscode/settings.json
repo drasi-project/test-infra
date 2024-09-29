@@ -1,0 +1,35 @@
+{
+    "vs-kubernetes": {
+        "disable-linters": [
+            "resource-limits"
+        ],
+    },
+    "cSpell.words": [
+        "chrono",
+        "comms",
+        "crictl",
+        "dapr",
+        "datetime",
+        "DRASI",
+        "inproc",
+        "nanos",
+        "oneshot",
+        "Reactivator",
+        "reactivators",
+        "sourceprovider",
+        "tempdir",
+        "tempfile",
+        "thiserror",
+        "traceparent"
+    ],
+    "cSpell.ignorePaths": [
+        "Cargo.toml",
+        "package-lock.json",
+        "node_modules",
+        "vscode-extension",
+        ".git/objects",
+        ".vscode",
+        ".vscode-insiders",
+        "**/.cargo/registry/**"
+    ]
+}

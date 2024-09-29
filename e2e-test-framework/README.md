@@ -165,7 +165,7 @@ Delete the E2ETestSource
 drasi delete source e2e-test-source-facilities
 ```
 
-Delete the E2EtestSourceProvider
+Delete the E2ETestSourceProvider
 
 ```
 drasi delete sourceprovider E2ETestSource

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, hash::{Hash, Hasher}, path::PathBuf, str::FromStr};
+use std::{collections::{HashMap, HashSet}, hash::{Hash, Hasher}, path::PathBuf, str::FromStr};
 
 use async_zip::tokio::read::seek::ZipFileReader;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
@@ -7,7 +7,7 @@ use reqwest::Client;
 use tokio::{fs::{File, OpenOptions}, io::{AsyncWriteExt, BufReader}};
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
-use postgres::load_gdelt_files;
+use postgres::{initialize, load_gdelt_files, DbInfo};
 
 mod gdelt;
 mod postgres;
@@ -102,6 +102,20 @@ enum Commands {
         #[arg(short = 'p', long = "db_password", env = "GDELT_DB_PASSWORD")]
         database_password: Option<String>,
     },
+    InitDB {
+        #[arg(short = 'd', long = "db_url", env = "GDELT_DB_URL")]
+        database_url: Option<String>,
+
+        #[arg(short = 'u', long = "db_user", env = "GDELT_DB_USER")]
+        database_user: Option<String>,
+
+        #[arg(short = 'p', long = "db_password", env = "GDELT_DB_PASSWORD")]
+        database_password: Option<String>,
+
+        /// A flag to indicate whether existing tables should be overwritten
+        #[arg(short = 'o', long, default_value_t = false)]
+        overwrite: bool,        
+    },
 }
 
 #[derive(Args, Debug)]
@@ -138,6 +152,9 @@ async fn main() {
         }
         Commands::Load { data_selection, database_url, database_user, database_password } => {
             handle_load_command(data_selection, cache_folder_path, database_url, database_user, database_password).await
+        },
+        Commands::InitDB { database_url, database_user, database_password , overwrite} => {
+            handle_initdb_command(database_url, database_user, database_password, overwrite).await
         }
     };
 
@@ -302,31 +319,37 @@ async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path
     ).unwrap();
 
     // Display the list of files to be downloaded, without taking ownership of the list or content
-    println!("Download Tasks:");
-    for file_info in &downloads {
-        println!("  - {:?}", file_info);
-    }
+    // println!("Download Tasks:");
+    // for file_info in &downloads {
+    //     println!("  - {:?}", file_info);
+    // }
 
     // Download the files
     let download_results = download_gdelt_zip_files(downloads).await.unwrap();
 
-    println!("File download results:");
-    for file_info in &download_results {
-        println!("  - {:?}", file_info);
-    }
+    // println!("File download results:");
+    // for file_info in &download_results {
+    //     println!("  - {:?}", file_info);
+    // }
 
     // Unzip the files if the unzip flag is set
     if unzip {
         let unzip_results = unzip_gdelt_files(download_results).await.unwrap();
 
-        println!("File unzip results:");
-        for file_info in &unzip_results {
-            println!("  - {:?}", file_info);
-        }
+        // println!("File unzip results:");
+        // for file_info in &unzip_results {
+        //     println!("  - {:?}", file_info);
+        // }
+
+        summarize_fileinfo_results(unzip_results);
+
+    } else {
+        summarize_fileinfo_results(download_results);
     }
 
     Ok(())
 }
+
 
 async fn handle_unzip_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
     log::debug!("Unzip command:");
@@ -350,27 +373,20 @@ async fn handle_unzip_command(data_selection: DataSelectionArgs, cache_folder_pa
 
     let unzip_results = unzip_gdelt_files(files_to_unzip).await.unwrap();
 
-    println!("File unzip results:");
-    for file_info in &unzip_results {
-        println!("  - {:?}", file_info);
-    }
+    // println!("File unzip results:");
+    // for file_info in &unzip_results {
+    //     println!("  - {:?}", file_info);
+    // }
+
+    summarize_fileinfo_results(unzip_results);
 
     Ok(())
 }
 
-async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, database_url: Option<String>, database_user: Option<String>, _database_password: Option<String>) -> anyhow::Result<()>  {
+async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, database_url: Option<String>, database_user: Option<String>, database_password: Option<String>) -> anyhow::Result<()>  {
     log::debug!("Load command:");
 
     let (start_datetime, end_datetime) = get_date_range(&data_selection)?;
-
-    // Display a summary of what the command is going to do based on the input parameters and the calculated date range
-    // println!("Loading GDELT Data:");
-    // println!("  - date range: {} to {}", &start_datetime, &end_datetime);
-    // println!("  - data types: {:?}", data_selection.data_type);
-    // println!("  - cache folder: {:?}", cache_folder_path);
-    // println!("  - Database URL: {:?}", database_url);
-    // println!("  - Database User: {:?}", database_user);
-    // println!("  - Database Password: *****");
 
     println!(
         "Loading GDELT Data:\n\
@@ -391,17 +407,53 @@ async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_pat
         false,
     ).unwrap();
 
-    println!("Files to load:");
-    for file_info in &files_to_load {
-        println!("  - {:?}", file_info);
-    }
+    // println!("Files to load:");
+    // for file_info in &files_to_load {
+    //     println!("  - {:?}", file_info);
+    // }
 
-    let load_results = load_gdelt_files(files_to_load).await.unwrap();
+    let db_info = DbInfo {
+        host: database_url.unwrap_or_else(|| "localhost".to_string()),
+        port: 5432,
+        user: database_user.unwrap_or_else(|| "postgres".to_string()),
+        password: database_password.unwrap_or_else(|| "password".to_string()),
+        dbname: "gdelt".to_string(),
+        use_tls: false,
+    };
+
+    let load_results = load_gdelt_files(&db_info, files_to_load).await?;
 
     println!("File load results:");
     for file_info in &load_results {
         println!("  - {:?}", file_info);
     }
+
+    summarize_fileinfo_results(load_results);
+
+    Ok(())
+}
+
+async fn handle_initdb_command(database_url: Option<String>, database_user: Option<String>, database_password: Option<String>, overwrite: bool) -> anyhow::Result<()>  {
+    log::debug!("InitDB command:");
+
+    println!(
+        "Initializing GDELT Database:\n\
+          - Database URL: {:?}\n\
+          - Database User: {:?}\n\
+          - Database Password: *****",
+        database_url, database_user, 
+    );
+
+    let db_info = DbInfo {
+        host: database_url.unwrap_or_else(|| "localhost".to_string()),
+        port: 5432,
+        user: database_user.unwrap_or_else(|| "postgres".to_string()),
+        password: database_password.unwrap_or_else(|| "password".to_string()),
+        dbname: "gdelt".to_string(),
+        use_tls: false,
+    };
+
+    initialize(&db_info, overwrite).await?;
 
     Ok(())
 }
@@ -628,4 +680,45 @@ async fn unzip_file(src: PathBuf, dest: PathBuf, overwrite: bool) -> anyhow::Res
         .await?;
 
     Ok(())    
+}
+
+fn summarize_fileinfo_results(file_infos: Vec<FileInfo>) {
+    // Initialize counters
+    let mut summary: HashMap<DataType, (usize, usize, usize, usize)> = HashMap::new();
+
+    for file_info in file_infos {
+        let (total, successful, failed, skipped) = summary.entry(file_info.file_type).or_insert((0, 0, 0, 0));
+
+        *total += 1; // Increment total
+
+        // Check download result
+        match &file_info.download_result {
+            Some(Ok(_)) => *successful += 1,
+            Some(Err(_)) => *failed += 1,
+            None => *skipped += 1,
+        }
+
+        // Check extraction result
+        match &file_info.extract_result {
+            Some(Ok(_)) => *successful += 1,
+            Some(Err(_)) => *failed += 1,
+            None => *skipped += 1,
+        }
+
+        // Check load result
+        match &file_info.load_result {
+            Some(Ok(_)) => *successful += 1,
+            Some(Err(_)) => *failed += 1,
+            None => *skipped += 1,
+        }
+    }
+
+    // Print the summary
+    for (data_type, (total, successful, failed, skipped)) in summary {
+        println!("{:?} Files:", data_type);
+        println!("Downloads - Total: {}, Successful: {}, Failed: {}, Skipped: {}", total, successful, failed, skipped);
+        println!("Extractions - Total: {}, Successful: {}, Failed: {}, Skipped: {}", total, successful, failed, skipped);
+        println!("Loads - Total: {}, Successful: {}, Failed: {}, Skipped: {}", total, successful, failed, skipped);
+        println!(); // Print a newline for better readability
+    }
 }

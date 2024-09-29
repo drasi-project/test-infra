@@ -16,5 +16,5 @@ log = "0.4"
 reqwest = "0.12.7"
 serde = { version = "1.0.163", features = ["derive"] }
 tokio = { version = "1.37.0", features = ["full"] }
-tokio-postgres = { version = "0.7" }
+tokio-postgres = { version = "0.7.12" }
 tokio-util = { version = "0.7.12", features = ["compat"] }

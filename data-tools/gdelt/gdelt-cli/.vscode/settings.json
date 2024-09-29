@@ -2,11 +2,15 @@
     "cSpell.words": [
         "chrono",
         "datetime",
+        "datname",
+        "dbinfo",
         "dbname",
+        "fileinfo",
         "gcam",
         "gdelt",
         "goldstein",
         "Hasher",
+        "initdb",
         "reqwest",
         "Timelike"
     ],

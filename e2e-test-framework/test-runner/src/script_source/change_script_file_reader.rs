@@ -1,9 +1,6 @@
 use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf};
 
-use chrono::{DateTime, FixedOffset};
-use serde::{Deserialize, Serialize};
-
-use super::SourceChangeEvent;
+use super::{ChangeScriptRecord, FinishRecord, HeaderRecord, SequencedChangeScriptRecord};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChangeScriptReaderError {
@@ -17,83 +14,6 @@ pub enum ChangeScriptReaderError {
     RecordOutOfSequence(u64),
     #[error("Bad record format in file {0}: Error - {1}; Record - {2}")]
     BadRecordFormat(String, String, String),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")] // This will use the "type" field to determine the enum variant
-pub enum ChangeScriptRecord {
-    Comment(CommentRecord),
-    Header(HeaderRecord),
-    Label(LabelRecord),
-    PauseCommand(PauseCommandRecord),
-    SourceChange(SourceChangeRecord),
-    Finish(FinishRecord),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommentRecord {
-    pub comment: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HeaderRecord {
-    pub start_time: DateTime<FixedOffset>,
-    #[serde(default)]
-    pub description: String,
-}
-
-impl Default for HeaderRecord {
-    fn default() -> Self {
-        HeaderRecord {
-            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
-            description: "Error: Header record not found.".to_string(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LabelRecord {
-    #[serde(default)]
-    pub offset_ns: u64,
-    pub label: String,
-    #[serde(default)]
-    pub description: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PauseCommandRecord {
-    #[serde(default)]
-    pub offset_ns: u64,
-    #[serde(default)]
-    pub label: String,
-    #[serde(default)]
-    pub description: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FinishRecord {
-    #[serde(default)]
-    pub offset_ns: u64,
-    #[serde(default)]
-    pub description: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceChangeRecord {
-    #[serde(default)]
-    pub offset_ns: u64,
-    pub source_change_event: SourceChangeEvent,
-}
-
-// The SequencedChangeScriptRecord struct wraps a ChangeScriptRecord and ensures that each record has a 
-// sequence number and an offset_ns field. The sequence number is the order in which the record was read
-// from the script files. The offset_ns field the nanos since the start of the script starting time, 
-// which is the start_time field in the Header record.
-#[derive(Clone, Debug, Serialize)]
-pub struct SequencedChangeScriptRecord {
-    pub seq: u64,
-    pub offset_ns: u64,
-    pub record: ChangeScriptRecord,
 }
 
 pub struct ChangeScriptReader {

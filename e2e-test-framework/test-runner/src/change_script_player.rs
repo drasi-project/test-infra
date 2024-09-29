@@ -14,7 +14,7 @@ use crate::{
     }
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
-use crate::script_source::change_script_file_reader::{ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord};
+use crate::script_source::{ChangeScriptRecord, SequencedChangeScriptRecord, change_script_file_reader::ChangeScriptReader};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChangeScriptPlayerError {
@@ -49,7 +49,7 @@ pub struct ChangeScriptPlayerSettings {
 impl ChangeScriptPlayerSettings {
     pub fn try_from_test_run_source(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: String) -> anyhow::Result<Self> {
 
-        // If the SourceConfig doesnt contain a ReactivatorConfig, log and return an error.
+        // If the SourceConfig doesn't contain a ReactivatorConfig, log and return an error.
         // Otherwise, clone the TestRunSource and extract the TestRunReactivator.
         let (test_run_source, reactivator) = match test_run_source.reactivator {
             Some(reactivator) => {
@@ -172,7 +172,7 @@ impl ScheduledChangeScriptRecord {
 pub enum ChangeScriptPlayerCommand {
     // Command to start the ChangeScriptPlayer.
     Start,
-    // Command to process the delayed Change Script record. The param is the sequence nummber of the record to process.
+    // Command to process the delayed Change Script record. The param is the sequence number of the record to process.
     // It is used as a guard to ensure the timer is only processed if the sequence number matches the expected sequence number.
     ProcessDelayedRecord(u64),
     // Command to step the ChangeScriptPlayer forward a specified number of ChangeScriptRecords.
@@ -538,7 +538,7 @@ async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlay
     }
 
     let seq_record = player_state.next_record.as_ref().unwrap().clone();
-    log_sequeced_test_script_record("Next ChangeScriptRecord Pre-TimeShift", &seq_record);
+    log_sequenced_test_script_record("Next ChangeScriptRecord Pre-TimeShift", &seq_record);
 
     // Check if the ChangeScriptPlayer has finished processing all records.
     if let ChangeScriptRecord::Finish(_) = seq_record.record {
@@ -567,7 +567,7 @@ async fn process_next_test_script_record(mut player_state: &mut ChangeScriptPlay
     };
 
     // Take action based on size of the delay.
-    // It doesnt make sense to delay for trivially small amounts of time, nor does it make sense to send 
+    // It doesn't make sense to delay for trivially small amounts of time, nor does it make sense to send 
     // a message to the delayer thread for relatively small delays. 
     // TODO: This figures might need to be adjusted, or made configurable.
     if delay < 1_000 { 
@@ -974,7 +974,7 @@ fn log_scheduled_test_script_record(msg: &str, record: &ScheduledChangeScriptRec
 }
 
 // Function to log the current Next ChangeScriptRecord at varying levels of detail.
-fn log_sequeced_test_script_record(msg: &str, record: &SequencedChangeScriptRecord) {
+fn log_sequenced_test_script_record(msg: &str, record: &SequencedChangeScriptRecord) {
     match log::max_level() {
         log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, record),
         log::LevelFilter::Debug => log::debug!("{} - seq:{:?}, offset_ns:{:?}", msg, record.seq, record.offset_ns),

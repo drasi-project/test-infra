@@ -1,10 +1,20 @@
+use chrono::{DateTime, FixedOffset};
+use serde::{Deserialize, Serialize};
+
 pub mod bootstrap_script_file_reader;
 pub mod change_script_file_reader;
-
-use serde::{Deserialize, Serialize};
+pub mod change_script_file_writer;
 
 type SourceChangeEventBefore = serde_json::Value; // Arbitrary JSON object for before
 type SourceChangeEventAfter = serde_json::Value; // Arbitrary JSON object for after
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceChangeEvent {
+    pub op: String,
+    pub ts_ms: u64,
+    pub schema: String,
+    pub payload: SourceChangeEventPayload,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceChangeEventPayload {
@@ -22,14 +32,6 @@ pub struct SourceChangeEventSourceInfo {
     pub lsn: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceChangeEvent {
-    pub op: String,
-    pub ts_ms: u64,
-    pub schema: String,
-    pub payload: SourceChangeEventPayload,
-}
-
 impl std::fmt::Display for SourceChangeEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 
@@ -44,4 +46,81 @@ impl std::fmt::Display for SourceChangeEvent {
             Err(e) => return write!(f, "Error serializing SourceChangeEvent: {:?}. Error: {}", self, e),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type")] // This will use the "type" field to determine the enum variant
+pub enum ChangeScriptRecord {
+    Comment(CommentRecord),
+    Header(HeaderRecord),
+    Label(LabelRecord),
+    PauseCommand(PauseCommandRecord),
+    SourceChange(SourceChangeRecord),
+    Finish(FinishRecord),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommentRecord {
+    pub comment: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HeaderRecord {
+    pub start_time: DateTime<FixedOffset>,
+    #[serde(default)]
+    pub description: String,
+}
+
+impl Default for HeaderRecord {
+    fn default() -> Self {
+        HeaderRecord {
+            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
+            description: "Error: Header record not found.".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LabelRecord {
+    #[serde(default)]
+    pub offset_ns: u64,
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PauseCommandRecord {
+    #[serde(default)]
+    pub offset_ns: u64,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FinishRecord {
+    #[serde(default)]
+    pub offset_ns: u64,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceChangeRecord {
+    #[serde(default)]
+    pub offset_ns: u64,
+    pub source_change_event: SourceChangeEvent,
+}
+
+// The SequencedChangeScriptRecord struct wraps a ChangeScriptRecord and ensures that each record has a 
+// sequence number and an offset_ns field. The sequence number is the order in which the record was read
+// from the script files. The offset_ns field the nanos since the start of the script starting time, 
+// which is the start_time field in the Header record.
+#[derive(Clone, Debug, Serialize)]
+pub struct SequencedChangeScriptRecord {
+    pub seq: u64,
+    pub offset_ns: u64,
+    pub record: ChangeScriptRecord,
 }

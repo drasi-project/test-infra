@@ -1,4 +1,4 @@
-use std::{collections::HashSet, hash::{Hash, Hasher}, path::PathBuf};
+use std::{collections::HashSet, hash::{Hash, Hasher}, path::PathBuf, str::FromStr};
 
 use async_zip::tokio::read::seek::ZipFileReader;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
@@ -6,6 +6,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use reqwest::Client;
 use tokio::{fs::{File, OpenOptions}, io::{AsyncWriteExt, BufReader}};
 use tokio_util::compat::TokioAsyncWriteCompatExt;
+
+use postgres::load_gdelt_files;
+
+mod gdelt;
+mod postgres;
 
 /// String constant containing the address of GDELT data on the Web
 const GDELT_DATA_URL: &str = "http://data.gdeltproject.org/gdeltv2";
@@ -20,6 +25,21 @@ enum DataType {
     Event,
     Graph,
     Mention,
+}
+
+impl FromStr for DataType {
+    type Err = String;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let input = input.to_lowercase();
+
+        match input.as_str() {
+            "event" | "e" => Ok(DataType::Event),
+            "graph" | "g" => Ok(DataType::Graph),
+            "mention" | "m" => Ok(DataType::Mention),
+            _ => Err(format!("Unknown variant: {}", input)),
+        }
+    }
 }
 
 impl Hash for DataType {
@@ -283,16 +303,16 @@ async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path
 
     // Display the list of files to be downloaded, without taking ownership of the list or content
     println!("Download Tasks:");
-    for download in &downloads {
-        println!("  - {:?}", download);
+    for file_info in &downloads {
+        println!("  - {:?}", file_info);
     }
 
     // Download the files
     let download_results = download_gdelt_zip_files(downloads).await.unwrap();
 
     println!("File download results:");
-    for download in &download_results {
-        println!("  - {:?}", download);
+    for file_info in &download_results {
+        println!("  - {:?}", file_info);
     }
 
     // Unzip the files if the unzip flag is set
@@ -300,8 +320,8 @@ async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path
         let unzip_results = unzip_gdelt_files(download_results).await.unwrap();
 
         println!("File unzip results:");
-        for unzip in &unzip_results {
-            println!("  - {:?}", unzip);
+        for file_info in &unzip_results {
+            println!("  - {:?}", file_info);
         }
     }
 
@@ -320,7 +340,7 @@ async fn handle_unzip_command(data_selection: DataSelectionArgs, cache_folder_pa
     println!("  - cache folder: {:?}", cache_folder_path);
     println!("  - overwrite: {}", overwrite);
 
-    let unzips = create_gdelt_file_list(
+    let files_to_unzip = create_gdelt_file_list(
         start_datetime, 
         end_datetime,
         data_selection.data_type.iter().cloned().collect(),
@@ -328,52 +348,113 @@ async fn handle_unzip_command(data_selection: DataSelectionArgs, cache_folder_pa
         overwrite,
     ).unwrap();
 
-    let unzip_results = unzip_gdelt_files(unzips).await.unwrap();
+    let unzip_results = unzip_gdelt_files(files_to_unzip).await.unwrap();
 
     println!("File unzip results:");
-    for unzip in &unzip_results {
-        println!("  - {:?}", unzip);
+    for file_info in &unzip_results {
+        println!("  - {:?}", file_info);
     }
 
     Ok(())
 }
 
-async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, database_url: Option<String>, database_user: Option<String>, database_password: Option<String>) -> anyhow::Result<()>  {
+async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, database_url: Option<String>, database_user: Option<String>, _database_password: Option<String>) -> anyhow::Result<()>  {
     log::debug!("Load command:");
 
     let (start_datetime, end_datetime) = get_date_range(&data_selection)?;
 
     // Display a summary of what the command is going to do based on the input parameters and the calculated date range
-    println!("Unzipping GDELT Data:");
-    println!("  - date range: {} to {}", &start_datetime, &end_datetime);
-    println!("  - data types: {:?}", data_selection.data_type);
-    println!("  - cache folder: {:?}", cache_folder_path);
-    println!("  - Database URL: {:?}", database_url);
-    println!("  - Database User: {:?}", database_user);
-    println!("  - Database Password: {:?}", database_password);
+    // println!("Loading GDELT Data:");
+    // println!("  - date range: {} to {}", &start_datetime, &end_datetime);
+    // println!("  - data types: {:?}", data_selection.data_type);
+    // println!("  - cache folder: {:?}", cache_folder_path);
+    // println!("  - Database URL: {:?}", database_url);
+    // println!("  - Database User: {:?}", database_user);
+    // println!("  - Database Password: *****");
+
+    println!(
+        "Loading GDELT Data:\n\
+          - date range: {} to {}\n\
+          - data types: {:?}\n\
+          - cache folder: {:?}\n\
+          - Database URL: {:?}\n\
+          - Database User: {:?}\n\
+          - Database Password: *****",
+        &start_datetime, &end_datetime, data_selection.data_type, cache_folder_path, database_url, database_user
+    );
+
+    let files_to_load = create_gdelt_file_list(
+        start_datetime, 
+        end_datetime,
+        data_selection.data_type.iter().cloned().collect(),
+        cache_folder_path,
+        false,
+    ).unwrap();
+
+    println!("Files to load:");
+    for file_info in &files_to_load {
+        println!("  - {:?}", file_info);
+    }
+
+    let load_results = load_gdelt_files(files_to_load).await.unwrap();
+
+    println!("File load results:");
+    for file_info in &load_results {
+        println!("  - {:?}", file_info);
+    }
 
     Ok(())
 }
 
 #[derive(Debug)]
 struct FileInfo {
+    file_type: DataType,
     url: String,
     zip_path: PathBuf,
     unzip_path: PathBuf,
     overwrite: bool,
     download_result: Option<anyhow::Result<()>>,
     extract_result: Option<anyhow::Result<()>>,
+    load_result: Option<anyhow::Result<()>>,
 }
 
 impl FileInfo {
-    fn new(url: String, zip_path: PathBuf, unzip_path: PathBuf, overwrite: bool) -> Self {
+    fn new_event_file(cache_folder_path: PathBuf, file_name: &str, overwrite: bool) -> Self {
         Self {
-            url,
-            zip_path,
-            unzip_path,
+            file_type: DataType::Event,
+            url: format!("{}/{}.export.CSV.zip", GDELT_DATA_URL, file_name),
+            zip_path: cache_folder_path.join(format!("zip/{}.export.CSV.zip", file_name)),
+            unzip_path: cache_folder_path.join(format!("event/{}.export.CSV", file_name)),
             overwrite,
             download_result: None,
             extract_result: None,
+            load_result: None,
+        }
+    }
+
+    fn new_graph_file(cache_folder_path: PathBuf, file_name: &str, overwrite: bool) -> Self {
+        Self {
+            file_type: DataType::Graph,
+            url: format!("{}/{}.gkg.csv.zip", GDELT_DATA_URL, file_name),
+            zip_path: cache_folder_path.join(format!("zip/{}.gkg.csv.zip", file_name)),
+            unzip_path: cache_folder_path.join(format!("graph/{}.gkg.CSV", file_name)),
+            overwrite,
+            download_result: None,
+            extract_result: None,
+            load_result: None,
+        }
+    }
+
+    fn new_mention_file(cache_folder_path: PathBuf, file_name: &str, overwrite: bool) -> Self {
+        Self {
+            file_type: DataType::Mention,
+            url: format!("{}/{}.mentions.CSV.zip", GDELT_DATA_URL, file_name),
+            zip_path: cache_folder_path.join(format!("zip/{}.mentions.CSV.zip", file_name)),
+            unzip_path: cache_folder_path.join(format!("mention/{}.mentions.CSV", file_name)),
+            overwrite,
+            download_result: None,
+            extract_result: None,
+            load_result: None,
         }
     }
 
@@ -383,6 +464,10 @@ impl FileInfo {
 
     fn set_extract_result(&mut self, result: anyhow::Result<()>) {
         self.extract_result = Some(result);
+    }
+
+    fn set_load_result(&mut self, result: anyhow::Result<()>) {
+        self.load_result = Some(result);
     }
 }
 
@@ -399,30 +484,21 @@ fn create_gdelt_file_list(start_datetime: NaiveDateTime, end_datetime: NaiveDate
     let mut current_datetime = start_datetime;
     while current_datetime <= end_datetime {
         let timestamp = current_datetime.format("%Y%m%d%H%M%S").to_string();
-        // println!("Timestamp: {}", timestamp);
+        log::trace!("Processing timestamp: {}", timestamp);
 
         // Events
         if file_types.contains(&DataType::Event) {
-            let zip_path = cache_folder_path.join(format!("zip/{}.export.CSV.zip", timestamp));
-            let unzip_path = cache_folder_path.join(format!("event/{}.export.CSV", timestamp));
-            let url = format!("{}/{}.export.CSV.zip", GDELT_DATA_URL, timestamp);
-            download_tasks.push(FileInfo::new(url, zip_path, unzip_path, overwrite));
+            download_tasks.push(FileInfo::new_event_file(cache_folder_path.clone(), &timestamp, overwrite));
         }
 
         // Graph
         if file_types.contains(&DataType::Graph) {
-            let zip_path = cache_folder_path.join(format!("zip/{}.gkg.csv.zip", timestamp));
-            let unzip_path = cache_folder_path.join(format!("graph/{}.gkg.CSV", timestamp));
-            let url = format!("{}/{}.gkg.csv.zip", GDELT_DATA_URL, timestamp);
-            download_tasks.push(FileInfo::new(url, zip_path, unzip_path, overwrite));
+            download_tasks.push(FileInfo::new_graph_file(cache_folder_path.clone(), &timestamp, overwrite));
         }
 
         // Mentions
         if file_types.contains(&DataType::Mention) {
-            let zip_path = cache_folder_path.join(format!("zip/{}.mentions.CSV.zip", timestamp));
-            let unzip_path = cache_folder_path.join(format!("mention/{}.mentions.CSV", timestamp));
-            let url = format!("{}/{}.mentions.CSV.zip", GDELT_DATA_URL, timestamp);
-            download_tasks.push(FileInfo::new(url, zip_path, unzip_path, overwrite));
+            download_tasks.push(FileInfo::new_mention_file(cache_folder_path.clone(), &timestamp, overwrite));
         }
 
         // Increment the current_datetime by 15 minutes
@@ -493,7 +569,6 @@ async fn unzip_gdelt_files(mut unzip_tasks: Vec<FileInfo>) -> anyhow::Result<Vec
         let src_path = task.zip_path.clone();
         let dest_path = task.unzip_path.clone();
 
-        // Spawn the unzip task and update the result in the FileInfo
         let fut = async move {
             unzip_file(src_path, dest_path, task.overwrite).await
         };

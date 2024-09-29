@@ -8,10 +8,13 @@ anyhow = "1.0.86"
 async_zip = { version = "0.0.17", features = ["full"] }
 chrono = { version = "0.4.38" }
 clap = { version = "4.5.18", features = ["derive", "env"] }
+csv = "1.1"
 env_logger = "0.7.1"
 futures = "0.3.3"
 futures-lite = { version = "2.1.0", default-features = false, features = ["std"] }
 log = "0.4"
 reqwest = "0.12.7"
+serde = { version = "1.0.163", features = ["derive"] }
 tokio = { version = "1.37.0", features = ["full"] }
+tokio-postgres = { version = "0.7" }
 tokio-util = { version = "0.7.12", features = ["compat"] }

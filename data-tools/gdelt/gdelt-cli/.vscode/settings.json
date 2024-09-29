@@ -1,14 +1,17 @@
 {
     "cSpell.words": [
         "chrono",
-        "compat",
         "datetime",
+        "dbname",
+        "gcam",
         "gdelt",
+        "goldstein",
         "Hasher",
         "reqwest",
         "Timelike"
     ],
     "cSpell.ignorePaths": [
+        "Cargo.toml",
         "package-lock.json",
         "node_modules",
         "vscode-extension",

@@ -16,6 +16,22 @@ pub struct SourceChangeEvent {
     pub payload: SourceChangeEventPayload,
 }
 
+impl TryFrom<&str> for SourceChangeEvent {
+    type Error = serde_json::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        serde_json::from_str(value)
+    }
+}
+
+impl TryFrom<&String> for SourceChangeEvent {
+    type Error = serde_json::Error;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        serde_json::from_str(value)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceChangeEventPayload {
     pub source: SourceChangeEventSourceInfo,

@@ -95,7 +95,7 @@ impl Default for SourceConfig {
     fn default() -> Self {
         SourceConfig {
             source_id: "default_source".to_string(),
-            start_immediately: Some(false),
+            start_immediately: false,
             bootstrap_data_recorder: None,
             source_change_recorder: None,
         }
@@ -139,24 +139,14 @@ pub struct SourceChangeRecorderConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SourceChangeQueueReaderConfig {
-    Dapr(DaprSourceChangeQueueReaderConfig),
     Redis(RedisSourceChangeQueueReaderConfig),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DaprSourceChangeQueueReaderConfig {
-    pub host: Option<String>,
-    pub port: Option<u16>,
-    pub pubsub_name: Option<String>,
-    pub pubsub_topic: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RedisSourceChangeQueueReaderConfig {
     pub host: Option<String>,
     pub port: Option<u16>,
-    pub pubsub_name: Option<String>,
-    pub pubsub_topic: Option<String>,
+    pub queue_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

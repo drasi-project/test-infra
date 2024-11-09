@@ -2,8 +2,8 @@ use async_trait::async_trait;
 
 use test_runner::script_source::SourceChangeEvent;
 
-// pub mod dapr_change_queue_reader;
-// pub mod redis_change_queue_reader;
+pub mod none_change_queue_reader;
+pub mod redis_change_queue_reader;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeQueueReaderError {

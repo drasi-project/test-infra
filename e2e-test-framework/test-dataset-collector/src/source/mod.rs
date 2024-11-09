@@ -22,15 +22,17 @@ pub struct DatasetSource {
 impl DatasetSource {
     pub async fn try_from_config(config: &SourceConfig, data_store_path: PathBuf) -> anyhow::Result<Self> {
         
-        let data_store_path = data_store_path.join(config.source_id.clone());
+        let source_id = config.source_id.clone();
+
+        let data_store_path = data_store_path.join(source_id.clone());
 
         let bootstrap_data_recorder = match &config.bootstrap_data_recorder {
-            Some(config) => Some(BootstrapDataRecorder::try_from_config(config, data_store_path.clone()).await?),
+            Some(config) => Some(BootstrapDataRecorder::new(config, source_id.clone(), data_store_path.clone()).await?),
             None => None,
         };
 
         let source_change_recorder = match &config.source_change_recorder {
-            Some(config) => Some(SourceChangeRecorder::try_from_config(config, data_store_path.clone()).await?),
+            Some(config) => Some(SourceChangeRecorder::new(config, source_id.clone(), data_store_path.clone()).await?),
             None => None,
         };
         

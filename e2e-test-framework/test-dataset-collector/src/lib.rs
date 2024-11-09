@@ -27,7 +27,7 @@ pub type SharedTestDatasetCollector = Arc<RwLock<TestDatasetCollector>>;
 
 #[derive(Debug)]
 pub struct TestDatasetCollector {
-    source_change_recorders: HashMap<String, SourceChangeRecorder>,
+    _source_change_recorders: HashMap<String, SourceChangeRecorder>,
     data_store_path: PathBuf,
     datasets: HashMap<String, Dataset>,
     status: TestDatasetCollectorStatus,
@@ -43,7 +43,7 @@ impl TestDatasetCollector {
         let data_store_path = PathBuf::from(&config.data_store_path);
 
         let mut test_dataset_collector = TestDatasetCollector {
-            source_change_recorders: HashMap::new(),
+            _source_change_recorders: HashMap::new(),
             data_store_path,
             datasets: HashMap::new(),
             status: TestDatasetCollectorStatus::Initialized,
@@ -144,8 +144,8 @@ impl TestDatasetCollector {
         self.datasets.contains_key(dataset_id)
     }
 
-    pub fn get_data_store_path(&self) -> &str {
-        &self.data_store_path
+    pub fn get_data_store_path(&self) -> PathBuf {
+        self.data_store_path.clone()
     }
 
     // pub fn get_datasets(&self) -> anyhow::Result<Vec<DataSet>> {

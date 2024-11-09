@@ -11,6 +11,13 @@ pub enum ChangeScriptWriterError {
     FileWriteError(String),
 }
 
+#[derive(Debug)]
+pub struct ChangeScriptWriterSettings {
+    pub folder_path: PathBuf,
+    pub script_name: String,
+    pub max_size: Option<u64>,
+}
+
 pub struct ChangeScriptWriter {
     folder_path: PathBuf,
     script_file_name: String,
@@ -22,7 +29,11 @@ pub struct ChangeScriptWriter {
 }
 
 impl ChangeScriptWriter {
-    pub fn new(folder_path: PathBuf, script_name: String, max_size: Option<u64>) -> anyhow::Result<Self> {
+    pub fn new(settings: ChangeScriptWriterSettings) -> anyhow::Result<Self> {
+        log::debug!("Creating new ChangeScriptWriter with settings: {:?}", settings);
+
+        let ChangeScriptWriterSettings { folder_path, script_name, max_size } = settings;
+
         let mut writer = ChangeScriptWriter {
             folder_path: folder_path.join(&script_name),
             script_file_name: script_name,
@@ -100,7 +111,13 @@ mod tests {
         let script_name = "test_script".to_string();
         let max_size = 5;
 
-        let mut writer = ChangeScriptWriter::new(folder_path.clone(), script_name.clone(), Some(max_size)).unwrap();
+        let writer_settings = ChangeScriptWriterSettings {
+            folder_path: folder_path.clone(),
+            script_name: script_name.clone(),
+            max_size: Some(max_size),
+        };
+
+        let mut writer = ChangeScriptWriter::new(writer_settings).unwrap();
 
         for i in 0..12 {
             let record = ChangeScriptRecord::Comment(CommentRecord { comment: format!("record_{}", i) });

@@ -1,12 +1,13 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
+use futures::future::join_all;
 use serde::Serialize;
 use tokio::{fs::remove_dir_all, sync::RwLock};
 
 use test_runner::{config::TestRepoConfig, test_repo::test_repo_cache::TestRepoCache};
 
 use config::{DatasetConfig, TestDatasetCollectorConfig, SourceConfig};
-use source::{DatasetSource, source_change_recorder::SourceChangeRecorder};
+use source::DatasetSource;
 
 pub mod config;
 // pub mod query;
@@ -27,7 +28,6 @@ pub type SharedTestDatasetCollector = Arc<RwLock<TestDatasetCollector>>;
 
 #[derive(Debug)]
 pub struct TestDatasetCollector {
-    _source_change_recorders: HashMap<String, SourceChangeRecorder>,
     data_store_path: PathBuf,
     datasets: HashMap<String, Dataset>,
     status: TestDatasetCollectorStatus,
@@ -43,7 +43,6 @@ impl TestDatasetCollector {
         let data_store_path = PathBuf::from(&config.data_store_path);
 
         let mut test_dataset_collector = TestDatasetCollector {
-            _source_change_recorders: HashMap::new(),
             data_store_path,
             datasets: HashMap::new(),
             status: TestDatasetCollectorStatus::Initialized,
@@ -84,7 +83,7 @@ impl TestDatasetCollector {
             anyhow::bail!("TestDatasetCollector is in an Error state: {}", msg);
         };
         
-        let dataset = Dataset::try_from_config(dataset_config, self.data_store_path.clone()).await?;
+        let dataset = Dataset::new(dataset_config, self.data_store_path.clone()).await?;
         self.datasets.insert(dataset.dataset_id.clone(), dataset);
 
         Ok(())
@@ -104,37 +103,24 @@ impl TestDatasetCollector {
         Ok(())
     }
 
-    // pub async fn control_player(&self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
-    //     log::trace!("Control Player - player_id:{}, command:{:?}", player_id, command);
+    pub async fn start_dataset_source(&mut self, dataset_id: &str, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
+        log::trace!("Starting Dataset Sources - dataset_id:{}, record_bootstrap_data:{}, start_change_recorder:{}", dataset_id, record_bootstrap_data, start_change_recorder);
 
-    //     // If the TestDatasetCollector is in an Error state, return an error.
-    //     if let TestDatasetCollectorStatus::Error(msg) = &self.status {
-    //         anyhow::bail!("TestDatasetCollector is in an Error state: {}", msg);
-    //     };
+        // If the TestDatasetCollector is in an Error state, return an error.
+        if let TestDatasetCollectorStatus::Error(msg) = &self.status {
+            anyhow::bail!("TestDatasetCollector is in an Error state: {}", msg);
+        };
 
-    //     // Get the ChangeScriptPlayer from the TestDatasetCollector or fail if it doesn't exist.
-    //     match self.source_change_recorders.get(player_id) {
-    //         Some(player) => {
-    //             match command {
-    //                 SourceChangeRecorderCommand::GetState => {
-    //                     player.get_state().await
-    //                 },
-    //                 SourceChangeRecorderCommand::Start => {
-    //                     player.start().await
-    //                 },
-    //                 SourceChangeRecorderCommand::Pause => {
-    //                     player.pause().await
-    //                 },
-    //                 SourceChangeRecorderCommand::Stop => {
-    //                     player.stop().await
-    //                 },
-    //                 }
-    //         },
-    //         None => {
-    //             anyhow::bail!("ChangeScriptPlayer not found: {}", player_id);
-    //         }
-    //     }
-    // }
+        // Get the Dataset from the TestDatasetCollector or fail if it doesn't exist.
+        match self.datasets.get_mut(dataset_id) {
+            Some(dataset) => {
+                dataset.start_sources(record_bootstrap_data, start_change_recorder).await
+            },
+            None => {
+                anyhow::bail!("Dataset not found: {}", dataset_id);
+            }
+        }
+    }
 
     pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
         self.test_repos.contains_key(test_repo_id)
@@ -147,10 +133,6 @@ impl TestDatasetCollector {
     pub fn get_data_store_path(&self) -> PathBuf {
         self.data_store_path.clone()
     }
-
-    // pub fn get_datasets(&self) -> anyhow::Result<Vec<DataSet>> {
-    //     self.test_repo_cache.get_datasets()
-    // }
 
     pub fn get_status(&self) -> &TestDatasetCollectorStatus {
         &self.status
@@ -167,46 +149,6 @@ impl TestDatasetCollector {
     pub fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.test_repos.keys().cloned().collect())
     }
-
-    // pub async fn start(&mut self) -> anyhow::Result<()> {
-
-    //     match &self.status {
-    //         TestDatasetCollectorStatus::Initialized => {
-    //             log::debug!("Starting TestDatasetCollector...");
-    //         },
-    //         TestDatasetCollectorStatus::Started => {
-    //             let msg = format!("Test Dataset Collector has already been started, cannot start.");
-    //             log::error!("{}", msg);
-    //             anyhow::bail!("{}", msg);
-    //         },
-    //         TestDatasetCollectorStatus::Error(_) => {
-    //             let msg = format!("Test Dataset Collector is in an error state, cannot start. TestDatasetCollectorStatus: {:?}", &self.status);
-    //             log::error!("{}", msg);
-    //             anyhow::bail!("{}", msg);
-    //         },
-    //     };
-
-    //     // Iterate over the reactivators and start each one if it is configured to start immediately.
-    //     // If any of the reactivators fail to start, set the TestDatasetCollectorStatus to Error and return an error.
-    //     for (_, player) in &self.source_change_recorders {
-    //         if player.get_settings().reactivator.start_immediately {
-    //             match player.start().await {
-    //                 Ok(_) => {},
-    //                 Err(e) => {
-    //                     let msg = format!("Error starting ChangeScriptPlayer: {}", e);
-    //                     self.status = TestDatasetCollectorStatus::Error(msg);
-    //                     bail!("{:?}", self.status);
-    //                 }
-    //             }
-    //         }
-    //     }
-
-    //     // Set the TestDatasetCollectorStatus to Started.
-    //     log::info!("Test Dataset Collector started successfully");            
-    //     self.status = TestDatasetCollectorStatus::Started;
-
-    //     Ok(())
-    // }
 }
 
 
@@ -218,14 +160,16 @@ pub struct Dataset {
 }
 
 impl Dataset {
-    pub async fn try_from_config(config: &DatasetConfig, data_store_path: PathBuf) -> anyhow::Result<Self> {
-        log::debug!("Creating Dataset from {:#?}", config);
+    pub async fn new(config: &DatasetConfig, data_store_path: PathBuf) -> anyhow::Result<Self> {
+        log::debug!("Creating Dataset from config {:#?}", config);
 
-        let data_store_path = data_store_path.join(config.dataset_id.clone());
+        let dataset_id = config.dataset_id.clone();
+
+        let data_store_path = data_store_path.join(&dataset_id);
 
         let mut dataset = Dataset {
             data_store_path,   
-            dataset_id: config.dataset_id.clone(),
+            dataset_id: dataset_id,
             sources: HashMap::new(),
         };
     
@@ -233,23 +177,22 @@ impl Dataset {
             dataset.add_source(source_config).await?;
         };
 
-        log::debug!("Dataset created -  {:?}", &dataset);
-
         Ok(dataset)
-
     }
 
     pub async fn add_source(&mut self, config: &SourceConfig) -> anyhow::Result<()> {
         log::trace!("Adding DatasetSource from {:#?}", config);
 
+        let source_id = config.source_id.clone();
+
         // Fail if the Dataset already contains the Source
-        if self.contains_source(&config.source_id) {
+        if self.contains_source(&source_id) {
             anyhow::bail!("DatasetSource already exists: {:?}", &config);
         }
         
-        let source = DatasetSource::try_from_config(config, self.data_store_path.clone()).await?;
+        let source = DatasetSource::new(config, self.data_store_path.clone()).await?;
 
-        self.sources.insert(source.source_id.clone(), source);
+        self.sources.insert(source_id.clone(), source);
 
         Ok(())
     }    
@@ -257,16 +200,114 @@ impl Dataset {
     pub fn contains_source(&self, source_id: &str) -> bool {
         self.sources.contains_key(source_id)
     }
+
+    pub async fn start_sources(&mut self, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
+        log::trace!("Starting DatasetSources - record_bootstrap_data:{}, start_change_recorder:{}", record_bootstrap_data, start_change_recorder);
+
+        // TODO: If record_bootstrap_data is true, start the BootstrapDataRecorder for each Source.
+
+        // If start_change_recorder is true, start the SourceChangeRecorder for each DatasetSource.
+        // Start each DatasetSource in parallel, and wait for all to complete before returning.
+        if start_change_recorder {
+            let tasks: Vec<_> = self.sources.iter_mut().map(|(_, source)| {
+                let mut source = source.clone();
+                tokio::spawn(async move {
+                    source.start_source_change_recorder().await
+                })
+            }).collect();
+
+            let results = join_all(tasks).await;
+
+            for result in results {
+                match result {
+                    Ok(Ok(_)) => continue, // Task and source.start() both succeeded
+                    Ok(Err(e)) => return Err(e.into()), // source.start() returned an error
+                    Err(e) => return Err(anyhow::Error::new(e)), // Task itself panicked
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // Unit tests
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use config::{SourceChangeQueueReaderConfig, SourceChangeRecorderConfig, TestBeaconSourceChangeQueueReaderConfig};
 
-//     #[test]
-//     fn test_add() {
-//         // Assert that 2 + 2 equals 4
-//         assert_eq!(2+2, 4);
-//     }
-// }
+    use super::*;
+
+    #[tokio::test]
+    async fn test_dataset_collector_data_cache_create() {
+        // Create a random String to use as the data store name.
+        let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
+        let data_store_path_buf = PathBuf::from(&data_store_path);
+
+        let config = TestDatasetCollectorConfig {
+            data_store_path,
+            prune_data_store_path: false,
+            test_repos: vec![],
+            datasets: vec![],
+        };
+
+        let test_dataset_collector = TestDatasetCollector::new(config).await.unwrap();
+
+        // Check that the TestDatasetCollector is in the Initialized state.
+        assert_eq!(test_dataset_collector.get_status(), &TestDatasetCollectorStatus::Initialized);
+
+        // Check that the data cache folder was created.
+        assert_eq!(test_dataset_collector.get_data_store_path(), data_store_path_buf);
+
+        // Delete the data cache folder and test that the operation was successful;
+        assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
+    }
+
+    #[tokio::test]
+    async fn test_dataset_collector_test_beacon() {
+        // Create a random String to use as the data store name.
+        let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
+        let data_store_path_buf = PathBuf::from(&data_store_path);
+
+        let config = TestDatasetCollectorConfig {
+            data_store_path,
+            prune_data_store_path: false,
+            test_repos: vec![],
+            datasets: vec![DatasetConfig {
+                dataset_id: "test_beacon".to_string(),
+                queries: vec![],
+                sources: vec![SourceConfig {
+                    source_id: "beacon".to_string(),
+                    bootstrap_data_recorder: None,
+                    source_change_recorder: Some( SourceChangeRecorderConfig {
+                        drain_queue_on_stop: Some( false),
+                        change_queue_reader: Some( SourceChangeQueueReaderConfig::TestBeacon(TestBeaconSourceChangeQueueReaderConfig {
+                            interval_ns: Some(1000),
+                            record_count: Some(10),
+                        })),
+                        change_event_loggers: vec![],
+                    }),
+                    start_immediately: false,
+                }],
+            }],
+        };
+
+        let mut test_dataset_collector = TestDatasetCollector::new(config).await.unwrap();
+
+        // Check that the TestDatasetCollector is in the Initialized state.
+        assert_eq!(test_dataset_collector.get_status(), &TestDatasetCollectorStatus::Initialized);
+
+        // Start the Source, which will start the SourceChangeRecorder
+        test_dataset_collector.start_dataset_source("test_beacon", false, true).await.unwrap();        
+
+        // Wait for 15 seconds
+        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+
+        // Stop the Source, which will stop the SourceChangeRecorder
+        // test_dataset_collector.stop_dataset_source("test_beacon", "beacon").await.unwrap();        
+
+        // Delete the data cache folder and test that the operation was successful;
+        assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
+    }
+
+}

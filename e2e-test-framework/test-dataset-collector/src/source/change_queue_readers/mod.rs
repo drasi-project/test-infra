@@ -1,6 +1,11 @@
 use async_trait::async_trait;
 
+use none_change_queue_reader::NoneSourceChangeQueueReader;
+use redis_change_queue_reader::RedisSourceChangeQueueReader;
+use test_beacon_change_queue_reader::TestBeaconSourceChangeQueueReader;
 use test_runner::script_source::SourceChangeEvent;
+
+use crate::config::SourceChangeQueueReaderConfig;
 
 pub mod none_change_queue_reader;
 pub mod redis_change_queue_reader;
@@ -30,5 +35,13 @@ pub trait SourceChangeQueueReader : Send + Sync {
 impl SourceChangeQueueReader for Box<dyn SourceChangeQueueReader + Send + Sync> {
     async fn get_next_change(&mut self) -> anyhow::Result<SourceChangeEvent> {
         (**self).get_next_change().await
+    }
+}
+
+pub async fn get_source_change_queue_reader<S: Into<String>>(config: Option<SourceChangeQueueReaderConfig>, source_id: S) -> anyhow::Result<Box<dyn SourceChangeQueueReader + Send + Sync>> {
+    match config {
+        Some(SourceChangeQueueReaderConfig::Redis(config)) => RedisSourceChangeQueueReader::new(config, source_id).await,
+        Some(SourceChangeQueueReaderConfig::TestBeacon(config)) => TestBeaconSourceChangeQueueReader::new(config, source_id).await,
+        None => Ok(NoneSourceChangeQueueReader::new())
     }
 }

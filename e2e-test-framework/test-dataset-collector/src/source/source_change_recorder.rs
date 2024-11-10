@@ -1,13 +1,11 @@
 use std::{path::PathBuf, sync::Arc, time::SystemTime};
 
 use serde::Serialize;
-use tokio::sync::{mpsc::{Receiver, Sender}, oneshot, Mutex};
-// use tokio::sync::mpsc::error::TryRecvError::{Empty, Disconnected};
-use tokio::task::JoinHandle;
+use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle };
 
 use test_runner::script_source::{ChangeScriptRecord, SourceChangeRecord};
 
-use crate::{config::{SourceChangeQueueReaderConfig, SourceChangeRecorderConfig}, source::change_queue_readers::{none_change_queue_reader::NoneSourceChangeQueueReader, redis_change_queue_reader::RedisSourceChangeQueueReader, SourceChangeQueueReader}};
+use crate::{config::{SourceChangeQueueReaderConfig, SourceChangeRecorderConfig}, source::change_queue_readers::{get_source_change_queue_reader, none_change_queue_reader::NoneSourceChangeQueueReader, SourceChangeQueueReader}};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeRecorderError {
@@ -206,22 +204,43 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
     // };
 
     // Create the SourceChangeQueueReader based on the provided configuration.
-    let mut change_queue_reader: Box<dyn SourceChangeQueueReader + Send + Sync + 'static> = match settings.source_change_queue_reader_config {
-        Some(SourceChangeQueueReaderConfig::Redis(redis_config)) => {
-            match RedisSourceChangeQueueReader::new(redis_config, settings.source_id.clone()).await {
-                Ok(reader) => {
-                    reader
-                },
-                Err(e) => {
-                    transition_to_error_state(format!("Error creating RedisSourceChangeQueueReader: {:?}", e).as_str(), &mut recorder_state);
-                    NoneSourceChangeQueueReader::new()
-                }
-            }
+    let mut change_queue_reader: Box<dyn SourceChangeQueueReader + Send + Sync> = match get_source_change_queue_reader( settings.source_change_queue_reader_config, &settings.source_id).await {
+        Ok(reader) => {
+            reader
         },
-        None => {
+        Err(e) => {
+            transition_to_error_state(format!("Error creating SourceChangeQueueReader: {:?}", e).as_str(), &mut recorder_state);
             NoneSourceChangeQueueReader::new()
         }
     };
+
+    // let mut change_queue_reader: Box<dyn SourceChangeQueueReader + Send + Sync + 'static> = match settings.source_change_queue_reader_config {
+    //     Some(SourceChangeQueueReaderConfig::Redis(redis_config)) => {
+    //         match RedisSourceChangeQueueReader::new(redis_config, settings.source_id.clone()).await {
+    //             Ok(reader) => {
+    //                 reader
+    //             },
+    //             Err(e) => {
+    //                 transition_to_error_state(format!("Error creating RedisSourceChangeQueueReader: {:?}", e).as_str(), &mut recorder_state);
+    //                 NoneSourceChangeQueueReader::new()
+    //             }
+    //         }
+    //     },
+    //     Some(SourceChangeQueueReaderConfig::TestBeacon(test_beacon_config)) => {
+    //         match TestBeaconSourceChangeQueueReader::new(test_beacon_config, settings.source_id.clone()).await {
+    //             Ok(reader) => {
+    //                 reader
+    //             },
+    //             Err(e) => {
+    //                 transition_to_error_state(format!("Error creating TestBeaconSourceChangeQueueReader: {:?}", e).as_str(), &mut recorder_state);
+    //                 NoneSourceChangeQueueReader::new()
+    //             }
+    //         }
+    //     },
+    //     None => {
+    //         NoneSourceChangeQueueReader::new()
+    //     }
+    // };
 
     // TODO: Create the BootstrapDataRecorder based on the provided configuration.
 
@@ -236,7 +255,7 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
             // Process the branch in sequence to prioritize processing of control messages.
             biased;
 
-            // Process messages in the control channel.
+            // Process messages from the command channel.
             Some(message) = recorder_rx_channel.recv() => {
                 log::debug!("Received {:?} command message.", message.command);
 

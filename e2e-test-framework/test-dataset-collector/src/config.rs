@@ -140,6 +140,7 @@ pub struct SourceChangeRecorderConfig {
 #[serde(tag = "type")]
 pub enum SourceChangeQueueReaderConfig {
     Redis(RedisSourceChangeQueueReaderConfig),
+    TestBeacon(TestBeaconSourceChangeQueueReaderConfig),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -147,6 +148,12 @@ pub struct RedisSourceChangeQueueReaderConfig {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub queue_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TestBeaconSourceChangeQueueReaderConfig {
+    pub interval_ns: Option<u32>,
+    pub record_count: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bootstrap_data_recorder::BootstrapDataRecorder;
-use source_change_recorder::SourceChangeRecorder;
+use source_change_recorder::{SourceChangeRecorder, SourceChangeRecorderMessageResponse};
 
 use crate::config::SourceConfig;
 
@@ -11,7 +11,7 @@ pub mod change_event_loggers;
 pub mod change_queue_readers;
 pub mod source_change_recorder;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DatasetSource {
     pub bootstrap_data_recorder: Option<BootstrapDataRecorder>,
     pub source_id: String,
@@ -20,7 +20,8 @@ pub struct DatasetSource {
 }
 
 impl DatasetSource {
-    pub async fn try_from_config(config: &SourceConfig, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(config: &SourceConfig, data_store_path: PathBuf) -> anyhow::Result<Self> {
+        log::debug!("Creating DatasetSource from config {:#?}", config);
         
         let source_id = config.source_id.clone();
 
@@ -35,38 +36,6 @@ impl DatasetSource {
             Some(config) => Some(SourceChangeRecorder::new(config, source_id.clone(), data_store_path.clone()).await?),
             None => None,
         };
-        
-        // // If neither the SourceConfig nor the SourceConfig defaults contain a proxy, set it to None.
-        // let proxy = match config.proxy {
-        //     Some(ref config) => {
-        //         match defaults.proxy {
-        //             Some(ref defaults) => TestRunProxy::try_from_config(id.clone(), config, defaults).ok(),
-        //             None => TestRunProxy::try_from_config(id.clone(), config, &ProxyConfig::default()).ok(),
-        //         }
-        //     },
-        //     None => {
-        //         match defaults.proxy {
-        //             Some(ref defaults) => TestRunProxy::try_from_config(id.clone(), defaults, &ProxyConfig::default()).ok(),
-        //             None => None,
-        //         }
-        //     }
-        // };
-
-        // // If neither the SourceConfig nor the SourceConfig defaults contain a reactivator, set it to None.
-        // let reactivator = match config.reactivator {
-        //     Some(ref config) => {
-        //         match defaults.reactivator {
-        //             Some(ref defaults) => TestRunReactivator::try_from_config(id.clone(), config, defaults).ok(),
-        //             None => TestRunReactivator::try_from_config(id.clone(), config, &ReactivatorConfig::default()).ok(),
-        //         }
-        //     },
-        //     None => {
-        //         match defaults.reactivator {
-        //             Some(ref defaults) => TestRunReactivator::try_from_config(id.clone(), defaults, &ReactivatorConfig::default()).ok(),
-        //             None => None,
-        //         }
-        //     }
-        // };
 
         Ok(Self {
             bootstrap_data_recorder,
@@ -74,5 +43,35 @@ impl DatasetSource {
             source_change_recorder,
             start_immediately: config.start_immediately,
         })
+    }
+
+    pub async fn start_source_change_recorder(&mut self) -> anyhow::Result<SourceChangeRecorderMessageResponse> {
+        log::debug!("Starting source change recorder for source {}", self.source_id);
+
+        if let Some(source_change_recorder) = &mut self.source_change_recorder {
+            source_change_recorder.start().await
+        } else {
+            anyhow::bail!("No source change recorder configured for source {}", self.source_id);
+        }
+    }
+    
+    pub async fn pause_source_change_recorder(&mut self) -> anyhow::Result<SourceChangeRecorderMessageResponse> {
+        log::debug!("Pausing source change recorder for source {}", self.source_id);
+
+        if let Some(source_change_recorder) = &mut self.source_change_recorder {
+            source_change_recorder.pause().await
+        } else {
+            anyhow::bail!("No source change recorder configured for source {}", self.source_id);
+        }
+    }
+
+    pub async fn stop_source_change_recorder(&mut self) -> anyhow::Result<SourceChangeRecorderMessageResponse> {
+        log::debug!("Stopping source change recorder for source {}", self.source_id);
+
+        if let Some(source_change_recorder) = &mut self.source_change_recorder {
+            source_change_recorder.stop().await
+        } else {
+            anyhow::bail!("No source change recorder configured for source {}", self.source_id);
+        }
     }
 }

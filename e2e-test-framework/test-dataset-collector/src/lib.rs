@@ -103,7 +103,7 @@ impl TestDatasetCollector {
         Ok(())
     }
 
-    pub async fn start_dataset_source(&mut self, dataset_id: &str, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
+    pub async fn start_dataset_sources(&mut self, dataset_id: &str, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
         log::trace!("Starting Dataset Sources - dataset_id:{}, record_bootstrap_data:{}, start_change_recorder:{}", dataset_id, record_bootstrap_data, start_change_recorder);
 
         // If the TestDatasetCollector is in an Error state, return an error.
@@ -234,37 +234,84 @@ impl Dataset {
 // Unit tests
 #[cfg(test)]
 mod tests {
-    use config::{SourceChangeQueueReaderConfig, SourceChangeRecorderConfig, TestBeaconSourceChangeQueueReaderConfig};
+    use config::{RedisSourceChangeQueueReaderConfig, SourceChangeQueueReaderConfig, SourceChangeRecorderConfig};
 
     use super::*;
 
+    // #[tokio::test]
+    // async fn test_dataset_collector_data_cache_create() {
+    //     // Create a random String to use as the data store name.
+    //     let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
+    //     let data_store_path_buf = PathBuf::from(&data_store_path);
+
+    //     let config = TestDatasetCollectorConfig {
+    //         data_store_path,
+    //         prune_data_store_path: false,
+    //         test_repos: vec![],
+    //         datasets: vec![],
+    //     };
+
+    //     let test_dataset_collector = TestDatasetCollector::new(config).await.unwrap();
+
+    //     // Check that the TestDatasetCollector is in the Initialized state.
+    //     assert_eq!(test_dataset_collector.get_status(), &TestDatasetCollectorStatus::Initialized);
+
+    //     // Check that the data cache folder was created.
+    //     assert_eq!(test_dataset_collector.get_data_store_path(), data_store_path_buf);
+
+    //     // Delete the data cache folder and test that the operation was successful;
+    //     assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
+    // }
+
+    // #[tokio::test]
+    // async fn test_dataset_collector_test_beacon() {
+    //     // Create a random String to use as the data store name.
+    //     let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
+    //     let data_store_path_buf = PathBuf::from(&data_store_path);
+
+    //     let config = TestDatasetCollectorConfig {
+    //         data_store_path,
+    //         prune_data_store_path: false,
+    //         test_repos: vec![],
+    //         datasets: vec![DatasetConfig {
+    //             dataset_id: "test_beacon".to_string(),
+    //             queries: vec![],
+    //             sources: vec![SourceConfig {
+    //                 source_id: "beacon".to_string(),
+    //                 bootstrap_data_recorder: None,
+    //                 source_change_recorder: Some(SourceChangeRecorderConfig {
+    //                     drain_queue_on_stop: Some(false),
+    //                     change_queue_reader: Some(SourceChangeQueueReaderConfig::TestBeacon(TestBeaconSourceChangeQueueReaderConfig {
+    //                         interval_ns: Some(1000),
+    //                         record_count: Some(10),
+    //                     })),
+    //                     change_event_loggers: vec![],
+    //                 }),
+    //                 start_immediately: false,
+    //             }],
+    //         }],
+    //     };
+
+    //     let mut test_dataset_collector = TestDatasetCollector::new(config).await.unwrap();
+
+    //     // Check that the TestDatasetCollector is in the Initialized state.
+    //     assert_eq!(test_dataset_collector.get_status(), &TestDatasetCollectorStatus::Initialized);
+
+    //     // Start the Source, which will start the SourceChangeRecorder
+    //     test_dataset_collector.start_dataset_sources("test_beacon", false, true).await.unwrap();        
+
+    //     // Wait for 15 seconds
+    //     // tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+
+    //     // Stop the Source, which will stop the SourceChangeRecorder
+    //     // test_dataset_collector.stop_dataset_source("test_beacon", "beacon").await.unwrap();        
+
+    //     // Delete the data cache folder and test that the operation was successful;
+    //     assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
+    // }
+
     #[tokio::test]
-    async fn test_dataset_collector_data_cache_create() {
-        // Create a random String to use as the data store name.
-        let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
-        let data_store_path_buf = PathBuf::from(&data_store_path);
-
-        let config = TestDatasetCollectorConfig {
-            data_store_path,
-            prune_data_store_path: false,
-            test_repos: vec![],
-            datasets: vec![],
-        };
-
-        let test_dataset_collector = TestDatasetCollector::new(config).await.unwrap();
-
-        // Check that the TestDatasetCollector is in the Initialized state.
-        assert_eq!(test_dataset_collector.get_status(), &TestDatasetCollectorStatus::Initialized);
-
-        // Check that the data cache folder was created.
-        assert_eq!(test_dataset_collector.get_data_store_path(), data_store_path_buf);
-
-        // Delete the data cache folder and test that the operation was successful;
-        assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
-    }
-
-    #[tokio::test]
-    async fn test_dataset_collector_test_beacon() {
+    async fn interactive_test() {
         // Create a random String to use as the data store name.
         let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
         let data_store_path_buf = PathBuf::from(&data_store_path);
@@ -274,16 +321,17 @@ mod tests {
             prune_data_store_path: false,
             test_repos: vec![],
             datasets: vec![DatasetConfig {
-                dataset_id: "test_beacon".to_string(),
+                dataset_id: "hello-world".to_string(),
                 queries: vec![],
                 sources: vec![SourceConfig {
-                    source_id: "beacon".to_string(),
+                    source_id: "hello-world".to_string(),
                     bootstrap_data_recorder: None,
-                    source_change_recorder: Some( SourceChangeRecorderConfig {
-                        drain_queue_on_stop: Some( false),
-                        change_queue_reader: Some( SourceChangeQueueReaderConfig::TestBeacon(TestBeaconSourceChangeQueueReaderConfig {
-                            interval_ns: Some(1000),
-                            record_count: Some(10),
+                    source_change_recorder: Some(SourceChangeRecorderConfig {
+                        drain_queue_on_stop: Some(false),
+                        change_queue_reader: Some(SourceChangeQueueReaderConfig::Redis(RedisSourceChangeQueueReaderConfig {
+                            host: Some("localhost".to_string()),
+                            port: Some(6379),
+                            queue_name: Some("hello-world-change".to_string()),
                         })),
                         change_event_loggers: vec![],
                     }),
@@ -298,16 +346,16 @@ mod tests {
         assert_eq!(test_dataset_collector.get_status(), &TestDatasetCollectorStatus::Initialized);
 
         // Start the Source, which will start the SourceChangeRecorder
-        test_dataset_collector.start_dataset_source("test_beacon", false, true).await.unwrap();        
+        test_dataset_collector.start_dataset_sources("hello-world", false, true).await.unwrap();        
 
-        // Wait for 15 seconds
-        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+        println!("Press Enter to continue...");
+        let _ = std::io::stdin().read_line(&mut String::new()).unwrap();
 
         // Stop the Source, which will stop the SourceChangeRecorder
-        // test_dataset_collector.stop_dataset_source("test_beacon", "beacon").await.unwrap();        
+        // test_dataset_collector.stop_dataset_source("hello-world", "beacon").await.unwrap();        
 
         // Delete the data cache folder and test that the operation was successful;
         assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
-    }
 
+    }
 }

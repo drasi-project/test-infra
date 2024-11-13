@@ -20,7 +20,8 @@
         "tempdir",
         "tempfile",
         "thiserror",
-        "traceparent"
+        "traceparent",
+        "xread"
     ],
     "cSpell.ignorePaths": [
         "Cargo.toml",

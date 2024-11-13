@@ -29,6 +29,7 @@ impl std::fmt::Display for SourceChangeQueueReaderError {
 #[async_trait]
 pub trait SourceChangeQueueReader : Send + Sync {
     async fn get_next_change(&mut self) -> anyhow::Result<SourceChangeEvent>;
+    // async fn cancel_get_next_change(&mut self) -> anyhow::Result<()>;
 }
 
 #[async_trait]
@@ -36,6 +37,9 @@ impl SourceChangeQueueReader for Box<dyn SourceChangeQueueReader + Send + Sync> 
     async fn get_next_change(&mut self) -> anyhow::Result<SourceChangeEvent> {
         (**self).get_next_change().await
     }
+    // async fn cancel_get_next_change(&mut self) -> anyhow::Result<()> {
+    //     (**self).cancel_get_next_change().await
+    // }
 }
 
 pub async fn get_source_change_queue_reader<S: Into<String>>(config: Option<SourceChangeQueueReaderConfig>, source_id: S) -> anyhow::Result<Box<dyn SourceChangeQueueReader + Send + Sync>> {

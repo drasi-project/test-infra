@@ -253,48 +253,67 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
 
         tokio::select! {
             // Process the branch in sequence to prioritize processing of control messages.
-            biased;
+            // biased;
 
             // Process messages from the command channel.
-            Some(message) = recorder_rx_channel.recv() => {
-                log::debug!("Received {:?} command message.", message.command);
+            event = change_queue_reader.get_next_change() => {
+                match event {
+                    Ok(source_change_event) => {
+                        log::debug!("Received SourceChangeEvent: {:?}", source_change_event);
 
-                let transition_response = match recorder_state.status {
-                    SourceChangeRecorderStatus::Running => transition_from_running_state(&message.command, &mut recorder_state),
-                    SourceChangeRecorderStatus::Paused => transition_from_paused_state(&message.command, &mut recorder_state),
-                    SourceChangeRecorderStatus::Stopped => transition_from_stopped_state(&message.command, &mut recorder_state),
-                    SourceChangeRecorderStatus::Error => transition_from_error_state(&message.command, &mut recorder_state),
-                };
+                        let record = SourceChangeRecord {
+                            offset_ns: recorder_state.current_time_offset,
+                            source_change_event: source_change_event,
+                        };
 
-                if message.response_tx.is_some() {
-                    let message_response = SourceChangeRecorderMessageResponse {
-                        result: transition_response,
-                        state: recorder_state.clone(),
-                    };
-        
-                    let r = message.response_tx.unwrap().send(message_response);
-                    if let Err(e) = r {
-                        log::error!("Error in SourceChangeRecorder sending message response back to caller: {:?}", e);
+                        // Display the record to the console
+                        log::debug!("Record: {:?}", record);
+                    },
+                    Err(e) => {
+                        log::error!("Error getting next change event: {:?}", e);
                     }
                 }
+            },
+            cmd = recorder_rx_channel.recv() => {
+                match cmd {
+                    Some(message) => {
+                        log::debug!("Received {:?} command message.", message.command);
 
-                log_change_script_recorder_state(format!("Post {:?} command", message.command).as_str(), &recorder_state);
-            }
+                        let transition_response = match recorder_state.status {
+                            SourceChangeRecorderStatus::Running => transition_from_running_state(&message.command, &mut recorder_state),
+                            SourceChangeRecorderStatus::Paused => transition_from_paused_state(&message.command, &mut recorder_state),
+                            SourceChangeRecorderStatus::Stopped => transition_from_stopped_state(&message.command, &mut recorder_state),
+                            SourceChangeRecorderStatus::Error => transition_from_error_state(&message.command, &mut recorder_state),
+                        };
 
-            // Process Source Change Events, if the SourceChangeRecorder is in the Running state.
-            Ok(source_change_event) = change_queue_reader.get_next_change(), if recorder_state.status == SourceChangeRecorderStatus::Running => {
-                log::debug!("Received SourceChangeEvent: {:?}", source_change_event);
-
-                let record = SourceChangeRecord {
-                    offset_ns: recorder_state.current_time_offset,
-                    source_change_event: source_change_event,
-                };
-
-                // Display the record to the console
-                log::debug!("Record: {:?}", record);
+                        if message.response_tx.is_some() {
+                            let message_response = SourceChangeRecorderMessageResponse {
+                                result: transition_response,
+                                state: recorder_state.clone(),
+                            };
+                
+                            let r = message.response_tx.unwrap().send(message_response);
+                            if let Err(e) = r {
+                                log::error!("Error in SourceChangeRecorder sending message response back to caller: {:?}", e);
+                            }
+                        }
+                
+                        log_change_script_recorder_state(format!("Post {:?} command", message.command).as_str(), &recorder_state);
+                    },
+                    None => {
+                        log::info!("SourceChangeRecorder command channel closed.");
+                        break;
+                    }
+                }
+            },
+            else => {
+                log::debug!("SourceChangeRecorder loop - no messages to process.");
             }
         }
     }
+
+    log::debug!("SourceChangeRecorder thread exiting...");
+
 }
 
 fn transition_from_paused_state(command: &SourceChangeRecorderCommand, player_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {

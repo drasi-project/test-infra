@@ -310,7 +310,7 @@ mod tests {
     //     assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
     // }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn interactive_test() {
         // Create a random String to use as the data store name.
         let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());

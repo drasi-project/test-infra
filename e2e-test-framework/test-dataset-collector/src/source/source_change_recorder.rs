@@ -3,9 +3,9 @@ use std::{path::PathBuf, sync::Arc, time::SystemTime};
 use serde::Serialize;
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle };
 
-use test_runner::script_source::{ChangeScriptRecord, SourceChangeRecord};
+use test_runner::script_source::ChangeScriptRecord;
 
-use crate::{config::{SourceChangeQueueReaderConfig, SourceChangeRecorderConfig}, source::change_queue_readers::{get_source_change_queue_reader, none_change_queue_reader::NoneSourceChangeQueueReader, SourceChangeQueueReader}};
+use crate::{config::{SourceChangeQueueReaderConfig, SourceChangeRecorderConfig}, source::change_queue_readers::{get_source_change_queue_reader, none_change_queue_reader::NoneSourceChangeQueueReader, SourceChangeQueueReader, SourceChangeQueueReaderMessage}};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeRecorderError {
@@ -198,13 +198,13 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
     //         Some(writer)
     //     },
     //     Err(e) => {
-    //         transition_to_error_state(format!("Error creating ChangeScriptWriter: {:?}", e).as_str(), &mut player_state);
+    //         transition_to_error_state(format!("Error creating ChangeScriptWriter: {:?}", e).as_str(), &mut recorder_state);
     //         None
     //     }
     // };
 
     // Create the SourceChangeQueueReader based on the provided configuration.
-    let mut change_queue_reader: Box<dyn SourceChangeQueueReader + Send + Sync> = match get_source_change_queue_reader( settings.source_change_queue_reader_config, &settings.source_id).await {
+    let change_queue_reader: Box<dyn SourceChangeQueueReader + Send + Sync> = match get_source_change_queue_reader( settings.source_change_queue_reader_config, &settings.source_id).await {
         Ok(reader) => {
             reader
         },
@@ -214,33 +214,21 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
         }
     };
 
-    // let mut change_queue_reader: Box<dyn SourceChangeQueueReader + Send + Sync + 'static> = match settings.source_change_queue_reader_config {
-    //     Some(SourceChangeQueueReaderConfig::Redis(redis_config)) => {
-    //         match RedisSourceChangeQueueReader::new(redis_config, settings.source_id.clone()).await {
-    //             Ok(reader) => {
-    //                 reader
-    //             },
-    //             Err(e) => {
-    //                 transition_to_error_state(format!("Error creating RedisSourceChangeQueueReader: {:?}", e).as_str(), &mut recorder_state);
-    //                 NoneSourceChangeQueueReader::new()
-    //             }
-    //         }
-    //     },
-    //     Some(SourceChangeQueueReaderConfig::TestBeacon(test_beacon_config)) => {
-    //         match TestBeaconSourceChangeQueueReader::new(test_beacon_config, settings.source_id.clone()).await {
-    //             Ok(reader) => {
-    //                 reader
-    //             },
-    //             Err(e) => {
-    //                 transition_to_error_state(format!("Error creating TestBeaconSourceChangeQueueReader: {:?}", e).as_str(), &mut recorder_state);
-    //                 NoneSourceChangeQueueReader::new()
-    //             }
-    //         }
-    //     },
-    //     None => {
-    //         NoneSourceChangeQueueReader::new()
-    //     }
-    // };
+    let init_result_future = change_queue_reader.init();
+
+    let init_result = init_result_future.await;
+
+    let mut change_queue_reader_channel = match init_result {
+        Ok(channel) => {
+            channel
+        },
+        Err(e) => {
+            transition_to_error_state(format!("Error initializing SourceChangeQueueReader: {:?}", e).as_str(), &mut recorder_state);
+            NoneSourceChangeQueueReader::new().init().await.unwrap()
+        }
+    };
+
+    change_queue_reader.start().await.unwrap();
 
     // TODO: Create the BootstrapDataRecorder based on the provided configuration.
 
@@ -256,24 +244,6 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
             // biased;
 
             // Process messages from the command channel.
-            event = change_queue_reader.get_next_change() => {
-                match event {
-                    Ok(source_change_event) => {
-                        log::debug!("Received SourceChangeEvent: {:?}", source_change_event);
-
-                        let record = SourceChangeRecord {
-                            offset_ns: recorder_state.current_time_offset,
-                            source_change_event: source_change_event,
-                        };
-
-                        // Display the record to the console
-                        log::debug!("Record: {:?}", record);
-                    },
-                    Err(e) => {
-                        log::error!("Error getting next change event: {:?}", e);
-                    }
-                }
-            },
             cmd = recorder_rx_channel.recv() => {
                 match cmd {
                     Some(message) => {
@@ -301,8 +271,29 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
                         log_change_script_recorder_state(format!("Post {:?} command", message.command).as_str(), &recorder_state);
                     },
                     None => {
-                        log::info!("SourceChangeRecorder command channel closed.");
+                        log::error!("SourceChangeRecorder command channel closed.");
                         break;
+                    }
+                }
+            },
+            change_queue_message = change_queue_reader_channel.recv() => {
+                match change_queue_message {
+                    Some(SourceChangeQueueReaderMessage::QueueRecord(queue_record)) => {
+                        log::trace!("Received SOurce Change Queue Record: {:?}", queue_record);
+
+                        // let record = SourceChangeRecord {
+                        //     offset_ns: recorder_state.current_time_offset,
+                        //     queue_record,
+                        // };
+
+                        // Display the record to the console
+                        println!("Record In Recorder: {:?}", queue_record);
+                    },
+                    Some(SourceChangeQueueReaderMessage::Error(e)) => {
+                        log::error!("Error getting next change event: {:?}", e);
+                    },
+                    None => {
+                        log::info!("SourceChangeQueueReader channel closed.");
                     }
                 }
             },
@@ -316,19 +307,19 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
 
 }
 
-fn transition_from_paused_state(command: &SourceChangeRecorderCommand, player_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_paused_state(command: &SourceChangeRecorderCommand, recorder_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", recorder_state.status, command);
 
     match command {
         SourceChangeRecorderCommand::Start => {
-            player_state.status = SourceChangeRecorderStatus::Running;
+            recorder_state.status = SourceChangeRecorderStatus::Running;
             Ok(())
         },
         SourceChangeRecorderCommand::Pause => {
             Err(SourceChangeRecorderError::AlreadyPaused.into())
         },
         SourceChangeRecorderCommand::Stop => {
-            player_state.status = SourceChangeRecorderStatus::Stopped;
+            recorder_state.status = SourceChangeRecorderStatus::Stopped;
             Ok(())
         },
         SourceChangeRecorderCommand::GetState => {
@@ -337,19 +328,19 @@ fn transition_from_paused_state(command: &SourceChangeRecorderCommand, player_st
     }
 }
 
-fn transition_from_running_state(command: &SourceChangeRecorderCommand, player_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_running_state(command: &SourceChangeRecorderCommand, recorder_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", recorder_state.status, command);
 
     match command {
         SourceChangeRecorderCommand::Start => {
             Err(SourceChangeRecorderError::AlreadyRunning.into())
         },
         SourceChangeRecorderCommand::Pause => {
-            player_state.status = SourceChangeRecorderStatus::Paused;
+            recorder_state.status = SourceChangeRecorderStatus::Paused;
             Ok(())
         },
         SourceChangeRecorderCommand::Stop => {
-            player_state.status = SourceChangeRecorderStatus::Stopped;
+            recorder_state.status = SourceChangeRecorderStatus::Stopped;
             Ok(())
         },
         SourceChangeRecorderCommand::GetState => {
@@ -358,22 +349,22 @@ fn transition_from_running_state(command: &SourceChangeRecorderCommand, player_s
     }
 }
 
-fn transition_from_stopped_state(command: &SourceChangeRecorderCommand, player_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_stopped_state(command: &SourceChangeRecorderCommand, recorder_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", recorder_state.status, command);
 
     Err(SourceChangeRecorderError::AlreadyStopped.into())
 }
 
-fn transition_from_error_state(command: &SourceChangeRecorderCommand, player_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_error_state(command: &SourceChangeRecorderCommand, recorder_state: &mut SourceChangeRecorderState) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", recorder_state.status, command);
 
-    Err(SourceChangeRecorderError::Error(player_state.status).into())
+    Err(SourceChangeRecorderError::Error(recorder_state.status).into())
 }
 
-fn transition_to_error_state(error_message: &str, player_state: &mut SourceChangeRecorderState) {
+fn transition_to_error_state(error_message: &str, recorder_state: &mut SourceChangeRecorderState) {
     log::error!("{}", error_message);
-    player_state.status = SourceChangeRecorderStatus::Error;
-    player_state.error_message = Some(error_message.to_string());
+    recorder_state.status = SourceChangeRecorderStatus::Error;
+    recorder_state.error_message = Some(error_message.to_string());
 }
 
 // Function to log the Player State at varying levels of detail.

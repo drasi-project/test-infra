@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bootstrap_data_recorder::BootstrapDataRecorder;
 use source_change_recorder::{SourceChangeRecorder, SourceChangeRecorderMessageResponse};
 
-use crate::config::SourceConfig;
+use crate::config::DataCollectionSourceConfig;
 
 // pub mod bootstrap_data_loggers;
 pub mod bootstrap_data_recorder;
@@ -12,16 +12,16 @@ pub mod change_queue_readers;
 pub mod source_change_recorder;
 
 #[derive(Clone, Debug)]
-pub struct DatasetSource {
+pub struct DataCollectionSource {
     pub bootstrap_data_recorder: Option<BootstrapDataRecorder>,
     pub source_id: String,
     pub source_change_recorder: Option<SourceChangeRecorder>,
     pub start_immediately: bool,
 }
 
-impl DatasetSource {
-    pub async fn new(config: &SourceConfig, data_store_path: PathBuf) -> anyhow::Result<Self> {
-        log::debug!("Creating DatasetSource from config {:#?}", config);
+impl DataCollectionSource {
+    pub async fn new(config: &DataCollectionSourceConfig, data_store_path: PathBuf) -> anyhow::Result<Self> {
+        log::debug!("Creating DataCollectionSource from config {:#?}", config);
         
         let source_id = config.source_id.clone();
 

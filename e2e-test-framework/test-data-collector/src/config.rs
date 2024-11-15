@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use test_data_store::config::TestRepoConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct TestDatasetCollectorConfig {
+pub struct TestDataCollectorConfig {
     #[serde(default = "default_data_store_path")]
     pub data_store_path: String,
     #[serde(default = "default_delete_data_store")]
@@ -10,33 +10,33 @@ pub struct TestDatasetCollectorConfig {
     #[serde(default)]
     pub test_repos: Vec<TestRepoConfig>,
     #[serde(default)]
-    pub datasets: Vec<DatasetConfig>,
+    pub data_collections: Vec<DataCollectionConfig>,
 }
-fn default_data_store_path() -> String { "./test_dataset_collector_data".to_string() }
+fn default_data_store_path() -> String { "./test_data_collector_data".to_string() }
 fn default_delete_data_store() -> bool { false }
 
-impl Default for TestDatasetCollectorConfig {
+impl Default for TestDataCollectorConfig {
     fn default() -> Self {
-        TestDatasetCollectorConfig {
+        TestDataCollectorConfig {
             data_store_path: default_data_store_path(),
             delete_data_store: default_delete_data_store(),
             test_repos: Vec::new(),
-            datasets: Vec::new(),
+            data_collections: Vec::new(),
         }
     }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct DatasetConfig {
-    pub dataset_id: String,
-    pub queries: Vec<QueryConfig>,
-    pub sources: Vec<SourceConfig>,
+pub struct DataCollectionConfig {
+    pub id: String,
+    pub queries: Vec<DataCollectionQueryConfig>,
+    pub sources: Vec<DataCollectionSourceConfig>,
 }
 
-impl Default for DatasetConfig {
+impl Default for DataCollectionConfig {
     fn default() -> Self {
-        DatasetConfig {
-            dataset_id: "default_dataset".to_string(),
+        DataCollectionConfig {
+            id: "default_data_collection".to_string(),
             queries: Vec::new(),
             sources: Vec::new(),
         }
@@ -44,7 +44,7 @@ impl Default for DatasetConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct QueryConfig {
+pub struct DataCollectionQueryConfig {
     pub query_id: Option<String>,
     pub result_event_recorders: Vec<QueryResultEventRecorderConfig>,
     pub result_set_loggers: Vec<QueryResultSetLoggerConfig>,
@@ -81,7 +81,7 @@ pub struct JsonlFileQueryResultSetLoggerConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct SourceConfig {
+pub struct DataCollectionSourceConfig {
     pub source_id: String,
     #[serde(default = "default_start_immediately")]
     pub start_immediately: bool,
@@ -91,9 +91,9 @@ pub struct SourceConfig {
 }
 fn default_start_immediately() -> bool { false }
 
-impl Default for SourceConfig {
+impl Default for DataCollectionSourceConfig {
     fn default() -> Self {
-        SourceConfig {
+        DataCollectionSourceConfig {
             source_id: "default_source".to_string(),
             start_immediately: false,
             bootstrap_data_recorder: None,

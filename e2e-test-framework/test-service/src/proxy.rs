@@ -160,7 +160,7 @@ pub async fn acquire_handler(
     // Read the boostrap data for each node and relation type and return the response.
     let mut response = AcquireResponseBody::new();
 
-    let bootstrap_data = dataset.content.bootstrap_script_files.unwrap();
+    let bootstrap_data = dataset.bootstrap_script_files.unwrap();
 
     for label in &requested_labels {
         if let Some(bootstrap_files) = bootstrap_data.get(label) {

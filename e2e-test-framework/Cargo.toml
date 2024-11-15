@@ -4,7 +4,7 @@ members = [
   "test-data-collector",
   "test-data-store",
   "test-runner",
-  "test-runner-service",
+  "test-service",
   
   # Internal
   "infrastructure/comms-abstractions",

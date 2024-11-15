@@ -92,6 +92,10 @@ pub(crate) async fn start_web_api(port: u16, test_runner: TestRunner) {
     // Now the Test Runner is initialized, create the shared state and start the Web API.
     let shared_test_runner = Arc::new(RwLock::new(test_runner));
 
+    // let datasets_routes = Router::new()
+    //     .route("/", get(get_dataset_handler))
+    //     .route("/sources/start", post(start_dataset_sources_handler));
+
     let sources_routes = Router::new()
         .route("/", get(get_source_handler))
         .route("/player", get(get_player_handler))
@@ -104,6 +108,8 @@ pub(crate) async fn start_web_api(port: u16, test_runner: TestRunner) {
     let app = Router::new()
         .route("/", get(service_info_handler))
         .route("/acquire", post(acquire_handler))
+        // .route("/datasets", get(get_dataset_list_handler).post(add_dataset_handler))
+        // .nest("/datasets/:id", datasets_routes)
         .route("/sources", get(get_source_list_handler).post(add_source_handler))
         .nest("/sources/:id", sources_routes)
         .route("/test_repos", get(get_test_repo_list_handler).post(add_test_repo_handler))

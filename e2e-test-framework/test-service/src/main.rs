@@ -2,10 +2,11 @@ use clap::Parser;
 use serde::Serialize;
 use test_runner::{config::TestRunnerConfig, TestRunner};
 
-mod web_api;
+mod dataset;
 mod proxy;
 mod source;
 mod test_repo;
+mod web_api;
 
 // A struct to hold parameters obtained from env vars and/or command line arguments.
 // Command line args will override env vars. If neither is provided, default values are used.
@@ -77,7 +78,7 @@ async fn main() {
 
     // If the prune_data_store flag is set, update the TestRunnerConfig
     if host_params.prune_data_store {
-        test_runner_config.prune_data_store_path = true;
+        test_runner_config.delete_data_store = true;
     }
 
     log::debug!("Creating Test Runner with config {:?}", test_runner_config);

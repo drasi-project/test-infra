@@ -20,6 +20,7 @@
         "tempdir",
         "tempfile",
         "thiserror",
+        "traceid",
         "traceparent",
         "xread"
     ],

@@ -1,18 +1,16 @@
-use std::{collections::{HashMap, HashSet}, str::FromStr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, path::PathBuf, str::FromStr, sync::Arc};
 
-use anyhow::bail;
 use serde::Serialize;
-use tokio::{fs::remove_dir_all, sync::RwLock};
+use test_data_store::{config::TestRepoConfig, TestDataStore, TestRepoInfo, TestSourceDataset};
+use tokio::sync::RwLock;
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse, ChangeScriptPlayerSettings};
-use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig, TestRepoConfig};
-use crate::test_repo::{dataset::DataSet, test_repo_cache::TestRepoCache};
+use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig};
 
 pub mod change_script_player;
 pub mod config;
 pub mod script_source;
 pub mod source_change_dispatchers;
-pub mod test_repo;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum TimeMode {
@@ -309,13 +307,12 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 #[derive(Debug)]
 pub struct TestRunner {
     change_script_players: HashMap<String, ChangeScriptPlayer>,
-    data_store_path: String,
+    data_store_path: PathBuf,
     source_defaults: SourceConfig,
     sources: HashMap<String, TestRunSource>,
     status: TestRunnerStatus,
     _start_reactivators_together: bool,
-    test_repos: HashMap<String, TestRepoConfig>,
-    test_repo_cache: TestRepoCache,
+    test_data_store: TestDataStore,
 }
 
 impl TestRunner {
@@ -323,24 +320,17 @@ impl TestRunner {
 
         log::debug!("Creating TestRunner from {:#?}", config);
 
+        let data_store_path = PathBuf::from(&config.data_store_path);
+
         let mut test_runner = TestRunner {
             change_script_players: HashMap::new(),
-            data_store_path: config.data_store_path.clone(),
+            data_store_path: data_store_path.clone(),
             source_defaults: config.source_defaults,
             sources: HashMap::new(),
             status: TestRunnerStatus::Initialized,
             _start_reactivators_together: config.start_reactivators_together,
-            test_repos: HashMap::new(),
-            test_repo_cache: TestRepoCache::new(config.data_store_path.clone()).await?,
+            test_data_store: TestDataStore::new(data_store_path, config.delete_data_store).await?,
         };
-
-        // If the prune_data_store flag is set, and the folder exists, remove it.
-        if config.prune_data_store_path && std::path::Path::new(&config.data_store_path).exists() {
-            log::info!("Pruning data store folder: {:?}", &config.data_store_path);
-            remove_dir_all(&config.data_store_path).await.unwrap_or_else(|err| {
-                panic!("Error Pruning data store folder - path:{}, error:{}", &config.data_store_path, err);
-            });
-        }
 
         // Add the initial set of test repos.
         // Fail construction if any of the TestRepoConfigs fail to create.
@@ -367,8 +357,7 @@ impl TestRunner {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
 
-        let test_repo_id = self.test_repo_cache.add_test_repo(test_repo_config.clone()).await?;  
-        self.test_repos.insert(test_repo_id, test_repo_config.clone());
+        self.test_data_store.add_test_repo(test_repo_config.clone()).await?;  
 
         Ok(())
     }
@@ -389,12 +378,12 @@ impl TestRunner {
         }
 
         // Get the DataSet for the TestRunSource.
-        let dataset = self.test_repo_cache.download_data_set(test_run_source.clone()).await?;
+        let dataset = self.test_data_store.get_test_source_dataset(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await?;
 
         // Determine if the TestRunSource has a reactivator, in which case a ChangeScriptPlayer should 
         // be created and possibly started.
         if test_run_source.reactivator.is_some() {
-            match dataset.content.change_log_script_files {
+            match dataset.change_log_script_files {
                 Some(change_log_script_files) => {
                     if change_log_script_files.len() > 0 {
                         let player_settings = 
@@ -464,7 +453,7 @@ impl TestRunner {
     }
 
     pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.test_repos.contains_key(test_repo_id)
+        self.test_data_store.contains_test_repo(test_repo_id)
     }
 
     pub fn contains_test_run_source(&self, test_run_source_id: &str) -> bool {
@@ -472,27 +461,27 @@ impl TestRunner {
     }
 
     pub fn get_data_store_path(&self) -> &str {
-        &self.data_store_path
+        &self.data_store_path.to_str().unwrap()
     }
 
-    pub fn get_datasets(&self) -> anyhow::Result<Vec<DataSet>> {
-        self.test_repo_cache.get_datasets()
+    pub fn get_datasets(&self) -> anyhow::Result<Vec<TestSourceDataset>> {
+        self.test_data_store.list_test_source_datasets()
     }
 
     pub fn get_status(&self) -> &TestRunnerStatus {
         &self.status
     }
 
-    pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoConfig>> {
-        Ok(self.test_repos.get(test_repo_id).cloned())
+    pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoInfo>> {
+        self.test_data_store.get_test_repo_info(test_repo_id)
     }
 
-    pub fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoConfig>> {
-        Ok(self.test_repos.values().cloned().collect())
+    pub fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoInfo>> {
+        self.test_data_store.get_test_repos_info()
     }
 
     pub fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self.test_repos.keys().cloned().collect())
+        self.test_data_store.get_test_repo_ids()
     }
 
     pub fn get_test_run_source(&self, test_run_source_id: &str) -> anyhow::Result<Option<TestRunSource>> {
@@ -507,8 +496,8 @@ impl TestRunner {
         Ok(self.sources.keys().cloned().collect())
     }
 
-    pub fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<DataSet>> {
-        self.test_repo_cache.match_bootstrap_dataset(requested_labels)
+    pub fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
+        self.test_data_store.match_bootstrap_dataset(requested_labels)
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
@@ -538,7 +527,7 @@ impl TestRunner {
                     Err(e) => {
                         let msg = format!("Error starting ChangeScriptPlayer: {}", e);
                         self.status = TestRunnerStatus::Error(msg);
-                        bail!("{:?}", self.status);
+                        anyhow::bail!("{:?}", self.status);
                     }
                 }
             }

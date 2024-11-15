@@ -10,57 +10,63 @@ use tokio::{fs::File, io::AsyncWriteExt};
 
 use crate::config::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig};
 
-use super::{TestRepo, TestSourceContent};
+use super::{TestRepoClient, TestSourceDataset};
 
 #[derive(Debug)]
-pub struct AzureStorageBlobTestRepoSettings {
-    pub data_cache_repo_path: PathBuf,
+pub struct AzureStorageBlobTestRepoClientSettings {
     pub force_cache_refresh: bool,
     pub storage_account_name: String,
     pub storage_container: String,
     pub storage_credentials: StorageCredentials,
     pub storage_root_path: String,
+    pub test_repo_cache_path: PathBuf,
     pub test_repo_id: String,
 }
 
-impl AzureStorageBlobTestRepoSettings {
-    pub async fn try_from_config(data_cache_repo_path: PathBuf, common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig) -> anyhow::Result<Self> {
+impl AzureStorageBlobTestRepoClientSettings {
+    pub async fn new(common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig, data_cache_path: PathBuf) -> anyhow::Result<Self> {
 
         // Create storage credentials from the account name and access key.
         let storage_credentials = StorageCredentials::access_key(unique_config.account_name.clone(), unique_config.access_key.clone());
 
+        // Create the root path for this test repo data cache
+        let test_repo_cache_path = data_cache_path.join(format!("test_repos/{}/", &common_config.id));
+
         Ok(Self {
-            data_cache_repo_path,
             force_cache_refresh: common_config.force_cache_refresh,
             storage_account_name: unique_config.account_name.clone(),
             storage_container: unique_config.container.clone(),
             storage_credentials,
             storage_root_path: unique_config.root_path,
+            test_repo_cache_path,
             test_repo_id: common_config.id.clone(),
         })
     }
 }
 
 #[derive(Debug)]
-pub struct AzureStorageBlobTestRepo {
-    pub settings: AzureStorageBlobTestRepoSettings,
+pub struct AzureStorageBlobTestRepoClient {
+    pub settings: AzureStorageBlobTestRepoClientSettings,
 }
 
-impl AzureStorageBlobTestRepo {
-    pub async fn new(settings: AzureStorageBlobTestRepoSettings) -> anyhow::Result<Self> {
-        log::info!("Initializing AzureStorageBlobTestRepo from {:?}", settings);
+impl AzureStorageBlobTestRepoClient {
+    pub async fn new(common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig, data_cache_path: PathBuf) -> anyhow::Result<Box<dyn TestRepoClient + Send + Sync>> {
+        log::debug!("Creating AzureStorageBlobTestRepoClient in {:?} from common_config:{:?} and unique_config:{:?}, ", data_cache_path, common_config, unique_config);
+
+        let settings = AzureStorageBlobTestRepoClientSettings::new(common_config, unique_config, data_cache_path).await?;
+        log::trace!("Creating AzureStorageBlobTestRepoClientSettings with settings: {:?}, ", settings);
 
         // Delete the data cache folder if it exists and the force_cache_refresh flag is set.
-        if settings.force_cache_refresh && settings.data_cache_repo_path.exists() {
-            tokio::fs::remove_dir_all(&settings.data_cache_repo_path).await?;
+        if settings.force_cache_refresh && settings.test_repo_cache_path.exists() {
+            tokio::fs::remove_dir_all(&settings.test_repo_cache_path).await?;
         }
 
         // Create the data cache folder if it doesn't exist.
-        if !settings.data_cache_repo_path.exists() {
-            tokio::fs::create_dir_all(&settings.data_cache_repo_path).await?
+        if !settings.test_repo_cache_path.exists() {
+            tokio::fs::create_dir_all(&settings.test_repo_cache_path).await?
         }
         
-        Ok(Self { settings })
+        Ok(Box::new( Self { settings }))
     }
 
     async fn download_change_script_files(&self, local_folder: PathBuf, repo_folder: String) -> anyhow::Result<Vec<PathBuf>> {
@@ -112,8 +118,8 @@ impl AzureStorageBlobTestRepo {
 }
 
 #[async_trait]
-impl TestRepo for AzureStorageBlobTestRepo {
-    async fn download_test_source_content(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceContent> {
+impl TestRepoClient for AzureStorageBlobTestRepoClient {
+    async fn download_test_source_dataset(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
         log::trace!("Downloading DataSet - {:?}/{:?} to folder {:?}", test_id, source_id, dataset_cache_path);
 
         // Formulate and create the local path for change_script files
@@ -150,7 +156,7 @@ impl TestRepo for AzureStorageBlobTestRepo {
             bootstrap_scripts_repo_path
         ).await?;
          
-        Ok(TestSourceContent {
+        Ok(TestSourceDataset {
             change_log_script_files: Some(change_script_files),
             bootstrap_script_files: Some(bootstrap_script_files),
         })

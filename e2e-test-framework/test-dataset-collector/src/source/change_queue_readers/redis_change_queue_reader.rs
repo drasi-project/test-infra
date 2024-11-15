@@ -89,7 +89,7 @@ impl RedisSourceChangeQueueReader {
         let notifier = Arc::new(Notify::new());
         let status = Arc::new(RwLock::new(SourceChangeQueueReaderStatus::Uninitialized));
         
-        Ok(Box::new(RedisSourceChangeQueueReader {
+        Ok(Box::new(Self {
             notifier,
             seq: Arc::new(AtomicUsize::new(0)),
             settings,

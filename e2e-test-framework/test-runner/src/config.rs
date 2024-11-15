@@ -1,11 +1,13 @@
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
+
+use test_data_store::config::TestRepoConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestRunnerConfig {
     #[serde(default = "default_data_store_path")]
     pub data_store_path: String,
-    #[serde(default = "default_prune_data_store_path")]
-    pub prune_data_store_path: bool,
+    #[serde(default = "default_delete_data_store")]
+    pub delete_data_store: bool,
     #[serde(default)]
     pub source_defaults: SourceConfig,
     #[serde(default)]
@@ -16,14 +18,14 @@ pub struct TestRunnerConfig {
     pub test_repos: Vec<TestRepoConfig>,
 }
 fn default_data_store_path() -> String { "./test_runner_data".to_string() }
-fn default_prune_data_store_path() -> bool { false }
+fn default_delete_data_store() -> bool { false }
 fn default_start_reactivators_together() -> bool { true }
 
 impl Default for TestRunnerConfig {
     fn default() -> Self {
         TestRunnerConfig {
             data_store_path: default_data_store_path(),
-            prune_data_store_path: false,
+            delete_data_store: default_delete_data_store(),
             source_defaults: SourceConfig::default(),
             start_reactivators_together: default_start_reactivators_together(),
             test_repos: Vec::new(),
@@ -115,38 +117,4 @@ pub struct DaprSourceChangeDispatcherConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlFileSourceChangeDispatcherConfig {
     pub folder_path: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum TestRepoConfig {
-    AzureStorageBlob {
-        #[serde(flatten)]
-        common_config: CommonTestRepoConfig,
-        #[serde(flatten)]
-        unique_config: AzureStorageBlobTestRepoConfig,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommonTestRepoConfig {
-    #[serde(default = "is_false")]
-    pub force_cache_refresh: bool,
-    pub id: String,
-}
-fn is_false() -> bool { false }
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AzureStorageBlobTestRepoConfig {
-    pub account_name: String,
-    #[serde(serialize_with = "mask_secret")]
-    pub access_key: String,
-    pub container: String,
-    pub root_path: String,
-}
-pub fn mask_secret<S>(_: &str, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str("******")
 }

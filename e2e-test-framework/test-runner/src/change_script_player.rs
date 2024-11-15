@@ -40,14 +40,14 @@ pub enum ChangeScriptPlayerError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ChangeScriptPlayerSettings {
-    pub data_store_path: String,
+    pub data_store_path: PathBuf,
     pub reactivator: TestRunReactivator,
     pub script_files: Vec<PathBuf>,
     pub test_run_source: TestRunSource,
 }
 
 impl ChangeScriptPlayerSettings {
-    pub fn try_from_test_run_source(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: String) -> anyhow::Result<Self> {
+    pub fn try_from_test_run_source(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
 
         // If the SourceConfig doesn't contain a ReactivatorConfig, log and return an error.
         // Otherwise, clone the TestRunSource and extract the TestRunReactivator.
@@ -360,11 +360,33 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                     },
                     SourceChangeDispatcherConfig::JsonlFile(jsonl_file_config) => {
                         // Construct the path to the local file used to store the generated SourceChangeEvents.
-                        let folder_path = format!("./{}/test_output/{}/{}/change_logs/{}", 
-                            jsonl_file_config.folder_path.clone().unwrap_or(player_settings.data_store_path.clone()),
-                            player_settings.test_run_source.test_id, 
-                            player_settings.test_run_source.test_run_id, 
-                            player_settings.test_run_source.source_id);
+                        // let folder_path = format!("./{}/test_output/{}/{}/change_logs/{}", 
+                        //     jsonl_file_config.folder_path.clone().unwrap_or(player_settings.data_store_path.to_owned()),
+                        //     player_settings.test_run_source.test_id, 
+                        //     player_settings.test_run_source.test_run_id, 
+                        //     player_settings.test_run_source.source_id);
+
+                        let folder_path = match &jsonl_file_config.folder_path {
+                            Some(config_path) => {
+                                if config_path.starts_with("/") {
+                                    PathBuf::from(format!("{}/test_output/{}/{}/change_logs/{}", 
+                                        config_path,
+                                        &player_settings.test_run_source.test_id, 
+                                        &player_settings.test_run_source.test_run_id, 
+                                        &player_settings.test_run_source.source_id))
+                                } else {
+                                    PathBuf::from(format!("./{}/test_output/{}/{}/change_logs/{}", 
+                                        config_path,
+                                        &player_settings.test_run_source.test_id, 
+                                        &player_settings.test_run_source.test_run_id, 
+                                        &player_settings.test_run_source.source_id))
+                                }
+                            },
+                            None => player_settings.data_store_path.clone()
+                                        .join(&player_settings.test_run_source.test_id)
+                                        .join(&player_settings.test_run_source.test_run_id)
+                                        .join(&player_settings.test_run_source.source_id)
+                        };
 
                         match JsonlFileSourceChangeDispatcherSettings::try_from_config(jsonl_file_config, folder_path) {
                             Ok(settings) => {

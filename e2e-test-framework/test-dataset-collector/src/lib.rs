@@ -2,9 +2,8 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use futures::future::join_all;
 use serde::Serialize;
-use tokio::{fs::remove_dir_all, sync::RwLock};
-
-use test_runner::{config::TestRepoConfig, test_repo::test_repo_cache::TestRepoCache};
+use test_data_store::{config::TestRepoConfig, TestDataStore, TestRepoInfo};
+use tokio::sync::RwLock;
 
 use config::{DatasetConfig, TestDatasetCollectorConfig, SourceConfig};
 use source::DatasetSource;
@@ -31,8 +30,7 @@ pub struct TestDatasetCollector {
     data_store_path: PathBuf,
     datasets: HashMap<String, Dataset>,
     status: TestDatasetCollectorStatus,
-    test_repos: HashMap<String, TestRepoConfig>,
-    test_repo_cache: TestRepoCache,
+    test_data_store: TestDataStore,
 }
 
 impl TestDatasetCollector {
@@ -43,20 +41,11 @@ impl TestDatasetCollector {
         let data_store_path = PathBuf::from(&config.data_store_path);
 
         let mut test_dataset_collector = TestDatasetCollector {
-            data_store_path,
+            data_store_path: data_store_path.clone(),
             datasets: HashMap::new(),
             status: TestDatasetCollectorStatus::Initialized,
-            test_repos: HashMap::new(),
-            test_repo_cache: TestRepoCache::new(config.data_store_path.clone()).await?,
+            test_data_store: TestDataStore::new(data_store_path, config.delete_data_store).await?,
         };
-
-        // If the prune_data_store flag is set, and the folder exists, remove it.
-        if config.prune_data_store_path && std::path::Path::new(&config.data_store_path).exists() {
-            log::info!("Pruning data store folder: {:?}", &config.data_store_path);
-            remove_dir_all(&config.data_store_path).await.unwrap_or_else(|err| {
-                panic!("Error Pruning data store folder - path:{}, error:{}", &config.data_store_path, err);
-            });
-        }
 
         // Add the initial set of test repos.
         // Fail construction if any of the TestRepoConfigs fail to create.
@@ -97,8 +86,7 @@ impl TestDatasetCollector {
             anyhow::bail!("TestDatasetCollector is in an Error state: {}", msg);
         };
 
-        let test_repo_id = self.test_repo_cache.add_test_repo(test_repo_config.clone()).await?;  
-        self.test_repos.insert(test_repo_id, test_repo_config.clone());
+        self.test_data_store.add_test_repo(test_repo_config.clone()).await?;  
 
         Ok(())
     }
@@ -123,7 +111,7 @@ impl TestDatasetCollector {
     }
 
     pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.test_repos.contains_key(test_repo_id)
+        self.test_data_store.contains_test_repo(test_repo_id)
     }
 
     pub fn contains_dataset(&self, dataset_id: &str) -> bool {
@@ -138,16 +126,16 @@ impl TestDatasetCollector {
         &self.status
     }
 
-    pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoConfig>> {
-        Ok(self.test_repos.get(test_repo_id).cloned())
+    pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoInfo>> {
+        self.test_data_store.get_test_repo_info(test_repo_id)
     }
 
-    pub fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoConfig>> {
-        Ok(self.test_repos.values().cloned().collect())
+    pub fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoInfo>> {
+        self.test_data_store.get_test_repos_info()
     }
 
     pub fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self.test_repos.keys().cloned().collect())
+        self.test_data_store.get_test_repo_ids()
     }
 }
 
@@ -235,6 +223,7 @@ impl Dataset {
 #[cfg(test)]
 mod tests {
     use config::{RedisSourceChangeQueueReaderConfig, SourceChangeQueueReaderConfig, SourceChangeRecorderConfig};
+    use tokio::fs::remove_dir_all;
 
     use super::*;
 
@@ -318,7 +307,7 @@ mod tests {
 
         let config = TestDatasetCollectorConfig {
             data_store_path,
-            prune_data_store_path: false,
+            delete_data_store: false,
             test_repos: vec![],
             datasets: vec![DatasetConfig {
                 dataset_id: "hello-world".to_string(),

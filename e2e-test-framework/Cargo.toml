@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+  "test-data-store",
   "test-dataset-collector",
   "test-runner",
   "test-runner-service",

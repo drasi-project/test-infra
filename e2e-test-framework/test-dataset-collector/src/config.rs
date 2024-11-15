@@ -1,25 +1,25 @@
 use serde::{Deserialize, Serialize};
-use test_runner::config::TestRepoConfig;
+use test_data_store::config::TestRepoConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestDatasetCollectorConfig {
     #[serde(default = "default_data_store_path")]
     pub data_store_path: String,
-    #[serde(default = "default_prune_data_store_path")]
-    pub prune_data_store_path: bool,
+    #[serde(default = "default_delete_data_store")]
+    pub delete_data_store: bool,
     #[serde(default)]
     pub test_repos: Vec<TestRepoConfig>,
     #[serde(default)]
     pub datasets: Vec<DatasetConfig>,
 }
 fn default_data_store_path() -> String { "./test_dataset_collector_data".to_string() }
-fn default_prune_data_store_path() -> bool { false }
+fn default_delete_data_store() -> bool { false }
 
 impl Default for TestDatasetCollectorConfig {
     fn default() -> Self {
         TestDatasetCollectorConfig {
             data_store_path: default_data_store_path(),
-            prune_data_store_path: default_prune_data_store_path(),
+            delete_data_store: default_delete_data_store(),
             test_repos: Vec::new(),
             datasets: Vec::new(),
         }

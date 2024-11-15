@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
+use std::path::PathBuf;
 
 use crate::config::JsonlFileSourceChangeDispatcherConfig;
 use crate::script_source::SourceChangeEvent;
@@ -10,11 +11,11 @@ use super::{SourceChangeDispatcher, SourceChangeDispatcherError};
 
 #[derive(Debug)]
 pub struct JsonlFileSourceChangeDispatcherSettings {
-    pub folder_path: String,
+    pub folder_path: PathBuf,
 }
 
 impl JsonlFileSourceChangeDispatcherSettings {
-    pub fn try_from_config(_config: &JsonlFileSourceChangeDispatcherConfig, folder_path: String) -> anyhow::Result<Self> {
+    pub fn try_from_config(_config: &JsonlFileSourceChangeDispatcherConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
         return Ok(Self {
             folder_path,
         });
@@ -40,12 +41,12 @@ impl JsonlFileSourceChangeDispatcher {
             };
         }        
 
-        let file_path = format!("{}/source_change_events.jsonl", &settings.folder_path);
+        let file_path =  &settings.folder_path.clone().join("source_change_events.jsonl");
 
         let writer = match OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&file_path) {
+            .open(file_path) {
                 Ok(f) => BufWriter::new(f),
                 Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
             };

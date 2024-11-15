@@ -8,6 +8,7 @@ use config::TestRepoConfig;
 
 pub mod config;
 pub mod repo_clients;
+pub mod scripts;
 
 // #[derive(Debug, thiserror::Error)]
 // pub enum TestRepoError {

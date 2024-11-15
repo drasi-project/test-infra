@@ -1,7 +1,8 @@
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use test_runner::script_source::SourceChangeEvent;
+
+use test_data_store::scripts::SourceChangeEvent;
 
 // pub mod console_change_event_logger;
 // pub mod script_change_event_logger;

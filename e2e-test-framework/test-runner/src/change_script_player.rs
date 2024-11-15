@@ -7,14 +7,17 @@ use tokio::sync::mpsc::error::TryRecvError::{Empty, Disconnected};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
+use test_data_store::scripts::{change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent};
+
 use crate::{
     config::SourceChangeDispatcherConfig, SpacingMode, TestRunReactivator, TestRunSource, TimeMode, 
-    script_source::SourceChangeEvent, source_change_dispatchers::{
-        console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
+    source_change_dispatchers::{
+        console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, 
+        dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, 
+        jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
     }
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
-use crate::script_source::{ChangeScriptRecord, SequencedChangeScriptRecord, change_script_file_reader::ChangeScriptReader};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChangeScriptPlayerError {

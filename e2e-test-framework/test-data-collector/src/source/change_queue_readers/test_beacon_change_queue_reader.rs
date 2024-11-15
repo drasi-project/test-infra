@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use test_runner::script_source::{SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo};
+use test_data_store::scripts::{SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo};
 use tokio::sync::{mpsc::{Receiver, Sender}, Notify, RwLock};
 
 use crate::config::TestBeaconSourceChangeQueueReaderConfig;

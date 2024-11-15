@@ -9,7 +9,6 @@ use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispa
 
 pub mod change_script_player;
 pub mod config;
-pub mod script_source;
 pub mod source_change_dispatchers;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

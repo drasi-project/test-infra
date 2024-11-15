@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::SystemTime};
 use serde::Serialize;
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle };
 
-use test_runner::script_source::ChangeScriptRecord;
+use test_data_store::scripts::ChangeScriptRecord;
 
 use crate::{config::{SourceChangeQueueReaderConfig, SourceChangeRecorderConfig}, source::change_queue_readers::{get_source_change_queue_reader, none_change_queue_reader::NoneSourceChangeQueueReader, SourceChangeQueueReader, SourceChangeQueueReaderMessage}};
 

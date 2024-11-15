@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 test-data-store = { path = "../test-data-store" }
-test-runner = { path = "../test-runner" }
 
 azure_core = "0.20.0"
 azure_storage = "0.20.0"

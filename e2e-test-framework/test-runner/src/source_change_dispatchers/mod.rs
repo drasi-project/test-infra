@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::script_source::SourceChangeEvent;
+use test_data_store::scripts::SourceChangeEvent;
 
 pub mod console_dispatcher;
 pub mod dapr_dispatcher;

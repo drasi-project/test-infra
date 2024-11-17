@@ -122,7 +122,7 @@ pub struct TestRunSource {
 }
 
 impl TestRunSource {
-    pub fn try_from_config(config: &SourceConfig, defaults: &SourceConfig) -> anyhow::Result<Self> {
+    pub fn new(config: &SourceConfig, defaults: &SourceConfig) -> anyhow::Result<Self> {
         // If neither the SourceConfig nor the SourceConfig defaults contain a source_id, return an error.
         let source_id = config.source_id.as_ref()
             .or_else( || defaults.source_id.as_ref())
@@ -358,53 +358,54 @@ impl TestRunner {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
         
-        let test_run_source = TestRunSource::try_from_config(source_config, &self.source_defaults)?;
+        let test_run_source = TestRunSource::new(source_config, &self.source_defaults)?;
 
         // Fail if the TestRunner already contains the TestRunSource.
-        if self.contains_test_source(&test_run_source.id) {
+        if self.contains_test_source(&test_run_source.id).await? {
             anyhow::bail!("TestRunSource already exists: {:?}", &test_run_source);
         }
 
         // Get the DataSet for the TestRunSource.
-        let dataset = self.data_store.get_test_source_dataset(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await?;
+        let dataset = match self.data_store.get_test_source_dataset(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await? {
+            Some(dataset) => dataset,
+            None => {
+                anyhow::bail!("TestSourceDataset not found for TestRunSource: {:?}", &test_run_source);
+            }
+        };
+
+        // Get the path for data
+        let data_store_path = self.data_store.get_test_run_storage(&test_run_source.test_id, &test_run_source.test_run_id).await?.path;
 
         // Determine if the TestRunSource has a reactivator, in which case a ChangeScriptPlayer should 
         // be created and possibly started.
         if test_run_source.reactivator.is_some() {
-            match dataset.change_log_script_files {
-                Some(change_log_script_files) => {
-                    if change_log_script_files.len() > 0 {
-                        let player_settings = 
-                            ChangeScriptPlayerSettings::try_from_test_run_source(
-                                test_run_source.clone(), change_log_script_files, self.data_store_path.clone())?;
+            if dataset.change_log_script_files.len() > 0 {
+                let player_settings = 
+                    ChangeScriptPlayerSettings::try_from_test_run_source(
+                        test_run_source.clone(), dataset.change_log_script_files, data_store_path)?;
 
-                        log::debug!("Creating ChangeScriptPlayer from {:#?}", &player_settings);
+                log::debug!("Creating ChangeScriptPlayer from {:#?}", &player_settings);
 
-                        let player = ChangeScriptPlayer::new(player_settings).await;
+                let player = ChangeScriptPlayer::new(player_settings).await;
 
-                        self.sources.insert(test_run_source.id.clone(), test_run_source);
-                        self.change_script_players.insert(player.get_id().clone(), player.clone());
+                self.sources.insert(test_run_source.id.clone(), test_run_source);
+                self.change_script_players.insert(player.get_id().clone(), player.clone());
 
-                        return Ok(Some(player));
-                    } else {
-                        anyhow::bail!("No change script files available for player: {:?}", &test_run_source);
-                    }
-                },
-                None => {
-                    anyhow::bail!("No change script files available for player: {:?}", &test_run_source);
-                }
+                return Ok(Some(player));
+            } else {
+                anyhow::bail!("No change script files available for player: {:?}", &test_run_source);
             }
         }
 
         Ok(None)
     }
 
-    pub async fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.data_store.contains_test_repo(test_repo_id)
+    pub async fn contains_test_repo(&self, test_repo_id: &str) -> anyhow::Result<bool> {
+        self.data_store.contains_test_repo(test_repo_id).await
     }
 
-    pub async fn contains_test_source(&self, test_run_source_id: &str) -> bool {
-        self.sources.contains_key(test_run_source_id)
+    pub async fn contains_test_source(&self, test_run_source_id: &str) -> anyhow::Result<bool> {
+        Ok(self.sources.contains_key(test_run_source_id))
     }
 
     pub async fn control_change_script_player(&self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
@@ -448,24 +449,16 @@ impl TestRunner {
         }
     }
 
-    pub async fn get_test_source_datasets(&self) -> anyhow::Result<Vec<TestSourceDataset>> {
-        self.data_store.get_test_source_datasets()
-    }
-
     pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
-        &self.status
+        Ok(self.status.clone())
     }
 
-    pub async fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoCacheInfo>> {
-        self.data_store.add_test_repo_storage(config)
-    }
-
-    pub async fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoCacheInfo>> {
-        self.data_store.get_test_repos_info()
+    pub async fn get_test_repo(&self, id: &str) -> anyhow::Result<Option<TestRepoStorage>> {
+        self.data_store.get_test_repo_storage(id).await
     }
 
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        self.data_store.get_test_repo_ids()
+        self.data_store.get_test_repo_ids().await
     }
 
     pub async fn get_test_source(&self, test_run_source_id: &str) -> anyhow::Result<Option<TestRunSource>> {
@@ -480,9 +473,9 @@ impl TestRunner {
         Ok(self.sources.keys().cloned().collect())
     }
 
-    pub async fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
-        self.data_store.match_bootstrap_dataset(requested_labels)
-    }
+    // pub async fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
+    //     self.data_store.match_bootstrap_dataset(requested_labels)
+    // }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
 

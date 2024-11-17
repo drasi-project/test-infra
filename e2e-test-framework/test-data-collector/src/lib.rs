@@ -156,7 +156,7 @@ impl DataCollection {
             anyhow::bail!("DataCollectionSource already exists: {:?}", &config);
         }
         
-        let source = DataCollectionSource::new(config, self.storage.get_source_storage(&source_id).await?).await?;
+        let source = DataCollectionSource::new(config, self.storage.get_source_storage(&source_id, false).await?).await?;
 
         self.sources.insert(source_id.clone(), source.clone());
 
@@ -222,6 +222,7 @@ mod tests {
                 delete_data_store: Some(true),
                 test_repos: None,
                 test_repo_folder: None,
+                test_run_folder: None,
             }
         };
 
@@ -268,6 +269,7 @@ mod tests {
                 delete_data_store: Some(true),
                 test_repos: None,
                 test_repo_folder: None,
+                test_run_folder: None,
             }
         };
 

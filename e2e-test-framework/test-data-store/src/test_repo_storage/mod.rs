@@ -7,52 +7,65 @@ use walkdir::WalkDir;
 
 pub mod repo_clients;
 
+fn get_test_source_id(test_id: &str, source_id: &str) -> String {
+    format!("{}__{}", test_id, source_id)
+}
+
 #[derive(Clone, Debug)]
 pub struct TestRepoStorage {
     pub config: RemoteTestRepoConfig,
     pub id: String,
     pub path: PathBuf,
+    pub sources_path: PathBuf,
 }
 
 impl TestRepoStorage {
-    pub async fn new(config: RemoteTestRepoConfig, path: PathBuf) -> anyhow::Result<Self> {
-        log::debug!("Creating TestRepoStorage in {:?} from config: {:?}", &path, &config);
+    pub async fn new(config: RemoteTestRepoConfig, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
+        log::debug!("Creating TestRepoStorage in {:?} from config: {:?}", &parent_path, &config);
 
-        // Create the data store folder if it doesn't exist.
-        if !path.exists() {
-            log::info!("Creating TestRepoStorage folder: {:?}", &path);
-            tokio::fs::create_dir_all(&path).await?
-        }
-        
         let id = config.get_id();
+
+        let path = parent_path.join(&id);
+        let sources_path = path.join("sources/");
+
+        if replace && path.exists() {
+            fs::remove_dir_all(&path).await?;
+        }
+
+        if !path.exists() {
+            fs::create_dir_all(&path).await?;
+            fs::create_dir_all(&sources_path).await?;
+        }
 
         Ok(TestRepoStorage {
             config,
             id,
             path,
+            sources_path,
         })
     }
 
-    pub async fn get_test_source_storage(&self, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceStorage> {
-        log::debug!("Getting TestSourceStorage for ID: {:?}/{:?}", &test_id, &source_id);
+    pub async fn add_test_source(&self, test_id: &str, source_id: &str, replace: bool) -> anyhow::Result<TestSourceStorage> {
+        log::debug!("Adding TestSourceStorage for ID: {:?}__{:?}", &test_id, &source_id);
 
-        let mut path = self.path.clone();
-        path.push(format!("sources/{}/{}/", &test_id, &source_id));        
-        
-        let source_storage = TestSourceStorage::new(test_id, source_id, path).await?;
+        if !replace {
+            self.get_test_source_storage(test_id, source_id).await
+        } else {
+            let source_storage = TestSourceStorage::new(test_id, source_id, self.sources_path.clone(), replace).await?;
 
-        // Download the test source dataset from the remote test repo.
-        let test_repo_client = create_test_repo_client(self.config.clone(), source_storage.path.clone()).await?;
+            // Download the test source dataset from the remote test repo.
+            let test_repo_client = create_test_repo_client(self.config.clone(), source_storage.path.clone()).await?;
 
-        test_repo_client.download_test_source_dataset(test_id.to_string(), source_id.to_string(), source_storage.path.clone()).await?;
+            test_repo_client.download_test_source_dataset(test_id.to_string(), source_id.to_string(), source_storage.path.clone()).await?;
 
-        Ok(source_storage)
+            Ok(source_storage)
+        }
     }
 
-    pub async fn get_source_ids(&self) -> anyhow::Result<Vec<String>> {
+    pub async fn get_test_source_ids(&self) -> anyhow::Result<Vec<String>> {
         let mut test_sources = Vec::new();
 
-        let mut entries = fs::read_dir(&self.path).await?;     
+        let mut entries = fs::read_dir(&self.sources_path).await?;     
         while let Some(entry) = entries.next_entry().await? {
             let metadata = entry.metadata().await?;
             if metadata.is_dir() {
@@ -64,6 +77,16 @@ impl TestRepoStorage {
 
         Ok(test_sources)        
     }
+
+    pub async fn get_test_source_storage(&self, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceStorage> {
+        let id = get_test_source_id(test_id, source_id);
+        log::debug!("Getting TestSourceStorage for ID: {:?}", &id);
+
+        match TestSourceStorage::try_get(test_id, source_id, self.sources_path.clone())? {
+            Some(storage) => Ok(storage),
+            None => Err(anyhow::anyhow!("TestSourceStorage not found for ID: {:?}", &id))
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,36 +94,56 @@ pub struct TestSourceStorage {
     pub bootstrap_scripts_path: PathBuf,
     pub change_scripts_path: PathBuf,
     pub id: String,
+    pub path: PathBuf,
     pub source_id: String,
     pub test_id: String,
-    pub path: PathBuf,
 }
 
 impl TestSourceStorage {
-    pub async fn new(test_id: &str, source_id: &str, path: PathBuf) -> anyhow::Result<Self> {
-        log::debug!("Creating TestSourceStorage for ID {:?}/{:?} in folder: {:?}", &test_id, &source_id, &path);
+    pub async fn new(test_id: &str, source_id: &str, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
+        let id = get_test_source_id(test_id, source_id);
+        log::debug!("Creating TestSourceStorage for ID {:?} in folder: {:?}", &id, &parent_path);
 
-        // Create the data storage folders if they don't exist.
-        // Need a folder for the bootstrap scripts.
+        let path = parent_path.join(&id);
         let bootstrap_scripts_path = path.join("bootstrap_scripts");            
-        if !bootstrap_scripts_path.exists() {
-            fs::create_dir_all(&bootstrap_scripts_path).await?;
+        let change_scripts_path = path.join("change_scripts");
+
+        if replace && path.exists() {
+            fs::remove_dir_all(&path).await?;
         }
 
-        // Need a folder for the change log scripts.
-        let change_scripts_path = path.join("change_scripts");
-        if !change_scripts_path.exists() {
+        if !path.exists() {
+            fs::create_dir_all(&path).await?;
+            fs::create_dir_all(&bootstrap_scripts_path).await?;
             fs::create_dir_all(&change_scripts_path).await?;
         }
 
         Ok(Self {
             bootstrap_scripts_path,
             change_scripts_path,
-            id: format!("{}/{}", test_id, source_id),
+            id,
+            path,
             source_id: source_id.to_string(),
             test_id: test_id.to_string(),
-            path,
         })
+    }
+
+    pub fn try_get(test_id: &str, source_id: &str, parent_path: PathBuf) -> anyhow::Result<Option<Self>> {
+        let id = get_test_source_id(test_id, source_id);
+        let path = parent_path.join(&id);
+        
+        if path.exists() {
+            Ok(Some(Self {
+                bootstrap_scripts_path: path.join("bootstrap_scripts"),
+                change_scripts_path: path.join("change_scripts"),
+                id,
+                path,
+                source_id: source_id.to_string(),
+                test_id: test_id.to_string(),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn get_dataset(&self) -> anyhow::Result<TestSourceDataset> {

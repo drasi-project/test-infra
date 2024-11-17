@@ -1,34 +1,52 @@
-use std::{collections::{HashMap, HashSet}, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use derive_more::Debug;
-use repo_clients::{get_test_repo_client, TestRepoClient};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tokio::{fs, sync::Mutex};
 
-use config::TestRepoConfig;
+use data_collection_storage::DataCollectionStorage;
+use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage};
 
-pub mod config;
-pub mod repo_clients;
+pub mod data_collection_storage;
 pub mod scripts;
+pub mod test_repo_storage;
 
-// #[derive(Debug, thiserror::Error)]
-// pub enum TestRepoError {
-//     #[error("Invalid TestRepo Id: {0}")]
-//     _InvalidTestRepoId(String),
-//     #[error("Invalid TestRepo Type: {0}")]
-//     _InvalidType(String),
-// }
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TestDataStoreConfig {
+    pub data_collection_folder: Option<String>,
+    pub data_store_path: Option<String>,
+    pub delete_data_store: Option<bool>,
+    pub test_repos: Option<Vec<RemoteTestRepoConfig>>,
+    pub test_repo_folder: Option<String>,
+}
+
+impl Default for TestDataStoreConfig {
+    fn default() -> Self {
+        TestDataStoreConfig {
+            data_collection_folder: None,
+            data_store_path: None,
+            delete_data_store: None,
+            test_repos: None,
+            test_repo_folder: None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct TestDataStore {
-    pub root_path: PathBuf,
-    pub test_repos: HashMap<String, TestRepoCache>,
+    pub data_collection_root_path: PathBuf,
+    pub root_path: PathBuf,    
+    pub test_repo_root_path: PathBuf,
+    pub test_repo_stores: Arc<Mutex<HashMap<String, TestRepoStorage>>>,
 }
 
 impl TestDataStore {
-    pub async fn new(root_path: PathBuf, delete_data_store: bool) -> anyhow::Result<Self> {
+    pub async fn new(config: TestDataStoreConfig) -> anyhow::Result<Self> {
+        log::debug!("Creating TestDataStore using config: {:?}", &config);
+
+        let root_path = PathBuf::from(config.data_store_path.unwrap_or("./drasi_test_data_store".to_string()));
 
         // Delete the data store folder if it exists and the delete_data_store flag is set.
-        if delete_data_store && root_path.exists() {
+        if config.delete_data_store.unwrap_or(false) && root_path.exists() {
             log::info!("Deleting data store data: {:?}", &root_path);
             tokio::fs::remove_dir_all(&root_path).await?;
         }
@@ -39,176 +57,136 @@ impl TestDataStore {
             tokio::fs::create_dir_all(&root_path).await?
         }
 
-        Ok(TestDataStore {
+        let data_collection_root_path = root_path.join(config.data_collection_folder.unwrap_or("data_collections".to_string()));
+        let test_repo_root_path = root_path.join(config.test_repo_folder.unwrap_or("test_repos".to_string()));
+
+        let mut test_data_store = TestDataStore {
+            data_collection_root_path,
             root_path,
-            test_repos: HashMap::new(),
-        })
-    }
-
-    pub async fn add_test_repo(&mut self, config: TestRepoConfig ) -> anyhow::Result<()> {
-
-        let id = config.get_id();
-
-        // Formulate the local folder path where the files from the TestRepo should be stored.
-        let mut data_cache_path = self.root_path.clone();
-        data_cache_path.push(format!("test_repos/{}/", &id));
-        
-        let test_repo_client = get_test_repo_client(config, data_cache_path.clone()).await?;
-
-        let test_repo_cache = TestRepoCache {
-            id: id.clone(),
-            path: data_cache_path,
-            test_repo_client,
-            test_source_datasets: HashMap::new(),
+            test_repo_root_path,
+            test_repo_stores: Arc::new(Mutex::new(HashMap::new())),
         };
 
-        self.test_repos.insert(id, test_repo_cache);
+        // Create the initial TestDataRepo instances.
+        for test_repo_config in config.test_repos.unwrap_or_default() {
+            test_data_store.add_test_repo_storage(test_repo_config).await?;
+        };
 
-        Ok(())
+        Ok(test_data_store)
     }
 
-    pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.test_repos.contains_key(test_repo_id)
-    }
+    pub async fn add_test_repo_storage(&mut self, config: RemoteTestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
+        log::debug!("Adding TestRepoStorage from config: {:?}", &config);
 
-    pub fn get_test_repo_info(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoInfo>> {
-        
-        match self.test_repos.get(test_repo_id) {
-            Some(test_repo) => {
-                Ok(Some(test_repo.into()))
-            },
-            None => {
-                Ok(None)
-            }
-        }
-    }
+        let mut test_repo_stores = self.test_repo_stores.lock().await;
 
-    pub fn get_test_repos_info(&self) -> anyhow::Result<Vec<TestRepoInfo>> {
-        let mut test_repos_info = Vec::new();
-
-        for (_, test_repo) in &self.test_repos {
-            test_repos_info.push(test_repo.into());
+        if test_repo_stores.contains_key(&config.get_id()) {
+            anyhow::bail!("TestRepoStore with ID {} already exists", &config.get_id());
         }
 
-        Ok(test_repos_info)
+        let test_repo_storage = TestRepoStorage::new(config.clone(), self.test_repo_root_path.clone()).await?;
+        test_repo_stores.insert(test_repo_storage.id.clone(), test_repo_storage.clone());
+
+        Ok(test_repo_storage)
     }
 
-    pub fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self.test_repos.keys().cloned().collect())
+    pub async fn contains_data_collection(&self, id: &str) -> anyhow::Result<bool> {
+        let mut path = self.data_collection_root_path.clone();
+        path.push(format!("{}/", id));
+
+        Ok(path.exists())
     }
 
-    pub async fn get_test_source_dataset(&mut self, test_repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceDataset> {
+    pub async fn contains_test_repo(&self, id: &str) -> anyhow::Result<bool> {
+        let mut path = self.test_repo_root_path.clone();
+        path.push(format!("{}/", id));
 
-        // Attempt to get the TestRepo associated with the provided test_repo_id.
-        let test_repo = match self.test_repos.get_mut(test_repo_id) {
-            Some(test_repo) => test_repo,
-            None => {
-                let msg = format!("Invalid TestRepo Id: {:?}", test_repo_id);
-                anyhow::bail!(msg);
-            },
-        };
-        
-        // Attempt to get the TestSourceDataset associated with the provided test_id and source_id.
-        let test_source_id = format!("{}/{}", test_id, source_id);
-
-        let test_source_dataset = match test_repo.test_source_datasets.get(&test_source_id) {
-            Some(test_source_dataset) => test_source_dataset.clone(),
-            None => {
-                // Attempt to download the TestSourceDataset from the TestRepo.
-                let mut test_source_dataset_path = test_repo.path.clone();
-                test_source_dataset_path.push(test_source_id.clone());
-        
-                let test_source_dataset = test_repo.test_repo_client.download_test_source_dataset(test_id.to_string(), source_id.to_string(), test_source_dataset_path).await?;
-
-                // Store the TestSourceDataset in the TestRepo cache.
-                test_repo.test_source_datasets.insert(test_source_id, test_source_dataset.clone());
-
-                test_source_dataset
-            }
-        };
-
-        Ok(test_source_dataset)
+        Ok(path.exists())
     }
 
-    pub fn list_test_source_datasets(&self) -> anyhow::Result<Vec<TestSourceDataset>> {
-        let mut test_source_datasets = Vec::new();
+    pub async fn get_data_collection_ids(&self) -> anyhow::Result<Vec<String>> {
+        let mut data_collection_ids = Vec::new();
 
-        for (_, test_repo) in &self.test_repos {
-            for (_, test_source_dataset) in &test_repo.test_source_datasets {
-                test_source_datasets.push(test_source_dataset.clone());
+        let mut entries = fs::read_dir(&self.data_collection_root_path).await?;     
+        while let Some(entry) = entries.next_entry().await? {
+            let metadata = entry.metadata().await?;
+            if metadata.is_dir() {
+                if let Some(folder_name) = entry.file_name().to_str() {
+                    data_collection_ids.push(folder_name.to_string());
+                }
             }
         }
 
-        Ok(test_source_datasets)
+        Ok(data_collection_ids)      
     }
 
+    pub async fn get_data_collection_storage(&self, id: &str) -> anyhow::Result<DataCollectionStorage> {
+        log::debug!("Getting DataCollectionStorage for ID: {:?}", &id);
+
+        let mut path = self.data_collection_root_path.clone();
+        path.push(format!("{}/", id));
+
+        Ok(DataCollectionStorage::new(id, path).await?)
+    }
+
+    pub async fn get_data_store_path(&self) -> anyhow::Result<PathBuf> {
+        Ok(self.root_path.clone())
+    }
+
+    pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
+        let mut test_repo_ids = Vec::new();
+
+        let mut entries = fs::read_dir(&self.data_collection_root_path).await?;     
+        while let Some(entry) = entries.next_entry().await? {
+            let metadata = entry.metadata().await?;
+            if metadata.is_dir() {
+                if let Some(folder_name) = entry.file_name().to_str() {
+                    test_repo_ids.push(folder_name.to_string());
+                }
+            }
+        }
+
+        Ok(test_repo_ids)      
+    }
+
+    pub async fn get_test_repo_storage(&self, id: &str) -> anyhow::Result<TestRepoStorage> {
+        log::debug!("Getting TestRepoStorage for ID: {:?}", &id);
+
+        let test_repo_stores = self.test_repo_stores.lock().await;
+
+        if let Some(test_repo_storage) = test_repo_stores.get(id) {
+            Ok(test_repo_storage.clone())
+        } else {
+            anyhow::bail!("TestRepoStorage with ID {} not found", &id);
+        }
+    }
+    
     // This function is used to figure out which dataset to use to service a bootstrap request.
     // It is a workaround for the fact that a Drasi Source issues a simple "acquire" request, assuming
     // the SourceProxy it is connected to will only be dealing with a single DB connection, whereas the 
     // TestRunner can be simulating multiple sources concurrently. Would be better to do something else here, 
     // but it is sufficient for now.
-    pub fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
-        let mut best_match = None;
-        let mut best_match_count = 0;
+    // pub async fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
+    //     let mut best_match = None;
+    //     let mut best_match_count = 0;
 
-        for (_, repo) in &self.test_repos {
-            for (_, ds) in &repo.test_source_datasets {
-                let match_count = ds.count_bootstrap_type_intersection(&requested_labels);
+    //     let test_repo_stores = self.test_repo_stores.lock().await;
 
-                if match_count > best_match_count {
-                    best_match = Some(ds);
-                    best_match_count = match_count;
-                }
-            }
-        }
+    //     for (_, repo) in test_repo_stores.iter() {
 
-        Ok(best_match.map(|ds| ds.clone()))
-    }
-}
+    //         let test_source_datasets = repo.test_source_datasets.lock().await;
+    //         let test_source_datasets_iter = test_source_datasets.iter();
 
-#[derive(Debug)]
-pub struct TestRepoCache {
-    pub id: String,
-    pub path: PathBuf,
-    #[debug(skip)]
-    pub test_repo_client: Box<dyn TestRepoClient>,
-    pub test_source_datasets: HashMap<String, TestSourceDataset>,
-}
+    //         for (_, ds) in test_source_datasets_iter {
+    //             let match_count = ds.count_bootstrap_type_intersection(&requested_labels);
 
-#[derive(Debug)]
-pub struct TestRepoInfo {
-    pub id: String,
-    pub path: PathBuf,
-    pub test_source_datasets: HashMap<String, TestSourceDataset>,
-}
+    //             if match_count > best_match_count {
+    //                 best_match = Some(ds);
+    //                 best_match_count = match_count;
+    //             }
+    //         }
+    //     }
 
-impl From<&TestRepoCache> for TestRepoInfo {
-    fn from(test_repo_cache: &TestRepoCache) -> Self {
-        TestRepoInfo {
-            id: test_repo_cache.id.clone(),
-            path: test_repo_cache.path.clone(),
-            test_source_datasets: test_repo_cache.test_source_datasets.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct TestSourceDataset {
-    pub bootstrap_script_files: Option<HashMap<String, Vec<PathBuf>>>,
-    pub change_log_script_files: Option<Vec<PathBuf>>,
-}
-
-impl TestSourceDataset {
-    pub fn count_bootstrap_type_intersection(&self, requested_labels: &HashSet<String>) -> usize {
-        let mut match_count = 0;
-
-        if self.bootstrap_script_files.is_some() {
-            // Iterate through the requested labels (data types) and count the number of matches.
-            self.bootstrap_script_files.as_ref().unwrap().keys().filter(|key| requested_labels.contains(*key)).for_each(|_| {
-                match_count += 1;
-            });
-        }
-
-        match_count
-    }
+    //     Ok(best_match.map(|ds| ds.clone()))
+    // }
 }

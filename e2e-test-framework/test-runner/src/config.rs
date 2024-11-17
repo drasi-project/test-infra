@@ -1,35 +1,27 @@
 use serde::{Deserialize, Serialize};
 
-use test_data_store::config::TestRepoConfig;
+use test_data_store::TestDataStoreConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestRunnerConfig {
-    #[serde(default = "default_data_store_path")]
-    pub data_store_path: String,
-    #[serde(default = "default_delete_data_store")]
-    pub delete_data_store: bool,
+    #[serde(default)]
+    pub data_store: TestDataStoreConfig,
     #[serde(default)]
     pub source_defaults: SourceConfig,
     #[serde(default)]
     pub sources: Vec<SourceConfig>,
     #[serde(default = "default_start_reactivators_together")]
     pub start_reactivators_together: bool,
-    #[serde(default)]
-    pub test_repos: Vec<TestRepoConfig>,
 }
-fn default_data_store_path() -> String { "./test_runner_data".to_string() }
-fn default_delete_data_store() -> bool { false }
 fn default_start_reactivators_together() -> bool { true }
 
 impl Default for TestRunnerConfig {
     fn default() -> Self {
         TestRunnerConfig {
-            data_store_path: default_data_store_path(),
-            delete_data_store: default_delete_data_store(),
+            data_store: TestDataStoreConfig::default(),
             source_defaults: SourceConfig::default(),
-            start_reactivators_together: default_start_reactivators_together(),
-            test_repos: Vec::new(),
             sources: Vec::new(),
+            start_reactivators_together: default_start_reactivators_together(),
         }
     }
 }

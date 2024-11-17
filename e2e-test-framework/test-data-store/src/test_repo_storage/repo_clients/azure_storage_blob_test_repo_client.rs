@@ -8,9 +8,9 @@ use azure_storage_blobs::container::operations::BlobItem;
 use futures::stream::StreamExt;
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::{config::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig}, TestSourceDataset};
+use crate::test_repo_storage::TestSourceDataset;
 
-use super::TestRepoClient;
+use super::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig, RemoteTestRepoClient};
 
 #[derive(Debug)]
 pub struct AzureStorageBlobTestRepoClientSettings {
@@ -50,7 +50,7 @@ pub struct AzureStorageBlobTestRepoClient {
 }
 
 impl AzureStorageBlobTestRepoClient {
-    pub async fn new(common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig, data_cache_path: PathBuf) -> anyhow::Result<Box<dyn TestRepoClient + Send + Sync>> {
+    pub async fn new(common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig, data_cache_path: PathBuf) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
         log::debug!("Creating AzureStorageBlobTestRepoClient in {:?} from common_config:{:?} and unique_config:{:?}, ", data_cache_path, common_config, unique_config);
 
         let settings = AzureStorageBlobTestRepoClientSettings::new(common_config, unique_config, data_cache_path).await?;
@@ -118,7 +118,7 @@ impl AzureStorageBlobTestRepoClient {
 }
 
 #[async_trait]
-impl TestRepoClient for AzureStorageBlobTestRepoClient {
+impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
     async fn download_test_source_dataset(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
         log::trace!("Downloading DataSet - {:?}/{:?} to folder {:?}", test_id, source_id, dataset_cache_path);
 
@@ -157,8 +157,8 @@ impl TestRepoClient for AzureStorageBlobTestRepoClient {
         ).await?;
          
         Ok(TestSourceDataset {
-            change_log_script_files: Some(change_script_files),
-            bootstrap_script_files: Some(bootstrap_script_files),
+            change_log_script_files: change_script_files,
+            bootstrap_script_files: bootstrap_script_files,
         })
     }
 }

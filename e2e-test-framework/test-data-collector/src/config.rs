@@ -1,27 +1,19 @@
 use serde::{Deserialize, Serialize};
-use test_data_store::config::TestRepoConfig;
+use test_data_store::TestDataStoreConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestDataCollectorConfig {
-    #[serde(default = "default_data_store_path")]
-    pub data_store_path: String,
-    #[serde(default = "default_delete_data_store")]
-    pub delete_data_store: bool,
-    #[serde(default)]
-    pub test_repos: Vec<TestRepoConfig>,
     #[serde(default)]
     pub data_collections: Vec<DataCollectionConfig>,
+    #[serde(default)]
+    pub data_store: TestDataStoreConfig,
 }
-fn default_data_store_path() -> String { "./test_data_collector_data".to_string() }
-fn default_delete_data_store() -> bool { false }
 
 impl Default for TestDataCollectorConfig {
     fn default() -> Self {
         TestDataCollectorConfig {
-            data_store_path: default_data_store_path(),
-            delete_data_store: default_delete_data_store(),
-            test_repos: Vec::new(),
             data_collections: Vec::new(),
+            data_store: TestDataStoreConfig::default(),
         }
     }
 }

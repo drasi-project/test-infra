@@ -1,7 +1,7 @@
-use std::{collections::{HashMap, HashSet}, path::PathBuf, str::FromStr, sync::Arc};
+use std::{collections::{HashMap, HashSet}, str::FromStr, sync::Arc};
 
 use serde::Serialize;
-use test_data_store::{config::TestRepoConfig, TestDataStore, TestRepoInfo, TestSourceDataset};
+use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestSourceDataset}, TestDataStore};
 use tokio::sync::RwLock;
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse, ChangeScriptPlayerSettings};
@@ -306,41 +306,30 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 #[derive(Debug)]
 pub struct TestRunner {
     change_script_players: HashMap<String, ChangeScriptPlayer>,
-    data_store_path: PathBuf,
     source_defaults: SourceConfig,
     sources: HashMap<String, TestRunSource>,
     status: TestRunnerStatus,
     _start_reactivators_together: bool,
-    test_data_store: TestDataStore,
+    data_store: TestDataStore,
 }
 
 impl TestRunner {
     pub async fn new(config: TestRunnerConfig) -> anyhow::Result<Self> {   
-
         log::debug!("Creating TestRunner from {:#?}", config);
-
-        let data_store_path = PathBuf::from(&config.data_store_path);
 
         let mut test_runner = TestRunner {
             change_script_players: HashMap::new(),
-            data_store_path: data_store_path.clone(),
             source_defaults: config.source_defaults,
             sources: HashMap::new(),
             status: TestRunnerStatus::Initialized,
             _start_reactivators_together: config.start_reactivators_together,
-            test_data_store: TestDataStore::new(data_store_path, config.delete_data_store).await?,
-        };
-
-        // Add the initial set of test repos.
-        // Fail construction if any of the TestRepoConfigs fail to create.
-        for ref test_repo_config in config.test_repos {
-            test_runner.add_test_repo(test_repo_config).await?;
+            data_store: TestDataStore::new(config.data_store).await?,
         };
 
         // Add the initial set of sources.
         // Fail construction if any of the SourceConfigs fail to create.
         for ref source_config in config.sources {
-            test_runner.add_test_run_source(source_config).await?;
+            test_runner.add_test_source(source_config).await?;
         };
 
         log::debug!("TestRunner created -  {:?}", &test_runner);
@@ -348,7 +337,7 @@ impl TestRunner {
         Ok(test_runner)
     }
     
-    pub async fn add_test_repo(&mut self, test_repo_config: &TestRepoConfig ) -> anyhow::Result<()> {
+    pub async fn add_test_repo(&mut self, test_repo_config: &RemoteTestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
         log::trace!("Adding TestRepo from {:#?}", test_repo_config);
 
         // If the TestRunner is in an Error state, return an error.
@@ -356,12 +345,12 @@ impl TestRunner {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
 
-        self.test_data_store.add_test_repo(test_repo_config.clone()).await?;  
+        let storage = self.data_store.add_test_repo_storage(test_repo_config.clone()).await?;  
 
-        Ok(())
+        Ok(storage)
     }
 
-    pub async fn add_test_run_source(&mut self, source_config: &SourceConfig) -> anyhow::Result<Option<ChangeScriptPlayer>> {
+    pub async fn add_test_source(&mut self, source_config: &SourceConfig) -> anyhow::Result<Option<ChangeScriptPlayer>> {
         log::trace!("Adding TestRunSource from {:#?}", source_config);
 
         // If the TestRunner is in an Error state, return an error.
@@ -372,12 +361,12 @@ impl TestRunner {
         let test_run_source = TestRunSource::try_from_config(source_config, &self.source_defaults)?;
 
         // Fail if the TestRunner already contains the TestRunSource.
-        if self.contains_test_run_source(&test_run_source.id) {
+        if self.contains_test_source(&test_run_source.id) {
             anyhow::bail!("TestRunSource already exists: {:?}", &test_run_source);
         }
 
         // Get the DataSet for the TestRunSource.
-        let dataset = self.test_data_store.get_test_source_dataset(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await?;
+        let dataset = self.data_store.get_test_source_dataset(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await?;
 
         // Determine if the TestRunSource has a reactivator, in which case a ChangeScriptPlayer should 
         // be created and possibly started.
@@ -410,7 +399,15 @@ impl TestRunner {
         Ok(None)
     }
 
-    pub async fn control_player(&self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
+    pub async fn contains_test_repo(&self, test_repo_id: &str) -> bool {
+        self.data_store.contains_test_repo(test_repo_id)
+    }
+
+    pub async fn contains_test_source(&self, test_run_source_id: &str) -> bool {
+        self.sources.contains_key(test_run_source_id)
+    }
+
+    pub async fn control_change_script_player(&self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
         log::trace!("Control Player - player_id:{}, command:{:?}", player_id, command);
 
         // If the TestRunner is in an Error state, return an error.
@@ -451,52 +448,40 @@ impl TestRunner {
         }
     }
 
-    pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.test_data_store.contains_test_repo(test_repo_id)
+    pub async fn get_test_source_datasets(&self) -> anyhow::Result<Vec<TestSourceDataset>> {
+        self.data_store.get_test_source_datasets()
     }
 
-    pub fn contains_test_run_source(&self, test_run_source_id: &str) -> bool {
-        self.sources.contains_key(test_run_source_id)
-    }
-
-    pub fn get_data_store_path(&self) -> &str {
-        &self.data_store_path.to_str().unwrap()
-    }
-
-    pub fn get_datasets(&self) -> anyhow::Result<Vec<TestSourceDataset>> {
-        self.test_data_store.list_test_source_datasets()
-    }
-
-    pub fn get_status(&self) -> &TestRunnerStatus {
+    pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
         &self.status
     }
 
-    pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoInfo>> {
-        self.test_data_store.get_test_repo_info(test_repo_id)
+    pub async fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoCacheInfo>> {
+        self.data_store.add_test_repo_storage(config)
     }
 
-    pub fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoInfo>> {
-        self.test_data_store.get_test_repos_info()
+    pub async fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoCacheInfo>> {
+        self.data_store.get_test_repos_info()
     }
 
-    pub fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        self.test_data_store.get_test_repo_ids()
+    pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
+        self.data_store.get_test_repo_ids()
     }
 
-    pub fn get_test_run_source(&self, test_run_source_id: &str) -> anyhow::Result<Option<TestRunSource>> {
+    pub async fn get_test_source(&self, test_run_source_id: &str) -> anyhow::Result<Option<TestRunSource>> {
         Ok(self.sources.get(test_run_source_id).cloned())
     }
 
-    pub fn get_test_run_sources(&self) -> anyhow::Result<Vec<TestRunSource>> {
+    pub async fn get_test_sources(&self) -> anyhow::Result<Vec<TestRunSource>> {
         Ok(self.sources.values().cloned().collect())
     }
 
-    pub fn get_test_run_source_ids(&self) -> anyhow::Result<Vec<String>> {
+    pub async fn get_test_source_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.sources.keys().cloned().collect())
     }
 
-    pub fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
-        self.test_data_store.match_bootstrap_dataset(requested_labels)
+    pub async fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
+        self.data_store.match_bootstrap_dataset(requested_labels)
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {

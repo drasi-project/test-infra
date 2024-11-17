@@ -78,7 +78,7 @@ pub async fn add_source_handler (
 
     let source_config = body.0;
 
-    match test_runner.add_test_run_source(&source_config).await {
+    match test_runner.add_test_source(&source_config).await {
         Ok(result) => {
             match result {
                 Some(player) => {
@@ -119,7 +119,7 @@ pub async fn get_source_list_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    match test_runner.get_test_run_sources() {
+    match test_runner.get_test_sources() {
         Ok(sources) => {
             Json(sources).into_response()
         },
@@ -145,7 +145,7 @@ pub async fn get_source_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    match test_runner.get_test_run_source(&id) {
+    match test_runner.get_test_source(&id) {
         Ok(source) => {
             match source {
                 Some(source) => {
@@ -177,7 +177,7 @@ pub async fn get_player_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    match test_runner.control_player(&id, ChangeScriptPlayerCommand::GetState).await {
+    match test_runner.control_change_script_player(&id, ChangeScriptPlayerCommand::GetState).await {
         Ok(response) => {
             Json(response.state).into_response()
         },
@@ -200,7 +200,7 @@ pub async fn pause_player_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Pause).await {
+    match test_runner.control_change_script_player(&id, ChangeScriptPlayerCommand::Pause).await {
         Ok(response) => {
             Json(response.state).into_response()
         },
@@ -243,7 +243,7 @@ pub async fn skip_player_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Skip(num_skips)).await {
+    match test_runner.control_change_script_player(&id, ChangeScriptPlayerCommand::Skip(num_skips)).await {
         Ok(response) => {
             Json(response.state).into_response()
         },
@@ -266,7 +266,7 @@ pub async fn start_player_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Start).await {
+    match test_runner.control_change_script_player(&id, ChangeScriptPlayerCommand::Start).await {
         Ok(response) => {
             Json(response.state).into_response()
         },
@@ -309,7 +309,7 @@ pub async fn step_player_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Step(num_steps)).await {
+    match test_runner.control_change_script_player(&id, ChangeScriptPlayerCommand::Step(num_steps)).await {
         Ok(response) => {
             Json(response.state).into_response()
         },
@@ -332,7 +332,7 @@ pub async fn stop_player_handler(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
     }
 
-    match test_runner.control_player(&id, ChangeScriptPlayerCommand::Stop).await {
+    match test_runner.control_change_script_player(&id, ChangeScriptPlayerCommand::Stop).await {
         Ok(response) => {
             Json(response.state).into_response()
         },

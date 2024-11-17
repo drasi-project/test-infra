@@ -1,9 +1,9 @@
-use std::{path::PathBuf, sync::Arc, time::SystemTime};
+use std::{sync::Arc, time::SystemTime};
 
 use serde::Serialize;
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle };
 
-use test_data_store::scripts::ChangeScriptRecord;
+use test_data_store::{data_collection_storage::DataCollectionSourceStorage, scripts::ChangeScriptRecord};
 
 use crate::{config::{SourceChangeQueueReaderConfig, SourceChangeRecorderConfig}, source::change_queue_readers::{get_source_change_queue_reader, none_change_queue_reader::NoneSourceChangeQueueReader, SourceChangeQueueReader, SourceChangeQueueReaderMessage}};
 
@@ -21,21 +21,21 @@ pub enum SourceChangeRecorderError {
     PauseToPublish,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct SourceChangeRecorderSettings {
-    pub data_store_path: PathBuf,
     pub drain_queue_on_stop: bool,
     pub source_id: String,
     pub source_change_queue_reader_config: Option<SourceChangeQueueReaderConfig>,
+    pub storage: DataCollectionSourceStorage,
 }   
 
 impl SourceChangeRecorderSettings {
-    pub fn new(config: &SourceChangeRecorderConfig, source_id: String, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(config: &SourceChangeRecorderConfig, source_id: String, storage: DataCollectionSourceStorage) -> anyhow::Result<Self> {
         Ok( SourceChangeRecorderSettings {
-            data_store_path: data_store_path.join("source_change_recorder"),
             drain_queue_on_stop: config.drain_queue_on_stop.unwrap_or(false),
             source_id,
             source_change_queue_reader_config: config.change_queue_reader.clone(),
+            storage
         })
     }
 }
@@ -120,10 +120,10 @@ pub struct SourceChangeRecorder {
 }
 
 impl SourceChangeRecorder {
-    pub async fn new(config: &SourceChangeRecorderConfig, source_id: String, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(config: &SourceChangeRecorderConfig, source_id: String, storage: DataCollectionSourceStorage) -> anyhow::Result<Self> {
         log::debug!("Creating SourceChangeRecorder from config {:?}", config);
 
-        let settings = SourceChangeRecorderSettings::new(config, source_id, data_store_path)?;
+        let settings = SourceChangeRecorderSettings::new(config, source_id, storage)?;
 
         let (recorder_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
         let recorder_thread_handle = tokio::spawn(recorder_thread(settings.clone(), player_rx_channel));

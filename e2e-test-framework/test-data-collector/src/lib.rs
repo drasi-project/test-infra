@@ -2,14 +2,13 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use futures::future::join_all;
 use serde::Serialize;
-use test_data_store::{config::TestRepoConfig, TestDataStore, TestRepoInfo};
 use tokio::sync::RwLock;
 
 use config::{DataCollectionConfig, TestDataCollectorConfig, DataCollectionSourceConfig};
 use source::DataCollectionSource;
+use test_data_store::{data_collection_storage::DataCollectionStorage, test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage}, TestDataStore};
 
 pub mod config;
-// pub mod query;
 pub mod source;
 
 // An enum that represents the current state of the TestDataCollector.
@@ -27,35 +26,24 @@ pub type SharedTestDataCollector = Arc<RwLock<TestDataCollector>>;
 
 #[derive(Debug)]
 pub struct TestDataCollector {
-    data_store_path: PathBuf,
     data_collections: HashMap<String, DataCollection>,
+    data_store: TestDataStore,
     status: TestDataCollectorStatus,
-    test_data_store: TestDataStore,
 }
 
 impl TestDataCollector {
     pub async fn new(config: TestDataCollectorConfig) -> anyhow::Result<Self> {   
-
         log::debug!("Creating TestDataCollector from {:#?}", config);
 
-        let data_store_path = PathBuf::from(&config.data_store_path);
-
         let mut test_data_collector = TestDataCollector {
-            data_store_path: data_store_path.clone(),
             data_collections: HashMap::new(),
             status: TestDataCollectorStatus::Initialized,
-            test_data_store: TestDataStore::new(data_store_path, config.delete_data_store).await?,
-        };
-
-        // Add the initial set of test repos.
-        // Fail construction if any of the TestRepoConfigs fail to create.
-        for ref test_repo_config in config.test_repos {
-            test_data_collector.add_test_repo(test_repo_config).await?;
+            data_store: TestDataStore::new(config.data_store).await?,
         };
 
         // Add the initial set of DataCollections.
         // Fail construction if any of the DataCollectionConfigs fail to create.
-        for ref data_collection_config in config.data_collections {
+        for data_collection_config in config.data_collections {
             test_data_collector.add_data_collection(data_collection_config).await?;
         };
 
@@ -64,21 +52,29 @@ impl TestDataCollector {
         Ok(test_data_collector)
     }
     
-    pub async fn add_data_collection(&mut self, data_collection_config: &DataCollectionConfig) -> anyhow::Result<()> {
+    pub async fn add_data_collection(&mut self, data_collection_config: DataCollectionConfig) -> anyhow::Result<DataCollection> {
         log::trace!("Adding DataCollection from {:#?}", data_collection_config);
 
         // If the TestDataCollector is in an Error state, return an error.
         if let TestDataCollectorStatus::Error(msg) = &self.status {
             anyhow::bail!("TestDataCollector is in an Error state: {}", msg);
         };
-        
-        let data_collection = DataCollection::new(data_collection_config, self.data_store_path.clone()).await?;
-        self.data_collections.insert(data_collection.id.clone(), data_collection);
 
-        Ok(())
+        // Fail if the TestDataCollector already contains a DataCollection with the same ID.
+        if self.contains_data_collection(&data_collection_config.id).await? {
+            anyhow::bail!("DataCollection already exists: {:?}", &data_collection_config);
+        }
+
+        // Create storage for the DataCollection.
+        let storage = self.data_store.get_data_collection_storage(&data_collection_config.id).await?;
+        
+        let data_collection = DataCollection::new(data_collection_config, storage).await?;
+        self.data_collections.insert(data_collection.id.clone(), data_collection.clone());
+
+        Ok(data_collection)
     }
 
-    pub async fn add_test_repo(&mut self, test_repo_config: &TestRepoConfig ) -> anyhow::Result<()> {
+    pub async fn add_test_repo(&mut self, test_repo_config: RemoteTestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
         log::trace!("Adding TestRepo from {:#?}", test_repo_config);
 
         // If the TestDataCollector is in an Error state, return an error.
@@ -86,9 +82,7 @@ impl TestDataCollector {
             anyhow::bail!("TestDataCollector is in an Error state: {}", msg);
         };
 
-        self.test_data_store.add_test_repo(test_repo_config.clone()).await?;  
-
-        Ok(())
+        self.data_store.add_test_repo_storage(test_repo_config.clone()).await
     }
 
     pub async fn start_data_collection_sources(&mut self, data_collection_id: &str, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
@@ -110,83 +104,67 @@ impl TestDataCollector {
         }
     }
 
-    pub fn contains_test_repo(&self, test_repo_id: &str) -> bool {
-        self.test_data_store.contains_test_repo(test_repo_id)
+    pub async fn contains_test_repo(&self, test_repo_id: &str) -> anyhow::Result<bool> {
+        self.data_store.contains_test_repo(test_repo_id).await
     }
 
-    pub fn contains_data_collection(&self, data_collection_id: &str) -> bool {
-        self.data_collections.contains_key(data_collection_id)
+    pub async fn contains_data_collection(&self, data_collection_id: &str) -> anyhow::Result<bool>  {
+        Ok(self.data_collections.contains_key(data_collection_id))
     }
 
-    pub fn get_data_store_path(&self) -> PathBuf {
-        self.data_store_path.clone()
+    pub async fn get_data_store_path(&self) -> anyhow::Result<PathBuf> {
+        self.data_store.get_data_store_path().await
     }
 
-    pub fn get_status(&self) -> &TestDataCollectorStatus {
+    pub async fn get_status(&self) -> &TestDataCollectorStatus {
         &self.status
-    }
-
-    pub fn get_test_repo(&self, test_repo_id: &str) -> anyhow::Result<Option<TestRepoInfo>> {
-        self.test_data_store.get_test_repo_info(test_repo_id)
-    }
-
-    pub fn get_test_repos(&self) -> anyhow::Result<Vec<TestRepoInfo>> {
-        self.test_data_store.get_test_repos_info()
-    }
-
-    pub fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        self.test_data_store.get_test_repo_ids()
     }
 }
 
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DataCollection {
-    data_store_path: PathBuf,
     id: String,
     sources: HashMap<String, DataCollectionSource>,    
+    storage: DataCollectionStorage,
 }
 
 impl DataCollection {
-    pub async fn new(config: &DataCollectionConfig, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(config: DataCollectionConfig, storage: DataCollectionStorage) -> anyhow::Result<Self> {
         log::debug!("Creating DataCollection from config {:#?}", config);
 
-        let id = config.id.clone();
-
-        let data_store_path = data_store_path.join(&id);
-
         let mut data_collection = DataCollection {
-            data_store_path,   
-            id,
+            id: config.id.clone(),
             sources: HashMap::new(),
+            storage: storage,
         };
     
-        for source_config in &config.sources {
+        for source_config in config.sources {
             data_collection.add_source(source_config).await?;
         };
 
         Ok(data_collection)
     }
 
-    pub async fn add_source(&mut self, config: &DataCollectionSourceConfig) -> anyhow::Result<()> {
-        log::trace!("Adding DataCollectionSource from {:#?}", config);
+    pub async fn add_source(&mut self, config: DataCollectionSourceConfig) -> anyhow::Result<DataCollectionSource> {
+        log::trace!("Adding DataCollectionSource from config {:#?}", config);
 
         let source_id = config.source_id.clone();
 
         // Fail if the DataCollection already contains the Source
-        if self.contains_source(&source_id) {
+        if self.contains_source(&source_id).await? {
             anyhow::bail!("DataCollectionSource already exists: {:?}", &config);
         }
         
-        let source = DataCollectionSource::new(config, self.data_store_path.clone()).await?;
+        let source = DataCollectionSource::new(config, self.storage.get_source_storage(&source_id).await?).await?;
 
-        self.sources.insert(source_id.clone(), source);
+        self.sources.insert(source_id.clone(), source.clone());
 
-        Ok(())
+        Ok(source)
     }    
 
-    pub fn contains_source(&self, source_id: &str) -> bool {
-        self.sources.contains_key(source_id)
+    pub async fn contains_source(&self, source_id: &str) -> anyhow::Result<bool> {
+        Ok(self.sources.contains_key(source_id))
     }
 
     pub async fn start_sources(&mut self, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
@@ -222,46 +200,50 @@ impl DataCollection {
 // Unit tests
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use config::{RedisSourceChangeQueueReaderConfig, SourceChangeQueueReaderConfig, SourceChangeRecorderConfig};
+    use test_data_store::TestDataStoreConfig;
     use tokio::fs::remove_dir_all;
 
     use super::*;
 
     #[tokio::test]
     async fn test_data_collector_data_cache_create() {
-        // Create a random String to use as the data store name.
-        let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
+        // Create a random path to use as the Data Store folder name.
+        let data_store_path = format!("./tests/{}", uuid::Uuid::new_v4().to_string());
         let data_store_path_buf = PathBuf::from(&data_store_path);
 
         let config = TestDataCollectorConfig {
-            data_store_path,
-            delete_data_store: false,
-            test_repos: vec![],
             data_collections: vec![],
+            data_store: TestDataStoreConfig {
+                data_collection_folder: None,
+                data_store_path: Some(data_store_path),
+                delete_data_store: Some(true),
+                test_repos: None,
+                test_repo_folder: None,
+            }
         };
 
         let test_data_collector = TestDataCollector::new(config).await.unwrap();
 
         // Check that the TestDataCollector is in the Initialized state.
-        assert_eq!(test_data_collector.get_status(), &TestDataCollectorStatus::Initialized);
+        assert_eq!(test_data_collector.get_status().await, &TestDataCollectorStatus::Initialized);
 
         // Check that the data cache folder was created.
-        assert_eq!(test_data_collector.get_data_store_path(), data_store_path_buf);
+        assert_eq!(test_data_collector.get_data_store_path().await.unwrap(), data_store_path_buf);
 
         // Delete the data cache folder and test that the operation was successful;
         assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[tokio::test]
     async fn interactive_test() {
         // Create a random String to use as the data store name.
         let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
         let data_store_path_buf = PathBuf::from(&data_store_path);
 
         let config = TestDataCollectorConfig {
-            data_store_path,
-            delete_data_store: false,
-            test_repos: vec![],
             data_collections: vec![DataCollectionConfig {
                 id: "hello-world".to_string(),
                 queries: vec![],
@@ -280,12 +262,19 @@ mod tests {
                     start_immediately: false,
                 }],
             }],
+            data_store: TestDataStoreConfig {
+                data_collection_folder: None,
+                data_store_path: Some(data_store_path),
+                delete_data_store: Some(true),
+                test_repos: None,
+                test_repo_folder: None,
+            }
         };
 
         let mut test_data_collector = TestDataCollector::new(config).await.unwrap();
 
         // Check that the TestDataCollector is in the Initialized state.
-        assert_eq!(test_data_collector.get_status(), &TestDataCollectorStatus::Initialized);
+        assert_eq!(test_data_collector.get_status().await, &TestDataCollectorStatus::Initialized);
 
         // Start the Source, which will start the SourceChangeRecorder
         test_data_collector.start_data_collection_sources("hello-world", false, true).await.unwrap();        

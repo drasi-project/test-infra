@@ -148,7 +148,7 @@ async fn service_info_handler(
                 }
             };
 
-            let test_run_source_ids = match test_runner.get_test_run_source_ids() {
+            let test_run_source_ids = match test_runner.get_test_source_ids() {
                 Ok(ids) => ids,
                 Err(e) => {
                     let msg = format!("Error getting test run source ids: {:?}", e);

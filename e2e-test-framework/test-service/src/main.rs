@@ -1,11 +1,8 @@
 use clap::Parser;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use test_data_collector::{config::TestDataCollectorConfig, TestDataCollector};
 use test_runner::{config::TestRunnerConfig, TestRunner};
 
-mod dataset;
-mod proxy;
-mod source;
-mod test_repo;
 mod web_api;
 
 // A struct to hold parameters obtained from env vars and/or command line arguments.
@@ -14,12 +11,12 @@ mod web_api;
 #[command(author, version, about, long_about = None)]
 pub struct HostParams {
     // The path of the config file.
-    // If not provided, the the TestRunner will be stared with no active configuration
+    // If not provided, the TestService will be stared with no active configuration
     // and wait to be configured through the Web API.
     #[arg(short = 'c', long = "config", env = "DRASI_CONFIG_FILE")]
     pub config_file_path: Option<String>,
 
-    // The path where data used and generated in the TestRunner gets stored.
+    // The path where data used and generated in the TestService gets stored.
     // This will override the value in the config file if it is present.
     #[arg(short = 'd', long = "data", env = "DRASI_DATA_STORE_PATH")]
     pub data_store_path: Option<String>,
@@ -34,6 +31,23 @@ pub struct HostParams {
     pub port: u16
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TestServiceConfig {
+    #[serde(default)]
+    pub test_runner: TestRunnerConfig,
+    #[serde(default)]
+    pub test_data_collector: TestDataCollectorConfig,
+}
+
+impl Default for TestServiceConfig {
+    fn default() -> Self {
+        TestServiceConfig {
+            test_runner: TestRunnerConfig::default(),
+            test_data_collector: TestDataCollectorConfig::default(),
+        }
+    }
+}
+
 // The main function that starts the starts the Test Runner Host.
 #[tokio::main]
 async fn main() {
@@ -46,8 +60,8 @@ async fn main() {
 
     // Load the config from a file if a path is specified in the HostParams.
     // If the specified file does not exist, return an error.
-    // If no config file is specified, create the TestRunner with a default configuration.
-    let mut test_runner_config = match host_params.config_file_path.as_ref() {
+    // If no config file is specified, create the TestService with a default configuration.
+    let mut test_service_config = match host_params.config_file_path.as_ref() {
         Some(config_file_path) => {
             log::info!("Loading Test Runner config from {:#?}", config_file_path);
 
@@ -61,28 +75,33 @@ async fn main() {
                 panic!("Error reading config file: {}", err);
             });
 
-            serde_json::from_str::<TestRunnerConfig>(&config_file_json).unwrap_or_else(|err| {
-                panic!("Error parsing config TestRunner: {}", err);
+            serde_json::from_str::<TestServiceConfig>(&config_file_json).unwrap_or_else(|err| {
+                panic!("Error parsing TestServiceConfig: {}", err);
             })
         },
         None => {
-            log::info!("No config file specified.; using default configuration.");
-            TestRunnerConfig::default()
+            log::info!("No config file specified; using default configuration.");
+            TestServiceConfig::default()
         }
     };
 
-    // If a data_store_path is specified in the HostParams, update the TestRunnerConfig.
+    // If a data_store_path is specified in the HostParams, update the TestServiceConfig.
     if host_params.data_store_path.is_some() {
-        test_runner_config.data_store_path = host_params.data_store_path.unwrap();
+        test_service_config.test_runner.data_store.data_store_path = host_params.data_store_path.clone();
+        test_service_config.test_data_collector.data_store.data_store_path = host_params.data_store_path.clone();
+
     }
 
-    // If the prune_data_store flag is set, update the TestRunnerConfig
-    if host_params.prune_data_store {
-        test_runner_config.delete_data_store = true;
-    }
+    let mut test_data_collector = TestDataCollector::new(test_service_config.test_data_collector).await.unwrap_or_else(|err| {
+        panic!("Error creating TestDataCollector: {}", err);
+    });
 
-    log::debug!("Creating Test Runner with config {:?}", test_runner_config);
-    let mut test_runner = TestRunner::new(test_runner_config).await.unwrap_or_else(|err| {
+    // Start the TestDataCollector. This will start any collectors that are configured to start on launch.
+    test_data_collector.start().await.unwrap_or_else(|err| {
+        panic!("Error starting TestDataCollector: {}", err);
+    });
+
+    let mut test_runner = TestRunner::new(test_service_config.test_runner).await.unwrap_or_else(|err| {
         panic!("Error creating TestRunner: {}", err);
     });
 
@@ -90,7 +109,7 @@ async fn main() {
     test_runner.start().await.unwrap_or_else(|err| {
         panic!("Error starting TestRunner: {}", err);
     });
-
+    
     // Start the Web API.
-    web_api::start_web_api(host_params.port, test_runner).await;
+    web_api::start_web_api(host_params.port, test_runner, test_data_collector).await;
 }

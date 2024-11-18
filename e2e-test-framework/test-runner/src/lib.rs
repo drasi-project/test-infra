@@ -1,7 +1,7 @@
-use std::{collections::{HashMap, HashSet}, str::FromStr, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, str::FromStr, sync::Arc};
 
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestSourceDataset}, TestDataStore};
+use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage}, TestDataStore};
 use tokio::sync::RwLock;
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse, ChangeScriptPlayerSettings};
@@ -449,6 +449,10 @@ impl TestRunner {
         }
     }
 
+    pub async fn get_data_store_path(&self) -> anyhow::Result<PathBuf> {
+        self.data_store.get_data_store_path().await
+    }
+    
     pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
         Ok(self.status.clone())
     }

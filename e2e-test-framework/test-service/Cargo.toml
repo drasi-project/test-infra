@@ -7,6 +7,7 @@ edition = "2021"
 drasi-comms-abstractions = { path = "../infrastructure/comms-abstractions" }
 drasi-comms-dapr = { path = "../infrastructure/comms-dapr" }
 test-data-collector = { path = "../test-data-collector" }
+test-data-store = { path = "../test-data-store" }
 test-runner = { path = "../test-runner" }
 
 axum = "0.6.19"

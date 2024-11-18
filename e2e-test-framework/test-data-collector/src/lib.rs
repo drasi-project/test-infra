@@ -112,12 +112,26 @@ impl TestDataCollector {
         Ok(self.data_collections.contains_key(data_collection_id))
     }
 
+    pub async fn get_data_collection_ids(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.data_collections.keys().cloned().collect())
+    }
+
     pub async fn get_data_store_path(&self) -> anyhow::Result<PathBuf> {
         self.data_store.get_data_store_path().await
     }
 
-    pub async fn get_status(&self) -> &TestDataCollectorStatus {
-        &self.status
+    pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
+        self.data_store.get_test_repo_ids().await
+    }
+
+    pub async fn get_status(&self) -> anyhow::Result<TestDataCollectorStatus> {
+        Ok(self.status.clone())
+    }
+
+    pub async fn start(&mut self) -> anyhow::Result<()> {
+        log::trace!("Starting TestDataCollector");
+
+        Ok(())
     }
 }
 
@@ -209,7 +223,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_data_collector_data_cache_create() {
+    async fn test_data_collector_data_cache_create() -> anyhow::Result<()> {
         // Create a random path to use as the Data Store folder name.
         let data_store_path = format!("./tests/{}", uuid::Uuid::new_v4().to_string());
         let data_store_path_buf = PathBuf::from(&data_store_path);
@@ -229,17 +243,19 @@ mod tests {
         let test_data_collector = TestDataCollector::new(config).await.unwrap();
 
         // Check that the TestDataCollector is in the Initialized state.
-        assert_eq!(test_data_collector.get_status().await, &TestDataCollectorStatus::Initialized);
+        assert_eq!(test_data_collector.get_status().await?, TestDataCollectorStatus::Initialized);
 
         // Check that the data cache folder was created.
         assert_eq!(test_data_collector.get_data_store_path().await.unwrap(), data_store_path_buf);
 
         // Delete the data cache folder and test that the operation was successful;
         assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn interactive_test() {
+    async fn interactive_test()  -> anyhow::Result<()> {
         // Create a random String to use as the data store name.
         let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
         let data_store_path_buf = PathBuf::from(&data_store_path);
@@ -276,7 +292,7 @@ mod tests {
         let mut test_data_collector = TestDataCollector::new(config).await.unwrap();
 
         // Check that the TestDataCollector is in the Initialized state.
-        assert_eq!(test_data_collector.get_status().await, &TestDataCollectorStatus::Initialized);
+        assert_eq!(test_data_collector.get_status().await?, TestDataCollectorStatus::Initialized);
 
         // Start the Source, which will start the SourceChangeRecorder
         test_data_collector.start_data_collection_sources("hello-world", false, true).await.unwrap();        
@@ -290,5 +306,6 @@ mod tests {
         // Delete the data cache folder and test that the operation was successful;
         assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
 
+        Ok(())
     }
 }

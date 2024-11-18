@@ -12,7 +12,7 @@ pub mod scripts;
 pub mod test_repo_storage;
 pub mod test_run_storage;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TestDataStoreConfig {
     pub data_collection_folder: Option<String>,
     pub data_store_path: Option<String>,
@@ -33,6 +33,13 @@ impl Default for TestDataStoreConfig {
             test_run_folder: None,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct TestDataStoreInfo {
+    pub root_path: PathBuf,    
+    pub data_collection_ids: Vec<String>,
+    pub test_repo_ids: Vec<String>,
 }
 
 #[derive(Debug)]

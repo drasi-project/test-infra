@@ -28,7 +28,7 @@ impl Default for TestRunnerConfig {
 
 // The SourceConfig is what is loaded from the TestRunner config file or passed in to the Web API 
 // to create a new Source.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SourceConfig {
     pub test_repo_id: Option<String>,
     pub test_id: Option<String>,
@@ -51,7 +51,7 @@ impl Default for SourceConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ProxyConfig {
     pub time_mode: Option<String>,
 }
@@ -64,7 +64,7 @@ impl Default for ProxyConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ReactivatorConfig {
     pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
     pub ignore_scripted_pause_commands: Option<bool>,

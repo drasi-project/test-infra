@@ -18,7 +18,7 @@ impl Default for TestDataCollectorConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DataCollectionConfig {
     pub id: String,
     pub queries: Vec<DataCollectionQueryConfig>,
@@ -72,7 +72,7 @@ pub struct ConsoleQueryResultSetLoggerConfig {
 pub struct JsonlFileQueryResultSetLoggerConfig {
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DataCollectionSourceConfig {
     pub source_id: String,
     #[serde(default = "default_start_immediately")]
@@ -119,7 +119,7 @@ pub struct ScriptSourceBootstrapDataLoggerConfig {
     pub start_time_mode: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SourceChangeRecorderConfig {
     pub drain_queue_on_stop: Option<bool>,
     #[serde(default)]

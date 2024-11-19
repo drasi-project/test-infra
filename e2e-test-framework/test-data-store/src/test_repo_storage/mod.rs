@@ -7,8 +7,90 @@ use walkdir::WalkDir;
 
 pub mod repo_clients;
 
+const SOURCES_FOLDER_NAME: &str = "sources";
+const BOOTSTRAP_SCRIPTS_FOLDER_NAME: &str = "bootstrap_scripts";
+const CHANGE_SCRIPTS_FOLDER_NAME: &str = "change_scripts";
+
 fn get_test_source_id(test_id: &str, source_id: &str) -> String {
     format!("{}__{}", test_id, source_id)
+}
+
+#[derive(Clone, Debug)]
+pub struct TestRepoStore {
+    pub path: PathBuf,
+    pub remote_test_repos: HashMap<String, RemoteTestRepoConfig>,
+}
+
+impl TestRepoStore {
+    pub async fn new(folder_name: String, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
+
+        let path = parent_path.join(&folder_name);
+        log::debug!("Creating TestRepoStore in folder: {:?}", &path);
+
+        if replace && path.exists() {
+            fs::remove_dir_all(&path).await?;
+        }
+
+        if !path.exists() {
+            fs::create_dir_all(&path).await?;
+        }
+
+        Ok(Self {
+            path,
+            remote_test_repos: HashMap::new(),
+        })
+    }
+
+    pub async fn add_test_repo(&mut self, config: RemoteTestRepoConfig, replace: bool) -> anyhow::Result<TestRepoStorage> {
+        log::debug!("Adding RemoteTestRepo from config: {:?}", &config);
+
+        let id = config.get_id();
+
+        if self.remote_test_repos.contains_key(&id) {
+            return Err(anyhow::anyhow!("TestRepoStorage already exists for ID: {:?}", &id));
+        }
+
+        let test_repo_storage = TestRepoStorage::new(&id, self.path.clone(), config.clone(), replace).await?;
+
+        self.remote_test_repos.insert(id, config);
+
+        Ok(test_repo_storage)
+    }
+
+    pub async fn contains_test_repo(&self, id: &str) -> anyhow::Result<bool> {
+        let path = self.path.join(&id);
+        Ok(path.exists())
+    }
+
+    pub async fn contains_test_repo_source(&self, test_repo_id: &str, source_id: &str) -> anyhow::Result<bool> {
+        let path = self.path.join(format!("{}/{}/{}", test_repo_id, SOURCES_FOLDER_NAME, &source_id));
+        Ok(path.exists())
+    }
+
+    pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
+        let mut test_repo_ids = Vec::new();
+
+        let mut entries = fs::read_dir(&self.path).await?;     
+        while let Some(entry) = entries.next_entry().await? {
+            let metadata = entry.metadata().await?;
+            if metadata.is_dir() {
+                if let Some(folder_name) = entry.file_name().to_str() {
+                    test_repo_ids.push(folder_name.to_string());
+                }
+            }
+        }
+
+        Ok(test_repo_ids)
+    }    
+
+    pub async fn get_test_repo_storage(&self, id: &str) -> anyhow::Result<TestRepoStorage> {
+        log::debug!("Getting TestRepoStorage for ID: {:?}", id);
+
+        match self.remote_test_repos.get(id) {
+            Some(config) => TestRepoStorage::new(id, self.path.clone(), config.clone(), false).await,
+            None => Err(anyhow::anyhow!("TestRepoStorage not found for ID: {:?}", id))
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -20,26 +102,24 @@ pub struct TestRepoStorage {
 }
 
 impl TestRepoStorage {
-    pub async fn new(config: RemoteTestRepoConfig, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
+    pub(crate) async fn new(id: &str, parent_path: PathBuf, config: RemoteTestRepoConfig, replace: bool) -> anyhow::Result<Self> {
         log::debug!("Creating TestRepoStorage in {:?} from config: {:?}", &parent_path, &config);
 
-        let id = config.get_id();
-
         let path = parent_path.join(&id);
-        let sources_path = path.join("sources/");
+        let sources_path = path.join(SOURCES_FOLDER_NAME);
 
         if replace && path.exists() {
             fs::remove_dir_all(&path).await?;
         }
 
         if !path.exists() {
-            fs::create_dir_all(&path).await?;
+            // fs::create_dir_all(&path).await?;
             fs::create_dir_all(&sources_path).await?;
         }
 
         Ok(TestRepoStorage {
             config,
-            id,
+            id: id.to_string(),
             path,
             sources_path,
         })
@@ -100,13 +180,13 @@ pub struct TestSourceStorage {
 }
 
 impl TestSourceStorage {
-    pub async fn new(test_id: &str, source_id: &str, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
+    async fn new(test_id: &str, source_id: &str, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
         let id = get_test_source_id(test_id, source_id);
         log::debug!("Creating TestSourceStorage for ID {:?} in folder: {:?}", &id, &parent_path);
 
         let path = parent_path.join(&id);
-        let bootstrap_scripts_path = path.join("bootstrap_scripts");            
-        let change_scripts_path = path.join("change_scripts");
+        let bootstrap_scripts_path = path.join(BOOTSTRAP_SCRIPTS_FOLDER_NAME);            
+        let change_scripts_path = path.join(CHANGE_SCRIPTS_FOLDER_NAME);
 
         if replace && path.exists() {
             fs::remove_dir_all(&path).await?;
@@ -134,8 +214,8 @@ impl TestSourceStorage {
         
         if path.exists() {
             Ok(Some(Self {
-                bootstrap_scripts_path: path.join("bootstrap_scripts"),
-                change_scripts_path: path.join("change_scripts"),
+                bootstrap_scripts_path: path.join(BOOTSTRAP_SCRIPTS_FOLDER_NAME),
+                change_scripts_path: path.join(CHANGE_SCRIPTS_FOLDER_NAME),
                 id,
                 path,
                 source_id: source_id.to_string(),

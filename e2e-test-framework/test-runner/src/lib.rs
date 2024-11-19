@@ -1,11 +1,11 @@
 use std::{collections::HashMap, path::PathBuf, str::FromStr, sync::Arc};
 
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage}, TestDataStore};
-use tokio::sync::RwLock;
+use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage}, SharedTestDataStore};
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse, ChangeScriptPlayerSettings};
 use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig};
+use tokio::sync::RwLock;
 
 pub mod change_script_player;
 pub mod config;
@@ -306,24 +306,24 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 #[derive(Debug)]
 pub struct TestRunner {
     change_script_players: HashMap<String, ChangeScriptPlayer>,
+    data_store: SharedTestDataStore,
     source_defaults: SourceConfig,
     sources: HashMap<String, TestRunSource>,
     status: TestRunnerStatus,
     _start_reactivators_together: bool,
-    data_store: TestDataStore,
 }
 
 impl TestRunner {
-    pub async fn new(config: TestRunnerConfig) -> anyhow::Result<Self> {   
+    pub async fn new(config: TestRunnerConfig, data_store: SharedTestDataStore) -> anyhow::Result<Self> {   
         log::debug!("Creating TestRunner from {:#?}", config);
 
         let mut test_runner = TestRunner {
             change_script_players: HashMap::new(),
+            data_store,
             source_defaults: config.source_defaults,
             sources: HashMap::new(),
             status: TestRunnerStatus::Initialized,
             _start_reactivators_together: config.start_reactivators_together,
-            data_store: TestDataStore::new(config.data_store).await?,
         };
 
         // Add the initial set of sources.
@@ -345,7 +345,7 @@ impl TestRunner {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
 
-        let storage = self.data_store.add_test_repo_storage(test_repo_config.clone()).await?;  
+        let storage = self.data_store.add_remote_test_repo(test_repo_config.clone()).await?;  
 
         Ok(storage)
     }
@@ -366,12 +366,7 @@ impl TestRunner {
         }
 
         // Get the DataSet for the TestRunSource.
-        let dataset = match self.data_store.get_test_source_dataset(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await? {
-            Some(dataset) => dataset,
-            None => {
-                anyhow::bail!("TestSourceDataset not found for TestRunSource: {:?}", &test_run_source);
-            }
-        };
+        let dataset = self.data_store.get_test_source_dataset(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await?;
 
         // Get the path for data
         let data_store_path = self.data_store.get_test_run_storage(&test_run_source.test_id, &test_run_source.test_run_id).await?.path;
@@ -455,10 +450,6 @@ impl TestRunner {
     
     pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
         Ok(self.status.clone())
-    }
-
-    pub async fn get_test_repo(&self, id: &str) -> anyhow::Result<Option<TestRepoStorage>> {
-        self.data_store.get_test_repo_storage(id).await
     }
 
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {

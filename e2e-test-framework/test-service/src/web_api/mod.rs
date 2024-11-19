@@ -1,13 +1,14 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use axum::{
     extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::get, Json, Router
 };
 use serde::Serialize;
-use tokio::{io::{self, AsyncBufReadExt}, select, signal, sync::RwLock};
+use tokio::{io::{self, AsyncBufReadExt}, select, signal};
 
-use test_data_collector::{SharedTestDataCollector, TestDataCollector};
-use test_runner::{ SharedTestRunner, TestRunner};
+use test_data_collector::SharedTestDataCollector;
+use test_data_store::SharedTestDataStore;
+use test_runner::SharedTestRunner;
 
 // use proxy::acquire_handler;
 // use source::{add_source_handler, get_player_handler, get_source_handler, get_source_list_handler, pause_player_handler, skip_player_handler, start_player_handler, step_player_handler, stop_player_handler};
@@ -103,35 +104,32 @@ where
 
 #[derive(Debug, Serialize)]
 struct TestServiceStateResponse {
+    pub data_store: TestDataStoreStateResponse,
     pub test_runner: TestRunnerStateResponse,
     pub test_data_collector: TestDataCollectorStateResponse,
 }
 
 #[derive(Debug, Serialize)]
+struct TestDataStoreStateResponse {
+    pub data_cache_path: String,
+    pub test_repo_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct TestRunnerStateResponse {
-    pub data_store: DataStoreStateResponse,
     pub status: String,
     pub test_run_source_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct TestDataCollectorStateResponse {
-    pub data_store: DataStoreStateResponse,
     pub status: String,
     pub data_collection_ids: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct DataStoreStateResponse {
-    pub data_cache_path: String,
-    pub test_repo_ids: Vec<String>,
-}
 
-pub(crate) async fn start_web_api(port: u16, test_runner: TestRunner, test_data_collector: TestDataCollector) {
+pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStore, test_runner: SharedTestRunner, test_data_collector: SharedTestDataCollector) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-
-    let shared_test_runner = Arc::new(RwLock::new(test_runner));
-    let shared_test_data_collector = Arc::new(RwLock::new(test_data_collector));
 
     // let datasets_routes = Router::new()
     //     .route("/", get(get_dataset_handler))
@@ -155,8 +153,9 @@ pub(crate) async fn start_web_api(port: u16, test_runner: TestRunner, test_data_
         // .nest("/sources/:id", sources_routes)
         // .route("/test_repos", get(get_test_repo_list_handler).post(add_test_repo_handler))
         // .route("/test_repos/:id", get(get_test_repo_handler))
-        .layer(axum::extract::Extension(shared_test_runner))
-        .layer(axum::extract::Extension(shared_test_data_collector));
+        .layer(axum::extract::Extension(test_data_collector))
+        .layer(axum::extract::Extension(test_data_store))
+        .layer(axum::extract::Extension(test_runner));
 
     log::info!("Listening on {}", addr);
 
@@ -200,8 +199,9 @@ async fn shutdown_signal() {
 }
 
 async fn service_info_handler(
-    test_runner_state: Extension<SharedTestRunner>,
     test_data_collector_state: Extension<SharedTestDataCollector>,
+    test_data_store: Extension<SharedTestDataStore>,
+    test_runner_state: Extension<SharedTestRunner>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceError> {
     log::info!("Processing call - service_info");
 
@@ -209,19 +209,15 @@ async fn service_info_handler(
     let test_data_collector = test_data_collector_state.read().await;
 
     Ok(Json(TestServiceStateResponse {
+        data_store: TestDataStoreStateResponse {
+            data_cache_path: test_data_store.get_data_store_path().await?.to_string_lossy().to_string(),
+            test_repo_ids: test_data_store.get_test_repo_ids().await?,
+        },
         test_runner: TestRunnerStateResponse {
-            data_store: DataStoreStateResponse {
-                data_cache_path: test_runner.get_data_store_path().await?.to_string_lossy().to_string(),
-                test_repo_ids: test_runner.get_test_repo_ids().await?,
-            },
             status: format!("{:?}", test_runner.get_status().await?),
             test_run_source_ids: test_runner.get_test_source_ids().await?
         },
         test_data_collector: TestDataCollectorStateResponse {
-            data_store: DataStoreStateResponse {
-                data_cache_path: test_data_collector.get_data_store_path().await?.to_string_lossy().to_string(),
-                test_repo_ids: test_data_collector.get_test_repo_ids().await?,
-            },
             status: format!("{:?}", test_data_collector.get_status().await?),
             data_collection_ids: test_data_collector.get_data_collection_ids().await?,
         },

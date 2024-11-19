@@ -1,19 +1,15 @@
 use serde::{Deserialize, Serialize};
-use test_data_store::TestDataStoreConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestDataCollectorConfig {
     #[serde(default)]
     pub data_collections: Vec<DataCollectionConfig>,
-    #[serde(default)]
-    pub data_store: TestDataStoreConfig,
 }
 
 impl Default for TestDataCollectorConfig {
     fn default() -> Self {
         TestDataCollectorConfig {
             data_collections: Vec::new(),
-            data_store: TestDataStoreConfig::default(),
         }
     }
 }

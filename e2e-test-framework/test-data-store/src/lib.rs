@@ -1,16 +1,21 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 use serde::{Deserialize, Serialize};
-use test_run_storage::TestRunStorage;
-use tokio::{fs, sync::Mutex};
+use test_run_storage::{TestRunStorage, TestRunStore};
 
-use data_collection_storage::DataCollectionStorage;
-use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestSourceDataset};
+use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
+use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceDataset};
+use tokio::sync::Mutex;
 
 pub mod data_collection_storage;
 pub mod scripts;
 pub mod test_repo_storage;
 pub mod test_run_storage;
+
+const DEFAULT_ROOT_PATH: &str = "drasi_data_store";
+const DEFAULT_DATA_COLLECTION_STORE_FOLDER: &str = "data_collections";
+const DEFAULT_TEST_REPO_STORE_FOLDER: &str = "test_repos";
+const DEFAULT_TEST_RUN_STORE_FOLDER: &str = "test_runs";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TestDataStoreConfig {
@@ -37,25 +42,27 @@ impl Default for TestDataStoreConfig {
 
 #[derive(Debug)]
 pub struct TestDataStoreInfo {
-    pub root_path: PathBuf,    
     pub data_collection_ids: Vec<String>,
+    pub root_path: PathBuf,    
     pub test_repo_ids: Vec<String>,
+    pub test_run_ids: Vec<String>,
 }
 
-#[derive(Debug)]
+pub type SharedTestDataStore = Arc<TestDataStore>;
+
+#[derive(Clone, Debug)]
 pub struct TestDataStore {
-    pub data_collection_root_path: PathBuf,
+    pub data_collection_store: Arc<Mutex<DataCollectionStore>>,
     pub root_path: PathBuf,    
-    pub test_repo_root_path: PathBuf,
-    pub test_repo_stores: Arc<Mutex<HashMap<String, TestRepoStorage>>>,
-    pub test_run_root_path: PathBuf,
+    pub test_repo_store: Arc<Mutex<TestRepoStore>>,
+    pub test_run_store: Arc<Mutex<TestRunStore>>, 
 }
 
 impl TestDataStore {
     pub async fn new(config: TestDataStoreConfig) -> anyhow::Result<Self> {
         log::debug!("Creating TestDataStore using config: {:?}", &config);
 
-        let root_path = PathBuf::from(config.data_store_path.unwrap_or("./drasi_test_data_store".to_string()));
+        let root_path = PathBuf::from(config.data_store_path.unwrap_or(DEFAULT_ROOT_PATH.to_string()));
 
         // Delete the data store folder if it exists and the delete_data_store flag is set.
         if config.delete_data_store.unwrap_or(false) && root_path.exists() {
@@ -69,82 +76,43 @@ impl TestDataStore {
             tokio::fs::create_dir_all(&root_path).await?
         }
 
-        let data_collection_root_path = root_path.join(config.data_collection_folder.unwrap_or("data_collections".to_string()));
-        let test_repo_root_path = root_path.join(config.test_repo_folder.unwrap_or("test_repos".to_string()));
-        let test_run_root_path = root_path.join(config.test_run_folder.unwrap_or("test_runs".to_string()));
-
-        let mut test_data_store = TestDataStore {
-            data_collection_root_path,
-            root_path,
-            test_repo_root_path,
-            test_repo_stores: Arc::new(Mutex::new(HashMap::new())),
-            test_run_root_path,
+        let test_data_store = TestDataStore {
+            data_collection_store: Arc::new(Mutex::new(DataCollectionStore::new(config.data_collection_folder.unwrap_or(DEFAULT_DATA_COLLECTION_STORE_FOLDER.to_string()), root_path.clone(), false).await?)),
+            root_path: root_path.clone(),
+            test_repo_store: Arc::new(Mutex::new(TestRepoStore::new(config.test_repo_folder.unwrap_or(DEFAULT_TEST_REPO_STORE_FOLDER.to_string()), root_path.clone(), false).await?)),
+            test_run_store: Arc::new(Mutex::new(TestRunStore::new(config.test_run_folder.unwrap_or(DEFAULT_TEST_RUN_STORE_FOLDER.to_string()), root_path.clone(), false).await?)),
         };
 
-        // Create the initial TestDataRepo instances.
+        // Create the initial RemoteTestRepo instances.
         for test_repo_config in config.test_repos.unwrap_or_default() {
-            test_data_store.add_test_repo_storage(test_repo_config).await?;
+            test_data_store.add_remote_test_repo(test_repo_config).await?;
         };
 
         Ok(test_data_store)
     }
 
-    pub async fn add_test_repo_storage(&mut self, config: RemoteTestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
-        log::debug!("Adding TestRepoStorage from config: {:?}", &config);
-
-        let mut test_repo_stores = self.test_repo_stores.lock().await;
-
-        if test_repo_stores.contains_key(&config.get_id()) {
-            anyhow::bail!("TestRepoStore with ID {} already exists", &config.get_id());
-        }
-
-        let test_repo_storage = TestRepoStorage::new(config.clone(), self.test_repo_root_path.clone(), false).await?;
-        test_repo_stores.insert(test_repo_storage.id.clone(), test_repo_storage.clone());
-
-        Ok(test_repo_storage)
+    pub async fn add_remote_test_repo(&self, config: RemoteTestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
+        Ok(self.test_repo_store.lock().await.add_test_repo(config, false).await?)
     }
 
     pub async fn contains_data_collection(&self, id: &str) -> anyhow::Result<bool> {
-        let mut path = self.data_collection_root_path.clone();
-        path.push(format!("{}/", id));
-
-        Ok(path.exists())
+        Ok(self.data_collection_store.lock().await.contains_data_collection(id).await?)
     }
 
     pub async fn contains_test_repo(&self, id: &str) -> anyhow::Result<bool> {
-        let mut path = self.test_repo_root_path.clone();
-        path.push(format!("{}/", id));
-
-        Ok(path.exists())
+        Ok(self.test_repo_store.lock().await.contains_test_repo(id).await?)
     }
 
     pub async fn contains_test_run(&self, test_id: &str, test_run_id: &str) -> anyhow::Result<bool> {
-        let mut path = self.test_run_root_path.clone();
-        path.push(format!("{}__{}", test_id, test_run_id));
-
-        Ok(path.exists())
+        Ok(self.test_run_store.lock().await.contains_test_run(test_id, test_run_id).await?)
     }
 
     pub async fn get_data_collection_ids(&self) -> anyhow::Result<Vec<String>> {
-        let mut data_collection_ids = Vec::new();
-
-        let mut entries = fs::read_dir(&self.data_collection_root_path).await?;     
-        while let Some(entry) = entries.next_entry().await? {
-            let metadata = entry.metadata().await?;
-            if metadata.is_dir() {
-                if let Some(folder_name) = entry.file_name().to_str() {
-                    data_collection_ids.push(folder_name.to_string());
-                }
-            }
-        }
-
-        Ok(data_collection_ids)      
+        Ok(self.data_collection_store.lock().await.get_data_collection_ids().await?)
     }
 
     pub async fn get_data_collection_storage(&self, id: &str) -> anyhow::Result<DataCollectionStorage> {
-        log::debug!("Getting DataCollectionStorage for ID: {:?}", id);
-
-        Ok(DataCollectionStorage::new(id, self.data_collection_root_path.clone(), false).await?)
+        Ok(self.data_collection_store.lock().await.get_data_collection_storage(id, false).await?)
     }
 
     pub async fn get_data_store_path(&self) -> anyhow::Result<PathBuf> {
@@ -152,52 +120,22 @@ impl TestDataStore {
     }
 
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        let mut test_repo_ids = Vec::new();
-
-        let mut entries = fs::read_dir(&self.data_collection_root_path).await?;     
-        while let Some(entry) = entries.next_entry().await? {
-            let metadata = entry.metadata().await?;
-            if metadata.is_dir() {
-                if let Some(folder_name) = entry.file_name().to_str() {
-                    test_repo_ids.push(folder_name.to_string());
-                }
-            }
-        }
-
-        Ok(test_repo_ids)      
+        Ok(self.test_repo_store.lock().await.get_test_repo_ids().await?)
     }
 
-    pub async fn get_test_repo_storage(&self, id: &str) -> anyhow::Result<Option<TestRepoStorage>> {
-        log::debug!("Getting TestRepoStorage for ID: {:?}", id);
-
-        let test_repo_stores = self.test_repo_stores.lock().await;
-
-        if let Some(test_repo_storage) = test_repo_stores.get(id) {
-            Ok(Some(test_repo_storage.clone()))
-        } else {
-            Ok(None)
-        }
+    pub async fn get_test_source_dataset(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceDataset> {
+        Ok(self.test_repo_store.lock().await
+            .get_test_repo_storage(repo_id).await?
+            .get_test_source_storage(test_id, source_id).await?
+            .get_dataset().await?)
     }
     
-    pub async fn get_test_source_dataset(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<Option<TestSourceDataset>> {
-        log::debug!("Getting TestSourceDataset for ID: {:?}/{:?}/{:?}", &repo_id, &test_id, &source_id);
-
-        let test_repo_stores = self.test_repo_stores.lock().await;
-
-        if let Some(test_repo_storage) = test_repo_stores.get(repo_id) {
-            let test_source_storage = test_repo_storage.get_test_source_storage(test_id, source_id).await?;
-            let test_source_dataset = test_source_storage.get_dataset().await?;
-
-            Ok(Some(test_source_dataset))
-        } else {
-            Ok(None)
-        }
+    pub async fn get_test_run_ids(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.test_run_store.lock().await.get_test_run_ids().await?)
     }
-    
+
     pub async fn get_test_run_storage(&self, test_id: &str, test_run_id: &str) -> anyhow::Result<TestRunStorage> {
-        log::debug!("Getting TestRunStorage for ID: {:?}__{:?}", test_id, test_run_id);
-
-        Ok(TestRunStorage::new(test_id, test_run_id, self.test_run_root_path.clone(), false).await?)
+        Ok(self.test_run_store.lock().await.get_test_run_storage(test_id, test_run_id, false).await?)
     }
 
     // This function is used to figure out which dataset to use to service a bootstrap request.

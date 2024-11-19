@@ -1,11 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use test_data_store::TestDataStoreConfig;
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestRunnerConfig {
-    #[serde(default)]
-    pub data_store: TestDataStoreConfig,
     #[serde(default)]
     pub source_defaults: SourceConfig,
     #[serde(default)]
@@ -18,7 +14,6 @@ fn default_start_reactivators_together() -> bool { true }
 impl Default for TestRunnerConfig {
     fn default() -> Self {
         TestRunnerConfig {
-            data_store: TestDataStoreConfig::default(),
             source_defaults: SourceConfig::default(),
             sources: Vec::new(),
             start_reactivators_together: default_start_reactivators_together(),

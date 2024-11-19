@@ -2,11 +2,11 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use futures::future::join_all;
 use serde::Serialize;
-use tokio::sync::RwLock;
 
 use config::{DataCollectionConfig, TestDataCollectorConfig, DataCollectionSourceConfig};
 use source::DataCollectionSource;
-use test_data_store::{data_collection_storage::DataCollectionStorage, test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage}, TestDataStore};
+use test_data_store::{data_collection_storage::DataCollectionStorage, test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage}, SharedTestDataStore};
+use tokio::sync::RwLock;
 
 pub mod config;
 pub mod source;
@@ -27,18 +27,18 @@ pub type SharedTestDataCollector = Arc<RwLock<TestDataCollector>>;
 #[derive(Debug)]
 pub struct TestDataCollector {
     data_collections: HashMap<String, DataCollection>,
-    data_store: TestDataStore,
+    data_store: SharedTestDataStore,
     status: TestDataCollectorStatus,
 }
 
 impl TestDataCollector {
-    pub async fn new(config: TestDataCollectorConfig) -> anyhow::Result<Self> {   
+    pub async fn new(config: TestDataCollectorConfig, data_store: SharedTestDataStore) -> anyhow::Result<Self> {   
         log::debug!("Creating TestDataCollector from {:#?}", config);
 
         let mut test_data_collector = TestDataCollector {
             data_collections: HashMap::new(),
+            data_store,
             status: TestDataCollectorStatus::Initialized,
-            data_store: TestDataStore::new(config.data_store).await?,
         };
 
         // Add the initial set of DataCollections.
@@ -82,7 +82,7 @@ impl TestDataCollector {
             anyhow::bail!("TestDataCollector is in an Error state: {}", msg);
         };
 
-        self.data_store.add_test_repo_storage(test_repo_config.clone()).await
+        self.data_store.add_remote_test_repo(test_repo_config.clone()).await
     }
 
     pub async fn start_data_collection_sources(&mut self, data_collection_id: &str, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
@@ -217,7 +217,7 @@ mod tests {
     use std::path::PathBuf;
 
     use config::{RedisSourceChangeQueueReaderConfig, SourceChangeQueueReaderConfig, SourceChangeRecorderConfig};
-    use test_data_store::TestDataStoreConfig;
+    use test_data_store::{TestDataStore, TestDataStoreConfig};
     use tokio::fs::remove_dir_all;
 
     use super::*;
@@ -228,19 +228,20 @@ mod tests {
         let data_store_path = format!("./tests/{}", uuid::Uuid::new_v4().to_string());
         let data_store_path_buf = PathBuf::from(&data_store_path);
 
+        let data_store_config = TestDataStoreConfig {
+            data_collection_folder: None,
+            data_store_path: Some(data_store_path),
+            delete_data_store: Some(true),
+            test_repos: None,
+            test_repo_folder: None,
+            test_run_folder: None,
+        };
+        let test_data_store = Arc::new(TestDataStore::new(data_store_config).await?);
+
         let config = TestDataCollectorConfig {
             data_collections: vec![],
-            data_store: TestDataStoreConfig {
-                data_collection_folder: None,
-                data_store_path: Some(data_store_path),
-                delete_data_store: Some(true),
-                test_repos: None,
-                test_repo_folder: None,
-                test_run_folder: None,
-            }
         };
-
-        let test_data_collector = TestDataCollector::new(config).await.unwrap();
+        let test_data_collector = TestDataCollector::new(config, test_data_store).await.unwrap();
 
         // Check that the TestDataCollector is in the Initialized state.
         assert_eq!(test_data_collector.get_status().await?, TestDataCollectorStatus::Initialized);
@@ -260,6 +261,16 @@ mod tests {
         let data_store_path = format!("tests/{}", uuid::Uuid::new_v4().to_string());
         let data_store_path_buf = PathBuf::from(&data_store_path);
 
+        let data_store_config = TestDataStoreConfig {
+            data_collection_folder: None,
+            data_store_path: Some(data_store_path),
+            delete_data_store: Some(true),
+            test_repos: None,
+            test_repo_folder: None,
+            test_run_folder: None,
+        };
+        let test_data_store = Arc::new(TestDataStore::new(data_store_config).await?);
+
         let config = TestDataCollectorConfig {
             data_collections: vec![DataCollectionConfig {
                 id: "hello-world".to_string(),
@@ -278,18 +289,9 @@ mod tests {
                     }),
                     start_immediately: false,
                 }],
-            }],
-            data_store: TestDataStoreConfig {
-                data_collection_folder: None,
-                data_store_path: Some(data_store_path),
-                delete_data_store: Some(true),
-                test_repos: None,
-                test_repo_folder: None,
-                test_run_folder: None,
-            }
+            }]
         };
-
-        let mut test_data_collector = TestDataCollector::new(config).await.unwrap();
+        let mut test_data_collector = TestDataCollector::new(config, test_data_store).await.unwrap();
 
         // Check that the TestDataCollector is in the Initialized state.
         assert_eq!(test_data_collector.get_status().await?, TestDataCollectorStatus::Initialized);

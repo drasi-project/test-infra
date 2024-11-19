@@ -1,7 +1,11 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use test_data_collector::{config::TestDataCollectorConfig, TestDataCollector};
+use test_data_store::{TestDataStoreConfig, TestDataStore};
 use test_runner::{config::TestRunnerConfig, TestRunner};
+use tokio::sync::RwLock;
 
 mod web_api;
 
@@ -34,6 +38,8 @@ pub struct HostParams {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestServiceConfig {
     #[serde(default)]
+    pub data_store: TestDataStoreConfig,
+    #[serde(default)]
     pub test_runner: TestRunnerConfig,
     #[serde(default)]
     pub test_data_collector: TestDataCollectorConfig,
@@ -42,6 +48,7 @@ pub struct TestServiceConfig {
 impl Default for TestServiceConfig {
     fn default() -> Self {
         TestServiceConfig {
+            data_store: TestDataStoreConfig::default(),
             test_runner: TestRunnerConfig::default(),
             test_data_collector: TestDataCollectorConfig::default(),
         }
@@ -85,14 +92,20 @@ async fn main() {
         }
     };
 
-    // If a data_store_path is specified in the HostParams, update the TestServiceConfig.
     if host_params.data_store_path.is_some() {
-        test_service_config.test_runner.data_store.data_store_path = host_params.data_store_path.clone();
-        test_service_config.test_data_collector.data_store.data_store_path = host_params.data_store_path.clone();
+        test_service_config.data_store.data_store_path = host_params.data_store_path;
+    };
 
-    }
+    if host_params.prune_data_store {
+        test_service_config.data_store.delete_data_store = Some(true);
+    };
 
-    let mut test_data_collector = TestDataCollector::new(test_service_config.test_data_collector).await.unwrap_or_else(|err| {
+    // Create the TestDataStore.
+    let test_data_store = Arc::new(TestDataStore::new(test_service_config.data_store).await.unwrap_or_else(|err| {
+        panic!("Error creating TestDataStore: {}", err);
+    }));
+
+    let mut test_data_collector = TestDataCollector::new(test_service_config.test_data_collector, test_data_store.clone()).await.unwrap_or_else(|err| {
         panic!("Error creating TestDataCollector: {}", err);
     });
 
@@ -101,7 +114,7 @@ async fn main() {
         panic!("Error starting TestDataCollector: {}", err);
     });
 
-    let mut test_runner = TestRunner::new(test_service_config.test_runner).await.unwrap_or_else(|err| {
+    let mut test_runner = TestRunner::new(test_service_config.test_runner, test_data_store.clone()).await.unwrap_or_else(|err| {
         panic!("Error creating TestRunner: {}", err);
     });
 
@@ -111,5 +124,10 @@ async fn main() {
     });
     
     // Start the Web API.
-    web_api::start_web_api(host_params.port, test_runner, test_data_collector).await;
+    web_api::start_web_api(
+        host_params.port, 
+        test_data_store, 
+        Arc::new(RwLock::new(test_runner)), 
+        Arc::new(RwLock::new(test_data_collector))
+    ).await;
 }

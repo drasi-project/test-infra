@@ -1,3 +1,4 @@
 tests/config/
-tests/data_cache/
+tests/drasi/
+tests/drasi_data/
 tests/demo/

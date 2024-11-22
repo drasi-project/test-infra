@@ -63,14 +63,14 @@ async fn main() {
 
     // Parse the command line and env var args. If the args are invalid, return an error.
     let host_params = HostParams::parse();
-    log::info!("Using settings - {:#?}", host_params);
+    log::info!("Started Test Service with - {:?}", host_params);
 
     // Load the config from a file if a path is specified in the HostParams.
     // If the specified file does not exist, return an error.
     // If no config file is specified, create the TestService with a default configuration.
     let mut test_service_config = match host_params.config_file_path.as_ref() {
         Some(config_file_path) => {
-            log::info!("Loading Test Runner config from {:#?}", config_file_path);
+            log::info!("Loading Test Service config from {:#?}", config_file_path);
 
             // Validate that the file exists and if not return an error.
             if !std::path::Path::new(config_file_path).exists() {

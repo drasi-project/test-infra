@@ -35,7 +35,7 @@ pub struct DaprSourceChangeDispatcher {
 impl DaprSourceChangeDispatcher {
     pub fn new(settings: DaprSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
 
-        log::info!("Initializing DaprSourceChangeDispatcher from {:?}", settings);
+        log::info!("Initializing from {:?}", settings);
 
         let publisher = DaprHttpPublisher::new(
             settings.host.clone(),
@@ -55,7 +55,7 @@ impl DaprSourceChangeDispatcher {
 impl SourceChangeDispatcher for DaprSourceChangeDispatcher {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
-        log::trace!("DaprSourceChangeDispatcher - dispatch_source_change_events");
+        log::trace!("Dispatch source change events");
 
         let data = serde_json::to_value(events)?;
 

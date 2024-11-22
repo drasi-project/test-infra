@@ -293,7 +293,7 @@ impl ChangeScriptPlayer {
 // The Web API function communicate via a channel and provide oneshot channels for the ChangeScriptPlayer to send responses back.
 pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMessage>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>, player_settings: ChangeScriptPlayerSettings) {
 
-    log::info!("ChangeScriptPlayer thread started...");
+    log::info!("Player thread started...");
 
     // Initialize the ChangeScriptPlayer infrastructure.
     // Create a ChangeScriptReader to read the ChangeScript files.
@@ -951,7 +951,7 @@ fn transition_to_error_state(error_message: &str, player_state: &mut ChangeScrip
 }
 
 pub async fn delayer_thread(mut delayer_rx_channel: Receiver<DelayChangeScriptRecordMessage>, player_tx_channel: Sender<ChangeScriptPlayerMessage>) {
-    log::info!("ChangeScriptRecord Delayer thread started...");
+    log::info!("Record delayer thread started...");
     log::trace!("Starting ChangeScriptRecord Delayer loop...");
 
     loop {

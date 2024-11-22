@@ -28,7 +28,7 @@ pub struct ConsoleSourceChangeDispatcher {
 impl ConsoleSourceChangeDispatcher {
     pub fn new(settings: ConsoleSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
 
-        log::info!("Initializing ConsoleSourceChangeDispatcher from {:?}", settings);
+        log::info!("Initializing from {:?}", settings);
 
         Ok(Box::new(Self { settings }))
     }
@@ -38,7 +38,7 @@ impl ConsoleSourceChangeDispatcher {
 impl SourceChangeDispatcher for ConsoleSourceChangeDispatcher {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
-        log::trace!("ConsoleSourceChangeDispatcher - dispatch_source_change_events");
+        log::trace!("Dispatch source change events");
 
         let time = Local::now().format(&self.settings.date_time_format);
 

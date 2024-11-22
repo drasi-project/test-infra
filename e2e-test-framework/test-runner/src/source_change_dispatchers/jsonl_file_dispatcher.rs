@@ -32,7 +32,7 @@ pub struct JsonlFileSourceChangeDispatcher {
 impl JsonlFileSourceChangeDispatcher {
     pub fn new(settings: JsonlFileSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
 
-        log::info!("Initializing JsonlFileSourceChangeDispatcher from {:?}", settings);
+        log::info!("Initializing from {:?}", settings);
 
         // Make sure the local change_data_folder exists, if not, create it.
         // If the folder cannot be created, return an error.
@@ -64,7 +64,7 @@ impl JsonlFileSourceChangeDispatcher {
 impl SourceChangeDispatcher for JsonlFileSourceChangeDispatcher {
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
-        log::trace!("JsonlFileSourceChangeDispatcher - dispatch_source_change_events");
+        log::trace!("Dispatch source change events");
 
         let json_event = match serde_json::to_string(&events) {
             Ok(e) => e,

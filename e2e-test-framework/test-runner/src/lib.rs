@@ -366,7 +366,7 @@ impl TestRunner {
         }
 
         // Get the DataSet for the TestRunSource.
-        let dataset = self.data_store.get_test_source_dataset(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await?;
+        let dataset = self.data_store.get_test_source_content(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await?;
 
         // Get the path for data
         let data_store_path = self.data_store.get_test_run_storage(&test_run_source.test_id, &test_run_source.test_run_id).await?.path;

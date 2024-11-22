@@ -111,7 +111,7 @@ struct TestServiceStateResponse {
 
 #[derive(Debug, Serialize)]
 struct TestDataStoreStateResponse {
-    pub data_cache_path: String,
+    pub path: String,
     pub test_repo_ids: Vec<String>,
 }
 
@@ -210,7 +210,7 @@ async fn service_info_handler(
 
     Ok(Json(TestServiceStateResponse {
         data_store: TestDataStoreStateResponse {
-            data_cache_path: test_data_store.get_data_store_path().await?.to_string_lossy().to_string(),
+            path: test_data_store.get_data_store_path().await?.to_string_lossy().to_string(),
             test_repo_ids: test_data_store.get_test_repo_ids().await?,
         },
         test_runner: TestRunnerStateResponse {

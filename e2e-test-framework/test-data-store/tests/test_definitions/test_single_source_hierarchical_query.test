@@ -1,0 +1,22 @@
+{
+  "name": "single_source_hierarchical_query",
+  "version": 1,
+  "description": "A single source hierarchical query using facilities data.",
+  "test_folder": "single_source_hierarchical_query",
+  "sources": [
+    {
+      "name": "facilities",
+      "bootstrap_data": {
+        "script_file_folder": "bootstrap_scripts",
+        "script_file_list":[]
+      },
+      "change_log": {
+        "script_file_folder": "change_scripts",
+        "script_file_list":[]
+      }
+    }
+  ],
+  "queries": [],
+  "reactions": [],
+  "clients": []
+}

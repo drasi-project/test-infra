@@ -8,7 +8,7 @@ use azure_storage_blobs::container::operations::BlobItem;
 use futures::stream::StreamExt;
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::test_repo_storage::TestSourceDataset;
+use crate::test_repo_storage::{test_metadata::TestDefinition, TestSourceDataset};
 
 use super::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig, RemoteTestRepoClient};
 
@@ -19,18 +19,14 @@ pub struct AzureStorageBlobTestRepoClientSettings {
     pub storage_container: String,
     pub storage_credentials: StorageCredentials,
     pub storage_root_path: String,
-    pub test_repo_cache_path: PathBuf,
     pub test_repo_id: String,
 }
 
 impl AzureStorageBlobTestRepoClientSettings {
-    pub async fn new(common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig, data_cache_path: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig) -> anyhow::Result<Self> {
 
         // Create storage credentials from the account name and access key.
         let storage_credentials = StorageCredentials::access_key(unique_config.account_name.clone(), unique_config.access_key.clone());
-
-        // Create the root path for this test repo data cache
-        let test_repo_cache_path = data_cache_path.join(format!("test_repos/{}/", &common_config.id));
 
         Ok(Self {
             force_cache_refresh: common_config.force_cache_refresh,
@@ -38,7 +34,6 @@ impl AzureStorageBlobTestRepoClientSettings {
             storage_container: unique_config.container.clone(),
             storage_credentials,
             storage_root_path: unique_config.root_path,
-            test_repo_cache_path,
             test_repo_id: common_config.id.clone(),
         })
     }
@@ -50,32 +45,33 @@ pub struct AzureStorageBlobTestRepoClient {
 }
 
 impl AzureStorageBlobTestRepoClient {
-    pub async fn new(common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig, data_cache_path: PathBuf) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
-        log::debug!("Creating AzureStorageBlobTestRepoClient in {:?} from common_config:{:?} and unique_config:{:?}, ", data_cache_path, common_config, unique_config);
+    pub async fn new(common_config: CommonTestRepoConfig, unique_config: AzureStorageBlobTestRepoConfig) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
+        log::debug!("Creating AzureStorageBlobTestRepoClient from common_config:{:?} and unique_config:{:?}, ", common_config, unique_config);
 
-        let settings = AzureStorageBlobTestRepoClientSettings::new(common_config, unique_config, data_cache_path).await?;
+        let settings = AzureStorageBlobTestRepoClientSettings::new(common_config, unique_config).await?;
         log::trace!("Creating AzureStorageBlobTestRepoClientSettings with settings: {:?}, ", settings);
-
-        // Delete the data cache folder if it exists and the force_cache_refresh flag is set.
-        if settings.force_cache_refresh && settings.test_repo_cache_path.exists() {
-            tokio::fs::remove_dir_all(&settings.test_repo_cache_path).await?;
-        }
-
-        // Create the data cache folder if it doesn't exist.
-        if !settings.test_repo_cache_path.exists() {
-            tokio::fs::create_dir_all(&settings.test_repo_cache_path).await?
-        }
         
         Ok(Box::new( Self { settings }))
+    }
+
+    fn create_container_client(&self) -> anyhow::Result<ContainerClient> {
+        let container_client = 
+            ClientBuilder::new(
+                self.settings.storage_account_name.clone(), 
+                self.settings.storage_credentials.clone()
+            ).container_client(self.settings.storage_container.clone());
+
+        Ok(container_client)
     }
 
     async fn download_change_script_files(&self, local_folder: PathBuf, repo_folder: String) -> anyhow::Result<Vec<PathBuf>> {
 
         let mut file_path_list = download_test_repo_folder(
-            self.settings.storage_account_name.clone(),
-            self.settings.storage_credentials.clone(),
-            self.settings.storage_container.clone(),
-            self.settings.storage_root_path.clone(),
+            self.create_container_client()?,
+            // self.settings.storage_account_name.clone(),
+            // self.settings.storage_credentials.clone(),
+            // self.settings.storage_container.clone(),
+            // self.settings.storage_root_path.clone(),
             local_folder,
             repo_folder,
         ).await?;
@@ -89,10 +85,11 @@ impl AzureStorageBlobTestRepoClient {
 
     async fn download_bootstrap_script_files( &self, local_folder: PathBuf, repo_folder: String ) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
         let mut file_path_list = download_test_repo_folder(
-            self.settings.storage_account_name.clone(),
-            self.settings.storage_credentials.clone(),
-            self.settings.storage_container.clone(),
-            self.settings.storage_root_path.clone(),
+            self.create_container_client()?,
+            // self.settings.storage_account_name.clone(),
+            // self.settings.storage_credentials.clone(),
+            // self.settings.storage_container.clone(),
+            // self.settings.storage_root_path.clone(),
             local_folder,
             repo_folder,
         ).await?;
@@ -119,42 +116,86 @@ impl AzureStorageBlobTestRepoClient {
 
 #[async_trait]
 impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
-    async fn download_test_source_dataset(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
-        log::trace!("Downloading DataSet - {:?}/{:?} to folder {:?}", test_id, source_id, dataset_cache_path);
+    async fn get_test_definition(&self, test_id: String, test_store_path: PathBuf) -> anyhow::Result<PathBuf> {
+        log::trace!("Getting TestDefinition - {:?} to folder {:?}", test_id, test_store_path);
 
-        // Formulate and create the local path for change_script files
-        let mut change_scripts_local_path = dataset_cache_path.clone();
-        change_scripts_local_path.push("change_scripts");
-        if !change_scripts_local_path.exists() {
-            tokio::fs::create_dir_all(&change_scripts_local_path).await?;
-        }
+        // Formulate local path for test definition file
+        let local_file_path = test_store_path.join(format!("{}.test", test_id));
+        
+        // Formulate the remote repo path for the test definition file
+        let remote_path = format!("{}/{}.test", self.settings.storage_root_path, test_id);
+    
+        // Download the test definition file
+        download_test_repo_file(
+            self.create_container_client()?.blob_client(&remote_path),
+            local_file_path.clone()
+        ).await?;
 
+        Ok(local_file_path)
+    }
+
+    // async fn get_test_source(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
+    //     log::trace!("Downloading Test Source - {:?}/{:?} to folder {:?}", test_id, source_id, dataset_cache_path);
+
+    //     // Formulate and create the local path for change_script files
+    //     let mut change_scripts_local_path = dataset_cache_path.clone();
+    //     change_scripts_local_path.push("change_scripts");
+    //     if !change_scripts_local_path.exists() {
+    //         tokio::fs::create_dir_all(&change_scripts_local_path).await?;
+    //     }
+
+    //     // Formulate the remote repo path for the change script files
+    //     let change_scripts_repo_path = format!("{}/{}/sources/{}/change_scripts/", 
+    //         self.settings.storage_root_path, test_id, source_id);
+
+    //     // Download the change_script files
+    //     let change_script_files = self.download_change_script_files(
+    //         change_scripts_local_path,
+    //         change_scripts_repo_path
+    //     ).await?;
+
+    //     // Formulate and create the local path for bootstrap_script files
+    //     let mut bootstrap_scripts_local_path = dataset_cache_path.clone();
+    //     bootstrap_scripts_local_path.push("bootstrap_scripts");
+    //     if !bootstrap_scripts_local_path.exists() {
+    //         tokio::fs::create_dir_all(&bootstrap_scripts_local_path).await?
+    //     }
+
+    //     // Formulate the remote repo path for the bootstrap script files
+    //     let bootstrap_scripts_repo_path = format!("{}/{}/sources/{}/bootstrap_scripts/", 
+    //         self.settings.storage_root_path, test_id, source_id);
+    
+    //     // Download the bootstrap_script files
+    //     let bootstrap_script_files = self.download_bootstrap_script_files(
+    //         bootstrap_scripts_local_path,
+    //         bootstrap_scripts_repo_path
+    //     ).await?;
+         
+    //     Ok(TestSourceDataset {
+    //         change_log_script_files: change_script_files,
+    //         bootstrap_script_files: bootstrap_script_files,
+    //     })
+    // }
+
+    async fn get_test_source_content_from_def(&self, test_def: &TestDefinition, source_id: String, bootstrap_store_path: PathBuf, change_store_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
+        log::trace!("Downloading Test Source Content for {:?}", source_id);
+
+        // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
         // Formulate the remote repo path for the change script files
-        let change_scripts_repo_path = format!("{}/{}/sources/{}/change_scripts/", 
-            self.settings.storage_root_path, test_id, source_id);
+        let change_script_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().change_log.script_file_folder.clone();
+        let change_scripts_repo_path = format!("{}/{}/sources/{}/{}/", self.settings.storage_root_path, test_def.id, source_id, change_script_folder);
 
         // Download the change_script files
         let change_script_files = self.download_change_script_files(
-            change_scripts_local_path,
-            change_scripts_repo_path
-        ).await?;
+            change_store_path, change_scripts_repo_path).await?;
 
-        // Formulate and create the local path for bootstrap_script files
-        let mut bootstrap_scripts_local_path = dataset_cache_path.clone();
-        bootstrap_scripts_local_path.push("bootstrap_scripts");
-        if !bootstrap_scripts_local_path.exists() {
-            tokio::fs::create_dir_all(&bootstrap_scripts_local_path).await?
-        }
-
+        // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
         // Formulate the remote repo path for the bootstrap script files
-        let bootstrap_scripts_repo_path = format!("{}/{}/sources/{}/bootstrap_scripts/", 
-            self.settings.storage_root_path, test_id, source_id);
+        let bootstrap_script_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().bootstrap_data.script_file_folder.clone();
+        let bootstrap_scripts_repo_path = format!("{}/{}/sources/{}/{}/", self.settings.storage_root_path, test_def.id, source_id, bootstrap_script_folder);
     
         // Download the bootstrap_script files
-        let bootstrap_script_files = self.download_bootstrap_script_files(
-            bootstrap_scripts_local_path,
-            bootstrap_scripts_repo_path
-        ).await?;
+        let bootstrap_script_files = self.download_bootstrap_script_files(bootstrap_store_path, bootstrap_scripts_repo_path).await?;
          
         Ok(TestSourceDataset {
             change_log_script_files: change_script_files,
@@ -164,18 +205,17 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
 }
 
 async fn download_test_repo_folder(
-    storage_account: String,
-    storage_credentials: StorageCredentials,
-    storage_container: String,
-    storage_path: String,
+    container_client: ContainerClient,
+    // storage_account: String,
+    // storage_credentials: StorageCredentials,
+    // storage_container: String,
+    // storage_path: String,
     local_repo_folder: PathBuf,
     remote_repo_folder: String, 
 ) -> anyhow::Result<Vec<PathBuf>> {
-    log::info!("Downloading Remote Repo Folder - {:?} : {:?}/{:?}", storage_account, storage_container, storage_path);
+    // log::info!("Downloading Remote Repo Folder - {:?} : {:?}/{:?}", storage_account, storage_container, storage_path);
 
-    let container_client = ClientBuilder::new(&storage_account, storage_credentials)
-        .container_client(&storage_container);
-
+    // let container_client = self.create_container_client()?;
     let mut stream = container_client
             .list_blobs()
             .prefix(remote_repo_folder.clone())

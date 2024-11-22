@@ -66,26 +66,21 @@ impl TestDataStore {
 
         // Delete the data store folder if it exists and the delete_data_store flag is set.
         if config.delete_data_store.unwrap_or(false) && root_path.exists() {
-            log::info!("Deleting data store data: {:?}", &root_path);
+            log::info!("Deleting TestDataStore at - {:?}", &root_path);
             tokio::fs::remove_dir_all(&root_path).await?;
         }
 
         // Create the data store folder if it doesn't exist.
         if !root_path.exists() {
-            log::info!("Creating data store data: {:?}", &root_path);
+            log::info!("Creating TestDataStore in - {:?}", &root_path);
             tokio::fs::create_dir_all(&root_path).await?
         }
 
         let test_data_store = TestDataStore {
             data_collection_store: Arc::new(Mutex::new(DataCollectionStore::new(config.data_collection_folder.unwrap_or(DEFAULT_DATA_COLLECTION_STORE_FOLDER.to_string()), root_path.clone(), false).await?)),
             root_path: root_path.clone(),
-            test_repo_store: Arc::new(Mutex::new(TestRepoStore::new(config.test_repo_folder.unwrap_or(DEFAULT_TEST_REPO_STORE_FOLDER.to_string()), root_path.clone(), false).await?)),
+            test_repo_store: Arc::new(Mutex::new(TestRepoStore::new(config.test_repo_folder.unwrap_or(DEFAULT_TEST_REPO_STORE_FOLDER.to_string()), root_path.clone(), false, config.test_repos).await?)),
             test_run_store: Arc::new(Mutex::new(TestRunStore::new(config.test_run_folder.unwrap_or(DEFAULT_TEST_RUN_STORE_FOLDER.to_string()), root_path.clone(), false).await?)),
-        };
-
-        // Create the initial RemoteTestRepo instances.
-        for test_repo_config in config.test_repos.unwrap_or_default() {
-            test_data_store.add_remote_test_repo(test_repo_config).await?;
         };
 
         Ok(test_data_store)
@@ -123,10 +118,11 @@ impl TestDataStore {
         Ok(self.test_repo_store.lock().await.get_test_repo_ids().await?)
     }
 
-    pub async fn get_test_source_dataset(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceDataset> {
+    pub async fn get_test_source_content(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceDataset> {
         Ok(self.test_repo_store.lock().await
-            .get_test_repo_storage(repo_id).await?
-            .get_test_source_storage(test_id, source_id).await?
+            .get_test_repo(repo_id).await?
+            .get_test(test_id, false).await?
+            .get_test_source(source_id, false).await?
             .get_dataset().await?)
     }
     

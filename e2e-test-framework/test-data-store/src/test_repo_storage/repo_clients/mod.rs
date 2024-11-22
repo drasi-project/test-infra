@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use azure_storage_blob_test_repo_client::AzureStorageBlobTestRepoClient;
 
-use super::TestSourceDataset;
+use super::{test_metadata::TestDefinition, TestSourceDataset};
 
 pub mod azure_storage_blob_test_repo_client;
 
@@ -53,19 +53,31 @@ where
 
 #[async_trait]
 pub trait RemoteTestRepoClient : Send + Sync {
-    async fn download_test_source_dataset(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset>;
+    async fn get_test_definition(&self, test_id: String, test_store_path: PathBuf) -> anyhow::Result<PathBuf>;
+    // async fn get_test_source(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset>;
+    async fn get_test_source_content_from_def(&self, test_def: &TestDefinition, source_id: String, bootstrap_store_path: PathBuf, change_store_path: PathBuf) -> anyhow::Result<TestSourceDataset>;
+
 }
 
 #[async_trait]
 impl RemoteTestRepoClient for Box<dyn RemoteTestRepoClient + Send + Sync> {
-    async fn download_test_source_dataset(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
-        (**self).download_test_source_dataset(test_id, source_id, dataset_cache_path).await
+    async fn get_test_definition(&self, test_id: String, test_store_path: PathBuf) -> anyhow::Result<PathBuf> {
+        (**self).get_test_definition(test_id, test_store_path).await
     }
+
+    // async fn get_test_source(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
+    //     (**self).get_test_source(test_id, source_id, dataset_cache_path).await
+    // }
+
+    async fn get_test_source_content_from_def(&self, test_def: &TestDefinition, source_id: String, bootstrap_path: PathBuf, change_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
+        (**self).get_test_source_content_from_def(test_def, source_id, bootstrap_path, change_path ).await
+    }
+
 }
 
-pub async fn create_test_repo_client(config: RemoteTestRepoConfig, data_cache_path: PathBuf ) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
+pub async fn create_test_repo_client(config: RemoteTestRepoConfig) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
     match config {
         RemoteTestRepoConfig::AzureStorageBlob{common_config, unique_config} 
-            => AzureStorageBlobTestRepoClient::new(common_config, unique_config, data_cache_path).await
+            => AzureStorageBlobTestRepoClient::new(common_config, unique_config).await
     }
 }

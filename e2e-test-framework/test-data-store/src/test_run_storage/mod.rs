@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
+use serde::Serialize;
 use tokio::fs;
 
 const SOURCES_FOLDER_NAME: &str = "sources";
@@ -12,6 +13,61 @@ fn get_test_run_id(test_id: &str, test_run_id: &str) -> String {
 
 fn get_test_run_source_id(repo_id: &str, source_id: &str) -> String {
     format!("{}__{}", repo_id, source_id)
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+pub struct TestRunSourceId {
+    pub test_id: String,
+    pub test_repo_id: String,
+    pub test_run_id: String,
+    pub test_source_id: String,
+}
+
+impl TestRunSourceId {
+    pub fn new(test_run_id: &str, test_repo_id: &str, test_id: &str, test_source_id: &str) -> Self {
+        Self {
+            test_id: test_id.to_string(),
+            test_repo_id: test_repo_id.to_string(),
+            test_run_id: test_run_id.to_string(),
+            test_source_id: test_source_id.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for TestRunSourceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}.{}",
+            self.test_run_id, self.test_repo_id, self.test_id, self.test_source_id
+        )
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ParseTestRunSourceIdError {
+    #[error("Invalid format for TestRunSourceId - {0}")]
+    InvalidFormat(String),
+    #[error("Invalid values for TestRunSourceId - {0}")]
+    InvalidValues(String),
+}
+
+impl TryFrom<&str> for TestRunSourceId {
+    type Error = ParseTestRunSourceIdError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let parts: Vec<&str> = value.split('.').collect();
+        if parts.len() == 4 {
+            Ok(TestRunSourceId {
+                test_run_id: parts[0].to_string(),
+                test_repo_id: parts[1].to_string(),
+                test_id: parts[2].to_string(),
+                test_source_id: parts[3].to_string(),
+            })
+        } else {
+            Err(ParseTestRunSourceIdError::InvalidFormat(value.to_string()))
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -1,4 +1,7 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
+use test_data_store::test_run_storage::{ParseTestRunSourceIdError, TestRunSourceId};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestRunnerConfig {
@@ -39,6 +42,26 @@ impl Default for SourceConfig {
             proxy: None,
             reactivator: None,
         }
+    }
+}
+
+impl TryFrom<&SourceConfig> for TestRunSourceId {
+    type Error = ParseTestRunSourceIdError;
+
+    fn try_from(value: &SourceConfig) -> Result<Self, Self::Error> {
+        let test_repo_id = value.test_repo_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_repo_id".to_string()))?;
+        let test_run_id = value.test_run_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_run_id".to_string()))?;
+        let test_id = value.test_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_id".to_string()))?;
+        let test_source_id = value.test_source_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_source_id".to_string()))?;
+
+        Ok(TestRunSourceId::new(test_run_id, test_repo_id, test_id, test_source_id))
+    }
+}
+
+impl fmt::Display for SourceConfig {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SourceConfig: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, proxy: {:?}, reactivator: {:?}", 
+            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.proxy, self.reactivator)
     }
 }
 

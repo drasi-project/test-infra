@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use serde::{Deserialize, Serialize};
-use test_run_storage::{TestRunStorage, TestRunStore};
+use test_run_storage::{TestRunSourceId, TestRunStorage, TestRunStore};
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
 use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceDataset};
@@ -116,6 +116,10 @@ impl TestDataStore {
 
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.test_repo_store.lock().await.get_test_repo_ids().await?)
+    }
+
+    pub async fn get_test_run_source_content(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceDataset> {
+        self.get_test_source_content(&test_run_source_id.test_repo_id, &test_run_source_id.test_id, &test_run_source_id.test_source_id).await
     }
 
     pub async fn get_test_source_content(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceDataset> {

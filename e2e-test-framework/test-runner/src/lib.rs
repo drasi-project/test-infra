@@ -1,7 +1,7 @@
-use std::{collections::HashMap, fmt, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use serde::Serialize;
-use test_data_store::SharedTestDataStore;
+use test_data_store::{test_run_storage::TestRunSourceId, SharedTestDataStore};
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse};
 use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig};
@@ -107,61 +107,6 @@ impl std::fmt::Display for SpacingMode {
 impl Default for SpacingMode {
     fn default() -> Self {
         Self::Recorded
-    }
-}
-
-
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
-pub struct TestRunSourceId {
-    pub test_id: String,
-    pub test_repo_id: String,
-    pub test_run_id: String,
-    pub test_source_id: String,
-}
-
-impl TestRunSourceId {
-    pub fn new(test_run_id: &str, test_repo_id: &str, test_id: &str, test_source_id: &str) -> Self {
-        Self {
-            test_id: test_id.to_string(),
-            test_repo_id: test_repo_id.to_string(),
-            test_run_id: test_run_id.to_string(),
-            test_source_id: test_source_id.to_string(),
-        }
-    }
-}
-
-impl fmt::Display for TestRunSourceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}.{}.{}.{}",
-            self.test_run_id, self.test_repo_id, self.test_id, self.test_source_id
-        )
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ParseTestRunSourceIdError {
-    #[error("Invalid format for TestRunSourceId - {0}")]
-    InvalidFormat(String),
-}
-
-impl TryFrom<&str> for TestRunSourceId {
-    type Error = ParseTestRunSourceIdError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let parts: Vec<&str> = value.split('.').collect();
-        if parts.len() == 4 {
-            Ok(TestRunSourceId {
-                test_run_id: parts[0].to_string(),
-                test_repo_id: parts[1].to_string(),
-                test_id: parts[2].to_string(),
-                test_source_id: parts[3].to_string(),
-            })
-        } else {
-            Err(ParseTestRunSourceIdError::InvalidFormat(value.to_string()))
-        }
     }
 }
 
@@ -388,23 +333,26 @@ impl TestRunner {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
         
-        let test_run_source = TestRunSource::new(source_config, &self.source_defaults)?;
+        let test_run_source_id = TestRunSourceId::try_from(source_config)?;
 
         // Fail if the TestRunner already contains the TestRunSource.
-        if self.contains_test_source(&test_run_source.id.to_string()).await? {
-            anyhow::bail!("TestRunSource already exists: {:?}", &test_run_source);
+        if self.sources.contains_key(&test_run_source_id) {
+            anyhow::bail!("TestRunSource already exists: {:?}", &test_run_source_id);
         }
 
         // Get the DataSet for the TestRunSource.
-        let dataset = self.data_store.get_test_source_content(&test_run_source.id.test_repo_id, &test_run_source.id.test_id, &test_run_source.id.test_source_id).await?;
+        let dataset = self.data_store.get_test_run_source_content(&test_run_source_id).await?;
 
         // Get the path for data
-        let data_store_path = self.data_store.get_test_run_storage(&test_run_source.id.test_id, &test_run_source.id.test_run_id).await?.path;
+        let data_store_path = self.data_store.get_test_run_storage(&test_run_source_id.test_id, &test_run_source_id.test_run_id).await?.path;
 
+        let test_run_source = TestRunSource::new(source_config, &self.source_defaults)?;
+        
         // Determine if the TestRunSource has a reactivator, in which case a ChangeScriptPlayer should 
         // be created and possibly started.
         if test_run_source.reactivator.is_some() {
             if dataset.change_log_script_files.len() > 0 {
+
                 let player = 
                     ChangeScriptPlayer::new(
                         test_run_source.clone(), dataset.change_log_script_files, data_store_path).await?;

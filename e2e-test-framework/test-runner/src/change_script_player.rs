@@ -10,12 +10,11 @@ use tokio::time::{sleep, Duration};
 use test_data_store::scripts::{change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent};
 
 use crate::{
-    config::SourceChangeDispatcherConfig, SpacingMode, TestRunReactivator, TestRunSource, TimeMode, 
-    source_change_dispatchers::{
+    config::SourceChangeDispatcherConfig, source_change_dispatchers::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, 
         dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, 
         jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
-    }
+    }, SpacingMode, TestRunReactivator, TestRunSource, TestRunSourceId, TimeMode
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 
@@ -44,12 +43,9 @@ pub enum ChangeScriptPlayerError {
 #[derive(Clone, Debug, Serialize)]
 pub struct ChangeScriptPlayerSettings {
     pub data_store_path: PathBuf,
-    pub id: String,
+    pub id: TestRunSourceId,
     pub reactivator: TestRunReactivator,
     pub script_files: Vec<PathBuf>,
-    pub test_id: String,
-    pub test_run_id: String,
-    pub test_source_id: String,
 }
 
 impl ChangeScriptPlayerSettings {
@@ -64,13 +60,10 @@ impl ChangeScriptPlayerSettings {
             id: test_run_source.id,
             reactivator: test_run_source.reactivator.unwrap(),
             script_files,
-            test_id: test_run_source.test_id,
-            test_run_id: test_run_source.test_run_id,
-            test_source_id: test_run_source.source_id,
         })
     }
 
-    pub fn get_id(&self) -> String {
+    pub fn get_id(&self) -> TestRunSourceId {
         self.id.clone()
     }
 }
@@ -243,7 +236,7 @@ impl ChangeScriptPlayer {
         })
     }
 
-    pub fn get_id(&self) -> String {
+    pub fn get_id(&self) -> TestRunSourceId {
         self.settings.get_id()
     }
 
@@ -334,7 +327,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
             for dispatcher_config in player_settings.reactivator.dispatchers.iter() {
                 match dispatcher_config {
                     SourceChangeDispatcherConfig::Dapr(dapr_config) => {
-                        match DaprSourceChangeDispatcherSettings::new(dapr_config, player_settings.test_source_id.clone()) {
+                        match DaprSourceChangeDispatcherSettings::new(dapr_config, player_settings.id.test_source_id.clone()) {
                             Ok(settings) => {
                                 match DaprSourceChangeDispatcher::new(settings) {
                                     Ok(d) => dispatchers.push(d),
@@ -376,21 +369,21 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                                 if config_path.starts_with("/") {
                                     PathBuf::from(format!("{}/test_output/{}/{}/change_logs/{}", 
                                         config_path,
-                                        &player_settings.test_id, 
-                                        &player_settings.test_run_id, 
-                                        &player_settings.test_source_id))
+                                        &player_settings.id.test_id, 
+                                        &player_settings.id.test_run_id, 
+                                        &player_settings.id.test_source_id))
                                 } else {
                                     PathBuf::from(format!("./{}/test_output/{}/{}/change_logs/{}", 
                                         config_path,
-                                        &player_settings.test_id, 
-                                        &player_settings.test_run_id, 
-                                        &player_settings.test_source_id))
+                                        &player_settings.id.test_id, 
+                                        &player_settings.id.test_run_id, 
+                                        &player_settings.id.test_source_id))
                                 }
                             },
                             None => player_settings.data_store_path.clone()
-                                        .join(&player_settings.test_id)
-                                        .join(&player_settings.test_run_id)
-                                        .join(&player_settings.test_source_id)
+                                        .join(&player_settings.id.test_id)
+                                        .join(&player_settings.id.test_run_id)
+                                        .join(&player_settings.id.test_source_id)
                         };
 
                         match JsonlFileSourceChangeDispatcherSettings::new(jsonl_file_config, folder_path) {

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, fmt, str::FromStr, sync::Arc};
 
 use serde::Serialize;
 use test_data_store::SharedTestDataStore;
@@ -110,13 +110,63 @@ impl Default for SpacingMode {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct TestRunSource {
-    pub id: String,
-    pub source_id: String,
+
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TestRunSourceId {
     pub test_id: String,
     pub test_repo_id: String,
     pub test_run_id: String,
+    pub test_source_id: String,
+}
+
+impl TestRunSourceId {
+    pub fn new(test_run_id: &str, test_repo_id: &str, test_id: &str, test_source_id: &str) -> Self {
+        Self {
+            test_id: test_id.to_string(),
+            test_repo_id: test_repo_id.to_string(),
+            test_run_id: test_run_id.to_string(),
+            test_source_id: test_source_id.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for TestRunSourceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}.{}",
+            self.test_run_id, self.test_repo_id, self.test_id, self.test_source_id
+        )
+    }
+}
+
+#[derive(Debug)]
+pub enum ParseTestRunSourceIdError {
+    InvalidFormat,
+}
+
+impl TryFrom<&str> for TestRunSourceId {
+    type Error = ParseTestRunSourceIdError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let parts: Vec<&str> = value.split('.').collect();
+        if parts.len() == 3 {
+            Ok(TestRunSourceId {
+                test_run_id: parts[0].to_string(),
+                test_repo_id: parts[1].to_string(),
+                test_id: parts[2].to_string(),
+                test_source_id: parts[3].to_string(),
+            })
+        } else {
+            Err(ParseTestRunSourceIdError::InvalidFormat)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TestRunSource {
+    pub id: TestRunSourceId,
     pub proxy: Option<TestRunProxy>,
     pub reactivator: Option<TestRunReactivator>,    
 }
@@ -147,7 +197,7 @@ impl TestRunSource {
             .map(|id| id.to_string())
             .unwrap_or_else(|| chrono::Utc::now().format("%Y%m%d%H%M%S").to_string());
 
-        let id = format!("{}::{}::{}::{}", &test_repo_id, &test_id, &source_id, &test_run_id);
+        let id = TestRunSourceId::new(&test_run_id, &test_repo_id, &test_id, &source_id);
 
         // If neither the SourceConfig nor the SourceConfig defaults contain a proxy, set it to None.
         let proxy = match config.proxy {
@@ -183,10 +233,6 @@ impl TestRunSource {
 
         Ok(Self {
             id,
-            source_id,
-            test_id,
-            test_repo_id,
-            test_run_id,
             proxy,
             reactivator,
         })
@@ -195,12 +241,12 @@ impl TestRunSource {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TestRunProxy {
-    pub test_run_source_id: String,
+    pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
 }
 
 impl TestRunProxy {
-    pub fn new(test_run_source_id: String, config: &ProxyConfig, defaults: &ProxyConfig) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: TestRunSourceId, config: &ProxyConfig, defaults: &ProxyConfig) -> anyhow::Result<Self> {
         let time_mode = match &config.time_mode {
             Some(time_mode) => TimeMode::from_str(time_mode)?,
             None => {
@@ -224,12 +270,12 @@ pub struct TestRunReactivator {
     pub ignore_scripted_pause_commands: bool,    
     pub spacing_mode: SpacingMode,
     pub start_immediately: bool,
-    pub test_run_source_id: String,
+    pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
 }
 
 impl TestRunReactivator {
-    pub fn new(test_run_source_id: String, config: &ReactivatorConfig, defaults: &ReactivatorConfig) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: TestRunSourceId, config: &ReactivatorConfig, defaults: &ReactivatorConfig) -> anyhow::Result<Self> {
         // If neither the ReactivatorConfig nor the ReactivatorConfig defaults contain a ignore_scripted_pause_commands, 
         // set to false.
         let ignore_scripted_pause_commands = config.ignore_scripted_pause_commands
@@ -344,15 +390,15 @@ impl TestRunner {
         let test_run_source = TestRunSource::new(source_config, &self.source_defaults)?;
 
         // Fail if the TestRunner already contains the TestRunSource.
-        if self.contains_test_source(&test_run_source.id).await? {
+        if self.contains_test_source(&test_run_source.id.to_string()).await? {
             anyhow::bail!("TestRunSource already exists: {:?}", &test_run_source);
         }
 
         // Get the DataSet for the TestRunSource.
-        let dataset = self.data_store.get_test_source_content(&test_run_source.test_repo_id, &test_run_source.test_id, &test_run_source.source_id).await?;
+        let dataset = self.data_store.get_test_source_content(&test_run_source.id.test_repo_id, &test_run_source.id.test_id, &test_run_source.id.test_source_id).await?;
 
         // Get the path for data
-        let data_store_path = self.data_store.get_test_run_storage(&test_run_source.test_id, &test_run_source.test_run_id).await?.path;
+        let data_store_path = self.data_store.get_test_run_storage(&test_run_source.id.test_id, &test_run_source.id.test_run_id).await?.path;
 
         // Determine if the TestRunSource has a reactivator, in which case a ChangeScriptPlayer should 
         // be created and possibly started.
@@ -362,8 +408,8 @@ impl TestRunner {
                     ChangeScriptPlayer::new(
                         test_run_source.clone(), dataset.change_log_script_files, data_store_path).await?;
 
-                self.sources.insert(test_run_source.id.clone(), test_run_source);
-                self.change_script_players.insert(player.get_id().clone(), player.clone());
+                self.sources.insert(test_run_source.id.to_string(), test_run_source);
+                self.change_script_players.insert(player.get_id().to_string(), player.clone());
 
                 return Ok(Some(player));
             } else {

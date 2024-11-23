@@ -24,7 +24,7 @@ pub struct SourceConfig {
     pub test_repo_id: Option<String>,
     pub test_id: Option<String>,
     pub test_run_id: Option<String>,
-    pub source_id: Option<String>,
+    pub test_source_id: Option<String>,
     pub proxy: Option<ProxyConfig>,
     pub reactivator: Option<ReactivatorConfig>,
 }
@@ -35,7 +35,7 @@ impl Default for SourceConfig {
             test_repo_id: None,
             test_id: None,
             test_run_id: None,
-            source_id: None,
+            test_source_id: None,
             proxy: None,
             reactivator: None,
         }

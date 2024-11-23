@@ -175,8 +175,8 @@ pub struct TestRunSource {
 impl TestRunSource {
     pub fn new(config: &SourceConfig, defaults: &SourceConfig) -> anyhow::Result<Self> {
         // If neither the SourceConfig nor the SourceConfig defaults contain a source_id, return an error.
-        let source_id = config.source_id.as_ref()
-            .or_else( || defaults.source_id.as_ref())
+        let source_id = config.test_source_id.as_ref()
+            .or_else( || defaults.test_source_id.as_ref())
             .map(|source_id| source_id.to_string())
             .ok_or_else(|| anyhow::anyhow!("No source_id provided and no default value found."))?;
         

@@ -7,17 +7,21 @@ use serde::Serialize;
 use thiserror::Error;
 use tokio::{io::{self, AsyncBufReadExt}, select, signal};
 
+use repo::get_test_repo_routes;
+use runner::get_test_runner_routes;
 use test_data_collector::SharedTestDataCollector;
 use test_data_store::SharedTestDataStore;
-use test_repo::get_test_repo_routes;
 use test_runner::SharedTestRunner;
 
-pub mod test_repo;
+pub mod repo;
+pub mod runner;
 
 #[derive(Debug, Error)]
 pub enum TestServiceWebApiError {
     #[error("Error: {0}")]
     AnyhowError(anyhow::Error),
+    #[error("{0} with ID {1} not found")]
+    NotFound(String, String),
     #[error("Error: {0}")]
     SerdeJsonError(serde_json::Error),
 }
@@ -39,6 +43,9 @@ impl IntoResponse for TestServiceWebApiError {
         match self {
             TestServiceWebApiError::AnyhowError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
+            },
+            TestServiceWebApiError::NotFound(kind, id) => {
+                (StatusCode::NOT_FOUND, Json(format!("{} with ID {} not found", kind, id))).into_response()
             },
             TestServiceWebApiError::SerdeJsonError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
@@ -75,27 +82,11 @@ struct TestDataCollectorStateResponse {
 pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStore, test_runner: SharedTestRunner, test_data_collector: SharedTestDataCollector) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    // let datasets_routes = Router::new()
-    //     .route("/", get(get_dataset_handler))
-    //     .route("/sources/start", post(start_dataset_sources_handler));
-
-    // let sources_routes = Router::new()
-    //     .route("/", get(get_source_handler))
-    //     .route("/player", get(get_player_handler))
-    //     .route("/player/pause", post(pause_player_handler))
-    //     .route("/player/skip", post(skip_player_handler))
-    //     .route("/player/start", post(start_player_handler))
-    //     .route("/player/step", post(step_player_handler))
-    //     .route("/player/stop", post(stop_player_handler));
-
     let app = Router::new()
         .route("/", get(service_info_handler))
         // .route("/acquire", post(acquire_handler))
-        // // .route("/datasets", get(get_dataset_list_handler).post(add_dataset_handler))
-        // // .nest("/datasets/:id", datasets_routes)
-        // .route("/sources", get(get_source_list_handler).post(add_source_handler))
-        // .nest("/sources/:id", sources_routes)
         .nest("/test_repos", get_test_repo_routes())
+        .nest("/test_runner", get_test_runner_routes())
         .layer(axum::extract::Extension(test_data_collector))
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_runner));

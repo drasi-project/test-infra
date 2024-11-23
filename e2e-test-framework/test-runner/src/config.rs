@@ -6,17 +6,13 @@ pub struct TestRunnerConfig {
     pub source_defaults: SourceConfig,
     #[serde(default)]
     pub sources: Vec<SourceConfig>,
-    #[serde(default = "default_start_reactivators_together")]
-    pub start_reactivators_together: bool,
 }
-fn default_start_reactivators_together() -> bool { true }
 
 impl Default for TestRunnerConfig {
     fn default() -> Self {
         TestRunnerConfig {
             source_defaults: SourceConfig::default(),
             sources: Vec::new(),
-            start_reactivators_together: default_start_reactivators_together(),
         }
     }
 }

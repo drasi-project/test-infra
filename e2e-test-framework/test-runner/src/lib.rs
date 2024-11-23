@@ -310,7 +310,6 @@ pub struct TestRunner {
     source_defaults: SourceConfig,
     sources: HashMap<String, TestRunSource>,
     status: TestRunnerStatus,
-    _start_reactivators_together: bool,
 }
 
 impl TestRunner {
@@ -323,7 +322,6 @@ impl TestRunner {
             source_defaults: config.source_defaults,
             sources: HashMap::new(),
             status: TestRunnerStatus::Initialized,
-            _start_reactivators_together: config.start_reactivators_together,
         };
 
         // Add the initial set of sources.

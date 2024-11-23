@@ -4,101 +4,50 @@ use axum::{
     extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::get, Json, Router
 };
 use serde::Serialize;
+use thiserror::Error;
 use tokio::{io::{self, AsyncBufReadExt}, select, signal};
 
 use test_data_collector::SharedTestDataCollector;
 use test_data_store::SharedTestDataStore;
+use test_repo::{get_test_repo_handler, get_test_repo_list_handler, post_test_repo_handler};
 use test_runner::SharedTestRunner;
 
 // use proxy::acquire_handler;
 // use source::{add_source_handler, get_player_handler, get_source_handler, get_source_list_handler, pause_player_handler, skip_player_handler, start_player_handler, step_player_handler, stop_player_handler};
-// use test_repo::{add_test_repo_handler, get_test_repo_handler, get_test_repo_list_handler, LocalTestRepoResponse};
+// use data_store::{add_test_repo_handler, get_test_repo_handler, get_test_repo_list_handler, LocalTestRepoResponse};
 
+pub mod test_repo;
 
-// pub mod dataset;
-// pub mod proxy;
-// pub mod source;
-// pub mod test_repo;
+#[derive(Debug, Error)]
+pub enum TestServiceError {
+    #[error("Error: {0}")]
+    AnyhowError(anyhow::Error),
+    #[error("Error: {0}")]
+    SerdeJsonError(serde_json::Error),
+}
 
-// mod u64_as_string {
-//     use serde::{self, Serializer};
-
-//     pub fn serialize<S>(number: &u64, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: Serializer,
-//     {
-//         serializer.serialize_str(&number.to_string())
-//     }
-
-    // pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
-    // where
-    //     D: Deserializer<'de>,
-    // {
-    //     let s = String::deserialize(deserializer)?;
-    //     s.parse::<u64>().map_err(serde::de::Error::custom)
-    // }
-// }
-
-// mod u64_as_string {
-//     use serde::{self, Deserialize, Deserializer, Serializer};
-//     use serde::de::{self, Visitor};
-//     use std::fmt;
-
-//     pub fn serialize<S>(number: &u64, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: Serializer,
-//     {
-//         // Try to serialize as a number first
-//         serializer.serialize_u64(*number)
-//     }
-
-//     pub fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
-//     where
-//         D: Deserializer<'de>,
-//     {
-//         struct U64OrStringVisitor;
-
-//         impl<'de> Visitor<'de> for U64OrStringVisitor {
-//             type Value = u64;
-
-//             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-//                 formatter.write_str("a u64 represented as either a number or a string")
-//             }
-
-//             fn visit_u64<E>(self, value: u64) -> Result<u64, E> {
-//                 Ok(value)
-//             }
-
-//             fn visit_str<E>(self, value: &str) -> Result<u64, E>
-//             where
-//                 E: de::Error,
-//             {
-//                 value.parse::<u64>().map_err(E::custom)
-//             }
-//         }
-
-//         deserializer.deserialize_any(U64OrStringVisitor)
-//     }
-// }
-
-struct TestServiceError(anyhow::Error);
-
-impl IntoResponse for TestServiceError {
-    fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response()
+impl From<anyhow::Error> for TestServiceError {
+    fn from(error: anyhow::Error) -> Self {
+        TestServiceError::AnyhowError(error)
     }
 }
 
-impl<E> From<E> for TestServiceError
-where
-    E: Into<anyhow::Error>,
-{
-    fn from(err: E) -> Self {
-        Self(err.into())
+impl From<serde_json::Error> for TestServiceError {
+    fn from(error: serde_json::Error) -> Self {
+        TestServiceError::SerdeJsonError(error)
+    }
+}
+
+impl IntoResponse for TestServiceError {
+    fn into_response(self) -> Response {
+        match self {
+            TestServiceError::AnyhowError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
+            },
+            TestServiceError::SerdeJsonError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
+            },
+        }
     }
 }
 
@@ -131,6 +80,10 @@ struct TestDataCollectorStateResponse {
 pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStore, test_runner: SharedTestRunner, test_data_collector: SharedTestDataCollector) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
+    // let test_repo_routes = Router::new()
+    //     .route("/", get(get_dataset_handler))
+    //     .route("/sources/start", post(start_dataset_sources_handler));
+
     // let datasets_routes = Router::new()
     //     .route("/", get(get_dataset_handler))
     //     .route("/sources/start", post(start_dataset_sources_handler));
@@ -151,8 +104,8 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStor
         // // .nest("/datasets/:id", datasets_routes)
         // .route("/sources", get(get_source_list_handler).post(add_source_handler))
         // .nest("/sources/:id", sources_routes)
-        // .route("/test_repos", get(get_test_repo_list_handler).post(add_test_repo_handler))
-        // .route("/test_repos/:id", get(get_test_repo_handler))
+        .route("/test_repos", get(get_test_repo_list_handler).post(post_test_repo_handler))
+        .route("/test_repos/:repo_id", get(get_test_repo_handler))
         .layer(axum::extract::Extension(test_data_collector))
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_runner));
@@ -215,7 +168,7 @@ async fn service_info_handler(
         },
         test_runner: TestRunnerStateResponse {
             status: format!("{:?}", test_runner.get_status().await?),
-            test_run_source_ids: test_runner.get_test_source_ids().await?
+            test_run_source_ids: test_runner.get_test_source_ids().await?,
         },
         test_data_collector: TestDataCollectorStateResponse {
             status: format!("{:?}", test_data_collector.get_status().await?),

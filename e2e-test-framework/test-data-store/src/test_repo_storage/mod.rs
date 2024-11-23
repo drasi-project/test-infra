@@ -48,7 +48,7 @@ impl TestRepoStore {
         Ok(store)
     }
 
-    pub(crate) async fn add_test_repo(&mut self, repo_config: RemoteTestRepoConfig, replace: bool) -> anyhow::Result<TestRepoStorage> {
+    pub async fn add_test_repo(&mut self, repo_config: RemoteTestRepoConfig, replace: bool) -> anyhow::Result<TestRepoStorage> {
 
         let id = repo_config.get_id();
         log::info!("Adding (replace = {}) TestRepoStorage for Test Repo: {:?}", replace, &id);
@@ -258,12 +258,12 @@ impl TestStorage {
 
 #[allow(unused)]
 pub struct TestSourceStorage {
-    bootstrap_scripts_path: PathBuf,
-    change_scripts_path: PathBuf,
-    id: String,
-    path: PathBuf,
-    repo_id: String,
-    test_id: String,
+    pub bootstrap_scripts_path: PathBuf,
+    pub change_scripts_path: PathBuf,
+    pub id: String,
+    pub path: PathBuf,
+    pub repo_id: String,
+    pub test_id: String,
 }
 
 impl TestSourceStorage {

@@ -223,21 +223,41 @@ pub struct ChangeScriptPlayer {
 }
 
 impl ChangeScriptPlayer {
-    pub async fn new(settings: ChangeScriptPlayerSettings) -> Self {
+    pub async fn new(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+
+        let settings = ChangeScriptPlayerSettings::new(test_run_source, script_files, data_store_path)?;
+        log::debug!("Creating ChangeScriptPlayer from {:#?}", &settings);
+
         let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
         let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
 
         let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, delayer_tx_channel.clone(), settings.clone()));
         let delayer_thread_handle = tokio::spawn(delayer_thread(delayer_rx_channel, player_tx_channel.clone()));
 
-        Self {
+        Ok(Self {
             settings,
             player_tx_channel,
             _delayer_tx_channel: delayer_tx_channel,
             _player_thread_handle: Arc::new(Mutex::new(player_thread_handle)),
             _delayer_thread_handle: Arc::new(Mutex::new(delayer_thread_handle)),
-        }
+        })
     }
+
+    // pub async fn new(settings: ChangeScriptPlayerSettings) -> Self {
+    //     let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
+    //     let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
+
+    //     let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, delayer_tx_channel.clone(), settings.clone()));
+    //     let delayer_thread_handle = tokio::spawn(delayer_thread(delayer_rx_channel, player_tx_channel.clone()));
+
+    //     Self {
+    //         settings,
+    //         player_tx_channel,
+    //         _delayer_tx_channel: delayer_tx_channel,
+    //         _player_thread_handle: Arc::new(Mutex::new(player_thread_handle)),
+    //         _delayer_thread_handle: Arc::new(Mutex::new(delayer_thread_handle)),
+    //     }
+    // }
 
     pub fn get_id(&self) -> String {
         self.settings.get_id()

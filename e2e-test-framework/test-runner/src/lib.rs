@@ -112,7 +112,7 @@ impl Default for SpacingMode {
 
 
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
 pub struct TestRunSourceId {
     pub test_id: String,
     pub test_repo_id: String,
@@ -141,9 +141,10 @@ impl fmt::Display for TestRunSourceId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ParseTestRunSourceIdError {
-    InvalidFormat,
+    #[error("Invalid format for TestRunSourceId - {0}")]
+    InvalidFormat(String),
 }
 
 impl TryFrom<&str> for TestRunSourceId {
@@ -151,7 +152,7 @@ impl TryFrom<&str> for TestRunSourceId {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let parts: Vec<&str> = value.split('.').collect();
-        if parts.len() == 3 {
+        if parts.len() == 4 {
             Ok(TestRunSourceId {
                 test_run_id: parts[0].to_string(),
                 test_repo_id: parts[1].to_string(),
@@ -159,7 +160,7 @@ impl TryFrom<&str> for TestRunSourceId {
                 test_source_id: parts[3].to_string(),
             })
         } else {
-            Err(ParseTestRunSourceIdError::InvalidFormat)
+            Err(ParseTestRunSourceIdError::InvalidFormat(value.to_string()))
         }
     }
 }
@@ -353,7 +354,7 @@ pub struct TestRunner {
     change_script_players: HashMap<String, ChangeScriptPlayer>,
     data_store: SharedTestDataStore,
     source_defaults: SourceConfig,
-    sources: HashMap<String, TestRunSource>,
+    sources: HashMap<TestRunSourceId, TestRunSource>,
     status: TestRunnerStatus,
 }
 
@@ -408,7 +409,7 @@ impl TestRunner {
                     ChangeScriptPlayer::new(
                         test_run_source.clone(), dataset.change_log_script_files, data_store_path).await?;
 
-                self.sources.insert(test_run_source.id.to_string(), test_run_source);
+                self.sources.insert(test_run_source.id.clone(), test_run_source);
                 self.change_script_players.insert(player.get_id().to_string(), player.clone());
 
                 return Ok(Some(player));
@@ -421,7 +422,8 @@ impl TestRunner {
     }
 
     pub async fn contains_test_source(&self, test_run_source_id: &str) -> anyhow::Result<bool> {
-        Ok(self.sources.contains_key(test_run_source_id))
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        Ok(self.sources.contains_key(&test_run_source_id))
     }
 
     pub async fn control_change_script_player(&self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
@@ -474,7 +476,8 @@ impl TestRunner {
     }
 
     pub async fn get_test_source(&self, test_run_source_id: &str) -> anyhow::Result<Option<TestRunSource>> {
-        Ok(self.sources.get(test_run_source_id).cloned())
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        Ok(self.sources.get(&test_run_source_id).cloned())
     }
 
     pub async fn get_test_sources(&self) -> anyhow::Result<Vec<TestRunSource>> {
@@ -482,7 +485,7 @@ impl TestRunner {
     }
 
     pub async fn get_test_source_ids(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self.sources.keys().cloned().collect())
+        Ok(self.sources.keys().map(|id| id.to_string()).collect())
     }
 
     // pub async fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {

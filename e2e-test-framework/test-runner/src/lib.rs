@@ -1,7 +1,7 @@
-use std::{collections::HashMap, path::PathBuf, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage}, SharedTestDataStore};
+use test_data_store::SharedTestDataStore;
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse, ChangeScriptPlayerSettings};
 use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig};
@@ -289,7 +289,6 @@ impl TestRunReactivator {
     }
 }
 
-
 // An enum that represents the current state of the TestRunner.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum TestRunnerStatus {
@@ -324,8 +323,7 @@ impl TestRunner {
             status: TestRunnerStatus::Initialized,
         };
 
-        // Add the initial set of sources.
-        // Fail construction if any of the SourceConfigs fail to create.
+        // Add the initial set of Test Run Sources.
         for ref source_config in config.sources {
             test_runner.add_test_source(source_config).await?;
         };
@@ -335,19 +333,6 @@ impl TestRunner {
         Ok(test_runner)
     }
     
-    pub async fn add_test_repo(&mut self, test_repo_config: &RemoteTestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
-        log::trace!("Adding TestRepo from {:#?}", test_repo_config);
-
-        // If the TestRunner is in an Error state, return an error.
-        if let TestRunnerStatus::Error(msg) = &self.status {
-            anyhow::bail!("TestRunner is in an Error state: {}", msg);
-        };
-
-        let storage = self.data_store.add_remote_test_repo(test_repo_config.clone()).await?;  
-
-        Ok(storage)
-    }
-
     pub async fn add_test_source(&mut self, source_config: &SourceConfig) -> anyhow::Result<Option<ChangeScriptPlayer>> {
         log::trace!("Adding TestRunSource from {:#?}", source_config);
 
@@ -391,10 +376,6 @@ impl TestRunner {
         }
 
         Ok(None)
-    }
-
-    pub async fn contains_test_repo(&self, test_repo_id: &str) -> anyhow::Result<bool> {
-        self.data_store.contains_test_repo(test_repo_id).await
     }
 
     pub async fn contains_test_source(&self, test_run_source_id: &str) -> anyhow::Result<bool> {
@@ -442,16 +423,12 @@ impl TestRunner {
         }
     }
 
-    pub async fn get_data_store_path(&self) -> anyhow::Result<PathBuf> {
-        self.data_store.get_data_store_path().await
+    pub async fn get_data_store(&self) -> anyhow::Result<SharedTestDataStore> {
+        Ok(self.data_store.clone())
     }
     
     pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
         Ok(self.status.clone())
-    }
-
-    pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        self.data_store.get_test_repo_ids().await
     }
 
     pub async fn get_test_source(&self, test_run_source_id: &str) -> anyhow::Result<Option<TestRunSource>> {

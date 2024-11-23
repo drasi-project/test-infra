@@ -9,7 +9,7 @@ use tokio::{io::{self, AsyncBufReadExt}, select, signal};
 
 use test_data_collector::SharedTestDataCollector;
 use test_data_store::SharedTestDataStore;
-use test_repo::{get_test_repo_handler, get_test_repo_list_handler, post_test_repo_handler};
+use test_repo::{get_test_repo_handler, get_test_repo_list_handler, get_test_repo_test_handler, get_test_repo_test_list_handler, get_test_repo_test_source_handler, get_test_repo_test_source_list_handler, post_test_repo_handler};
 use test_runner::SharedTestRunner;
 
 // use proxy::acquire_handler;
@@ -106,10 +106,14 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStor
         // .nest("/sources/:id", sources_routes)
         .route("/test_repos", get(get_test_repo_list_handler).post(post_test_repo_handler))
         .route("/test_repos/:repo_id", get(get_test_repo_handler))
+        .route("/test_repos/:repo_id/tests", get(get_test_repo_test_list_handler))
+        .route("/test_repos/:repo_id/tests/:test_id", get(get_test_repo_test_handler))
+        .route("/test_repos/:repo_id/tests/:test_id/sources", get(get_test_repo_test_source_list_handler))
+        .route("/test_repos/:repo_id/tests/:test_id/sources/:source_id", get(get_test_repo_test_source_handler))
         .layer(axum::extract::Extension(test_data_collector))
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_runner));
-
+    
     log::info!("Listening on {}", addr);
 
     let server = axum::Server::bind(&addr)

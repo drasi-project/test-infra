@@ -123,7 +123,7 @@ impl TestRepoStorage {
     }
 
     pub async fn get_test(&self, id: &str, replace: bool) -> anyhow::Result<TestStorage> {
-        log::debug!("Creating ((replace = {}) ) TestStorage for ID {:?}", replace, &id);
+        log::debug!("Getting ((replace = {}) ) TestStorage for ID {:?}", replace, &id);
 
         let test_path = self.tests_path.join(&id);
         let sources_path = test_path.join(TEST_SOURCES_FOLDER_NAME);
@@ -204,7 +204,7 @@ impl TestStorage {
     }
 
     pub async fn get_test_source(&self, id: &str, replace: bool) -> anyhow::Result<TestSourceStorage> {
-        log::debug!("Creating (replace = {}) TestSourceStorage for ID {:?}", replace, &id);
+        log::debug!("Getting (replace = {}) TestSourceStorage for ID {:?}", replace, &id);
 
         let source_path = self.sources_path.join(&id);
         let bootstrap_scripts_path = source_path.join(TEST_SOURCE_BOOTSTRAP_SCRIPTS_FOLDER_NAME);            

@@ -1,10 +1,10 @@
 use axum::{ extract::{Extension, Path}, response::IntoResponse, Json };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, test_metadata::TestDefinition, TestRepoStorage, TestSourceDataset, TestSourceStorage, TestStorage}, SharedTestDataStore};
 
-use super::TestServiceError;
+use super::TestServiceWebApiError;
 
 #[derive(Debug, Serialize)]
 pub struct TestRepoResponse {
@@ -24,6 +24,13 @@ impl TestRepoResponse {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TestPostBody {
+    pub id: String,
+    #[serde(default)]
+    pub replace: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TestResponse {
     pub id: String,
@@ -40,6 +47,13 @@ impl TestResponse {
             definition: test.test_definition.clone(),
         })
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TestSourcePostBody {
+    pub id: String,
+    #[serde(default)]
+    pub replace: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,7 +92,7 @@ impl TestSourceResponse {
 
 pub async fn get_test_repo_list_handler(
     test_data_store: Extension<SharedTestDataStore>,
-) -> anyhow::Result<impl IntoResponse, TestServiceError> {
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_list");
 
     // If the TestRunner is an Error state, return an error and a description of the error.
@@ -93,8 +107,8 @@ pub async fn get_test_repo_list_handler(
 pub async fn get_test_repo_test_list_handler(
     Path(repo_id): Path<String>,
     test_data_store: Extension<SharedTestDataStore>,
-) -> anyhow::Result<impl IntoResponse, TestServiceError> {
-    log::info!("Processing call - get_test_repo_test_list");
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - get_test_repo_test_list - repo_id:{}", repo_id);
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
@@ -109,8 +123,8 @@ pub async fn get_test_repo_test_list_handler(
 pub async fn get_test_repo_test_source_list_handler(
     Path((repo_id, test_id)): Path<(String, String)>,
     test_data_store: Extension<SharedTestDataStore>,
-) -> anyhow::Result<impl IntoResponse, TestServiceError> {
-    log::info!("Processing call - get_test_repo_test_source_list");
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - get_test_repo_test_source_list - repo_id:{}, test_id:{}", repo_id, test_id);
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
@@ -126,8 +140,8 @@ pub async fn get_test_repo_test_source_list_handler(
 pub async fn get_test_repo_handler (
     Path(repo_id): Path<String>,
     test_data_store: Extension<SharedTestDataStore>,
-) -> anyhow::Result<impl IntoResponse, TestServiceError> {
-    log::info!("Processing call - get_test_repo: {}", repo_id);
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - get_test_repo - repo_id:{}", repo_id);
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
@@ -141,8 +155,8 @@ pub async fn get_test_repo_handler (
 pub async fn get_test_repo_test_handler (
     Path((repo_id, test_id)): Path<(String, String)>,
     test_data_store: Extension<SharedTestDataStore>,
-) -> anyhow::Result<impl IntoResponse, TestServiceError> {
-    log::info!("Processing call - get_test_repo_test: {}", repo_id);
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - get_test_repo_test - repo_id:{}, test_id:{}", repo_id, test_id);
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
@@ -157,8 +171,8 @@ pub async fn get_test_repo_test_handler (
 pub async fn get_test_repo_test_source_handler (
     Path((repo_id, test_id, source_id)): Path<(String, String, String)>,
     test_data_store: Extension<SharedTestDataStore>,
-) -> anyhow::Result<impl IntoResponse, TestServiceError> {
-    log::info!("Processing call - get_test_repo_test_source: {}", repo_id);
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - get_test_repo_test_source - repo_id:{}, test_id:{}, source_id:{}", repo_id, test_id, source_id);
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
@@ -174,7 +188,7 @@ pub async fn get_test_repo_test_source_handler (
 pub async fn post_test_repo_handler (
     test_data_store: Extension<SharedTestDataStore>,
     body: Json<Value>,
-) -> anyhow::Result<impl IntoResponse, TestServiceError> {
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_test_repo");
 
     // let mut test_runner = state.write().await;
@@ -186,7 +200,49 @@ pub async fn post_test_repo_handler (
 
     let repo_config: RemoteTestRepoConfig = serde_json::from_value(body.0)?;
 
-    // Add the TestRepoConfig to the test_runner.test_repo_configs HashMap.
     let repo = test_data_store.test_repo_store.lock().await.add_test_repo(repo_config, false).await?;
     Ok(Json(TestRepoResponse::new(&repo).await?).into_response())
+}
+
+pub async fn post_test_repo_test_handler (
+    Path(repo_id): Path<String>,
+    test_data_store: Extension<SharedTestDataStore>,
+    body: Json<Value>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - post_test_repo_test - repo_id:{}", repo_id);
+
+    // let mut test_runner = state.write().await;
+
+    // If the service is an Error state, return an error and the description of the error.
+    // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
+    //     return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    // }
+
+    let test_post_body: TestPostBody = serde_json::from_value(body.0)?;
+
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
+    let test = repo.get_test(&test_post_body.id, test_post_body.replace).await?;
+    Ok(Json(TestResponse::new(&test).await?).into_response())
+}
+
+pub async fn post_test_repo_test_source_handler (
+    Path((repo_id, test_id)): Path<(String, String)>,
+    test_data_store: Extension<SharedTestDataStore>,
+    body: Json<Value>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - post_test_repo_test_source - repo_id:{}, test_id:{}", repo_id, test_id);
+
+    // let mut test_runner = state.write().await;
+
+    // If the service is an Error state, return an error and the description of the error.
+    // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
+    //     return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    // }
+
+    let test_source_post_body: TestSourcePostBody = serde_json::from_value(body.0)?;
+
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
+    let test = repo.get_test(&test_id, false).await?;
+    let source = test.get_test_source(&test_source_post_body.id, test_source_post_body.replace).await?;
+    Ok(Json(TestSourceResponse::new(&source).await?).into_response())
 }

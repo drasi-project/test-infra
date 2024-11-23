@@ -9,7 +9,7 @@ use tokio::{io::{self, AsyncBufReadExt}, select, signal};
 
 use test_data_collector::SharedTestDataCollector;
 use test_data_store::SharedTestDataStore;
-use test_repo::{get_test_repo_handler, get_test_repo_list_handler, get_test_repo_test_handler, get_test_repo_test_list_handler, get_test_repo_test_source_handler, get_test_repo_test_source_list_handler, post_test_repo_handler};
+use test_repo::{get_test_repo_handler, get_test_repo_list_handler, get_test_repo_test_handler, get_test_repo_test_list_handler, get_test_repo_test_source_handler, get_test_repo_test_source_list_handler, post_test_repo_handler, post_test_repo_test_handler, post_test_repo_test_source_handler};
 use test_runner::SharedTestRunner;
 
 // use proxy::acquire_handler;
@@ -19,32 +19,32 @@ use test_runner::SharedTestRunner;
 pub mod test_repo;
 
 #[derive(Debug, Error)]
-pub enum TestServiceError {
+pub enum TestServiceWebApiError {
     #[error("Error: {0}")]
     AnyhowError(anyhow::Error),
     #[error("Error: {0}")]
     SerdeJsonError(serde_json::Error),
 }
 
-impl From<anyhow::Error> for TestServiceError {
+impl From<anyhow::Error> for TestServiceWebApiError {
     fn from(error: anyhow::Error) -> Self {
-        TestServiceError::AnyhowError(error)
+        TestServiceWebApiError::AnyhowError(error)
     }
 }
 
-impl From<serde_json::Error> for TestServiceError {
+impl From<serde_json::Error> for TestServiceWebApiError {
     fn from(error: serde_json::Error) -> Self {
-        TestServiceError::SerdeJsonError(error)
+        TestServiceWebApiError::SerdeJsonError(error)
     }
 }
 
-impl IntoResponse for TestServiceError {
+impl IntoResponse for TestServiceWebApiError {
     fn into_response(self) -> Response {
         match self {
-            TestServiceError::AnyhowError(e) => {
+            TestServiceWebApiError::AnyhowError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
             },
-            TestServiceError::SerdeJsonError(e) => {
+            TestServiceWebApiError::SerdeJsonError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
             },
         }
@@ -106,14 +106,14 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStor
         // .nest("/sources/:id", sources_routes)
         .route("/test_repos", get(get_test_repo_list_handler).post(post_test_repo_handler))
         .route("/test_repos/:repo_id", get(get_test_repo_handler))
-        .route("/test_repos/:repo_id/tests", get(get_test_repo_test_list_handler))
+        .route("/test_repos/:repo_id/tests", get(get_test_repo_test_list_handler).post(post_test_repo_test_handler))
         .route("/test_repos/:repo_id/tests/:test_id", get(get_test_repo_test_handler))
-        .route("/test_repos/:repo_id/tests/:test_id/sources", get(get_test_repo_test_source_list_handler))
+        .route("/test_repos/:repo_id/tests/:test_id/sources", get(get_test_repo_test_source_list_handler).post(post_test_repo_test_source_handler))
         .route("/test_repos/:repo_id/tests/:test_id/sources/:source_id", get(get_test_repo_test_source_handler))
         .layer(axum::extract::Extension(test_data_collector))
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_runner));
-    
+
     log::info!("Listening on {}", addr);
 
     let server = axum::Server::bind(&addr)
@@ -159,7 +159,7 @@ async fn service_info_handler(
     test_data_collector_state: Extension<SharedTestDataCollector>,
     test_data_store: Extension<SharedTestDataStore>,
     test_runner_state: Extension<SharedTestRunner>,
-) -> anyhow::Result<impl IntoResponse, TestServiceError> {
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - service_info");
 
     let test_runner = test_runner_state.read().await;

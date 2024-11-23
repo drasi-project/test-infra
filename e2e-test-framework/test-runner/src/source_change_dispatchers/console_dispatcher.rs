@@ -14,7 +14,7 @@ pub struct ConsoleSourceChangeDispatcherSettings {
 }
 
 impl ConsoleSourceChangeDispatcherSettings {
-    pub fn try_from_config(config: &ConsoleSourceChangeDispatcherConfig) -> anyhow::Result<Self> {
+    pub fn new(config: &ConsoleSourceChangeDispatcherConfig) -> anyhow::Result<Self> {
         return Ok(Self {
             date_time_format: config.date_time_format.clone().unwrap_or("%Y-%m-%d %H:%M:%S%.f".to_string()),
         });

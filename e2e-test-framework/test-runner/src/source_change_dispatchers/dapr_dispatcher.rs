@@ -17,7 +17,7 @@ pub struct DaprSourceChangeDispatcherSettings {
 }
 
 impl DaprSourceChangeDispatcherSettings {
-    pub fn try_from_config(config: &DaprSourceChangeDispatcherConfig, source_id: String) -> anyhow::Result<Self> {
+    pub fn new(config: &DaprSourceChangeDispatcherConfig, source_id: String) -> anyhow::Result<Self> {
         Ok(Self {
             host: config.host.clone().unwrap_or("127.0.0.1".to_string()),
             port: config.port.unwrap_or(3500),

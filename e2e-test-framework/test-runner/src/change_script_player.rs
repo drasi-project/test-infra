@@ -243,22 +243,6 @@ impl ChangeScriptPlayer {
         })
     }
 
-    // pub async fn new(settings: ChangeScriptPlayerSettings) -> Self {
-    //     let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
-    //     let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
-
-    //     let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, delayer_tx_channel.clone(), settings.clone()));
-    //     let delayer_thread_handle = tokio::spawn(delayer_thread(delayer_rx_channel, player_tx_channel.clone()));
-
-    //     Self {
-    //         settings,
-    //         player_tx_channel,
-    //         _delayer_tx_channel: delayer_tx_channel,
-    //         _player_thread_handle: Arc::new(Mutex::new(player_thread_handle)),
-    //         _delayer_thread_handle: Arc::new(Mutex::new(delayer_thread_handle)),
-    //     }
-    // }
-
     pub fn get_id(&self) -> String {
         self.settings.get_id()
     }
@@ -350,7 +334,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
             for dispatcher_config in player_settings.reactivator.dispatchers.iter() {
                 match dispatcher_config {
                     SourceChangeDispatcherConfig::Dapr(dapr_config) => {
-                        match DaprSourceChangeDispatcherSettings::try_from_config(dapr_config, player_settings.test_source_id.clone()) {
+                        match DaprSourceChangeDispatcherSettings::new(dapr_config, player_settings.test_source_id.clone()) {
                             Ok(settings) => {
                                 match DaprSourceChangeDispatcher::new(settings) {
                                     Ok(d) => dispatchers.push(d),
@@ -365,7 +349,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                         }
                     },
                     SourceChangeDispatcherConfig::Console(console_config ) => {
-                        match ConsoleSourceChangeDispatcherSettings::try_from_config(console_config) {
+                        match ConsoleSourceChangeDispatcherSettings::new(console_config) {
                             Ok(settings) => {
                                 match ConsoleSourceChangeDispatcher::new(settings) {
                                     Ok(d) => dispatchers.push(d),
@@ -409,7 +393,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                                         .join(&player_settings.test_source_id)
                         };
 
-                        match JsonlFileSourceChangeDispatcherSettings::try_from_config(jsonl_file_config, folder_path) {
+                        match JsonlFileSourceChangeDispatcherSettings::new(jsonl_file_config, folder_path) {
                             Ok(settings) => {
                                 match JsonlFileSourceChangeDispatcher::new(settings) {
                                     Ok(d) => dispatchers.push(d),

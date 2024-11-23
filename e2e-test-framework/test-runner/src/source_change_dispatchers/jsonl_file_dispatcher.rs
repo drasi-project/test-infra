@@ -17,7 +17,7 @@ pub struct JsonlFileSourceChangeDispatcherSettings {
 }
 
 impl JsonlFileSourceChangeDispatcherSettings {
-    pub fn try_from_config(_config: &JsonlFileSourceChangeDispatcherConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(_config: &JsonlFileSourceChangeDispatcherConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
         return Ok(Self {
             folder_path,
         });

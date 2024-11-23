@@ -44,9 +44,12 @@ pub enum ChangeScriptPlayerError {
 #[derive(Clone, Debug, Serialize)]
 pub struct ChangeScriptPlayerSettings {
     pub data_store_path: PathBuf,
+    pub id: String,
     pub reactivator: TestRunReactivator,
     pub script_files: Vec<PathBuf>,
-    pub test_run_source: TestRunSource,
+    pub test_id: String,
+    pub test_run_id: String,
+    pub test_source_id: String,
 }
 
 impl ChangeScriptPlayerSettings {
@@ -65,14 +68,17 @@ impl ChangeScriptPlayerSettings {
 
         Ok(ChangeScriptPlayerSettings {
             data_store_path,
+            id: test_run_source.id,
             reactivator,
             script_files,
-            test_run_source,
+            test_id: test_run_source.test_id,
+            test_run_id: test_run_source.test_run_id,
+            test_source_id: test_run_source.source_id,
         })
     }
 
     pub fn get_id(&self) -> String {
-        self.test_run_source.id.clone()
+        self.id.clone()
     }
 }
 
@@ -216,7 +222,6 @@ pub struct DelayChangeScriptRecordMessage {
 
 #[derive(Clone, Debug)]
 pub struct ChangeScriptPlayer {
-    // Channel used to send messages to the ChangeScriptPlayer thread.
     settings: ChangeScriptPlayerSettings,
     player_tx_channel: Sender<ChangeScriptPlayerMessage>,
     _delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>,
@@ -332,7 +337,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
             for dispatcher_config in player_settings.reactivator.dispatchers.iter() {
                 match dispatcher_config {
                     SourceChangeDispatcherConfig::Dapr(dapr_config) => {
-                        match DaprSourceChangeDispatcherSettings::try_from_config(dapr_config, player_settings.test_run_source.source_id.clone()) {
+                        match DaprSourceChangeDispatcherSettings::try_from_config(dapr_config, player_settings.test_source_id.clone()) {
                             Ok(settings) => {
                                 match DaprSourceChangeDispatcher::new(settings) {
                                     Ok(d) => dispatchers.push(d),
@@ -374,21 +379,21 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                                 if config_path.starts_with("/") {
                                     PathBuf::from(format!("{}/test_output/{}/{}/change_logs/{}", 
                                         config_path,
-                                        &player_settings.test_run_source.test_id, 
-                                        &player_settings.test_run_source.test_run_id, 
-                                        &player_settings.test_run_source.source_id))
+                                        &player_settings.test_id, 
+                                        &player_settings.test_run_id, 
+                                        &player_settings.test_source_id))
                                 } else {
                                     PathBuf::from(format!("./{}/test_output/{}/{}/change_logs/{}", 
                                         config_path,
-                                        &player_settings.test_run_source.test_id, 
-                                        &player_settings.test_run_source.test_run_id, 
-                                        &player_settings.test_run_source.source_id))
+                                        &player_settings.test_id, 
+                                        &player_settings.test_run_id, 
+                                        &player_settings.test_source_id))
                                 }
                             },
                             None => player_settings.data_store_path.clone()
-                                        .join(&player_settings.test_run_source.test_id)
-                                        .join(&player_settings.test_run_source.test_run_id)
-                                        .join(&player_settings.test_run_source.source_id)
+                                        .join(&player_settings.test_id)
+                                        .join(&player_settings.test_run_id)
+                                        .join(&player_settings.test_source_id)
                         };
 
                         match JsonlFileSourceChangeDispatcherSettings::try_from_config(jsonl_file_config, folder_path) {

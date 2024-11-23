@@ -3,7 +3,7 @@ use std::{collections::HashMap, str::FromStr, sync::Arc};
 use serde::Serialize;
 use test_data_store::SharedTestDataStore;
 
-use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse, ChangeScriptPlayerSettings};
+use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse};
 use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig};
 use tokio::sync::RwLock;
 
@@ -153,13 +153,13 @@ impl TestRunSource {
         let proxy = match config.proxy {
             Some(ref config) => {
                 match defaults.proxy {
-                    Some(ref defaults) => TestRunProxy::try_from_config(id.clone(), config, defaults).ok(),
-                    None => TestRunProxy::try_from_config(id.clone(), config, &ProxyConfig::default()).ok(),
+                    Some(ref defaults) => TestRunProxy::new(id.clone(), config, defaults).ok(),
+                    None => TestRunProxy::new(id.clone(), config, &ProxyConfig::default()).ok(),
                 }
             },
             None => {
                 match defaults.proxy {
-                    Some(ref defaults) => TestRunProxy::try_from_config(id.clone(), defaults, &ProxyConfig::default()).ok(),
+                    Some(ref defaults) => TestRunProxy::new(id.clone(), defaults, &ProxyConfig::default()).ok(),
                     None => None,
                 }
             }
@@ -169,13 +169,13 @@ impl TestRunSource {
         let reactivator = match config.reactivator {
             Some(ref config) => {
                 match defaults.reactivator {
-                    Some(ref defaults) => TestRunReactivator::try_from_config(id.clone(), config, defaults).ok(),
-                    None => TestRunReactivator::try_from_config(id.clone(), config, &ReactivatorConfig::default()).ok(),
+                    Some(ref defaults) => TestRunReactivator::new(id.clone(), config, defaults).ok(),
+                    None => TestRunReactivator::new(id.clone(), config, &ReactivatorConfig::default()).ok(),
                 }
             },
             None => {
                 match defaults.reactivator {
-                    Some(ref defaults) => TestRunReactivator::try_from_config(id.clone(), defaults, &ReactivatorConfig::default()).ok(),
+                    Some(ref defaults) => TestRunReactivator::new(id.clone(), defaults, &ReactivatorConfig::default()).ok(),
                     None => None,
                 }
             }
@@ -200,7 +200,7 @@ pub struct TestRunProxy {
 }
 
 impl TestRunProxy {
-    pub fn try_from_config(test_run_source_id: String, config: &ProxyConfig, defaults: &ProxyConfig) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: String, config: &ProxyConfig, defaults: &ProxyConfig) -> anyhow::Result<Self> {
         let time_mode = match &config.time_mode {
             Some(time_mode) => TimeMode::from_str(time_mode)?,
             None => {
@@ -221,7 +221,7 @@ impl TestRunProxy {
 #[derive(Clone, Debug, Serialize)]
 pub struct TestRunReactivator {
     pub dispatchers: Vec<SourceChangeDispatcherConfig>,
-    pub ignore_scripted_pause_commands: bool,
+    pub ignore_scripted_pause_commands: bool,    
     pub spacing_mode: SpacingMode,
     pub start_immediately: bool,
     pub test_run_source_id: String,
@@ -229,7 +229,7 @@ pub struct TestRunReactivator {
 }
 
 impl TestRunReactivator {
-    pub fn try_from_config(test_run_source_id: String, config: &ReactivatorConfig, defaults: &ReactivatorConfig) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: String, config: &ReactivatorConfig, defaults: &ReactivatorConfig) -> anyhow::Result<Self> {
         // If neither the ReactivatorConfig nor the ReactivatorConfig defaults contain a ignore_scripted_pause_commands, 
         // set to false.
         let ignore_scripted_pause_commands = config.ignore_scripted_pause_commands
@@ -358,13 +358,9 @@ impl TestRunner {
         // be created and possibly started.
         if test_run_source.reactivator.is_some() {
             if dataset.change_log_script_files.len() > 0 {
-                let player_settings = 
-                    ChangeScriptPlayerSettings::try_from_test_run_source(
-                        test_run_source.clone(), dataset.change_log_script_files, data_store_path)?;
-
-                log::debug!("Creating ChangeScriptPlayer from {:#?}", &player_settings);
-
-                let player = ChangeScriptPlayer::new(player_settings).await;
+                let player = 
+                    ChangeScriptPlayer::new(
+                        test_run_source.clone(), dataset.change_log_script_files, data_store_path).await?;
 
                 self.sources.insert(test_run_source.id.clone(), test_run_source);
                 self.change_script_players.insert(player.get_id().clone(), player.clone());
@@ -383,7 +379,7 @@ impl TestRunner {
     }
 
     pub async fn control_change_script_player(&self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
-        log::trace!("Control Player - player_id:{}, command:{:?}", player_id, command);
+        log::trace!("Control TestRunSource Player - player_id:{}, command:{:?}", player_id, command);
 
         // If the TestRunner is in an Error state, return an error.
         if let TestRunnerStatus::Error(msg) = &self.status {

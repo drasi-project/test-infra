@@ -53,23 +53,16 @@ pub struct ChangeScriptPlayerSettings {
 }
 
 impl ChangeScriptPlayerSettings {
-    pub fn try_from_test_run_source(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
 
-        // If the SourceConfig doesn't contain a ReactivatorConfig, log and return an error.
-        // Otherwise, clone the TestRunSource and extract the TestRunReactivator.
-        let (test_run_source, reactivator) = match test_run_source.reactivator {
-            Some(reactivator) => {
-                (TestRunSource { reactivator: None, ..test_run_source }, reactivator)
-            },
-            None => {
-                anyhow::bail!("No ReactivatorConfig provided in TestRunSource: {:?}", test_run_source);
-            }
-        };
+        if !(test_run_source.reactivator.is_some()) {
+            anyhow::bail!("No ReactivatorConfig provided in TestRunSource: {:?}", test_run_source);
+        }
 
         Ok(ChangeScriptPlayerSettings {
             data_store_path,
             id: test_run_source.id,
-            reactivator,
+            reactivator: test_run_source.reactivator.unwrap(),
             script_files,
             test_id: test_run_source.test_id,
             test_run_id: test_run_source.test_run_id,

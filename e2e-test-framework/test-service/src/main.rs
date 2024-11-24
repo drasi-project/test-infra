@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use data_collector::{config::TestDataCollectorConfig, TestDataCollector};
+use data_collector::{config::DataCollectorConfig, DataCollector};
 use test_data_store::{TestDataStoreConfig, TestDataStore};
 use test_runner::{config::TestRunnerConfig, TestRunner};
 use tokio::sync::RwLock;
@@ -42,7 +42,7 @@ pub struct TestServiceConfig {
     #[serde(default)]
     pub test_runner: TestRunnerConfig,
     #[serde(default)]
-    pub test_data_collector: TestDataCollectorConfig,
+    pub data_collector: DataCollectorConfig,
 }
 
 impl Default for TestServiceConfig {
@@ -50,7 +50,7 @@ impl Default for TestServiceConfig {
         TestServiceConfig {
             data_store: TestDataStoreConfig::default(),
             test_runner: TestRunnerConfig::default(),
-            test_data_collector: TestDataCollectorConfig::default(),
+            data_collector: DataCollectorConfig::default(),
         }
     }
 }
@@ -105,13 +105,13 @@ async fn main() {
         panic!("Error creating TestDataStore: {}", err);
     }));
 
-    let mut test_data_collector = TestDataCollector::new(test_service_config.test_data_collector, test_data_store.clone()).await.unwrap_or_else(|err| {
-        panic!("Error creating TestDataCollector: {}", err);
+    let mut data_collector = DataCollector::new(test_service_config.data_collector, test_data_store.clone()).await.unwrap_or_else(|err| {
+        panic!("Error creating DataCollector: {}", err);
     });
 
-    // Start the TestDataCollector. This will start any collectors that are configured to start on launch.
-    test_data_collector.start().await.unwrap_or_else(|err| {
-        panic!("Error starting TestDataCollector: {}", err);
+    // Start the DataCollector. This will start any collectors that are configured to start on launch.
+    data_collector.start().await.unwrap_or_else(|err| {
+        panic!("Error starting DataCollector: {}", err);
     });
 
     let mut test_runner = TestRunner::new(test_service_config.test_runner, test_data_store.clone()).await.unwrap_or_else(|err| {
@@ -128,6 +128,6 @@ async fn main() {
         host_params.port, 
         test_data_store, 
         Arc::new(RwLock::new(test_runner)), 
-        Arc::new(RwLock::new(test_data_collector))
+        Arc::new(RwLock::new(data_collector))
     ).await;
 }

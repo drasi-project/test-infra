@@ -9,7 +9,7 @@ use tokio::{io::{self, AsyncBufReadExt}, select, signal};
 
 use repo::get_test_repo_routes;
 use runner::get_test_runner_routes;
-use data_collector::SharedTestDataCollector;
+use data_collector::SharedDataCollector;
 use test_data_store::SharedTestDataStore;
 use test_runner::SharedTestRunner;
 
@@ -58,7 +58,7 @@ impl IntoResponse for TestServiceWebApiError {
 struct TestServiceStateResponse {
     pub data_store: TestDataStoreStateResponse,
     pub test_runner: TestRunnerStateResponse,
-    pub test_data_collector: TestDataCollectorStateResponse,
+    pub data_collector: DataCollectorStateResponse,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,12 +74,12 @@ struct TestRunnerStateResponse {
 }
 
 #[derive(Debug, Serialize)]
-struct TestDataCollectorStateResponse {
+struct DataCollectorStateResponse {
     pub status: String,
     pub data_collection_ids: Vec<String>,
 }
 
-pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStore, test_runner: SharedTestRunner, test_data_collector: SharedTestDataCollector) {
+pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStore, test_runner: SharedTestRunner, data_collector: SharedDataCollector) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
     let app = Router::new()
@@ -87,7 +87,7 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStor
         // .route("/acquire", post(acquire_handler))
         .nest("/test_repos", get_test_repo_routes())
         .nest("/test_runner", get_test_runner_routes())
-        .layer(axum::extract::Extension(test_data_collector))
+        .layer(axum::extract::Extension(data_collector))
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_runner));
 
@@ -133,14 +133,14 @@ async fn shutdown_signal() {
 }
 
 async fn service_info_handler(
-    test_data_collector_state: Extension<SharedTestDataCollector>,
+    data_collector_state: Extension<SharedDataCollector>,
     test_data_store: Extension<SharedTestDataStore>,
     test_runner_state: Extension<SharedTestRunner>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - service_info");
 
     let test_runner = test_runner_state.read().await;
-    let test_data_collector = test_data_collector_state.read().await;
+    let data_collector = data_collector_state.read().await;
 
     Ok(Json(TestServiceStateResponse {
         data_store: TestDataStoreStateResponse {
@@ -151,9 +151,9 @@ async fn service_info_handler(
             status: format!("{:?}", test_runner.get_status().await?),
             test_run_source_ids: test_runner.get_test_source_ids().await?,
         },
-        test_data_collector: TestDataCollectorStateResponse {
-            status: format!("{:?}", test_data_collector.get_status().await?),
-            data_collection_ids: test_data_collector.get_data_collection_ids().await?,
+        data_collector: DataCollectorStateResponse {
+            status: format!("{:?}", data_collector.get_status().await?),
+            data_collection_ids: data_collector.get_data_collection_ids().await?,
         },
     }))
 }

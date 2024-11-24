@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct TestDataCollectorConfig {
+pub struct DataCollectorConfig {
     #[serde(default)]
     pub data_collections: Vec<DataCollectionConfig>,
 }
 
-impl Default for TestDataCollectorConfig {
+impl Default for DataCollectorConfig {
     fn default() -> Self {
-        TestDataCollectorConfig {
+        DataCollectorConfig {
             data_collections: Vec::new(),
         }
     }

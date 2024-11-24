@@ -103,7 +103,7 @@ impl Default for SourceChangeGeneratorConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "kind")]
 pub enum SourceChangeDispatcherConfig {
     Console(ConsoleSourceChangeDispatcherConfig),
     Dapr(DaprSourceChangeDispatcherConfig),

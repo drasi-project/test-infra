@@ -16,7 +16,7 @@ pub enum BootstrapScriptReaderError {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")] // This will use the "type" field to determine the enum variant
+#[serde(tag = "kind")] // This will use the "kind" field to determine the enum variant
 pub enum BootstrapScriptRecord {
     Comment(CommentRecord),
     Header(HeaderRecord),

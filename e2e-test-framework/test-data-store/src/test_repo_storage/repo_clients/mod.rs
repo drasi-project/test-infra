@@ -10,7 +10,7 @@ use super::{test_metadata::TestDefinition, TestSourceDataset};
 pub mod azure_storage_blob_test_repo_client;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "kind")]
 pub enum RemoteTestRepoConfig {
     AzureStorageBlob {
         #[serde(flatten)]

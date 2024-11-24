@@ -65,7 +65,7 @@ impl std::fmt::Display for SourceChangeEvent {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")] // This will use the "type" field to determine the enum variant
+#[serde(tag = "kind")] // This will use the "kind" field to determine the enum variant
 pub enum ChangeScriptRecord {
     Comment(CommentRecord),
     Header(HeaderRecord),

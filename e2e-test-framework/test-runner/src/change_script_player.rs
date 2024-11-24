@@ -14,7 +14,7 @@ use crate::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, 
         dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, 
         jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
-    }, TestRunReactivator, TimeMode
+    }, TestRunSourceChangeGenerator, TimeMode
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 
@@ -44,16 +44,16 @@ pub enum ChangeScriptPlayerError {
 pub struct ChangeScriptPlayerSettings {
     pub data_store_path: PathBuf,
     pub id: TestRunSourceId,
-    pub reactivator: TestRunReactivator,
+    pub source_change_generator: TestRunSourceChangeGenerator,
     pub script_files: Vec<PathBuf>,
 }
 
 impl ChangeScriptPlayerSettings {
-    pub fn new(test_run_source_id: TestRunSourceId, reactivator: TestRunReactivator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: TestRunSourceId, source_change_generator: TestRunSourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
         Ok(ChangeScriptPlayerSettings {
             data_store_path,
             id: test_run_source_id,
-            reactivator: reactivator,
+            source_change_generator,
             script_files,
         })
     }
@@ -215,9 +215,9 @@ pub struct ChangeScriptPlayer {
 }
 
 impl ChangeScriptPlayer {
-    pub async fn new(test_run_source_id: TestRunSourceId, reactivator: TestRunReactivator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(test_run_source_id: TestRunSourceId, source_change_generator: TestRunSourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
 
-        let settings = ChangeScriptPlayerSettings::new(test_run_source_id, reactivator, script_files, data_store_path)?;
+        let settings = ChangeScriptPlayerSettings::new(test_run_source_id, source_change_generator, script_files, data_store_path)?;
         log::debug!("Creating ChangeScriptPlayer from {:#?}", &settings);
 
         let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
@@ -300,9 +300,9 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
             log::debug!("Loaded ChangeScript. {:?}", header);
 
             let mut player_state = ChangeScriptPlayerState::default();
-            player_state.ignore_scripted_pause_commands = player_settings.reactivator.ignore_scripted_pause_commands;
-            player_state.time_mode = player_settings.reactivator.time_mode;
-            player_state.spacing_mode = player_settings.reactivator.spacing_mode;
+            player_state.ignore_scripted_pause_commands = player_settings.source_change_generator.ignore_scripted_pause_commands;
+            player_state.time_mode = player_settings.source_change_generator.time_mode;
+            player_state.spacing_mode = player_settings.source_change_generator.spacing_mode;
         
             // Set the start_replay_time based on the time mode and the script start time from the header.
             player_state.start_replay_time = match player_state.time_mode {
@@ -323,7 +323,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
 
             let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
 
-            for dispatcher_config in player_settings.reactivator.dispatchers.iter() {
+            for dispatcher_config in player_settings.source_change_generator.dispatchers.iter() {
                 match dispatcher_config {
                     SourceChangeDispatcherConfig::Dapr(dapr_config) => {
                         match DaprSourceChangeDispatcherSettings::new(dapr_config, player_settings.id.test_source_id.clone()) {

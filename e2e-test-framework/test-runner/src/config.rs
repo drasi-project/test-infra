@@ -32,7 +32,7 @@ pub struct TestRunSourceConfig {
     pub test_run_id: Option<String>,
     pub test_source_id: Option<String>,
     pub proxy: Option<TestRunSourceProxyConfig>,
-    pub reactivator: Option<TestRunSourceReactivatorConfig>,
+    pub source_change_generator: Option<TestRunSourceChangeGeneratorConfig>,
 }
 
 impl Default for TestRunSourceConfig {
@@ -43,7 +43,7 @@ impl Default for TestRunSourceConfig {
             test_run_id: None,
             test_source_id: None,
             proxy: None,
-            reactivator: None,
+            source_change_generator: None,
         }
     }
 }
@@ -63,8 +63,8 @@ impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
 
 impl fmt::Display for TestRunSourceConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TestRunSourceConfig: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, proxy: {:?}, reactivator: {:?}", 
-            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.proxy, self.reactivator)
+        write!(f, "TestRunSourceConfig: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, proxy: {:?}, source_change_generator: {:?}", 
+            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.proxy, self.source_change_generator)
     }
 }
 
@@ -82,7 +82,7 @@ impl Default for TestRunSourceProxyConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TestRunSourceReactivatorConfig {
+pub struct TestRunSourceChangeGeneratorConfig {
     pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
     pub ignore_scripted_pause_commands: Option<bool>,
     pub spacing_mode: Option<SpacingMode>,
@@ -90,9 +90,9 @@ pub struct TestRunSourceReactivatorConfig {
     pub time_mode: Option<TimeMode>,
 }
 
-impl Default for TestRunSourceReactivatorConfig {
+impl Default for TestRunSourceChangeGeneratorConfig {
     fn default() -> Self {
-        TestRunSourceReactivatorConfig {
+        TestRunSourceChangeGeneratorConfig {
             dispatchers: None,
             ignore_scripted_pause_commands: Some(false),
             spacing_mode: Some(SpacingMode::Recorded),

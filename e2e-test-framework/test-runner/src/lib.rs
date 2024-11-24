@@ -4,7 +4,7 @@ use serde::Serialize;
 use test_data_store::{test_repo_storage::{test_metadata::{SpacingMode, TimeMode}, TestSourceDataset}, test_run_storage::{TestRunSourceId, TestRunStorage}, SharedTestDataStore};
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse};
-use config::{TestRunSourceProxyConfig, TestRunSourceReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, TestRunSourceConfig};
+use config::{TestRunSourceProxyConfig, TestRunSourceChangeGeneratorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, TestRunSourceConfig};
 use tokio::sync::RwLock;
 
 pub mod change_script_player;
@@ -15,7 +15,7 @@ pub mod source_change_dispatchers;
 pub struct TestRunSource {
     pub id: TestRunSourceId,
     pub proxy: Option<TestRunProxy>,
-    pub reactivator: Option<TestRunReactivator>,    
+    pub source_change_generator: Option<TestRunSourceChangeGenerator>,    
     pub change_script_player: Option<ChangeScriptPlayer>,
 }
 
@@ -63,24 +63,24 @@ impl TestRunSource {
             }
         };
 
-        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a reactivator, set it to None.
-        let reactivator = match config.reactivator {
+        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a source_change_generator, set it to None.
+        let source_change_generator = match config.source_change_generator {
             Some(ref config) => {
-                match defaults.reactivator {
-                    Some(ref defaults) => TestRunReactivator::new(id.clone(), config, defaults).ok(),
-                    None => TestRunReactivator::new(id.clone(), config, &TestRunSourceReactivatorConfig::default()).ok(),
+                match defaults.source_change_generator {
+                    Some(ref defaults) => TestRunSourceChangeGenerator::new(id.clone(), config, defaults).ok(),
+                    None => TestRunSourceChangeGenerator::new(id.clone(), config, &TestRunSourceChangeGeneratorConfig::default()).ok(),
                 }
             },
             None => {
-                match defaults.reactivator {
-                    Some(ref defaults) => TestRunReactivator::new(id.clone(), defaults, &TestRunSourceReactivatorConfig::default()).ok(),
+                match defaults.source_change_generator {
+                    Some(ref defaults) => TestRunSourceChangeGenerator::new(id.clone(), defaults, &TestRunSourceChangeGeneratorConfig::default()).ok(),
                     None => None,
                 }
             }
         };
 
-        let change_script_player = match &reactivator {
-            Some(reactivator) => {
+        let change_script_player = match &source_change_generator {
+            Some(source_change_generator) => {
                 let st = test_run_storage.get_source_storage(&test_repo_id, &source_id, false).await?;
                 let data_store_path = st.path.clone();
 
@@ -88,7 +88,7 @@ impl TestRunSource {
 
                     let player = 
                         ChangeScriptPlayer::new(
-                            id.clone(), reactivator.clone(), test_source_dataset.change_log_script_files, data_store_path).await?;
+                            id.clone(), source_change_generator.clone(), test_source_dataset.change_log_script_files, data_store_path).await?;
 
                     Some(player)
                 } else {
@@ -101,7 +101,7 @@ impl TestRunSource {
         Ok(Self {
             id,
             proxy,
-            reactivator,
+            source_change_generator,
             change_script_player,
         })
     }
@@ -135,7 +135,7 @@ impl TestRunProxy {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TestRunReactivator {
+pub struct TestRunSourceChangeGenerator {
     pub dispatchers: Vec<SourceChangeDispatcherConfig>,
     pub ignore_scripted_pause_commands: bool,    
     pub spacing_mode: SpacingMode,
@@ -144,9 +144,9 @@ pub struct TestRunReactivator {
     pub time_mode: TimeMode,
 }
 
-impl TestRunReactivator {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &TestRunSourceReactivatorConfig, defaults: &TestRunSourceReactivatorConfig) -> anyhow::Result<Self> {
-        // If neither the ReactivatorConfig nor the ReactivatorConfig defaults contain a ignore_scripted_pause_commands, 
+impl TestRunSourceChangeGenerator {
+    pub fn new(test_run_source_id: TestRunSourceId, config: &TestRunSourceChangeGeneratorConfig, defaults: &TestRunSourceChangeGeneratorConfig) -> anyhow::Result<Self> {
+        // If neither the SourceChangeGeneratorConfig nor the SourceChangeGeneratorConfig defaults contain a ignore_scripted_pause_commands, 
         // set to false.
         let ignore_scripted_pause_commands = config.ignore_scripted_pause_commands
             .or(defaults.ignore_scripted_pause_commands)
@@ -164,7 +164,7 @@ impl TestRunReactivator {
             }
         };
 
-        // If neither the ReactivatorConfig nor the ReactivatorConfig defaults contain a start_immediately, 
+        // If neither the SourceChangeGeneratorConfig nor the SourceChangeGeneratorConfig defaults contain a start_immediately, 
         // set to true.
         let start_immediately = config.start_immediately
             .or(defaults.start_immediately)
@@ -182,7 +182,7 @@ impl TestRunReactivator {
             }
         };
 
-        // If neither the ReactivatorConfig nor the ReactivatorConfig defaults contain a list of dispatchers, 
+        // If neither the SourceChangeGeneratorConfig nor the SourceChangeGeneratorConfig defaults contain a list of dispatchers, 
         // set to an empty Vec.
         let dispatchers = match &config.dispatchers {
             Some(dispatchers) => dispatchers.clone(),
@@ -369,10 +369,10 @@ impl TestRunner {
             },
         };
 
-        // Iterate over the reactivators and start each one if it is configured to start immediately.
-        // If any of the reactivators fail to start, set the TestRunnerStatus to Error and return an error.
+        // Iterate over the SourceChangeGenerators and start each one if it is configured to start immediately.
+        // If any of the SourceChangeGenerators fail to start, set the TestRunnerStatus to Error and return an error.
         for (_, source) in &self.sources {
-            if source.change_script_player.as_ref().unwrap().get_settings().reactivator.start_immediately {
+            if source.change_script_player.as_ref().unwrap().get_settings().source_change_generator.start_immediately {
                 match &source.change_script_player.as_ref().unwrap().start().await {
                     Ok(_) => {},
                     Err(e) => {

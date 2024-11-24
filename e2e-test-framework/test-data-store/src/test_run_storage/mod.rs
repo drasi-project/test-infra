@@ -24,7 +24,7 @@ pub struct TestRunSourceId {
 }
 
 impl TestRunSourceId {
-    pub fn new(test_run_id: &str, test_repo_id: &str, test_id: &str, test_source_id: &str) -> Self {
+    pub fn new(test_repo_id: &str, test_id: &str, test_run_id: &str, test_source_id: &str) -> Self {
         Self {
             test_id: test_id.to_string(),
             test_repo_id: test_repo_id.to_string(),
@@ -39,7 +39,7 @@ impl fmt::Display for TestRunSourceId {
         write!(
             f,
             "{}.{}.{}.{}",
-            self.test_run_id, self.test_repo_id, self.test_id, self.test_source_id
+            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id
         )
     }
 }
@@ -59,9 +59,9 @@ impl TryFrom<&str> for TestRunSourceId {
         let parts: Vec<&str> = value.split('.').collect();
         if parts.len() == 4 {
             Ok(TestRunSourceId {
-                test_run_id: parts[0].to_string(),
-                test_repo_id: parts[1].to_string(),
-                test_id: parts[2].to_string(),
+                test_repo_id: parts[0].to_string(),
+                test_id: parts[1].to_string(),
+                test_run_id: parts[2].to_string(),
                 test_source_id: parts[3].to_string(),
             })
         } else {

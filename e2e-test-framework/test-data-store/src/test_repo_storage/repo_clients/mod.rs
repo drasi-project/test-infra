@@ -55,8 +55,7 @@ where
 pub trait RemoteTestRepoClient : Send + Sync {
     async fn get_test_definition(&self, test_id: String, test_store_path: PathBuf) -> anyhow::Result<PathBuf>;
     // async fn get_test_source(&self, test_id: String, source_id: String, dataset_cache_path: PathBuf) -> anyhow::Result<TestSourceDataset>;
-    async fn get_test_source_content_from_def(&self, test_def: &TestDefinition, source_id: String, bootstrap_store_path: PathBuf, change_store_path: PathBuf) -> anyhow::Result<TestSourceDataset>;
-
+    async fn get_test_source_content_from_def(&self, test_def: &TestDefinition, source_id: String, bootstrap_data_store_path: PathBuf, source_change_store_path: PathBuf) -> anyhow::Result<TestSourceDataset>;
 }
 
 #[async_trait]

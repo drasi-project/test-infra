@@ -192,7 +192,7 @@ mod tests {
         let content = r#"
         {
             "kind": "script_player",
-            "script_file_folder": "bootstrap_scripts",
+            "script_file_folder": "bootstrap_data_scripts",
             "script_file_list": ["init*.jsonl", "deploy*.jsonl"],
             "time_mode": "recorded"
         }
@@ -202,7 +202,7 @@ mod tests {
         let bootstrap_data_generator: BootstrapDataGeneratorDefinition = serde_json::from_reader(reader).unwrap();
         
         assert_eq!(bootstrap_data_generator.kind, "script_player");
-        assert_eq!(bootstrap_data_generator.script_file_folder, "bootstrap_scripts");
+        assert_eq!(bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
         assert_eq!(bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
         assert_eq!(bootstrap_data_generator.time_mode, TimeMode::Recorded);
     }
@@ -238,7 +238,7 @@ mod tests {
             "id": "source1",
             "bootstrap_data_generator": {
                 "kind": "script_player",
-                "script_file_folder": "bootstrap_scripts",
+                "script_file_folder": "bootstrap_data_scripts",
                 "script_file_list": ["init*.jsonl", "deploy*.jsonl"],
                 "time_mode": "live"
             },
@@ -258,7 +258,7 @@ mod tests {
 
         assert_eq!(source.id, "source1");
         assert_eq!(source.bootstrap_data_generator.kind, "script_player");
-        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_scripts");
+        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
         assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Live);
         assert_eq!(source.source_change_generator.kind, "script_player");
@@ -282,7 +282,7 @@ mod tests {
                     "id": "source1",
                     "bootstrap_data_generator": {
                         "kind": "script_player",
-                        "script_file_folder": "bootstrap_scripts",
+                        "script_file_folder": "bootstrap_data_scripts",
                         "script_file_list": ["init*.jsonl", "deploy*.jsonl"],
                         "time_mode": "live"
                     },
@@ -313,7 +313,7 @@ mod tests {
         let source = &test_definition.sources[0];
         assert_eq!(source.id, "source1");
         assert_eq!(source.bootstrap_data_generator.kind, "script_player");
-        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_scripts");
+        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
         assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Live);
         assert_eq!(source.source_change_generator.kind, "script_player");
@@ -339,7 +339,7 @@ mod tests {
         let source = &test_definition.sources[0];
         assert_eq!(source.id, "facilities");
         assert_eq!(source.bootstrap_data_generator.kind, "script_player");
-        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_scripts");
+        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
         assert_eq!(source.bootstrap_data_generator.script_file_list, Vec::<String>::new());
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Recorded);
         assert_eq!(source.source_change_generator.kind, "script_player");

@@ -57,7 +57,7 @@ impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
         let test_id = value.test_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_id".to_string()))?;
         let test_source_id = value.test_source_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_source_id".to_string()))?;
 
-        Ok(TestRunSourceId::new(test_run_id, test_repo_id, test_id, test_source_id))
+        Ok(TestRunSourceId::new(test_repo_id, test_id, test_run_id, test_source_id))
     }
 }
 

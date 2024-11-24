@@ -45,7 +45,7 @@ impl TestRunSource {
             .map(|id| id.to_string())
             .unwrap_or_else(|| chrono::Utc::now().format("%Y%m%d%H%M%S").to_string());
 
-        let id = TestRunSourceId::new(&test_run_id, &test_repo_id, &test_id, &source_id);
+        let id = TestRunSourceId::new(&test_repo_id, &test_id, &test_run_id, &source_id);
 
         // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a BootstrapDataGenerator, set it to None.
         let bootstrap_data_generator = match config.bootstrap_data_generator {
@@ -84,11 +84,11 @@ impl TestRunSource {
                 let st = test_run_storage.get_source_storage(&test_repo_id, &source_id, false).await?;
                 let data_store_path = st.path.clone();
 
-                if test_source_dataset.change_log_script_files.len() > 0 {
+                if test_source_dataset.source_change_script_files.len() > 0 {
 
                     let player = 
                         ChangeScriptPlayer::new(
-                            id.clone(), source_change_generator.clone(), test_source_dataset.change_log_script_files, data_store_path).await?;
+                            id.clone(), source_change_generator.clone(), test_source_dataset.source_change_script_files, data_store_path).await?;
 
                     Some(player)
                 } else {

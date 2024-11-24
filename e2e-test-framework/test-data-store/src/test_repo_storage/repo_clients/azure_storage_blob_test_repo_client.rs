@@ -177,29 +177,29 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
     //     })
     // }
 
-    async fn get_test_source_content_from_def(&self, test_def: &TestDefinition, source_id: String, bootstrap_store_path: PathBuf, change_store_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
+    async fn get_test_source_content_from_def(&self, test_def: &TestDefinition, source_id: String, bootstrap_data_store_path: PathBuf, source_change_store_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
         log::trace!("Downloading Test Source Content for {:?}", source_id);
 
         // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
         // Formulate the remote repo path for the change script files
-        let change_script_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().source_change_generator.script_file_folder.clone();
-        let change_scripts_repo_path = format!("{}/{}/sources/{}/{}/", self.settings.storage_root_path, test_def.id, source_id, change_script_folder);
+        let source_change_scripts_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().source_change_generator.script_file_folder.clone();
+        let source_change_scripts_repo_path = format!("{}/{}/sources/{}/{}/", self.settings.storage_root_path, test_def.id, source_id, source_change_scripts_folder);
 
         // Download the change_script files
-        let change_script_files = self.download_change_script_files(
-            change_store_path, change_scripts_repo_path).await?;
+        let source_change_script_files = self.download_change_script_files(
+            source_change_store_path, source_change_scripts_repo_path).await?;
 
         // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
         // Formulate the remote repo path for the bootstrap script files
-        let bootstrap_script_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().bootstrap_data_generator.script_file_folder.clone();
-        let bootstrap_scripts_repo_path = format!("{}/{}/sources/{}/{}/", self.settings.storage_root_path, test_def.id, source_id, bootstrap_script_folder);
+        let bootstrap_data_scripts_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().bootstrap_data_generator.script_file_folder.clone();
+        let bootstrap_data_scripts_repo_path = format!("{}/{}/sources/{}/{}/", self.settings.storage_root_path, test_def.id, source_id, bootstrap_data_scripts_folder);
     
         // Download the bootstrap_script files
-        let bootstrap_script_files = self.download_bootstrap_script_files(bootstrap_store_path, bootstrap_scripts_repo_path).await?;
+        let bootstrap_script_files = self.download_bootstrap_script_files(bootstrap_data_store_path, bootstrap_data_scripts_repo_path).await?;
          
         Ok(TestSourceDataset {
-            change_log_script_files: change_script_files,
-            bootstrap_script_files: bootstrap_script_files,
+            source_change_script_files: source_change_script_files,
+            bootstrap_data_script_files: bootstrap_script_files,
         })
     }
 }

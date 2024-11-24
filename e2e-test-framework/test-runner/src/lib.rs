@@ -4,7 +4,7 @@ use serde::Serialize;
 use test_data_store::{test_repo_storage::{test_metadata::{SpacingMode, TimeMode}, TestSourceDataset}, test_run_storage::{TestRunSourceId, TestRunStorage}, SharedTestDataStore};
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse};
-use config::{TestRunSourceProxyConfig, TestRunSourceChangeGeneratorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, TestRunSourceConfig};
+use config::{BootstrapDataGeneratorConfig, SourceChangeGeneratorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, TestRunSourceConfig};
 use tokio::sync::RwLock;
 
 pub mod change_script_player;
@@ -14,8 +14,8 @@ pub mod source_change_dispatchers;
 #[derive(Clone, Debug, Serialize)]
 pub struct TestRunSource {
     pub id: TestRunSourceId,
-    pub proxy: Option<TestRunProxy>,
-    pub source_change_generator: Option<TestRunSourceChangeGenerator>,    
+    pub bootstrap_data_generator: Option<BootstrapDataGenerator>,
+    pub source_change_generator: Option<SourceChangeGenerator>,    
     pub change_script_player: Option<ChangeScriptPlayer>,
 }
 
@@ -47,17 +47,17 @@ impl TestRunSource {
 
         let id = TestRunSourceId::new(&test_run_id, &test_repo_id, &test_id, &source_id);
 
-        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a proxy, set it to None.
-        let proxy = match config.proxy {
+        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a BootstrapDataGenerator, set it to None.
+        let bootstrap_data_generator = match config.bootstrap_data_generator {
             Some(ref config) => {
-                match defaults.proxy {
-                    Some(ref defaults) => TestRunProxy::new(id.clone(), config, defaults).ok(),
-                    None => TestRunProxy::new(id.clone(), config, &TestRunSourceProxyConfig::default()).ok(),
+                match defaults.bootstrap_data_generator {
+                    Some(ref defaults) => BootstrapDataGenerator::new(id.clone(), config, defaults).ok(),
+                    None => BootstrapDataGenerator::new(id.clone(), config, &BootstrapDataGeneratorConfig::default()).ok(),
                 }
             },
             None => {
-                match defaults.proxy {
-                    Some(ref defaults) => TestRunProxy::new(id.clone(), defaults, &TestRunSourceProxyConfig::default()).ok(),
+                match defaults.bootstrap_data_generator {
+                    Some(ref defaults) => BootstrapDataGenerator::new(id.clone(), defaults, &BootstrapDataGeneratorConfig::default()).ok(),
                     None => None,
                 }
             }
@@ -67,13 +67,13 @@ impl TestRunSource {
         let source_change_generator = match config.source_change_generator {
             Some(ref config) => {
                 match defaults.source_change_generator {
-                    Some(ref defaults) => TestRunSourceChangeGenerator::new(id.clone(), config, defaults).ok(),
-                    None => TestRunSourceChangeGenerator::new(id.clone(), config, &TestRunSourceChangeGeneratorConfig::default()).ok(),
+                    Some(ref defaults) => SourceChangeGenerator::new(id.clone(), config, defaults).ok(),
+                    None => SourceChangeGenerator::new(id.clone(), config, &SourceChangeGeneratorConfig::default()).ok(),
                 }
             },
             None => {
                 match defaults.source_change_generator {
-                    Some(ref defaults) => TestRunSourceChangeGenerator::new(id.clone(), defaults, &TestRunSourceChangeGeneratorConfig::default()).ok(),
+                    Some(ref defaults) => SourceChangeGenerator::new(id.clone(), defaults, &SourceChangeGeneratorConfig::default()).ok(),
                     None => None,
                 }
             }
@@ -100,7 +100,7 @@ impl TestRunSource {
 
         Ok(Self {
             id,
-            proxy,
+            bootstrap_data_generator,
             source_change_generator,
             change_script_player,
         })
@@ -108,13 +108,13 @@ impl TestRunSource {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TestRunProxy {
+pub struct BootstrapDataGenerator {
     pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
 }
 
-impl TestRunProxy {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &TestRunSourceProxyConfig, defaults: &TestRunSourceProxyConfig) -> anyhow::Result<Self> {
+impl BootstrapDataGenerator {
+    pub fn new(test_run_source_id: TestRunSourceId, config: &BootstrapDataGeneratorConfig, defaults: &BootstrapDataGeneratorConfig) -> anyhow::Result<Self> {
         // Use the config.time_mode if it exists, otherwise use the defaults.time_mode if it exists, 
         // otherwise use TimeMode::default.
         let time_mode = match &config.time_mode {
@@ -135,7 +135,7 @@ impl TestRunProxy {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TestRunSourceChangeGenerator {
+pub struct SourceChangeGenerator {
     pub dispatchers: Vec<SourceChangeDispatcherConfig>,
     pub ignore_scripted_pause_commands: bool,    
     pub spacing_mode: SpacingMode,
@@ -144,8 +144,8 @@ pub struct TestRunSourceChangeGenerator {
     pub time_mode: TimeMode,
 }
 
-impl TestRunSourceChangeGenerator {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &TestRunSourceChangeGeneratorConfig, defaults: &TestRunSourceChangeGeneratorConfig) -> anyhow::Result<Self> {
+impl SourceChangeGenerator {
+    pub fn new(test_run_source_id: TestRunSourceId, config: &SourceChangeGeneratorConfig, defaults: &SourceChangeGeneratorConfig) -> anyhow::Result<Self> {
         // If neither the SourceChangeGeneratorConfig nor the SourceChangeGeneratorConfig defaults contain a ignore_scripted_pause_commands, 
         // set to false.
         let ignore_scripted_pause_commands = config.ignore_scripted_pause_commands

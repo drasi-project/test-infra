@@ -31,8 +31,8 @@ pub struct TestRunSourceConfig {
     pub test_id: Option<String>,
     pub test_run_id: Option<String>,
     pub test_source_id: Option<String>,
-    pub proxy: Option<TestRunSourceProxyConfig>,
-    pub source_change_generator: Option<TestRunSourceChangeGeneratorConfig>,
+    pub bootstrap_data_generator: Option<BootstrapDataGeneratorConfig>,
+    pub source_change_generator: Option<SourceChangeGeneratorConfig>,
 }
 
 impl Default for TestRunSourceConfig {
@@ -42,7 +42,7 @@ impl Default for TestRunSourceConfig {
             test_id: None,
             test_run_id: None,
             test_source_id: None,
-            proxy: None,
+            bootstrap_data_generator: None,
             source_change_generator: None,
         }
     }
@@ -63,26 +63,26 @@ impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
 
 impl fmt::Display for TestRunSourceConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TestRunSourceConfig: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, proxy: {:?}, source_change_generator: {:?}", 
-            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.proxy, self.source_change_generator)
+        write!(f, "TestRunSourceConfig: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, bootstrap_data_generator: {:?}, source_change_generator: {:?}", 
+            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.bootstrap_data_generator, self.source_change_generator)
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TestRunSourceProxyConfig {
+pub struct BootstrapDataGeneratorConfig {
     pub time_mode: Option<TimeMode>,
 }
 
-impl Default for TestRunSourceProxyConfig {
+impl Default for BootstrapDataGeneratorConfig {
     fn default() -> Self {
-        TestRunSourceProxyConfig {
+        BootstrapDataGeneratorConfig {
             time_mode: Some(TimeMode::Recorded),
         }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct TestRunSourceChangeGeneratorConfig {
+pub struct SourceChangeGeneratorConfig {
     pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
     pub ignore_scripted_pause_commands: Option<bool>,
     pub spacing_mode: Option<SpacingMode>,
@@ -90,9 +90,9 @@ pub struct TestRunSourceChangeGeneratorConfig {
     pub time_mode: Option<TimeMode>,
 }
 
-impl Default for TestRunSourceChangeGeneratorConfig {
+impl Default for SourceChangeGeneratorConfig {
     fn default() -> Self {
-        TestRunSourceChangeGeneratorConfig {
+        SourceChangeGeneratorConfig {
             dispatchers: None,
             ignore_scripted_pause_commands: Some(false),
             spacing_mode: Some(SpacingMode::Recorded),

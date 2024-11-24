@@ -14,7 +14,7 @@ use crate::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, 
         dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, 
         jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
-    }, TestRunSourceChangeGenerator, TimeMode
+    }, SourceChangeGenerator, TimeMode
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 
@@ -44,12 +44,12 @@ pub enum ChangeScriptPlayerError {
 pub struct ChangeScriptPlayerSettings {
     pub data_store_path: PathBuf,
     pub id: TestRunSourceId,
-    pub source_change_generator: TestRunSourceChangeGenerator,
+    pub source_change_generator: SourceChangeGenerator,
     pub script_files: Vec<PathBuf>,
 }
 
 impl ChangeScriptPlayerSettings {
-    pub fn new(test_run_source_id: TestRunSourceId, source_change_generator: TestRunSourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: TestRunSourceId, source_change_generator: SourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
         Ok(ChangeScriptPlayerSettings {
             data_store_path,
             id: test_run_source_id,
@@ -215,7 +215,7 @@ pub struct ChangeScriptPlayer {
 }
 
 impl ChangeScriptPlayer {
-    pub async fn new(test_run_source_id: TestRunSourceId, source_change_generator: TestRunSourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(test_run_source_id: TestRunSourceId, source_change_generator: SourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
 
         let settings = ChangeScriptPlayerSettings::new(test_run_source_id, source_change_generator, script_files, data_store_path)?;
         log::debug!("Creating ChangeScriptPlayer from {:#?}", &settings);

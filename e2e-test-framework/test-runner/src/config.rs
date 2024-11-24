@@ -6,35 +6,35 @@ use test_data_store::test_run_storage::{ParseTestRunSourceIdError, TestRunSource
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestRunnerConfig {
     #[serde(default)]
-    pub source_defaults: SourceConfig,
+    pub source_defaults: TestRunSourceConfig,
     #[serde(default)]
-    pub sources: Vec<SourceConfig>,
+    pub sources: Vec<TestRunSourceConfig>,
 }
 
 impl Default for TestRunnerConfig {
     fn default() -> Self {
         TestRunnerConfig {
-            source_defaults: SourceConfig::default(),
+            source_defaults: TestRunSourceConfig::default(),
             sources: Vec::new(),
         }
     }
 }
 
-// The SourceConfig is what is loaded from the TestRunner config file or passed in to the Web API 
+// The TestRunSourceConfig is what is loaded from the TestRunner config file or passed in to the Web API 
 // to create a new Source.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SourceConfig {
+pub struct TestRunSourceConfig {
     pub test_repo_id: Option<String>,
     pub test_id: Option<String>,
     pub test_run_id: Option<String>,
     pub test_source_id: Option<String>,
-    pub proxy: Option<ProxyConfig>,
-    pub reactivator: Option<ReactivatorConfig>,
+    pub proxy: Option<TestRunSourceProxyConfig>,
+    pub reactivator: Option<TestRunSourceReactivatorConfig>,
 }
 
-impl Default for SourceConfig {
+impl Default for TestRunSourceConfig {
     fn default() -> Self {
-        SourceConfig {
+        TestRunSourceConfig {
             test_repo_id: None,
             test_id: None,
             test_run_id: None,
@@ -45,10 +45,10 @@ impl Default for SourceConfig {
     }
 }
 
-impl TryFrom<&SourceConfig> for TestRunSourceId {
+impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
     type Error = ParseTestRunSourceIdError;
 
-    fn try_from(value: &SourceConfig) -> Result<Self, Self::Error> {
+    fn try_from(value: &TestRunSourceConfig) -> Result<Self, Self::Error> {
         let test_repo_id = value.test_repo_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_repo_id".to_string()))?;
         let test_run_id = value.test_run_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_run_id".to_string()))?;
         let test_id = value.test_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_id".to_string()))?;
@@ -58,28 +58,28 @@ impl TryFrom<&SourceConfig> for TestRunSourceId {
     }
 }
 
-impl fmt::Display for SourceConfig {
+impl fmt::Display for TestRunSourceConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "SourceConfig: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, proxy: {:?}, reactivator: {:?}", 
+        write!(f, "TestRunSourceConfig: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, proxy: {:?}, reactivator: {:?}", 
             self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.proxy, self.reactivator)
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ProxyConfig {
+pub struct TestRunSourceProxyConfig {
     pub time_mode: Option<String>,
 }
 
-impl Default for ProxyConfig {
+impl Default for TestRunSourceProxyConfig {
     fn default() -> Self {
-        ProxyConfig {
+        TestRunSourceProxyConfig {
             time_mode: Some("Recorded".to_string()),
         }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ReactivatorConfig {
+pub struct TestRunSourceReactivatorConfig {
     pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
     pub ignore_scripted_pause_commands: Option<bool>,
     pub spacing_mode: Option<String>,
@@ -87,9 +87,9 @@ pub struct ReactivatorConfig {
     pub time_mode: Option<String>,
 }
 
-impl Default for ReactivatorConfig {
+impl Default for TestRunSourceReactivatorConfig {
     fn default() -> Self {
-        ReactivatorConfig {
+        TestRunSourceReactivatorConfig {
             dispatchers: None,
             ignore_scripted_pause_commands: Some(false),
             spacing_mode: Some("Recorded".to_string()),

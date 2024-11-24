@@ -4,7 +4,7 @@ use serde::Serialize;
 use test_data_store::{test_repo_storage::TestSourceDataset, test_run_storage::{TestRunSourceId, TestRunStorage}, SharedTestDataStore};
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse};
-use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig};
+use config::{TestRunSourceProxyConfig, TestRunSourceReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, TestRunSourceConfig};
 use tokio::sync::RwLock;
 
 pub mod change_script_player;
@@ -121,26 +121,26 @@ pub struct TestRunSource {
 }
 
 impl TestRunSource {
-    pub async fn new(config: &SourceConfig, defaults: &SourceConfig, test_source_dataset: TestSourceDataset, test_run_storage: TestRunStorage) -> anyhow::Result<Self> {
-        // If neither the SourceConfig nor the SourceConfig defaults contain a source_id, return an error.
+    pub async fn new(config: &TestRunSourceConfig, defaults: &TestRunSourceConfig, test_source_dataset: TestSourceDataset, test_run_storage: TestRunStorage) -> anyhow::Result<Self> {
+        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a source_id, return an error.
         let source_id = config.test_source_id.as_ref()
             .or_else( || defaults.test_source_id.as_ref())
             .map(|source_id| source_id.to_string())
             .ok_or_else(|| anyhow::anyhow!("No source_id provided and no default value found."))?;
         
-        // If neither the SourceConfig nor the SourceConfig defaults contain a test_id, return an error.
+        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a test_id, return an error.
         let test_id = config.test_id.as_ref()
             .or_else( || defaults.test_id.as_ref())
             .map(|id| id.to_string())
             .ok_or_else(|| anyhow::anyhow!("No test_id provided and no default value found."))?;
 
-        // If neither the SourceConfig nor the SourceConfig defaults contain a test_repo_id, return an error.
+        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a test_repo_id, return an error.
         let test_repo_id = config.test_repo_id.as_ref()
             .or_else( || defaults.test_repo_id.as_ref())
             .map(|id| id.to_string())
             .ok_or_else(|| anyhow::anyhow!("No test_repo_id provided and no default value found."))?;
 
-        // If neither the SourceConfig nor the SourceConfig defaults contain a test_run_id, generate one.
+        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a test_run_id, generate one.
         let test_run_id = config.test_run_id.as_ref()
             .or_else( || defaults.test_run_id.as_ref())
             .map(|id| id.to_string())
@@ -148,33 +148,33 @@ impl TestRunSource {
 
         let id = TestRunSourceId::new(&test_run_id, &test_repo_id, &test_id, &source_id);
 
-        // If neither the SourceConfig nor the SourceConfig defaults contain a proxy, set it to None.
+        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a proxy, set it to None.
         let proxy = match config.proxy {
             Some(ref config) => {
                 match defaults.proxy {
                     Some(ref defaults) => TestRunProxy::new(id.clone(), config, defaults).ok(),
-                    None => TestRunProxy::new(id.clone(), config, &ProxyConfig::default()).ok(),
+                    None => TestRunProxy::new(id.clone(), config, &TestRunSourceProxyConfig::default()).ok(),
                 }
             },
             None => {
                 match defaults.proxy {
-                    Some(ref defaults) => TestRunProxy::new(id.clone(), defaults, &ProxyConfig::default()).ok(),
+                    Some(ref defaults) => TestRunProxy::new(id.clone(), defaults, &TestRunSourceProxyConfig::default()).ok(),
                     None => None,
                 }
             }
         };
 
-        // If neither the SourceConfig nor the SourceConfig defaults contain a reactivator, set it to None.
+        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a reactivator, set it to None.
         let reactivator = match config.reactivator {
             Some(ref config) => {
                 match defaults.reactivator {
                     Some(ref defaults) => TestRunReactivator::new(id.clone(), config, defaults).ok(),
-                    None => TestRunReactivator::new(id.clone(), config, &ReactivatorConfig::default()).ok(),
+                    None => TestRunReactivator::new(id.clone(), config, &TestRunSourceReactivatorConfig::default()).ok(),
                 }
             },
             None => {
                 match defaults.reactivator {
-                    Some(ref defaults) => TestRunReactivator::new(id.clone(), defaults, &ReactivatorConfig::default()).ok(),
+                    Some(ref defaults) => TestRunReactivator::new(id.clone(), defaults, &TestRunSourceReactivatorConfig::default()).ok(),
                     None => None,
                 }
             }
@@ -215,7 +215,7 @@ pub struct TestRunProxy {
 }
 
 impl TestRunProxy {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &ProxyConfig, defaults: &ProxyConfig) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: TestRunSourceId, config: &TestRunSourceProxyConfig, defaults: &TestRunSourceProxyConfig) -> anyhow::Result<Self> {
         let time_mode = match &config.time_mode {
             Some(time_mode) => TimeMode::from_str(time_mode)?,
             None => {
@@ -244,7 +244,7 @@ pub struct TestRunReactivator {
 }
 
 impl TestRunReactivator {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &ReactivatorConfig, defaults: &ReactivatorConfig) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: TestRunSourceId, config: &TestRunSourceReactivatorConfig, defaults: &TestRunSourceReactivatorConfig) -> anyhow::Result<Self> {
         // If neither the ReactivatorConfig nor the ReactivatorConfig defaults contain a ignore_scripted_pause_commands, 
         // set to false.
         let ignore_scripted_pause_commands = config.ignore_scripted_pause_commands
@@ -320,7 +320,7 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 #[derive(Debug)]
 pub struct TestRunner {
     data_store: SharedTestDataStore,
-    source_defaults: SourceConfig,
+    source_defaults: TestRunSourceConfig,
     sources: HashMap<TestRunSourceId, TestRunSource>,
     status: TestRunnerStatus,
 }
@@ -346,7 +346,7 @@ impl TestRunner {
         Ok(test_runner)
     }
     
-    pub async fn add_test_source(&mut self, source_config: &SourceConfig) -> anyhow::Result<TestRunSource> {
+    pub async fn add_test_source(&mut self, source_config: &TestRunSourceConfig) -> anyhow::Result<TestRunSource> {
         log::trace!("Adding TestRunSource from {:#?}", source_config);
 
         // If the TestRunner is in an Error state, return an error.

@@ -14,7 +14,6 @@
       },
       "source_change_generator": {
         "kind": "script_player",
-        "ignore_scripted_pause_commands": true,
         "script_file_folder": "source_change_scripts",
         "script_file_list":[],
         "spacing_mode": "none",

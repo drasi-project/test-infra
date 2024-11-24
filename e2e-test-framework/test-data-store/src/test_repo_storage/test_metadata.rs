@@ -150,7 +150,6 @@ pub struct BootstrapDataGeneratorDefinition {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SourceChangeGeneratorDefinition {
-    pub ignore_scripted_pause_commands: bool,
     pub kind: String,
     pub script_file_folder: String,
     pub script_file_list: Vec<String>,
@@ -212,7 +211,6 @@ mod tests {
         let content = r#"
         {
             "kind": "script_player",
-            "ignore_scripted_pause_commands": true,
             "script_file_folder": "source_change_scripts",
             "script_file_list": ["change01.jsonl", "change02.jsonl"],
             "spacing_mode": "100m",
@@ -224,7 +222,6 @@ mod tests {
         let source_change_generator: SourceChangeGeneratorDefinition = serde_json::from_reader(reader).unwrap();
         
         assert_eq!(source_change_generator.kind, "script_player");
-        assert_eq!(source_change_generator.ignore_scripted_pause_commands, true);
         assert_eq!(source_change_generator.script_file_folder, "source_change_scripts");
         assert_eq!(source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
         assert_eq!(source_change_generator.spacing_mode, SpacingMode::Fixed(100000000));
@@ -244,7 +241,6 @@ mod tests {
             },
             "source_change_generator": {
                 "kind": "script_player",
-                "ignore_scripted_pause_commands": false,
                 "script_file_folder": "source_change_scripts",
                 "script_file_list": ["change01.jsonl", "change02.jsonl"],
                 "spacing_mode": "recorded",
@@ -262,7 +258,6 @@ mod tests {
         assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Live);
         assert_eq!(source.source_change_generator.kind, "script_player");
-        assert_eq!(source.source_change_generator.ignore_scripted_pause_commands, false);
         assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
         assert_eq!(source.source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
         assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::Recorded);
@@ -288,7 +283,6 @@ mod tests {
                     },
                     "source_change_generator": {
                         "kind": "script_player",
-                        "ignore_scripted_pause_commands": false,
                         "script_file_folder": "source_change_scripts",
                         "script_file_list": ["change01.jsonl", "change02.jsonl"],
                         "spacing_mode": "recorded",
@@ -317,7 +311,6 @@ mod tests {
         assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Live);
         assert_eq!(source.source_change_generator.kind, "script_player");
-        assert_eq!(source.source_change_generator.ignore_scripted_pause_commands, false);
         assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
         assert_eq!(source.source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
         assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::Recorded);
@@ -343,7 +336,6 @@ mod tests {
         assert_eq!(source.bootstrap_data_generator.script_file_list, Vec::<String>::new());
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Recorded);
         assert_eq!(source.source_change_generator.kind, "script_player");
-        assert_eq!(source.source_change_generator.ignore_scripted_pause_commands, true);
         assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
         assert_eq!(source.source_change_generator.script_file_list, Vec::<String>::new());
         assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::None);

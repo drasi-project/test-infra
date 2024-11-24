@@ -1,46 +1,52 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestSourceBootstrapDataDefinition {
-    pub script_file_folder: String,
-    pub script_file_list: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestSourceChangeLogDefinition {
-    pub script_file_folder: String,
-    pub script_file_list: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestSourceDefinition {
-    pub id: String,
-    pub bootstrap_data: TestSourceBootstrapDataDefinition,
-    pub change_log: TestSourceChangeLogDefinition,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestQueryDefinition {
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestReactionDefinition {
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestClientDefinition {
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TestDefinition {
     pub id: String,
     pub version: u32,
     pub description: Option<String>,
     pub test_folder: Option<String>,
-    pub sources: Vec<TestSourceDefinition>,
-    pub queries: Vec<TestQueryDefinition>,
-    pub reactions: Vec<TestReactionDefinition>,
-    pub clients: Vec<TestClientDefinition>,
+    pub sources: Vec<SourceDefinition>,
+    pub queries: Vec<QueryDefinition>,
+    pub reactions: Vec<ReactionDefinition>,
+    pub clients: Vec<ClientDefinition>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SourceDefinition {
+    pub id: String,
+    pub bootstrap_data_generator: BootstrapDataGeneratorDefinition,
+    pub source_change_generator: SourceChangeGeneratorDefinition,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BootstrapDataGeneratorDefinition {    
+    pub kind: String,
+    pub script_file_folder: String,
+    pub script_file_list: Vec<String>,
+    pub time_mode: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SourceChangeGeneratorDefinition {
+    pub ignore_scripted_pause_commands: bool,
+    pub kind: String,
+    pub script_file_folder: String,
+    pub script_file_list: Vec<String>,
+    pub spacing_mode: String,
+    pub time_mode: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct QueryDefinition {
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ReactionDefinition {
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ClientDefinition {
 }
 
 #[cfg(test)]
@@ -70,7 +76,7 @@ mod tests {
         "#;
         let file = create_test_file(content);
         let reader = BufReader::new(file);
-        let bootstrap_data: TestSourceBootstrapDataDefinition = serde_json::from_reader(reader).unwrap();
+        let bootstrap_data: BootstrapDataGeneratorDefinition = serde_json::from_reader(reader).unwrap();
         
         assert_eq!(bootstrap_data.script_file_folder, "script_files");
         assert_eq!(bootstrap_data.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
@@ -86,7 +92,7 @@ mod tests {
         "#;
         let file = create_test_file(content);
         let reader = BufReader::new(file);
-        let change_log: TestSourceChangeLogDefinition = serde_json::from_reader(reader).unwrap();
+        let change_log: SourceChangeGeneratorDefinition = serde_json::from_reader(reader).unwrap();
         
         assert_eq!(change_log.script_file_folder, "script_files");
         assert_eq!(change_log.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
@@ -109,13 +115,13 @@ mod tests {
         "#;
         let file = create_test_file(content);
         let reader = BufReader::new(file);
-        let source: TestSourceDefinition = serde_json::from_reader(reader).unwrap();
+        let source: SourceDefinition = serde_json::from_reader(reader).unwrap();
         
         assert_eq!(source.id, "source1");
-        assert_eq!(source.bootstrap_data.script_file_folder, "script_files");
-        assert_eq!(source.bootstrap_data.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
-        assert_eq!(source.change_log.script_file_folder, "script_files");
-        assert_eq!(source.change_log.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
+        assert_eq!(source.bootstrap_data_generator.script_file_folder, "script_files");
+        assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
+        assert_eq!(source.source_change_generator.script_file_folder, "script_files");
+        assert_eq!(source.source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
     }
 
     #[test]
@@ -152,10 +158,10 @@ mod tests {
         assert_eq!(test_definition.sources.len(), 1);
         let source = &test_definition.sources[0];
         assert_eq!(source.id, "source1");
-        assert_eq!(source.bootstrap_data.script_file_folder, "script_files");
-        assert_eq!(source.bootstrap_data.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
-        assert_eq!(source.change_log.script_file_folder, "script_files");
-        assert_eq!(source.change_log.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
+        assert_eq!(source.bootstrap_data_generator.script_file_folder, "script_files");
+        assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
+        assert_eq!(source.source_change_generator.script_file_folder, "script_files");
+        assert_eq!(source.source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
     }
 
     #[test]
@@ -172,9 +178,9 @@ mod tests {
         assert_eq!(test_definition.sources.len(), 1);
         let source = &test_definition.sources[0];
         assert_eq!(source.id, "facilities");
-        assert_eq!(source.bootstrap_data.script_file_folder, "bootstrap_scripts");
-        assert_eq!(source.bootstrap_data.script_file_list, Vec::<String>::new());
-        assert_eq!(source.change_log.script_file_folder, "change_scripts");
-        assert_eq!(source.change_log.script_file_list, Vec::<String>::new());
+        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_scripts");
+        assert_eq!(source.bootstrap_data_generator.script_file_list, Vec::<String>::new());
+        assert_eq!(source.source_change_generator.script_file_folder, "change_scripts");
+        assert_eq!(source.source_change_generator.script_file_list, Vec::<String>::new());
     }
 }

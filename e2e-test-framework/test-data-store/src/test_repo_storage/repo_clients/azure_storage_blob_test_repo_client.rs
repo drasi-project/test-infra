@@ -182,7 +182,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
 
         // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
         // Formulate the remote repo path for the change script files
-        let change_script_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().change_log.script_file_folder.clone();
+        let change_script_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().source_change_generator.script_file_folder.clone();
         let change_scripts_repo_path = format!("{}/{}/sources/{}/{}/", self.settings.storage_root_path, test_def.id, source_id, change_script_folder);
 
         // Download the change_script files
@@ -191,7 +191,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
 
         // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
         // Formulate the remote repo path for the bootstrap script files
-        let bootstrap_script_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().bootstrap_data.script_file_folder.clone();
+        let bootstrap_script_folder = test_def.sources.iter().find(|s| s.id == source_id).unwrap().bootstrap_data_generator.script_file_folder.clone();
         let bootstrap_scripts_repo_path = format!("{}/{}/sources/{}/{}/", self.settings.storage_root_path, test_def.id, source_id, bootstrap_script_folder);
     
         // Download the bootstrap_script files

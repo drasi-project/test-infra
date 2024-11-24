@@ -11,6 +11,8 @@
         "dapr",
         "datetime",
         "DRASI",
+        "drasidev",
+        "etests",
         "inproc",
         "nanos",
         "oneshot",

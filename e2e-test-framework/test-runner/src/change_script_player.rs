@@ -7,14 +7,14 @@ use tokio::sync::mpsc::error::TryRecvError::{Empty, Disconnected};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
-use test_data_store::{test_repo_storage::scripts::{change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent}, test_run_storage::TestRunSourceId};
+use test_data_store::{test_repo_storage::{scripts::{change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent}, test_metadata::SpacingMode}, test_run_storage::TestRunSourceId};
 
 use crate::{
     config::SourceChangeDispatcherConfig, source_change_dispatchers::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, 
         dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, 
         jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
-    }, SpacingMode, TestRunReactivator, TimeMode
+    }, TestRunReactivator, TimeMode
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 
@@ -201,12 +201,16 @@ pub struct DelayChangeScriptRecordMessage {
     pub delay_sequence: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ChangeScriptPlayer {
     settings: ChangeScriptPlayerSettings,
+    #[serde(skip_serializing)]
     player_tx_channel: Sender<ChangeScriptPlayerMessage>,
+    #[serde(skip_serializing)]
     _delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>,
+    #[serde(skip_serializing)]
     _player_thread_handle: Arc<Mutex<JoinHandle<()>>>,
+    #[serde(skip_serializing)]
     _delayer_thread_handle: Arc<Mutex<JoinHandle<()>>>,
 }
 

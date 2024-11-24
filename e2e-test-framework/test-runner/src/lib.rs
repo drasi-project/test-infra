@@ -1,7 +1,7 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use serde::Serialize;
-use test_data_store::{test_repo_storage::TestSourceDataset, test_run_storage::{TestRunSourceId, TestRunStorage}, SharedTestDataStore};
+use test_data_store::{test_repo_storage::{test_metadata::{SpacingMode, TimeMode}, TestSourceDataset}, test_run_storage::{TestRunSourceId, TestRunStorage}, SharedTestDataStore};
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse};
 use config::{TestRunSourceProxyConfig, TestRunSourceReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, TestRunSourceConfig};
@@ -11,112 +11,11 @@ pub mod change_script_player;
 pub mod config;
 pub mod source_change_dispatchers;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum TimeMode {
-    Live,
-    Recorded,
-    Rebased(u64),
-}
-
-impl FromStr for TimeMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s {
-            "live" => Ok(Self::Live),
-            "recorded" => Ok(Self::Recorded),
-            _ => {
-                match chrono::DateTime::parse_from_rfc3339(s) {
-                    Ok(t) => Ok(Self::Rebased(t.timestamp_nanos_opt().unwrap() as u64)),
-                    Err(e) => {
-                        anyhow::bail!("Error parsing TimeMode - value:{}, error:{}", s, e);
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for TimeMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Live => write!(f, "live"),
-            Self::Recorded => write!(f, "recorded"),
-            Self::Rebased(time) => write!(f, "{}", time),
-        }
-    }
-}
-
-impl Default for TimeMode {
-    fn default() -> Self {
-        Self::Recorded
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum SpacingMode {
-    None,
-    Recorded,
-    Fixed(u64),
-}
-
-// Implementation of FromStr for ReplayEventSpacingMode.
-// For the Fixed variant, the spacing is specified as a string duration such as '5s' or '100n'.
-// Supported units are seconds ('s'), milliseconds ('m'), microseconds ('u'), and nanoseconds ('n').
-// If the string can't be parsed as a TimeDelta, an error is returned.
-impl FromStr for SpacingMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s {
-            "none" => Ok(Self::None),
-            "recorded" => Ok(Self::Recorded),
-            _ => {
-                // Parse the string as a number, followed by a time unit character.
-                let (num_str, unit_str) = s.split_at(s.len() - 1);
-                let num = match num_str.parse::<u64>() {
-                    Ok(num) => num,
-                    Err(e) => {
-                        anyhow::bail!("Error parsing SpacingMode: {}", e);
-                    }
-                };
-                match unit_str {
-                    "s" => Ok(Self::Fixed(num * 1000000000)),
-                    "m" => Ok(Self::Fixed(num * 1000000)),
-                    "u" => Ok(Self::Fixed(num * 1000)),
-                    "n" => Ok(Self::Fixed(num)),
-                    _ => {
-                        anyhow::bail!("Invalid SpacingMode: {}", s);
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for SpacingMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::None => write!(f, "none"),
-            Self::Recorded => write!(f, "recorded"),
-            Self::Fixed(d) => write!(f, "{}", d),
-        }
-    }
-}
-
-impl Default for SpacingMode {
-    fn default() -> Self {
-        Self::Recorded
-    }
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct TestRunSource {
     pub id: TestRunSourceId,
     pub proxy: Option<TestRunProxy>,
-    #[serde(skip_serializing)]
     pub reactivator: Option<TestRunReactivator>,    
-    #[serde(skip_serializing)]
     pub change_script_player: Option<ChangeScriptPlayer>,
 }
 
@@ -216,11 +115,13 @@ pub struct TestRunProxy {
 
 impl TestRunProxy {
     pub fn new(test_run_source_id: TestRunSourceId, config: &TestRunSourceProxyConfig, defaults: &TestRunSourceProxyConfig) -> anyhow::Result<Self> {
+        // Use the config.time_mode if it exists, otherwise use the defaults.time_mode if it exists, 
+        // otherwise use TimeMode::default.
         let time_mode = match &config.time_mode {
-            Some(time_mode) => TimeMode::from_str(time_mode)?,
+            Some(time_mode) => time_mode.clone(),
             None => {
                 match &defaults.time_mode {
-                    Some(time_mode) => TimeMode::from_str(time_mode)?,
+                    Some(time_mode) => time_mode.clone(),
                     None => TimeMode::default()
                 }
             }
@@ -251,14 +152,14 @@ impl TestRunReactivator {
             .or(defaults.ignore_scripted_pause_commands)
             .unwrap_or(false);
 
-        // If neither the ReactivatorConfig nor the ReactivatorConfig defaults contain a spacing_mode, 
-        // set to SpacingMode::Recorded.
+        // Use the config.spacing_mode if it exists, otherwise use the defaults.spacing_mode if it exists, 
+        // otherwise use SpacingMode::default.
         let spacing_mode = match &config.spacing_mode {
-            Some(spacing_mode) => SpacingMode::from_str(spacing_mode)?,
+            Some(spacing_mode) => spacing_mode.clone(),
             None => {
                 match &defaults.spacing_mode {
-                    Some(spacing_mode) => SpacingMode::from_str(spacing_mode)?,
-                    None => SpacingMode::Recorded
+                    Some(spacing_mode) => spacing_mode.clone(),
+                    None => SpacingMode::default()
                 }
             }
         };
@@ -269,14 +170,14 @@ impl TestRunReactivator {
             .or(defaults.start_immediately)
             .unwrap_or(true);
 
-        // If neither the ReactivatorConfig nor the ReactivatorConfig defaults contain a time_mode, 
-        // set to TimeMode::Recorded.
+        // Use the config.time_mode if it exists, otherwise use the defaults.time_mode if it exists, 
+        // otherwise use TimeMode::default.
         let time_mode = match &config.time_mode {
-            Some(time_mode) => TimeMode::from_str(time_mode)?,
+            Some(time_mode) => time_mode.clone(),
             None => {
                 match &defaults.time_mode {
-                    Some(time_mode) => TimeMode::from_str(time_mode)?,
-                    None => TimeMode::Recorded
+                    Some(time_mode) => time_mode.clone(),
+                    None => TimeMode::default()
                 }
             }
         };

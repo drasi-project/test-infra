@@ -1,7 +1,10 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use test_data_store::test_run_storage::{ParseTestRunSourceIdError, TestRunSourceId};
+use test_data_store::{
+    test_repo_storage::test_metadata::{SpacingMode, TimeMode}, 
+    test_run_storage::{ParseTestRunSourceIdError, TestRunSourceId}
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestRunnerConfig {
@@ -67,13 +70,13 @@ impl fmt::Display for TestRunSourceConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TestRunSourceProxyConfig {
-    pub time_mode: Option<String>,
+    pub time_mode: Option<TimeMode>,
 }
 
 impl Default for TestRunSourceProxyConfig {
     fn default() -> Self {
         TestRunSourceProxyConfig {
-            time_mode: Some("Recorded".to_string()),
+            time_mode: Some(TimeMode::Recorded),
         }
     }
 }
@@ -82,9 +85,9 @@ impl Default for TestRunSourceProxyConfig {
 pub struct TestRunSourceReactivatorConfig {
     pub dispatchers: Option<Vec<SourceChangeDispatcherConfig>>,
     pub ignore_scripted_pause_commands: Option<bool>,
-    pub spacing_mode: Option<String>,
+    pub spacing_mode: Option<SpacingMode>,
     pub start_immediately: Option<bool>,
-    pub time_mode: Option<String>,
+    pub time_mode: Option<TimeMode>,
 }
 
 impl Default for TestRunSourceReactivatorConfig {
@@ -92,9 +95,9 @@ impl Default for TestRunSourceReactivatorConfig {
         TestRunSourceReactivatorConfig {
             dispatchers: None,
             ignore_scripted_pause_commands: Some(false),
-            spacing_mode: Some("Recorded".to_string()),
+            spacing_mode: Some(SpacingMode::Recorded),
             start_immediately: Some(true),
-            time_mode: Some("Recorded".to_string()),
+            time_mode: Some(TimeMode::Recorded),
         }
     }
 }

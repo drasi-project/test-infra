@@ -101,7 +101,8 @@ impl ChangeScriptWriter {
 mod tests {
     use std::fs;    
     use tempfile::tempdir;
-    use crate::scripts::CommentRecord;
+
+    use crate::test_repo_storage::scripts::CommentRecord;
 
     use super::*;
 

@@ -1,18 +1,24 @@
 {
-  "name": "single_source_hierarchical_query",
+  "id": "single_source_hierarchical_query",
   "version": 1,
   "description": "A single source hierarchical query using facilities data.",
   "test_folder": "single_source_hierarchical_query",
   "sources": [
     {
-      "name": "facilities",
-      "bootstrap_data": {
+      "id": "facilities",
+      "bootstrap_data_generator": {
+        "kind": "script_player",
         "script_file_folder": "bootstrap_scripts",
-        "script_file_list":[]
+        "script_file_list":[],
+        "time_mode": "recorded"
       },
-      "change_log": {
-        "script_file_folder": "change_scripts",
-        "script_file_list":[]
+      "source_change_generator": {
+        "kind": "script_player",
+        "ignore_scripted_pause_commands": true,
+        "script_file_folder": "source_change_scripts",
+        "script_file_list":[],
+        "spacing_mode": "none",
+        "time_mode": "recorded"
       }
     }
   ],

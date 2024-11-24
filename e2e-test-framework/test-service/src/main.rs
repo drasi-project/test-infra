@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use test_data_collector::{config::TestDataCollectorConfig, TestDataCollector};
+use data_collector::{config::TestDataCollectorConfig, TestDataCollector};
 use test_data_store::{TestDataStoreConfig, TestDataStore};
 use test_runner::{config::TestRunnerConfig, TestRunner};
 use tokio::sync::RwLock;

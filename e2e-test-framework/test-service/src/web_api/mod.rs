@@ -9,7 +9,7 @@ use tokio::{io::{self, AsyncBufReadExt}, select, signal};
 
 use repo::get_test_repo_routes;
 use runner::get_test_runner_routes;
-use test_data_collector::SharedTestDataCollector;
+use data_collector::SharedTestDataCollector;
 use test_data_store::SharedTestDataStore;
 use test_runner::SharedTestRunner;
 

@@ -121,6 +121,96 @@ impl<'de> Deserialize<'de> for SpacingMode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum BootstrapDataGeneratorKind {
+    None,
+    Script,
+}
+
+impl Default for BootstrapDataGeneratorKind {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl FromStr for BootstrapDataGeneratorKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s {
+            "None" => Ok(Self::None),
+            "Script" => Ok(Self::Script),
+            _ => {
+                anyhow::bail!("Invalid BootstrapDataGeneratorKind: {}", s);
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for BootstrapDataGeneratorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Script => write!(f, "Script"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BootstrapDataGeneratorKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: String = Deserialize::deserialize(deserializer)?;
+        value.parse::<BootstrapDataGeneratorKind>().map_err(de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum SourceChangeGeneratorKind {
+    None,
+    Script,
+}
+
+impl Default for SourceChangeGeneratorKind {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl FromStr for SourceChangeGeneratorKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s {
+            "None" => Ok(Self::None),
+            "Script" => Ok(Self::Script),
+            _ => {
+                anyhow::bail!("Invalid SourceChangeGeneratorKind: {}", s);
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for SourceChangeGeneratorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Script => write!(f, "Script"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SourceChangeGeneratorKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: String = Deserialize::deserialize(deserializer)?;
+        value.parse::<SourceChangeGeneratorKind>().map_err(de::Error::custom)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TestDefinition {
     pub id: String,
@@ -142,7 +232,7 @@ pub struct SourceDefinition {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BootstrapDataGeneratorDefinition {    
-    pub kind: String,
+    pub kind: BootstrapDataGeneratorKind,
     pub script_file_folder: String,
     pub script_file_list: Vec<String>,
     pub time_mode: TimeMode,
@@ -150,7 +240,7 @@ pub struct BootstrapDataGeneratorDefinition {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SourceChangeGeneratorDefinition {
-    pub kind: String,
+    pub kind: SourceChangeGeneratorKind,
     pub script_file_folder: String,
     pub script_file_list: Vec<String>,
     pub spacing_mode: SpacingMode,
@@ -190,7 +280,7 @@ mod tests {
     fn test_read_bootstrap_data_generator() {
         let content = r#"
         {
-            "kind": "script_player",
+            "kind": "Script",
             "script_file_folder": "bootstrap_data_scripts",
             "script_file_list": ["init*.jsonl", "deploy*.jsonl"],
             "time_mode": "recorded"
@@ -200,7 +290,7 @@ mod tests {
         let reader = BufReader::new(file);
         let bootstrap_data_generator: BootstrapDataGeneratorDefinition = serde_json::from_reader(reader).unwrap();
         
-        assert_eq!(bootstrap_data_generator.kind, "script_player");
+        assert_eq!(bootstrap_data_generator.kind, BootstrapDataGeneratorKind::Script);
         assert_eq!(bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
         assert_eq!(bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
         assert_eq!(bootstrap_data_generator.time_mode, TimeMode::Recorded);
@@ -210,7 +300,7 @@ mod tests {
     fn test_read_source_change_generator() {
         let content = r#"
         {
-            "kind": "script_player",
+            "kind": "Script",
             "script_file_folder": "source_change_scripts",
             "script_file_list": ["change01.jsonl", "change02.jsonl"],
             "spacing_mode": "100m",
@@ -221,7 +311,7 @@ mod tests {
         let reader = BufReader::new(file);
         let source_change_generator: SourceChangeGeneratorDefinition = serde_json::from_reader(reader).unwrap();
         
-        assert_eq!(source_change_generator.kind, "script_player");
+        assert_eq!(source_change_generator.kind, SourceChangeGeneratorKind::Script);
         assert_eq!(source_change_generator.script_file_folder, "source_change_scripts");
         assert_eq!(source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
         assert_eq!(source_change_generator.spacing_mode, SpacingMode::Fixed(100000000));
@@ -234,13 +324,13 @@ mod tests {
         {
             "id": "source1",
             "bootstrap_data_generator": {
-                "kind": "script_player",
+                "kind": "None",
                 "script_file_folder": "bootstrap_data_scripts",
                 "script_file_list": ["init*.jsonl", "deploy*.jsonl"],
                 "time_mode": "live"
             },
             "source_change_generator": {
-                "kind": "script_player",
+                "kind": "Script",
                 "script_file_folder": "source_change_scripts",
                 "script_file_list": ["change01.jsonl", "change02.jsonl"],
                 "spacing_mode": "recorded",
@@ -253,11 +343,11 @@ mod tests {
         let source: SourceDefinition = serde_json::from_reader(reader).unwrap();
 
         assert_eq!(source.id, "source1");
-        assert_eq!(source.bootstrap_data_generator.kind, "script_player");
+        assert_eq!(source.bootstrap_data_generator.kind, BootstrapDataGeneratorKind::None);
         assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
         assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Live);
-        assert_eq!(source.source_change_generator.kind, "script_player");
+        assert_eq!(source.source_change_generator.kind, SourceChangeGeneratorKind::Script);
         assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
         assert_eq!(source.source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
         assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::Recorded);
@@ -276,13 +366,13 @@ mod tests {
                 {
                     "id": "source1",
                     "bootstrap_data_generator": {
-                        "kind": "script_player",
+                        "kind": "Script",
                         "script_file_folder": "bootstrap_data_scripts",
                         "script_file_list": ["init*.jsonl", "deploy*.jsonl"],
                         "time_mode": "live"
                     },
                     "source_change_generator": {
-                        "kind": "script_player",
+                        "kind": "None",
                         "script_file_folder": "source_change_scripts",
                         "script_file_list": ["change01.jsonl", "change02.jsonl"],
                         "spacing_mode": "recorded",
@@ -306,11 +396,11 @@ mod tests {
         assert_eq!(test_definition.sources.len(), 1);
         let source = &test_definition.sources[0];
         assert_eq!(source.id, "source1");
-        assert_eq!(source.bootstrap_data_generator.kind, "script_player");
+        assert_eq!(source.bootstrap_data_generator.kind, BootstrapDataGeneratorKind::Script);
         assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
         assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Live);
-        assert_eq!(source.source_change_generator.kind, "script_player");
+        assert_eq!(source.source_change_generator.kind, SourceChangeGeneratorKind::None);
         assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
         assert_eq!(source.source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
         assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::Recorded);
@@ -331,11 +421,11 @@ mod tests {
         assert_eq!(test_definition.sources.len(), 1);
         let source = &test_definition.sources[0];
         assert_eq!(source.id, "facilities");
-        assert_eq!(source.bootstrap_data_generator.kind, "script_player");
+        assert_eq!(source.bootstrap_data_generator.kind, BootstrapDataGeneratorKind::Script);
         assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
         assert_eq!(source.bootstrap_data_generator.script_file_list, Vec::<String>::new());
         assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Recorded);
-        assert_eq!(source.source_change_generator.kind, "script_player");
+        assert_eq!(source.source_change_generator.kind, SourceChangeGeneratorKind::Script);
         assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
         assert_eq!(source.source_change_generator.script_file_list, Vec::<String>::new());
         assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::None);

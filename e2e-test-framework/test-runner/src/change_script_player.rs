@@ -14,7 +14,7 @@ use crate::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, 
         dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, 
         jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
-    }, SpacingMode, TestRunReactivator, TestRunSource, TimeMode
+    }, SpacingMode, TestRunReactivator, TimeMode
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 
@@ -49,16 +49,11 @@ pub struct ChangeScriptPlayerSettings {
 }
 
 impl ChangeScriptPlayerSettings {
-    pub fn new(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
-
-        if !(test_run_source.reactivator.is_some()) {
-            anyhow::bail!("No ReactivatorConfig provided in TestRunSource: {:?}", test_run_source);
-        }
-
+    pub fn new(test_run_source_id: TestRunSourceId, reactivator: TestRunReactivator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
         Ok(ChangeScriptPlayerSettings {
             data_store_path,
-            id: test_run_source.id,
-            reactivator: test_run_source.reactivator.unwrap(),
+            id: test_run_source_id,
+            reactivator: reactivator,
             script_files,
         })
     }
@@ -183,7 +178,7 @@ pub enum ChangeScriptPlayerCommand {
 }
 
 // Struct for messages sent to the ChangeScriptPlayer from the functions in the Web API.
-#[derive(Debug)]
+#[derive(Debug,)]
 pub struct ChangeScriptPlayerMessage {
     // Command sent to the ChangeScriptPlayer.
     pub command: ChangeScriptPlayerCommand,
@@ -216,9 +211,9 @@ pub struct ChangeScriptPlayer {
 }
 
 impl ChangeScriptPlayer {
-    pub async fn new(test_run_source: TestRunSource, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(test_run_source_id: TestRunSourceId, reactivator: TestRunReactivator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
 
-        let settings = ChangeScriptPlayerSettings::new(test_run_source, script_files, data_store_path)?;
+        let settings = ChangeScriptPlayerSettings::new(test_run_source_id, reactivator, script_files, data_store_path)?;
         log::debug!("Creating ChangeScriptPlayer from {:#?}", &settings);
 
         let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);

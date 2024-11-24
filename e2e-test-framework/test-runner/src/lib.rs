@@ -1,7 +1,7 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use serde::Serialize;
-use test_data_store::{test_run_storage::TestRunSourceId, SharedTestDataStore};
+use test_data_store::{test_repo_storage::TestSourceDataset, test_run_storage::{TestRunSourceId, TestRunStorage}, SharedTestDataStore};
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse};
 use config::{ProxyConfig, ReactivatorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, SourceConfig};
@@ -114,11 +114,14 @@ impl Default for SpacingMode {
 pub struct TestRunSource {
     pub id: TestRunSourceId,
     pub proxy: Option<TestRunProxy>,
+    #[serde(skip_serializing)]
     pub reactivator: Option<TestRunReactivator>,    
+    #[serde(skip_serializing)]
+    pub change_script_player: Option<ChangeScriptPlayer>,
 }
 
 impl TestRunSource {
-    pub fn new(config: &SourceConfig, defaults: &SourceConfig) -> anyhow::Result<Self> {
+    pub async fn new(config: &SourceConfig, defaults: &SourceConfig, test_source_dataset: TestSourceDataset, test_run_storage: TestRunStorage) -> anyhow::Result<Self> {
         // If neither the SourceConfig nor the SourceConfig defaults contain a source_id, return an error.
         let source_id = config.test_source_id.as_ref()
             .or_else( || defaults.test_source_id.as_ref())
@@ -177,10 +180,30 @@ impl TestRunSource {
             }
         };
 
+        let change_script_player = match &reactivator {
+            Some(reactivator) => {
+                let st = test_run_storage.get_source_storage(&test_repo_id, &source_id, false).await?;
+                let data_store_path = st.path.clone();
+
+                if test_source_dataset.change_log_script_files.len() > 0 {
+
+                    let player = 
+                        ChangeScriptPlayer::new(
+                            id.clone(), reactivator.clone(), test_source_dataset.change_log_script_files, data_store_path).await?;
+
+                    Some(player)
+                } else {
+                    anyhow::bail!("No change script files available for player: {:?}", &id);
+                }
+            },
+            None => None,
+        };
+
         Ok(Self {
             id,
             proxy,
             reactivator,
+            change_script_player,
         })
     }
 }
@@ -296,7 +319,6 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 
 #[derive(Debug)]
 pub struct TestRunner {
-    change_script_players: HashMap<String, ChangeScriptPlayer>,
     data_store: SharedTestDataStore,
     source_defaults: SourceConfig,
     sources: HashMap<TestRunSourceId, TestRunSource>,
@@ -308,7 +330,6 @@ impl TestRunner {
         log::debug!("Creating TestRunner from {:#?}", config);
 
         let mut test_runner = TestRunner {
-            change_script_players: HashMap::new(),
             data_store,
             source_defaults: config.source_defaults,
             sources: HashMap::new(),
@@ -325,7 +346,7 @@ impl TestRunner {
         Ok(test_runner)
     }
     
-    pub async fn add_test_source(&mut self, source_config: &SourceConfig) -> anyhow::Result<Option<ChangeScriptPlayer>> {
+    pub async fn add_test_source(&mut self, source_config: &SourceConfig) -> anyhow::Result<TestRunSource> {
         log::trace!("Adding TestRunSource from {:#?}", source_config);
 
         // If the TestRunner is in an Error state, return an error.
@@ -344,29 +365,14 @@ impl TestRunner {
         let dataset = self.data_store.get_test_run_source_content(&test_run_source_id).await?;
 
         // Get the path for data
-        let data_store_path = self.data_store.get_test_run_storage(&test_run_source_id.test_id, &test_run_source_id.test_run_id).await?.path;
+        // let test_source_storage = self.data_store.test_repo_store.lock().await.get_test_repo(id)
+        let test_run_storage = self.data_store.get_test_run_storage(&test_run_source_id.test_id, &test_run_source_id.test_run_id).await?;
+        // let data_store_path = data_store.path.clone();
 
-        let test_run_source = TestRunSource::new(source_config, &self.source_defaults)?;
+        let test_run_source = TestRunSource::new(source_config, &self.source_defaults, dataset, test_run_storage).await?;
+        self.sources.insert(test_run_source_id, test_run_source.clone());
         
-        // Determine if the TestRunSource has a reactivator, in which case a ChangeScriptPlayer should 
-        // be created and possibly started.
-        if test_run_source.reactivator.is_some() {
-            if dataset.change_log_script_files.len() > 0 {
-
-                let player = 
-                    ChangeScriptPlayer::new(
-                        test_run_source.clone(), dataset.change_log_script_files, data_store_path).await?;
-
-                self.sources.insert(test_run_source.id.clone(), test_run_source);
-                self.change_script_players.insert(player.get_id().to_string(), player.clone());
-
-                return Ok(Some(player));
-            } else {
-                anyhow::bail!("No change script files available for player: {:?}", &test_run_source);
-            }
-        }
-
-        Ok(None)
+        Ok(test_run_source)
     }
 
     pub async fn contains_test_source(&self, test_run_source_id: &str) -> anyhow::Result<bool> {
@@ -382,8 +388,12 @@ impl TestRunner {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
 
+        let key = TestRunSourceId::try_from(player_id)?;
+
         // Get the ChangeScriptPlayer from the TestRunner or fail if it doesn't exist.
-        match self.change_script_players.get(player_id) {
+        let test_run_source = self.sources.get(&key).ok_or_else(|| anyhow::anyhow!("TestRunSource not found: {}", player_id))?;
+
+        match &test_run_source.change_script_player {
             Some(player) => {
                 match command {
                     ChangeScriptPlayerCommand::GetState => {
@@ -460,9 +470,9 @@ impl TestRunner {
 
         // Iterate over the reactivators and start each one if it is configured to start immediately.
         // If any of the reactivators fail to start, set the TestRunnerStatus to Error and return an error.
-        for (_, player) in &self.change_script_players {
-            if player.get_settings().reactivator.start_immediately {
-                match player.start().await {
+        for (_, source) in &self.sources {
+            if source.change_script_player.as_ref().unwrap().get_settings().reactivator.start_immediately {
+                match &source.change_script_player.as_ref().unwrap().start().await {
                     Ok(_) => {},
                     Err(e) => {
                         let msg = format!("Error starting ChangeScriptPlayer: {}", e);

@@ -2,7 +2,7 @@ use chrono::prelude::*;
 
 use async_trait::async_trait;
 
-use test_data_store::scripts::SourceChangeEvent;
+use test_data_store::test_repo_storage::scripts::SourceChangeEvent;
 
 use crate::config::ConsoleSourceChangeDispatcherConfig;
 use super::SourceChangeDispatcher;

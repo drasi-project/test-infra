@@ -8,7 +8,6 @@ use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, Tes
 use tokio::sync::Mutex;
 
 pub mod data_collection_storage;
-pub mod scripts;
 pub mod test_repo_storage;
 pub mod test_run_storage;
 

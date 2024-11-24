@@ -7,6 +7,7 @@ use walkdir::WalkDir;
 use repo_clients::{create_test_repo_client, RemoteTestRepoClient, RemoteTestRepoConfig};
 
 pub mod repo_clients;
+pub mod scripts;
 pub mod test_metadata;
 
 const TESTS_FOLDER_NAME: &str = "tests";

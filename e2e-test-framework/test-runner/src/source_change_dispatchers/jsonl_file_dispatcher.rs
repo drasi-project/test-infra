@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
-use test_data_store::scripts::SourceChangeEvent;
+use test_data_store::test_repo_storage::scripts::SourceChangeEvent;
 
 use crate::config::JsonlFileSourceChangeDispatcherConfig;
 

@@ -9,6 +9,7 @@ use tokio::sync::RwLock;
 
 pub mod change_script_player;
 pub mod config;
+pub mod source_change_generators;
 pub mod source_change_dispatchers;
 
 #[derive(Clone, Debug, Serialize)]

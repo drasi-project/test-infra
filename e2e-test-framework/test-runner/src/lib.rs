@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{test_metadata::{SpacingMode, TimeMode}, TestSourceDataset}, test_run_storage::{TestRunSourceId, TestRunStorage}, SharedTestDataStore};
+use test_data_store::{test_repo_storage::{test_metadata::{SpacingMode, TimeMode}, TestSourceDataset}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}, SharedTestDataStore};
 
 use change_script_player::{ChangeScriptPlayer, ChangeScriptPlayerCommand, ChangeScriptPlayerMessageResponse};
 use config::{BootstrapDataGeneratorConfig, SourceChangeGeneratorConfig, TestRunnerConfig, SourceChangeDispatcherConfig, TestRunSourceConfig};
@@ -20,75 +20,28 @@ pub struct TestRunSource {
 }
 
 impl TestRunSource {
-    pub async fn new(config: &TestRunSourceConfig, defaults: &TestRunSourceConfig, test_source_dataset: TestSourceDataset, test_run_storage: TestRunStorage) -> anyhow::Result<Self> {
-        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a source_id, return an error.
-        let source_id = config.test_source_id.as_ref()
-            .or_else( || defaults.test_source_id.as_ref())
-            .map(|source_id| source_id.to_string())
-            .ok_or_else(|| anyhow::anyhow!("No source_id provided and no default value found."))?;
-        
-        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a test_id, return an error.
-        let test_id = config.test_id.as_ref()
-            .or_else( || defaults.test_id.as_ref())
-            .map(|id| id.to_string())
-            .ok_or_else(|| anyhow::anyhow!("No test_id provided and no default value found."))?;
-
-        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a test_repo_id, return an error.
-        let test_repo_id = config.test_repo_id.as_ref()
-            .or_else( || defaults.test_repo_id.as_ref())
-            .map(|id| id.to_string())
-            .ok_or_else(|| anyhow::anyhow!("No test_repo_id provided and no default value found."))?;
-
-        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a test_run_id, generate one.
-        let test_run_id = config.test_run_id.as_ref()
-            .or_else( || defaults.test_run_id.as_ref())
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| chrono::Utc::now().format("%Y%m%d%H%M%S").to_string());
-
-        let id = TestRunSourceId::new(&test_repo_id, &test_id, &test_run_id, &source_id);
-
-        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a BootstrapDataGenerator, set it to None.
-        let bootstrap_data_generator = match config.bootstrap_data_generator {
-            Some(ref config) => {
-                match defaults.bootstrap_data_generator {
-                    Some(ref defaults) => BootstrapDataGenerator::new(id.clone(), config, defaults).ok(),
-                    None => BootstrapDataGenerator::new(id.clone(), config, &BootstrapDataGeneratorConfig::default()).ok(),
-                }
+    pub async fn new(id: TestRunSourceId, config: TestRunSourceConfig, dataset: TestSourceDataset, storage: TestRunSourceStorage) -> anyhow::Result<Self> {
+        // Before this is called, we have ensured all the missing TestRunSourceConfig fields are filled.
+        let bootstrap_data_generator = match &config.bootstrap_data_generator {
+            Some(bootstrap_data_generator_config) => {
+                Some(BootstrapDataGenerator::new(id.clone(), bootstrap_data_generator_config)?)
             },
-            None => {
-                match defaults.bootstrap_data_generator {
-                    Some(ref defaults) => BootstrapDataGenerator::new(id.clone(), defaults, &BootstrapDataGeneratorConfig::default()).ok(),
-                    None => None,
-                }
-            }
+            None => None,
         };
 
-        // If neither the TestRunSourceConfig nor the TestRunSourceConfig defaults contain a source_change_generator, set it to None.
-        let source_change_generator = match config.source_change_generator {
-            Some(ref config) => {
-                match defaults.source_change_generator {
-                    Some(ref defaults) => SourceChangeGenerator::new(id.clone(), config, defaults).ok(),
-                    None => SourceChangeGenerator::new(id.clone(), config, &SourceChangeGeneratorConfig::default()).ok(),
-                }
+        let source_change_generator = match &config.source_change_generator {
+            Some(source_change_generator_config) => {
+                Some(SourceChangeGenerator::new(id.clone(), source_change_generator_config)?)
             },
-            None => {
-                match defaults.source_change_generator {
-                    Some(ref defaults) => SourceChangeGenerator::new(id.clone(), defaults, &SourceChangeGeneratorConfig::default()).ok(),
-                    None => None,
-                }
-            }
+            None => None,
         };
 
         let change_script_player = match &source_change_generator {
             Some(source_change_generator) => {
-                let st = test_run_storage.get_source_storage(&test_repo_id, &source_id, false).await?;
-                let data_store_path = st.path.clone();
-
-                if test_source_dataset.source_change_script_files.len() > 0 {
-
+                if dataset.source_change_script_files.len() > 0 {
                     let player = 
                         ChangeScriptPlayer::new(
-                            id.clone(), source_change_generator.clone(), test_source_dataset.source_change_script_files, data_store_path).await?;
+                            id.clone(), source_change_generator.clone(), dataset.source_change_script_files, storage.path.clone()).await?;
 
                     Some(player)
                 } else {
@@ -114,22 +67,11 @@ pub struct BootstrapDataGenerator {
 }
 
 impl BootstrapDataGenerator {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &BootstrapDataGeneratorConfig, defaults: &BootstrapDataGeneratorConfig) -> anyhow::Result<Self> {
-        // Use the config.time_mode if it exists, otherwise use the defaults.time_mode if it exists, 
-        // otherwise use TimeMode::default.
-        let time_mode = match &config.time_mode {
-            Some(time_mode) => time_mode.clone(),
-            None => {
-                match &defaults.time_mode {
-                    Some(time_mode) => time_mode.clone(),
-                    None => TimeMode::default()
-                }
-            }
-        };
-
+    pub fn new(test_run_source_id: TestRunSourceId, config: &BootstrapDataGeneratorConfig) -> anyhow::Result<Self> {
+        // Before this is called, we have ensured all the missing TestRunSourceConfig fields are filled.
         Ok(Self {
             test_run_source_id,
-            time_mode,
+            time_mode: config.time_mode.clone().unwrap(),
         })
     }
 }
@@ -145,62 +87,16 @@ pub struct SourceChangeGenerator {
 }
 
 impl SourceChangeGenerator {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &SourceChangeGeneratorConfig, defaults: &SourceChangeGeneratorConfig) -> anyhow::Result<Self> {
-        // If neither the SourceChangeGeneratorConfig nor the SourceChangeGeneratorConfig defaults contain a ignore_scripted_pause_commands, 
-        // set to false.
-        let ignore_scripted_pause_commands = config.ignore_scripted_pause_commands
-            .or(defaults.ignore_scripted_pause_commands)
-            .unwrap_or(false);
-
-        // Use the config.spacing_mode if it exists, otherwise use the defaults.spacing_mode if it exists, 
-        // otherwise use SpacingMode::default.
-        let spacing_mode = match &config.spacing_mode {
-            Some(spacing_mode) => spacing_mode.clone(),
-            None => {
-                match &defaults.spacing_mode {
-                    Some(spacing_mode) => spacing_mode.clone(),
-                    None => SpacingMode::default()
-                }
-            }
-        };
-
-        // If neither the SourceChangeGeneratorConfig nor the SourceChangeGeneratorConfig defaults contain a start_immediately, 
-        // set to true.
-        let start_immediately = config.start_immediately
-            .or(defaults.start_immediately)
-            .unwrap_or(true);
-
-        // Use the config.time_mode if it exists, otherwise use the defaults.time_mode if it exists, 
-        // otherwise use TimeMode::default.
-        let time_mode = match &config.time_mode {
-            Some(time_mode) => time_mode.clone(),
-            None => {
-                match &defaults.time_mode {
-                    Some(time_mode) => time_mode.clone(),
-                    None => TimeMode::default()
-                }
-            }
-        };
-
-        // If neither the SourceChangeGeneratorConfig nor the SourceChangeGeneratorConfig defaults contain a list of dispatchers, 
-        // set to an empty Vec.
-        let dispatchers = match &config.dispatchers {
-            Some(dispatchers) => dispatchers.clone(),
-            None => {
-                match &defaults.dispatchers {
-                    Some(dispatchers) => dispatchers.clone(),
-                    None => Vec::new()
-                }
-            }
-        };
+    pub fn new(test_run_source_id: TestRunSourceId, config: &SourceChangeGeneratorConfig) -> anyhow::Result<Self> {
+        // Before this is called, we have ensured all the missing SourceChangeGeneratorConfig fields are filled.
 
         Ok(Self {
-            dispatchers,
-            ignore_scripted_pause_commands,
-            spacing_mode,
-            start_immediately,
+            dispatchers: config.dispatchers.clone().unwrap(),
+            ignore_scripted_pause_commands: config.ignore_scripted_pause_commands.unwrap(),
+            spacing_mode: config.spacing_mode.clone().unwrap(),
+            start_immediately: config.start_immediately.unwrap(),
             test_run_source_id,
-            time_mode,
+            time_mode: config.time_mode.clone().unwrap(),
         })
     }
 }
@@ -255,22 +151,30 @@ impl TestRunner {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
         
-        let test_run_source_id = TestRunSourceId::try_from(source_config)?;
+        // Create a merged TestRunSourceConfig from the source_config and the source_defaults.
+        let source_config = TestRunSourceConfig::new(source_config.clone(), self.source_defaults.clone()).await?;
+
+        // We can now safely unwrap the TestRunSourceId from the TestRunSourceConfig.
+        let test_run_source_id = TestRunSourceId::try_from(&source_config)?;
 
         // Fail if the TestRunner already contains the TestRunSource.
         if self.sources.contains_key(&test_run_source_id) {
             anyhow::bail!("TestRunSource already exists: {:?}", &test_run_source_id);
         }
 
+        // Get the storage for the new TestRunSource.
+        let test_run_source_storage = {
+            let data_store = self.data_store.test_run_store.lock().await;
+            let test_run_id = &test_run_source_id.test_run_id;
+            let test_run_storage = data_store.get_test_run_storage(&test_run_id, false).await?;
+            test_run_storage.get_source_storage(&test_run_source_id, true).await?
+        };
+
         // Get the DataSet for the TestRunSource.
         let dataset = self.data_store.get_test_run_source_content(&test_run_source_id).await?;
 
-        // Get the path for data
-        // let test_source_storage = self.data_store.test_repo_store.lock().await.get_test_repo(id)
-        let test_run_storage = self.data_store.get_test_run_storage(&test_run_source_id.test_id, &test_run_source_id.test_run_id).await?;
-        // let data_store_path = data_store.path.clone();
-
-        let test_run_source = TestRunSource::new(source_config, &self.source_defaults, dataset, test_run_storage).await?;
+        // Create the TestRunSource and add it to the TestRunner.
+        let test_run_source = TestRunSource::new(test_run_source_id.clone(), source_config, dataset, test_run_source_storage).await?;
         self.sources.insert(test_run_source_id, test_run_source.clone());
         
         Ok(test_run_source)

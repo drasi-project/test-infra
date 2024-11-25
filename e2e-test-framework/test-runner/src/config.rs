@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use test_data_store::{
     test_repo_storage::test_metadata::{SpacingMode, TimeMode}, 
-    test_run_storage::{ParseTestRunSourceIdError, TestRunSourceId}
+    test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId}
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -48,16 +48,59 @@ impl Default for TestRunSourceConfig {
     }
 }
 
+impl TestRunSourceConfig {
+    pub async fn new( config: Self, defaults: Self ) -> anyhow::Result<Self> {
+
+        let mut merged = Self {
+            test_repo_id: config.test_repo_id.or(defaults.test_repo_id),
+            test_id: config.test_id.or(defaults.test_id),
+            test_run_id: config.test_run_id.or(defaults.test_run_id),
+            test_source_id: config.test_source_id.or(defaults.test_source_id),
+            bootstrap_data_generator: BootstrapDataGeneratorConfig::new_with_defaults(config.bootstrap_data_generator, defaults.bootstrap_data_generator).await?,
+            source_change_generator: SourceChangeGeneratorConfig::new_with_defaults(config.source_change_generator, defaults.source_change_generator).await?,
+        };
+
+        // Validate the merged TestRunSourceConfig
+        if merged.test_repo_id.is_none() {
+            anyhow::bail!("No test_repo_id provided and no default value found.");
+        } else if merged.test_id.is_none() {
+            anyhow::bail!("No test_id provided and no default value found.");
+        } else if merged.test_source_id.is_none() {
+            anyhow::bail!("No test_source_id provided and no default value found.");
+        };
+
+        // Fill in missing test_run_id
+        if merged.test_run_id.is_none() {
+            merged.test_run_id = Some(chrono::Utc::now().format("%Y%m%d%H%M%S").to_string());
+        }
+
+        Ok(merged)
+    }
+}
+
+impl TryFrom<&TestRunSourceConfig> for TestRunId {
+    type Error = ParseTestRunIdError;
+
+    fn try_from(value: &TestRunSourceConfig) -> Result<Self, Self::Error> {
+        let test_repo_id = value.test_repo_id.as_ref().ok_or_else(|| ParseTestRunIdError::InvalidValues("test_repo_id".to_string()))?;
+        let test_id = value.test_id.as_ref().ok_or_else(|| ParseTestRunIdError::InvalidValues("test_id".to_string()))?;
+        let test_run_id = value.test_run_id.as_ref().ok_or_else(|| ParseTestRunIdError::InvalidValues("test_run_id".to_string()))?;
+
+        Ok(TestRunId::new(test_repo_id, test_id, test_run_id))
+    }
+}
+
 impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
     type Error = ParseTestRunSourceIdError;
 
     fn try_from(value: &TestRunSourceConfig) -> Result<Self, Self::Error> {
-        let test_repo_id = value.test_repo_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_repo_id".to_string()))?;
-        let test_run_id = value.test_run_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_run_id".to_string()))?;
-        let test_id = value.test_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_id".to_string()))?;
-        let test_source_id = value.test_source_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_source_id".to_string()))?;
-
-        Ok(TestRunSourceId::new(test_repo_id, test_id, test_run_id, test_source_id))
+        match TestRunId::try_from(value) {
+            Ok(test_run_id) => {
+                let test_source_id = value.test_source_id.as_ref().ok_or_else(|| ParseTestRunSourceIdError::InvalidValues("test_source_id".to_string()))?;
+                Ok(TestRunSourceId::new(&test_run_id, test_source_id))
+            }
+            Err(e) => return Err(ParseTestRunSourceIdError::InvalidValues(e.to_string())),
+        }
     }
 }
 
@@ -76,8 +119,36 @@ pub struct BootstrapDataGeneratorConfig {
 impl Default for BootstrapDataGeneratorConfig {
     fn default() -> Self {
         BootstrapDataGeneratorConfig {
-            time_mode: Some(TimeMode::Recorded),
+            time_mode: Some(TimeMode::default()),
         }
+    }
+}
+
+impl BootstrapDataGeneratorConfig {
+    pub async fn new_with_defaults( config: Option<Self>,  defaults: Option<Self>) -> anyhow::Result<Option<Self>> {
+
+        let merged = match config {
+            Some(cfg) => {
+                match defaults {
+                    Some(def) => {
+                        Self {
+                            time_mode: cfg.time_mode.or(def.time_mode).or(Some(TimeMode::default())),
+                        }
+                    },
+                    None => cfg
+                }
+            }
+            None => {
+                match defaults {
+                    Some(def) => def,
+                    None => {
+                        return Ok(None);
+                    }
+                }
+            }
+        };
+
+        Ok(Some(merged))
     }
 }
 
@@ -95,10 +166,59 @@ impl Default for SourceChangeGeneratorConfig {
         SourceChangeGeneratorConfig {
             dispatchers: None,
             ignore_scripted_pause_commands: Some(false),
-            spacing_mode: Some(SpacingMode::Recorded),
+            spacing_mode: Some(SpacingMode::default()),
             start_immediately: Some(true),
-            time_mode: Some(TimeMode::Recorded),
+            time_mode: Some(TimeMode::default()),
         }
+    }
+}
+
+impl SourceChangeGeneratorConfig {
+    pub async fn new_with_defaults( config: Option<Self>, defaults: Option<Self> ) -> anyhow::Result<Option<Self>> {
+
+        let mut merged = match config {
+            Some(cfg) => {
+                match defaults {
+                    Some(def) => {
+                        Self {
+                            dispatchers: cfg.dispatchers.or(def.dispatchers),
+                            ignore_scripted_pause_commands: cfg.ignore_scripted_pause_commands.or(def.ignore_scripted_pause_commands),
+                            spacing_mode: cfg.spacing_mode.or(def.spacing_mode),
+                            start_immediately: cfg.start_immediately.or(def.start_immediately),
+                            time_mode: cfg.time_mode.or(def.time_mode),
+                        }
+                    },
+                    None => cfg
+                }
+            }
+            None => {
+                match defaults {
+                    Some(def) => def,
+                    None => {
+                        return Ok(None);
+                    }
+                }
+            }
+        };
+
+        // Fill in missing values
+        if merged.dispatchers.is_none() {
+            merged.dispatchers = Some(Vec::new());
+        };
+        if merged.ignore_scripted_pause_commands.is_none() {
+            merged.ignore_scripted_pause_commands = Some(false);
+        };
+        if merged.spacing_mode.is_none() {
+            merged.spacing_mode = Some(SpacingMode::default());
+        };
+        if merged.start_immediately.is_none() {
+            merged.start_immediately = Some(true);
+        };
+        if merged.time_mode.is_none() {
+            merged.time_mode = Some(TimeMode::default());
+        };
+
+        Ok(Some(merged))
     }
 }
 

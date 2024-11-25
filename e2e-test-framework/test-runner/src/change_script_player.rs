@@ -356,33 +356,15 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                         }
                     },
                     SourceChangeDispatcherConfig::JsonlFile(jsonl_file_config) => {
-                        // Construct the path to the local file used to store the generated SourceChangeEvents.
-                        // let folder_path = format!("./{}/test_output/{}/{}/change_logs/{}", 
-                        //     jsonl_file_config.folder_path.clone().unwrap_or(player_settings.data_store_path.to_owned()),
-                        //     player_settings.test_run_source.test_id, 
-                        //     player_settings.test_run_source.test_run_id, 
-                        //     player_settings.test_run_source.source_id);
-
                         let folder_path = match &jsonl_file_config.folder_path {
                             Some(config_path) => {
                                 if config_path.starts_with("/") {
-                                    PathBuf::from(format!("{}/test_output/{}/{}/change_logs/{}", 
-                                        config_path,
-                                        &player_settings.id.test_id, 
-                                        &player_settings.id.test_run_id, 
-                                        &player_settings.id.test_source_id))
+                                    PathBuf::from("source_change")
                                 } else {
-                                    PathBuf::from(format!("./{}/test_output/{}/{}/change_logs/{}", 
-                                        config_path,
-                                        &player_settings.id.test_id, 
-                                        &player_settings.id.test_run_id, 
-                                        &player_settings.id.test_source_id))
+                                    PathBuf::from(format!("./source_change"))
                                 }
                             },
                             None => player_settings.data_store_path.clone()
-                                        .join(&player_settings.id.test_id)
-                                        .join(&player_settings.id.test_run_id)
-                                        .join(&player_settings.id.test_source_id)
                         };
 
                         match JsonlFileSourceChangeDispatcherSettings::new(jsonl_file_config, folder_path) {

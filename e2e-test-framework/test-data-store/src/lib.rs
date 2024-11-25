@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use serde::{Deserialize, Serialize};
-use test_run_storage::{TestRunSourceId, TestRunStorage, TestRunStore};
+use test_run_storage::{TestRunId, TestRunSourceId, TestRunStorage, TestRunStore};
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
 use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceDataset};
@@ -97,8 +97,8 @@ impl TestDataStore {
         Ok(self.test_repo_store.lock().await.contains_test_repo(id).await?)
     }
 
-    pub async fn contains_test_run(&self, test_id: &str, test_run_id: &str) -> anyhow::Result<bool> {
-        Ok(self.test_run_store.lock().await.contains_test_run(test_id, test_run_id).await?)
+    pub async fn contains_test_run(&self, test_run_id: &TestRunId) -> anyhow::Result<bool> {
+        Ok(self.test_run_store.lock().await.contains_test_run(test_run_id).await?)
     }
 
     pub async fn get_data_collection_ids(&self) -> anyhow::Result<Vec<String>> {
@@ -118,7 +118,7 @@ impl TestDataStore {
     }
 
     pub async fn get_test_run_source_content(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceDataset> {
-        self.get_test_source_content(&test_run_source_id.test_repo_id, &test_run_source_id.test_id, &test_run_source_id.test_source_id).await
+        self.get_test_source_content(&test_run_source_id.test_run_id.test_repo_id, &test_run_source_id.test_run_id.test_id, &test_run_source_id.test_source_id).await
     }
 
     pub async fn get_test_source_content(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceDataset> {
@@ -129,12 +129,12 @@ impl TestDataStore {
             .get_dataset().await?)
     }
     
-    pub async fn get_test_run_ids(&self) -> anyhow::Result<Vec<String>> {
+    pub async fn get_test_run_ids(&self) -> anyhow::Result<Vec<TestRunId>> {
         Ok(self.test_run_store.lock().await.get_test_run_ids().await?)
     }
 
-    pub async fn get_test_run_storage(&self, test_id: &str, test_run_id: &str) -> anyhow::Result<TestRunStorage> {
-        Ok(self.test_run_store.lock().await.get_test_run_storage(test_id, test_run_id, false).await?)
+    pub async fn get_test_run_storage(&self, test_run_id: &TestRunId) -> anyhow::Result<TestRunStorage> {
+        Ok(self.test_run_store.lock().await.get_test_run_storage(test_run_id, false).await?)
     }
 
     // This function is used to figure out which dataset to use to service a bootstrap request.

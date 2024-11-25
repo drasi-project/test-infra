@@ -8,7 +8,7 @@ use repo_clients::{create_test_repo_client, RemoteTestRepoClient, RemoteTestRepo
 
 pub mod repo_clients;
 pub mod scripts;
-pub mod test_metadata;
+pub mod models;
 
 const TESTS_FOLDER_NAME: &str = "tests";
 const TEST_SOURCES_FOLDER_NAME: &str = "sources";
@@ -143,7 +143,7 @@ impl TestRepoStorage {
 
             // Read the test definition file into a string.
             let json_content = fs::read_to_string(test_definition_path).await?;
-            let test_definition: test_metadata::TestDefinition = serde_json::from_str(&json_content)?;
+            let test_definition: models::TestDefinition = serde_json::from_str(&json_content)?;
 
             Ok(TestStorage {
                 client_config: self.repo_config.clone(),
@@ -159,7 +159,7 @@ impl TestRepoStorage {
             // Read the test definition file into a string.
             let test_definition_path = test_path.join(format!("{}.test", id));
             let json_content = fs::read_to_string(test_definition_path).await?;
-            let test_definition: test_metadata::TestDefinition = serde_json::from_str(&json_content)?;
+            let test_definition: models::TestDefinition = serde_json::from_str(&json_content)?;
 
             Ok(TestStorage {                            
                 client_config: self.repo_config.clone(),    
@@ -196,7 +196,7 @@ pub struct TestStorage {
     pub path: PathBuf,
     pub repo_id: String,
     pub sources_path: PathBuf,
-    pub test_definition: test_metadata::TestDefinition,
+    pub test_definition: models::TestDefinition,
 }
 
 impl TestStorage {

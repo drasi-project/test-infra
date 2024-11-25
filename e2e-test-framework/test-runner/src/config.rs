@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use test_data_store::{
-    test_repo_storage::test_metadata::{SpacingMode, TimeMode}, 
+    test_repo_storage::models::{SpacingMode, TimeMode}, 
     test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId}
 };
 

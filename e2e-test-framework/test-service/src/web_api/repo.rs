@@ -2,7 +2,7 @@ use axum::{ extract::{Extension, Path}, response::IntoResponse, routing::get, Js
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, test_metadata::TestDefinition, TestRepoStorage, TestSourceDataset, TestSourceStorage, TestStorage}, SharedTestDataStore};
+use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, models::TestDefinition, TestRepoStorage, TestSourceDataset, TestSourceStorage, TestStorage}, SharedTestDataStore};
 
 use super::TestServiceWebApiError;
 

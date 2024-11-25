@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use azure_storage_blob_test_repo_client::AzureStorageBlobTestRepoClient;
 
-use super::{test_metadata::TestDefinition, TestSourceDataset};
+use super::{models::TestDefinition, TestSourceDataset};
 
 pub mod azure_storage_blob_test_repo_client;
 

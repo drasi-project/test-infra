@@ -8,7 +8,7 @@ use azure_storage_blobs::container::operations::BlobItem;
 use futures::stream::StreamExt;
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::test_repo_storage::{test_metadata::TestDefinition, TestSourceDataset};
+use crate::test_repo_storage::{models::TestDefinition, TestSourceDataset};
 
 use super::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig, RemoteTestRepoClient};
 

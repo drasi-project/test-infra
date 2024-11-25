@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-// pub mod change_script_player;
+pub mod change_script_source_change_generator;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeGeneratorError {
@@ -17,7 +17,7 @@ pub struct SourceChangeGeneratorState {
 }
 
 #[async_trait]
-pub trait SourceChangeGenerator : Send + Sync {
+pub trait SourceChangeGeneratorX : Send + Sync {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
 
     async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
@@ -32,7 +32,7 @@ pub trait SourceChangeGenerator : Send + Sync {
 }
 
 #[async_trait]
-impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
+impl SourceChangeGeneratorX for Box<dyn SourceChangeGeneratorX + Send + Sync> {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         (**self).get_state().await
     }

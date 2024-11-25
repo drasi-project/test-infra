@@ -7,7 +7,7 @@ use tokio::sync::mpsc::error::TryRecvError::{Empty, Disconnected};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
-use test_data_store::{test_repo_storage::{scripts::{change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent}, test_metadata::SpacingMode}, test_run_storage::TestRunSourceId};
+use test_data_store::{test_repo_storage::{scripts::{change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent}, test_metadata::SpacingMode}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 
 use crate::{
     config::SourceChangeDispatcherConfig, source_change_dispatchers::{
@@ -42,16 +42,16 @@ pub enum ChangeScriptPlayerError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ChangeScriptPlayerSettings {
-    pub data_store_path: PathBuf,
+    pub storage: TestRunSourceStorage,
     pub id: TestRunSourceId,
     pub source_change_generator: SourceChangeGenerator,
     pub script_files: Vec<PathBuf>,
 }
 
 impl ChangeScriptPlayerSettings {
-    pub fn new(test_run_source_id: TestRunSourceId, source_change_generator: SourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(test_run_source_id: TestRunSourceId, source_change_generator: SourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: TestRunSourceStorage) -> anyhow::Result<Self> {
         Ok(ChangeScriptPlayerSettings {
-            data_store_path,
+            storage: data_store_path,
             id: test_run_source_id,
             source_change_generator,
             script_files,
@@ -215,7 +215,7 @@ pub struct ChangeScriptPlayer {
 }
 
 impl ChangeScriptPlayer {
-    pub async fn new(test_run_source_id: TestRunSourceId, source_change_generator: SourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: PathBuf) -> anyhow::Result<Self> {
+    pub async fn new(test_run_source_id: TestRunSourceId, source_change_generator: SourceChangeGenerator, script_files: Vec<PathBuf>, data_store_path: TestRunSourceStorage) -> anyhow::Result<Self> {
 
         let settings = ChangeScriptPlayerSettings::new(test_run_source_id, source_change_generator, script_files, data_store_path)?;
         log::debug!("Creating ChangeScriptPlayer from {:#?}", &settings);
@@ -357,14 +357,10 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                     },
                     SourceChangeDispatcherConfig::JsonlFile(jsonl_file_config) => {
                         let folder_path = match &jsonl_file_config.folder_path {
-                            Some(config_path) => {
-                                if config_path.starts_with("/") {
-                                    PathBuf::from("source_change")
-                                } else {
-                                    PathBuf::from(format!("./source_change"))
-                                }
-                            },
-                            None => player_settings.data_store_path.clone()
+                            Some(config_path) => 
+                                player_settings.storage.source_change_path.join(config_path),
+                            None => 
+                                player_settings.storage.source_change_path.join("jsonl_file_dispatcher"),
                         };
 
                         match JsonlFileSourceChangeDispatcherSettings::new(jsonl_file_config, folder_path) {

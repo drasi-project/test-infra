@@ -41,7 +41,7 @@ impl TestRunSource {
                 if dataset.source_change_script_files.len() > 0 {
                     let player = 
                         ChangeScriptPlayer::new(
-                            id.clone(), source_change_generator.clone(), dataset.source_change_script_files, storage.path.clone()).await?;
+                            id.clone(), source_change_generator.clone(), dataset.source_change_script_files, storage).await?;
 
                     Some(player)
                 } else {

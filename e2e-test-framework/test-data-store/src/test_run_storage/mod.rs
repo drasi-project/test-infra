@@ -4,7 +4,6 @@ use serde::Serialize;
 use tokio::fs;
 
 const SOURCES_FOLDER_NAME: &str = "sources";
-const BOOTSTRAP_DATA_FOLDER_NAME: &str = "bootstrap_data";
 const SOURCE_CHANGE_FOLDER_NAME: &str = "source_change";
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
@@ -186,7 +185,6 @@ impl TestRunStorage {
         log::info!("Getting (replace = {}) TestRunSourceStorage for ID: {:?}", replace, source_id);
 
         let source_path = self.sources_path.join(&source_id.test_source_id);
-        let bootstrap_data_path = source_path.join(BOOTSTRAP_DATA_FOLDER_NAME);            
         let source_change_path = source_path.join(SOURCE_CHANGE_FOLDER_NAME);
 
         if replace && source_path.exists() {
@@ -195,13 +193,13 @@ impl TestRunStorage {
 
         if !source_path.exists() {
             // fs::create_dir_all(&source_path).await?;
-            fs::create_dir_all(&bootstrap_data_path).await?;
             fs::create_dir_all(&source_change_path).await?;
         }
 
         Ok(TestRunSourceStorage {
             id: source_id.clone(),
             path: source_path,
+            source_change_path,
         })
     }
 
@@ -221,8 +219,9 @@ impl TestRunStorage {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TestRunSourceStorage {
     pub id: TestRunSourceId,
     pub path: PathBuf,
+    pub source_change_path: PathBuf,
 }

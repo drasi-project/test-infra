@@ -1,10 +1,37 @@
 use async_trait::async_trait;
 
+use serde::{Deserialize, Serialize};
 use test_data_store::test_repo_storage::scripts::SourceChangeEvent;
 
 pub mod console_dispatcher;
 pub mod dapr_dispatcher;
 pub mod jsonl_file_dispatcher;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum SourceChangeDispatcherConfig {
+    Console(ConsoleSourceChangeDispatcherConfig),
+    Dapr(DaprSourceChangeDispatcherConfig),
+    JsonlFile(JsonlFileSourceChangeDispatcherConfig),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsoleSourceChangeDispatcherConfig {
+    pub date_time_format: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaprSourceChangeDispatcherConfig {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub pubsub_name: Option<String>,
+    pub pubsub_topic: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonlFileSourceChangeDispatcherConfig {
+    pub folder_path: Option<String>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeDispatcherError {

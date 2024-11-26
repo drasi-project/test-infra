@@ -3,7 +3,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use test_runner::{config::TestRunSourceConfig, SharedTestRunner, TestRunnerStatus};
+use test_runner::{TestRunSourceConfig, SharedTestRunner, TestRunnerStatus};
 
 use super::TestServiceWebApiError;
 

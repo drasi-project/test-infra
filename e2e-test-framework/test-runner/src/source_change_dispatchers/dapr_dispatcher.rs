@@ -5,8 +5,7 @@ use drasi_comms_dapr::comms::DaprHttpPublisher;
 
 use test_data_store::test_repo_storage::scripts::SourceChangeEvent;
 
-use crate::config::DaprSourceChangeDispatcherConfig;
-use super::SourceChangeDispatcher;
+use super::{DaprSourceChangeDispatcherConfig, SourceChangeDispatcher};
 
 #[derive(Debug)]
 pub struct DaprSourceChangeDispatcherSettings {

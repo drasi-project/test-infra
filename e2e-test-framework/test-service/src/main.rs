@@ -4,7 +4,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use data_collector::{config::DataCollectorConfig, DataCollector};
 use test_data_store::{TestDataStoreConfig, TestDataStore};
-use test_runner::{config::TestRunnerConfig, TestRunner};
+use test_runner::{TestRunnerConfig, TestRunner};
 use tokio::sync::RwLock;
 
 mod web_api;

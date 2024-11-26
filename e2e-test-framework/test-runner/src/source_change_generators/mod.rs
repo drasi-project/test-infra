@@ -1,20 +1,48 @@
 use async_trait::async_trait;
 
-use script_source_change_generator::ChangeScriptPlayer;
-use serde::Serialize;
-use test_data_store::{test_repo_storage::TestSourceStorage, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use change_script_player::ChangeScriptPlayer;
+use serde::{Deserialize, Serialize};
+use test_data_store::{test_repo_storage::{models::{SpacingMode, TimeMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 use tokio::sync::oneshot;
 
-use crate::config::SourceChangeGeneratorConfig;
+use crate::source_change_dispatchers::SourceChangeDispatcherConfig;
 
-pub mod script_source_change_generator;
+pub mod change_script_player;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum SourceChangeGeneratorConfig {
+    Script {
+        #[serde(flatten)]
+        common_config: CommonSourceChangeGeneratorConfig,
+        #[serde(flatten)]
+        unique_config: ScriptSourceChangeGeneratorConfig,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommonSourceChangeGeneratorConfig {
+    #[serde(default)]
+    pub dispatchers: Vec<SourceChangeDispatcherConfig>,
+    #[serde(default)]
+    pub spacing_mode: SpacingMode,
+    #[serde(default)]
+    pub time_mode: TimeMode,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScriptSourceChangeGeneratorConfig {
+    #[serde(default = "is_false")]
+    pub ignore_scripted_pause_commands: bool,
+}
+fn is_false() -> bool { false }
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeGeneratorError {
     // NotConfigured
 }
 
-// Enum of ChangeScriptPlayer status.
+// Enum of SourceChangeGenerator status.
 // Running --start--> <ignore>
 // Running --skip--> <ignore>
 // Running --step--> <ignore>

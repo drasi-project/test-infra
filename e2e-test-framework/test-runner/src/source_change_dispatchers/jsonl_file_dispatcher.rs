@@ -6,10 +6,7 @@ use std::path::PathBuf;
 
 use test_data_store::test_repo_storage::scripts::SourceChangeEvent;
 
-use crate::config::JsonlFileSourceChangeDispatcherConfig;
-
-use super::{SourceChangeDispatcher, SourceChangeDispatcherError};
-
+use super::{JsonlFileSourceChangeDispatcherConfig, SourceChangeDispatcher, SourceChangeDispatcherError};
 
 #[derive(Debug)]
 pub struct JsonlFileSourceChangeDispatcherSettings {

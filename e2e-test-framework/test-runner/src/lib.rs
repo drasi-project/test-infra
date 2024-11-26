@@ -1,158 +1,26 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use derive_more::Debug;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use config::{BootstrapDataGeneratorConfig, TestRunnerConfig, TestRunSourceConfig};
-use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState};
-use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}, SharedTestDataStore};
+use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorConfig, SourceChangeGeneratorState};
+use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, SharedTestDataStore};
 
-pub mod config;
 pub mod source_change_generators;
 pub mod source_change_dispatchers;
 
-#[derive(Debug, Serialize)]
-pub struct TestRunSourceState {
-    pub id: TestRunSourceId,
-    pub source_change_generator: SourceChangeGeneratorState,
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TestRunnerConfig {
+    #[serde(default)]
+    pub sources: Vec<TestRunSourceConfig>,
 }
 
-#[derive(Debug)]
-pub struct TestRunSource {
-    pub id: TestRunSourceId,
-    pub start_immediately: bool,
-    pub bootstrap_data_generator: Option<BootstrapDataGenerator>,
-    #[debug(skip)]
-    pub source_change_generator: Option<Box<dyn SourceChangeGenerator + Send + Sync>>,    
-}
-
-impl TestRunSource {
-    pub async fn new(config: TestRunSourceConfig, test_data_store: TestSourceStorage, result_store: TestRunSourceStorage) -> anyhow::Result<Self> {
-        let id = TestRunSourceId::try_from(&config)?;
-
-        let TestRunSourceConfig { 
-            bootstrap_data_generator: bootstrap_data_generator_config, 
-            source_change_generator: source_change_generator_config, 
-            .. 
-        } = config;
-
-        let bootstrap_data_generator = match &bootstrap_data_generator_config {
-            Some(bootstrap_data_generator_config) => {
-                Some(BootstrapDataGenerator::new(id.clone(), bootstrap_data_generator_config)?)
-            },
-            None => None,
-        };
-
-        let source_change_generator = create_source_change_generator(
-            id.clone(),
-            source_change_generator_config,
-            test_data_store,
-            result_store
-        ).await?;
-    
-        Ok(Self { 
-            id, 
-            start_immediately: config.start_immediately,
-            bootstrap_data_generator, 
-            source_change_generator 
-        })
-    }
-
-    pub async fn get_state(&self) -> anyhow::Result<TestRunSourceState> {
-
-        Ok(TestRunSourceState {
-            id: self.id.clone(),
-            source_change_generator: self.get_source_change_generator_state().await?,
-        })
-    }
-
-    pub async fn get_source_change_generator_state(&self) -> anyhow::Result<SourceChangeGeneratorState> {
-        match &self.source_change_generator {
-            Some(generator) => {
-                let response = generator.get_state().await?;
-                Ok(response.state)
-            },
-            None => {
-                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
-            }
+impl Default for TestRunnerConfig {
+    fn default() -> Self {
+        TestRunnerConfig {
+            sources: Vec::new(),
         }
-    }
-
-    pub async fn pause_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        match &self.source_change_generator {
-            Some(generator) => {
-                let response = generator.pause().await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
-    }
-
-    pub async fn skip_source_change_generator(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        match &self.source_change_generator {
-            Some(generator) => {
-                let response = generator.skip(skips).await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
-    }
-
-    pub async fn start_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        match &self.source_change_generator {
-            Some(generator) => {
-                let response = generator.start().await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
-    }
-
-    pub async fn step_source_change_generator(&self, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        match &self.source_change_generator {
-            Some(generator) => {
-                let response = generator.step(steps).await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
-    }
-
-    pub async fn stop_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        match &self.source_change_generator {
-            Some(generator) => {
-                let response = generator.stop().await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct BootstrapDataGenerator {
-    pub test_run_source_id: TestRunSourceId,
-    pub time_mode: TimeMode,
-}
-
-impl BootstrapDataGenerator {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &BootstrapDataGeneratorConfig) -> anyhow::Result<Self> {
-        // Before this is called, we have ensured all the missing TestRunSourceConfig fields are filled.
-        Ok(Self {
-            test_run_source_id,
-            time_mode: config.time_mode.clone().unwrap(),
-        })
     }
 }
 
@@ -237,51 +105,6 @@ impl TestRunner {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
         Ok(self.sources.contains_key(&test_run_source_id))
     }
-
-    // pub async fn control_change_script_player(&self, player_id: &str, command: ChangeScriptPlayerCommand) -> anyhow::Result<ChangeScriptPlayerMessageResponse> {
-    //     log::trace!("Control TestRunSource Player - player_id:{}, command:{:?}", player_id, command);
-
-    //     // If the TestRunner is in an Error state, return an error.
-    //     if let TestRunnerStatus::Error(msg) = &self.status {
-    //         anyhow::bail!("TestRunner is in an Error state: {}", msg);
-    //     };
-
-    //     let key = TestRunSourceId::try_from(player_id)?;
-
-    //     // Get the ChangeScriptPlayer from the TestRunner or fail if it doesn't exist.
-    //     let test_run_source = self.sources.get(&key).ok_or_else(|| anyhow::anyhow!("TestRunSource not found: {}", player_id))?;
-
-        // match &test_run_source.change_script_player {
-        //     Some(player) => {
-        //         match command {
-        //             ChangeScriptPlayerCommand::GetState => {
-        //                 player.get_state().await
-        //             },
-        //             ChangeScriptPlayerCommand::Start => {
-        //                 player.start().await
-        //             },
-        //             ChangeScriptPlayerCommand::Step(steps) => {
-        //                 player.step(steps).await
-        //             },
-        //             ChangeScriptPlayerCommand::Skip(skips) => {
-        //                 player.skip(skips).await
-        //             },
-        //             ChangeScriptPlayerCommand::Pause => {
-        //                 player.pause().await
-        //             },
-        //             ChangeScriptPlayerCommand::Stop => {
-        //                 player.stop().await
-        //             },
-        //             ChangeScriptPlayerCommand::ProcessDelayedRecord(_) => {
-        //                 anyhow::bail!("ProcessDelayedRecord not supported");
-        //             },
-        //         }
-        //     },
-        //     None => {
-        //         anyhow::bail!("ChangeScriptPlayer not found: {}", player_id);
-        //     }
-        // }
-    // }
 
     pub async fn get_data_store(&self) -> anyhow::Result<SharedTestDataStore> {
         Ok(self.data_store.clone())
@@ -415,5 +238,202 @@ impl TestRunner {
         self.status = TestRunnerStatus::Running;
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TestRunSourceConfig {
+    pub test_repo_id: String,
+    pub test_id: String,
+    #[serde(default = "random_test_run_id")]
+    pub test_run_id: String,
+    pub test_source_id: String,
+    #[serde(default = "is_true")]
+    pub start_immediately: bool,    
+    pub bootstrap_data_generator: Option<BootstrapDataGeneratorConfig>,
+    pub source_change_generator: Option<SourceChangeGeneratorConfig>,
+}
+fn is_true() -> bool { false }
+fn random_test_run_id() -> String { chrono::Utc::now().format("%Y%m%d%H%M%S").to_string() }
+
+impl TryFrom<&TestRunSourceConfig> for TestRunId {
+    type Error = ParseTestRunIdError;
+
+    fn try_from(value: &TestRunSourceConfig) -> Result<Self, Self::Error> {
+        Ok(TestRunId {
+            test_repo_id: value.test_repo_id.clone(),
+            test_id: value.test_id.clone(),
+            test_run_id: value.test_run_id.clone(),
+        })
+    }
+}
+
+impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
+    type Error = ParseTestRunSourceIdError;
+
+    fn try_from(value: &TestRunSourceConfig) -> Result<Self, Self::Error> {
+        match TestRunId::try_from(value) {
+            Ok(test_run_id) => {
+                Ok(TestRunSourceId::new(&test_run_id, &value.test_source_id.clone()))
+            }
+            Err(e) => return Err(ParseTestRunSourceIdError::InvalidValues(e.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for TestRunSourceConfig {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "TestRunSourceConfig: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, bootstrap_data_generator: {:?}, source_change_generator: {:?}", 
+            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.bootstrap_data_generator, self.source_change_generator)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestRunSourceState {
+    pub id: TestRunSourceId,
+    pub source_change_generator: SourceChangeGeneratorState,
+}
+
+#[derive(Debug)]
+pub struct TestRunSource {
+    pub id: TestRunSourceId,
+    pub start_immediately: bool,
+    pub bootstrap_data_generator: Option<BootstrapDataGenerator>,
+    #[debug(skip)]
+    pub source_change_generator: Option<Box<dyn SourceChangeGenerator + Send + Sync>>,    
+}
+
+impl TestRunSource {
+    pub async fn new(config: TestRunSourceConfig, test_data_store: TestSourceStorage, result_store: TestRunSourceStorage) -> anyhow::Result<Self> {
+        let id = TestRunSourceId::try_from(&config)?;
+
+        let TestRunSourceConfig { 
+            bootstrap_data_generator: bootstrap_data_generator_config, 
+            source_change_generator: source_change_generator_config, 
+            .. 
+        } = config;
+
+        let bootstrap_data_generator = match &bootstrap_data_generator_config {
+            Some(bootstrap_data_generator_config) => {
+                Some(BootstrapDataGenerator::new(id.clone(), bootstrap_data_generator_config)?)
+            },
+            None => None,
+        };
+
+        let source_change_generator = create_source_change_generator(
+            id.clone(),
+            source_change_generator_config,
+            test_data_store,
+            result_store
+        ).await?;
+    
+        Ok(Self { 
+            id, 
+            start_immediately: config.start_immediately,
+            bootstrap_data_generator, 
+            source_change_generator 
+        })
+    }
+
+    pub async fn get_state(&self) -> anyhow::Result<TestRunSourceState> {
+
+        Ok(TestRunSourceState {
+            id: self.id.clone(),
+            source_change_generator: self.get_source_change_generator_state().await?,
+        })
+    }
+
+    pub async fn get_source_change_generator_state(&self) -> anyhow::Result<SourceChangeGeneratorState> {
+        match &self.source_change_generator {
+            Some(generator) => {
+                let response = generator.get_state().await?;
+                Ok(response.state)
+            },
+            None => {
+                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
+            }
+        }
+    }
+
+    pub async fn pause_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        match &self.source_change_generator {
+            Some(generator) => {
+                let response = generator.pause().await?;
+                Ok(response)
+            },
+            None => {
+                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
+            }
+        }
+    }
+
+    pub async fn skip_source_change_generator(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        match &self.source_change_generator {
+            Some(generator) => {
+                let response = generator.skip(skips).await?;
+                Ok(response)
+            },
+            None => {
+                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
+            }
+        }
+    }
+
+    pub async fn start_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        match &self.source_change_generator {
+            Some(generator) => {
+                let response = generator.start().await?;
+                Ok(response)
+            },
+            None => {
+                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
+            }
+        }
+    }
+
+    pub async fn step_source_change_generator(&self, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        match &self.source_change_generator {
+            Some(generator) => {
+                let response = generator.step(steps).await?;
+                Ok(response)
+            },
+            None => {
+                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
+            }
+        }
+    }
+
+    pub async fn stop_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        match &self.source_change_generator {
+            Some(generator) => {
+                let response = generator.stop().await?;
+                Ok(response)
+            },
+            None => {
+                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BootstrapDataGeneratorConfig {
+    #[serde(default)]
+    pub time_mode: Option<TimeMode>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BootstrapDataGenerator {
+    pub test_run_source_id: TestRunSourceId,
+    pub time_mode: TimeMode,
+}
+
+impl BootstrapDataGenerator {
+    pub fn new(test_run_source_id: TestRunSourceId, config: &BootstrapDataGeneratorConfig) -> anyhow::Result<Self> {
+        // Before this is called, we have ensured all the missing TestRunSourceConfig fields are filled.
+        Ok(Self {
+            test_run_source_id,
+            time_mode: config.time_mode.clone().unwrap(),
+        })
     }
 }

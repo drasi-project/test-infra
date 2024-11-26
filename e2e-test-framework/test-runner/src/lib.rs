@@ -27,8 +27,16 @@ pub struct TestRunSource {
 }
 
 impl TestRunSource {
-    pub async fn new(id: TestRunSourceId, config: TestRunSourceConfig, test_data_store: TestSourceStorage, result_store: TestRunSourceStorage) -> anyhow::Result<Self> {
-        let bootstrap_data_generator = match &config.bootstrap_data_generator {
+    pub async fn new(config: TestRunSourceConfig, test_data_store: TestSourceStorage, result_store: TestRunSourceStorage) -> anyhow::Result<Self> {
+        let id = TestRunSourceId::try_from(&config)?;
+
+        let TestRunSourceConfig { 
+            bootstrap_data_generator: bootstrap_data_generator_config, 
+            source_change_generator: source_change_generator_config, 
+            .. 
+        } = config;
+
+        let bootstrap_data_generator = match &bootstrap_data_generator_config {
             Some(bootstrap_data_generator_config) => {
                 Some(BootstrapDataGenerator::new(id.clone(), bootstrap_data_generator_config)?)
             },
@@ -37,16 +45,12 @@ impl TestRunSource {
 
         let source_change_generator = create_source_change_generator(
             id.clone(),
-            config.source_change_generator.clone(),
+            source_change_generator_config,
             test_data_store,
             result_store
         ).await?;
     
-        Ok(Self {
-            id,
-            bootstrap_data_generator,
-            source_change_generator
-        })
+        Ok(Self { id, bootstrap_data_generator, source_change_generator })
     }
 
     pub async fn get_state(&self) -> anyhow::Result<TestRunSourceState> {
@@ -186,38 +190,34 @@ impl TestRunner {
         Ok(test_runner)
     }
     
-    pub async fn add_test_source(&mut self, source_config: TestRunSourceConfig) -> anyhow::Result<TestRunSourceId> {
-        log::trace!("Adding TestRunSource from {:#?}", source_config);
+    pub async fn add_test_source(&mut self, config: TestRunSourceConfig) -> anyhow::Result<TestRunSourceId> {
+        log::trace!("Adding TestRunSource from {:#?}", config);
 
         // If the TestRunner is in an Error state, return an error.
         if let TestRunnerStatus::Error(msg) = &self.status {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
         
-        // We can now safely unwrap the TestRunSourceId from the TestRunSourceConfig.
-        let test_run_source_id = TestRunSourceId::try_from(&source_config)?;
+        let id = TestRunSourceId::try_from(&config)?;
 
-        // Fail if the TestRunner already contains the TestRunSource.
-        if self.sources.contains_key(&test_run_source_id) {
-            anyhow::bail!("TestRunSource already exists: {:?}", &test_run_source_id);
+        // Fail if the TestRunner already contains a TestRunSource with the specified Id.
+        if self.sources.contains_key(&id) {
+            anyhow::bail!("TestRunner already contains TestRunSource with ID: {:?}", &id);
         }
 
         // Get the INPUT Test Data storage for the TestRunSource.
-        let test_source_storage = self.data_store.get_test_run_source_storage(&test_run_source_id).await?;
+        // This is where the TestRunSource will read the Test Data from.
+        let input_storage = self.data_store.get_test_source_storage_for_test_run_source(&id).await?;
 
         // Get the OUTPUT storage for the new TestRunSource.
-        let test_run_source_storage = {
-            let data_store = self.data_store.test_run_store.lock().await;
-            let test_run_id = &test_run_source_id.test_run_id;
-            let test_run_storage = data_store.get_test_run_storage(&test_run_id, false).await?;
-            test_run_storage.get_source_storage(&test_run_source_id, true).await?
-        };
+        // This is where the TestRunSource will write the output to.
+        let output_storage = self.data_store.get_test_run_source_storage(&id).await?;
 
         // Create the TestRunSource and add it to the TestRunner.
-        let test_run_source = TestRunSource::new(test_run_source_id.clone(), source_config, test_source_storage, test_run_source_storage).await?;
-        self.sources.insert(test_run_source_id.clone(), test_run_source);
+        let test_run_source = TestRunSource::new(config, input_storage, output_storage).await?;
+        self.sources.insert(id.clone(), test_run_source);
         
-        Ok(test_run_source_id)
+        Ok(id)
     }
 
     pub async fn contains_test_source(&self, test_run_source_id: &str) -> anyhow::Result<bool> {

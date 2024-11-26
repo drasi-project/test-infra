@@ -51,7 +51,6 @@ pub struct ScriptSourceGeneratorSettings {
     pub dispatchers: Vec<SourceChangeDispatcherConfig>,
     pub output_storage: TestRunSourceStorage,
     pub spacing_mode: SpacingMode,
-    pub start_immediately: bool,
     pub time_mode: TimeMode,
 }
 
@@ -71,7 +70,6 @@ impl ScriptSourceGeneratorSettings {
             dispatchers: common_config.dispatchers,
             output_storage,
             spacing_mode: common_config.spacing_mode,
-            start_immediately: common_config.start_immediately,
             time_mode: common_config.time_mode,
         })
     }

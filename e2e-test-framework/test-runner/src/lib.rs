@@ -5,7 +5,7 @@ use serde::Serialize;
 use tokio::sync::RwLock;
 
 use config::{BootstrapDataGeneratorConfig, TestRunnerConfig, TestRunSourceConfig};
-use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorState};
+use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState};
 use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}, SharedTestDataStore};
 
 pub mod config;
@@ -21,6 +21,7 @@ pub struct TestRunSourceState {
 #[derive(Debug)]
 pub struct TestRunSource {
     pub id: TestRunSourceId,
+    pub start_immediately: bool,
     pub bootstrap_data_generator: Option<BootstrapDataGenerator>,
     #[debug(skip)]
     pub source_change_generator: Option<Box<dyn SourceChangeGenerator + Send + Sync>>,    
@@ -50,7 +51,12 @@ impl TestRunSource {
             result_store
         ).await?;
     
-        Ok(Self { id, bootstrap_data_generator, source_change_generator })
+        Ok(Self { 
+            id, 
+            start_immediately: config.start_immediately,
+            bootstrap_data_generator, 
+            source_change_generator 
+        })
     }
 
     pub async fn get_state(&self) -> anyhow::Result<TestRunSourceState> {
@@ -73,11 +79,11 @@ impl TestRunSource {
         }
     }
 
-    pub async fn pause_source_change_generator(&self) -> anyhow::Result<()> {
+    pub async fn pause_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.source_change_generator {
-            Some(_generator) => {
-                // generator.start().await?;
-                Ok(())
+            Some(generator) => {
+                let response = generator.pause().await?;
+                Ok(response)
             },
             None => {
                 anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
@@ -85,11 +91,11 @@ impl TestRunSource {
         }
     }
 
-    pub async fn skip_source_change_generator(&self, _skips: u64) -> anyhow::Result<()> {
+    pub async fn skip_source_change_generator(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.source_change_generator {
-            Some(_generator) => {
-                // generator.start().await?;
-                Ok(())
+            Some(generator) => {
+                let response = generator.skip(skips).await?;
+                Ok(response)
             },
             None => {
                 anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
@@ -97,11 +103,11 @@ impl TestRunSource {
         }
     }
 
-    pub async fn start_source_change_generator(&self) -> anyhow::Result<()> {
+    pub async fn start_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.source_change_generator {
-            Some(_generator) => {
-                // generator.start().await?;
-                Ok(())
+            Some(generator) => {
+                let response = generator.start().await?;
+                Ok(response)
             },
             None => {
                 anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
@@ -109,11 +115,11 @@ impl TestRunSource {
         }
     }
 
-    pub async fn step_source_change_generator(&self, _steps: u64) -> anyhow::Result<()> {
+    pub async fn step_source_change_generator(&self, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.source_change_generator {
-            Some(_generator) => {
-                // generator.start().await?;
-                Ok(())
+            Some(generator) => {
+                let response = generator.step(steps).await?;
+                Ok(response)
             },
             None => {
                 anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
@@ -121,11 +127,11 @@ impl TestRunSource {
         }
     }
 
-    pub async fn stop_source_change_generator(&self) -> anyhow::Result<()> {
+    pub async fn stop_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.source_change_generator {
-            Some(_generator) => {
-                // generator.start().await?;
-                Ok(())
+            Some(generator) => {
+                let response = generator.stop().await?;
+                Ok(response)
             },
             None => {
                 anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
@@ -156,7 +162,7 @@ pub enum TestRunnerStatus {
     // The Test Runner is Initialized and is ready to start.
     Initialized,
     // The Test Runner has been started.
-    Started,
+    Running,
     // The Test Runner is in an Error state. and will not be able to process requests.
     Error(String),
 }
@@ -214,9 +220,16 @@ impl TestRunner {
         let output_storage = self.data_store.get_test_run_source_storage(&id).await?;
 
         // Create the TestRunSource and add it to the TestRunner.
-        let test_run_source = TestRunSource::new(config, input_storage, output_storage).await?;
+        let test_run_source = TestRunSource::new(config, input_storage, output_storage).await?;        
+
+        let start_immediately = self.status == TestRunnerStatus::Running && test_run_source.start_immediately;
+
         self.sources.insert(id.clone(), test_run_source);
         
+        if start_immediately {
+            self.sources.get(&id).unwrap().start_source_change_generator().await?;
+        }
+
         Ok(id)
     }
 
@@ -306,21 +319,27 @@ impl TestRunner {
 
         match &self.status {
             TestRunnerStatus::Initialized => {
-                log::debug!("Starting TestRunner...");
+                log::info!("Starting TestRunner...");
             },
-            TestRunnerStatus::Started => {
-                let msg = format!("Test Runner has already been started, cannot start.");
+            TestRunnerStatus::Running => {
+                let msg = format!("Test Runner has already been Running, cannot start.");
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
             },
             TestRunnerStatus::Error(_) => {
-                let msg = format!("Test Runner is in an error state, cannot start. TestRunnerStatus: {:?}", &self.status);
+                let msg = format!("Test Runner is in an Error state, cannot start.");
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
             },
         };
 
-        // Iterate over the SourceChangeGenerators and start each one if it is configured to start immediately.
+        // Iterate over the TestRunSources and start each one if it is configured to start immediately.
+        for (_, source) in &self.sources {
+            if source.start_immediately {
+                source.start_source_change_generator().await?;
+            }
+        }
+
         // If any of the SourceChangeGenerators fail to start, set the TestRunnerStatus to Error and return an error.
         // for (_, source) in &self.sources {
         //     if source.change_script_player.as_ref().unwrap().get_settings().source_change_generator.start_immediately {
@@ -335,9 +354,9 @@ impl TestRunner {
         //     }
         // }
         
-        // Set the TestRunnerStatus to Started .
+        // Set the TestRunnerStatus to Running.
         log::info!("Test Runner started successfully");            
-        self.status = TestRunnerStatus::Started;
+        self.status = TestRunnerStatus::Running;
 
         Ok(())
     }

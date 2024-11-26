@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use test_run_storage::{TestRunId, TestRunSourceId, TestRunStorage, TestRunStore};
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
-use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceDataset};
+use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceDataset, TestSourceStorage};
 use tokio::sync::Mutex;
 
 pub mod data_collection_storage;
@@ -121,6 +121,10 @@ impl TestDataStore {
         self.get_test_source_content(&test_run_source_id.test_run_id.test_repo_id, &test_run_source_id.test_run_id.test_id, &test_run_source_id.test_source_id).await
     }
 
+    pub async fn get_test_run_source_storage(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceStorage> {
+        self.get_test_source_storage(&test_run_source_id.test_run_id.test_repo_id, &test_run_source_id.test_run_id.test_id, &test_run_source_id.test_source_id).await
+    }
+
     pub async fn get_test_source_content(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceDataset> {
         Ok(self.test_repo_store.lock().await
             .get_test_repo(repo_id).await?
@@ -129,6 +133,13 @@ impl TestDataStore {
             .get_dataset().await?)
     }
     
+    pub async fn get_test_source_storage(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceStorage> {
+        Ok(self.test_repo_store.lock().await
+            .get_test_repo(repo_id).await?
+            .get_test(test_id, false).await?
+            .get_test_source(source_id, false).await?)
+    }
+
     pub async fn get_test_run_ids(&self) -> anyhow::Result<Vec<TestRunId>> {
         Ok(self.test_run_store.lock().await.get_test_run_ids().await?)
     }

@@ -20,8 +20,8 @@ pub mod runner;
 pub enum TestServiceWebApiError {
     #[error("Error: {0}")]
     AnyhowError(anyhow::Error),
-    #[error("{0} with ID {1} not found")]
-    NotFound(String, String),
+    // #[error("{0} with ID {1} not found")]
+    // NotFound(String, String),
     #[error("Error: {0}")]
     SerdeJsonError(serde_json::Error),
 }
@@ -44,9 +44,9 @@ impl IntoResponse for TestServiceWebApiError {
             TestServiceWebApiError::AnyhowError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
             },
-            TestServiceWebApiError::NotFound(kind, id) => {
-                (StatusCode::NOT_FOUND, Json(format!("{} with ID {} not found", kind, id))).into_response()
-            },
+            // TestServiceWebApiError::NotFound(kind, id) => {
+            //     (StatusCode::NOT_FOUND, Json(format!("{} with ID {} not found", kind, id))).into_response()
+            // },
             TestServiceWebApiError::SerdeJsonError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
             },

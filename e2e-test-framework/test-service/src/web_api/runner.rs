@@ -38,26 +38,27 @@ pub async fn get_source_list_handler(
 
 pub async fn get_source_handler(
     Path(id): Path<String>,
-    test_runner: Extension<SharedTestRunner>,
+    // test_runner: Extension<SharedTestRunner>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_source: {}", id);
 
-    let test_runner = test_runner.read().await;
+    // let test_runner = test_runner.read().await;
 
-    // Check if the service is an Error state.
-    // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
-    //     return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
-    // }
+    // // Check if the service is an Error state.
+    // // if let TestRunnerStatus::Error(msg) = &test_runner.get_status() {
+    // //     return (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response();
+    // // }
 
-    let source = test_runner.get_test_source(&id).await?;
-    match source {
-        Some(source) => {
-            Ok(Json(source).into_response())
-        },
-        None => {
-            Err(TestServiceWebApiError::NotFound("TestRunSource".to_string(), id))
-        }
-    }   
+    // let source = test_runner.get_test_source(&id).await?;
+    // match source {
+    //     Some(source) => {
+    //         Ok(Json(source).into_response())
+    //     },
+    //     None => {
+    //         Err(TestServiceWebApiError::NotFound("TestRunSource".to_string(), id))
+    //     }
+    // }   
+    Ok(())
 }
 
 // pub async fn player_start_handler(

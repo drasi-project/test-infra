@@ -258,6 +258,7 @@ impl TestStorage {
 }
 
 #[allow(unused)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TestSourceStorage {
     pub bootstrap_data_scripts_path: PathBuf,
     pub source_change_scripts_path: PathBuf,

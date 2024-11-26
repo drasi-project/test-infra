@@ -24,6 +24,8 @@ pub enum TestServiceWebApiError {
     NotFound(String, String),
     #[error("Error: {0}")]
     SerdeJsonError(serde_json::Error),
+    #[error("TestRunner is in an Error state: {0}")]
+    TestRunnerError(String),
 }
 
 impl From<anyhow::Error> for TestServiceWebApiError {
@@ -49,6 +51,9 @@ impl IntoResponse for TestServiceWebApiError {
             },
             TestServiceWebApiError::SerdeJsonError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
+            },
+            TestServiceWebApiError::TestRunnerError(msg) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
             },
         }
     }

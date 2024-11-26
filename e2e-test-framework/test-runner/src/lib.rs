@@ -303,12 +303,68 @@ impl TestRunner {
         }
     }
 
-    // pub async fn get_test_sources(&self) -> anyhow::Result<Vec<TestRunSource>> {
-    //     Ok(self.sources.values().cloned().collect())
-    // }
-
     pub async fn get_test_source_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.sources.keys().map(|id| id.to_string()).collect())
+    }
+
+    pub async fn test_source_pause(&self, test_run_source_id: &str) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        match self.sources.get(&test_run_source_id) {
+            Some(source) => {
+                source.pause_source_change_generator().await
+            },
+            None => {
+                anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
+            }
+        }
+    }
+
+    pub async fn test_source_skip(&self, test_run_source_id: &str, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        match self.sources.get(&test_run_source_id) {
+            Some(source) => {
+                source.skip_source_change_generator(skips).await
+            },
+            None => {
+                anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
+            }
+        }
+    }
+
+    pub async fn test_source_start(&self, test_run_source_id: &str) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        match self.sources.get(&test_run_source_id) {
+            Some(source) => {
+                source.start_source_change_generator().await
+            },
+            None => {
+                anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
+            }
+        }
+    }
+
+    pub async fn test_source_step(&self, test_run_source_id: &str, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        match self.sources.get(&test_run_source_id) {
+            Some(source) => {
+                source.step_source_change_generator(steps).await
+            },
+            None => {
+                anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
+            }
+        }
+    }
+
+    pub async fn test_source_stop(&self, test_run_source_id: &str) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        match self.sources.get(&test_run_source_id) {
+            Some(source) => {
+                source.stop_source_change_generator().await
+            },
+            None => {
+                anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
+            }
+        }
     }
 
     // pub async fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {

@@ -1,14 +1,90 @@
 use async_trait::async_trait;
 
-use change_script_source_change_generator::ChangeScriptPlayer;
+use script_source_change_generator::ChangeScriptPlayer;
+use serde::Serialize;
 use test_data_store::{test_repo_storage::TestSourceStorage, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use tokio::sync::oneshot;
 
 use crate::config::SourceChangeGeneratorConfig;
 
-pub mod change_script_source_change_generator;
+pub mod script_source_change_generator;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeGeneratorError {
+    // NotConfigured
+}
+
+// Enum of ChangeScriptPlayer status.
+// Running --start--> <ignore>
+// Running --skip--> <ignore>
+// Running --step--> <ignore>
+// Running --pause--> Paused
+// Running --stop--> Stopped
+// Running --finish_script--> Finished
+
+// Skipping --start--> <ignore>
+// Skipping --skip--> <ignore>
+// Skipping --step--> <ignore>
+// Skipping --pause--> Paused
+// Skipping --stop--> Stopped
+// Skipping --finish_script--> Finished
+
+// Stepping --start--> <ignore>
+// Stepping --skip--> <ignore>
+// Stepping --step--> <ignore>
+// Stepping --pause--> Paused
+// Stepping --stop--> Stopped
+// Stepping --finish_script--> Finished
+
+// Paused --start--> Running
+// Paused --skip--> Skipping
+// Paused --step--> Stepping
+// Paused --pause--> <ignore>
+// Paused --stop--> Stopped
+
+// Stopped --*--> <ignore>
+// Finished --*--> <ignore>
+// Error --*--> <ignore>
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SourceChangeGeneratorStatus {
+    Running,
+    Skipping,
+    Stepping,
+    Paused,
+    Stopped,
+    Finished,
+    Error
+}
+
+impl Serialize for SourceChangeGeneratorStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: serde::Serializer {
+        match self {
+            SourceChangeGeneratorStatus::Running => serializer.serialize_str("Running"),
+            SourceChangeGeneratorStatus::Stepping => serializer.serialize_str("Stepping"),
+            SourceChangeGeneratorStatus::Skipping => serializer.serialize_str("Skipping"),
+            SourceChangeGeneratorStatus::Paused => serializer.serialize_str("Paused"),
+            SourceChangeGeneratorStatus::Stopped => serializer.serialize_str("Stopped"),
+            SourceChangeGeneratorStatus::Finished => serializer.serialize_str("Finished"),
+            SourceChangeGeneratorStatus::Error => serializer.serialize_str("Error"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum SourceChangeGeneratorAction {
+    GetState,
+    Pause,
+    Skip(u64),
+    Start,
+    Step(u64),
+    Stop,
+}
+
+#[derive(Debug,)]
+pub struct SourceChangeGeneratorCommand {
+    pub action: SourceChangeGeneratorAction,
+    pub response_tx: Option<oneshot::Sender<SourceChangeGeneratorCommandResponse>>,
 }
 
 #[derive(Debug)]
@@ -17,17 +93,18 @@ pub struct SourceChangeGeneratorCommandResponse {
     pub state: SourceChangeGeneratorState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SourceChangeGeneratorState {    
+    status: SourceChangeGeneratorStatus,
 }
 
 #[async_trait]
 pub trait SourceChangeGenerator : Send + Sync {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
+    async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
+    async fn skip(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn step(&self, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
-    async fn skip(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
-    async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn stop(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
 }
 
@@ -35,6 +112,14 @@ pub trait SourceChangeGenerator : Send + Sync {
 impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         (**self).get_state().await
+    }
+
+    async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        (**self).pause().await
+    }
+
+    async fn skip(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        (**self).skip(skips).await
     }
 
     async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
@@ -45,14 +130,6 @@ impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
         (**self).step(steps).await
     }
 
-    async fn skip(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        (**self).skip(skips).await
-    }
-
-    async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        (**self).pause().await
-    }
-
     async fn stop(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         (**self).stop().await
     }
@@ -61,8 +138,8 @@ impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
 pub async fn create_source_change_generator(
     id: TestRunSourceId, 
     config: Option<SourceChangeGeneratorConfig>,
-    dataset: TestSourceStorage, 
-    storage: TestRunSourceStorage
+    input_storage: TestSourceStorage, 
+    output_storage: TestRunSourceStorage
 ) -> anyhow::Result<Option<Box<dyn SourceChangeGenerator + Send + Sync>>> {
     match config {
         None => Ok(None),
@@ -71,8 +148,8 @@ pub async fn create_source_change_generator(
                 id, 
                 common_config, 
                 unique_config, 
-                dataset, 
-                storage).await?)))
+                input_storage, 
+                output_storage).await?)))
         }
     }
 }

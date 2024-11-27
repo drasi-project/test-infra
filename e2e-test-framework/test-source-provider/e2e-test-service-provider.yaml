@@ -1,6 +1,6 @@
 apiVersion: v1
 kind: SourceProvider
-name: E2ETestSource
+name: E2ETestService
 spec:
   services:
     proxy:
@@ -8,7 +8,7 @@ spec:
       dapr:
         app-port: "4002"
     reactivator:
-      image: e2e-test-runner
+      image: e2e-test-service
       dapr:
         app-port: "5000"
       endpoints:
@@ -21,18 +21,9 @@ spec:
           DRASI_PORT:
             type: number
             default: 5000
-          DRASI_DATA_CACHE:
+          DRASI_DATA_STORE_PATH:
             type: string
-#            default: "./data_cache"
-          DRASI_EVENT_OUTPUT:
-            type: string
-#            default: "file"
-          DRASI_TELEM_OUTPUT:
-            type: string
-#            default: "none"
-          DRASI_LOG_OUTPUT:
-            type: string
-#            default: "console"
+#            default: "./drasi_data"
           DRASI_CONFIG_FILE:
             type: string
 #            default: "./config.json"

@@ -47,7 +47,7 @@ make
 ```
 
 This will create the following docker images and push them to the local docker repo:
-- drasi-project/e2e-test-runner:latest
+- drasi-project/e2e-test-service:latest
 - drasi-project/e2e-test-proxy:latest
 
 To see that the images are in the local repo, run:

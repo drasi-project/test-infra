@@ -1,22 +1,24 @@
-FROM rust@sha256:fd45a543ed41160eae2ce9e749e5b3c972625b0778104e8962e9bfb113535301 as builder
-# rust:1.74
+FROM rust:1.81 as builder
+# rust:1.81
 RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
 
 WORKDIR /usr/src
 COPY ./infrastructure ./infrastructure
+COPY ./test-data-store ./test-data-store
+COPY ./data-collector ./data-collector
 COPY ./test-runner ./test-runner
 
-RUN cargo new test-runner-service
-WORKDIR /usr/src/test-runner-service
+RUN cargo new test-service
+WORKDIR /usr/src/test-service
 
-COPY ./test-runner-service/Cargo.toml . 
+COPY ./test-service/Cargo.toml . 
 RUN cargo fetch
-COPY ./test-runner-service .
+COPY ./test-service .
 RUN cargo install --force --path .
 
     
 FROM  gcr.io/distroless/cc
 ENV RUST_BACKTRACE=1
-COPY --from=builder /usr/local/cargo/bin/test-runner-service /usr/local/bin/test-runner-service
+COPY --from=builder /usr/local/cargo/bin/test-service /usr/local/bin/test-service
 # RUN apt-get update && apt install -y openssl
-CMD ["test-runner-service"]
+CMD ["test-service"]

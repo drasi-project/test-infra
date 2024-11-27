@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Extension, Path}, response::IntoResponse, routing::{get, post}, Json, Router
 };
 use serde::{Deserialize, Serialize};
 
-use test_runner::{TestRunSourceConfig, SharedTestRunner, TestRunnerStatus};
+use test_runner::{TestRunSourceConfig, TestRunner, TestRunnerStatus};
 
 use super::TestServiceWebApiError;
 
@@ -19,11 +21,9 @@ pub fn get_test_runner_routes() -> Router {
 }
 
 pub async fn get_source_list_handler(
-    test_runner: Extension<SharedTestRunner>,
+    test_runner: Extension<Arc<TestRunner>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_source_list");
-
-    let test_runner = test_runner.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
@@ -36,11 +36,9 @@ pub async fn get_source_list_handler(
 
 pub async fn get_source_handler(
     Path(id): Path<String>,
-    test_runner: Extension<SharedTestRunner>,
+    test_runner: Extension<Arc<TestRunner>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_source: {}", id);
-
-    let test_runner = test_runner.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
@@ -74,11 +72,9 @@ impl Default for TestSkipConfig {
 
 pub async fn source_change_generator_pause_handler (
     Path(id): Path<String>,
-    test_runner: Extension<SharedTestRunner>,
+    test_runner: Extension<Arc<TestRunner>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_pause: {}", id);
-
-    let test_runner = test_runner.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
@@ -98,12 +94,10 @@ pub async fn source_change_generator_pause_handler (
 
 pub async fn source_change_generator_skip_handler (
     Path(id): Path<String>,
-    test_runner: Extension<SharedTestRunner>,
+    test_runner: Extension<Arc<TestRunner>>,
     body: Json<Option<TestSkipConfig>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_skip: {}", id);
-
-    let test_runner = test_runner.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
@@ -125,11 +119,9 @@ pub async fn source_change_generator_skip_handler (
 
 pub async fn source_change_generator_start_handler (
     Path(id): Path<String>,
-    test_runner: Extension<SharedTestRunner>,
+    test_runner: Extension<Arc<TestRunner>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_start: {}", id);
-
-    let test_runner = test_runner.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
@@ -163,12 +155,10 @@ impl Default for TestStepConfig {
 
 pub async fn source_change_generator_step_handler (
     Path(id): Path<String>,
-    test_runner: Extension<SharedTestRunner>,
+    test_runner: Extension<Arc<TestRunner>>,
     body: Json<Option<TestStepConfig>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_step: {}", id);
-
-    let test_runner = test_runner.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
@@ -190,11 +180,9 @@ pub async fn source_change_generator_step_handler (
 
 pub async fn source_change_generator_stop_handler (
     Path(id): Path<String>,
-    test_runner: Extension<SharedTestRunner>,
+    test_runner: Extension<Arc<TestRunner>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_stop: {}", id);
-
-    let test_runner = test_runner.read().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
@@ -213,12 +201,10 @@ pub async fn source_change_generator_stop_handler (
 }
 
 pub async fn post_source_handler (
-    test_runner: Extension<SharedTestRunner>,
+    test_runner: Extension<Arc<TestRunner>>,
     body: Json<TestRunSourceConfig>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_source");
-
-    let mut test_runner = test_runner.write().await;
 
     // If the TestRunner is an Error state, return an error and a description of the error.
     if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {

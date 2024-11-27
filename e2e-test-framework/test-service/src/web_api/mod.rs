@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::get, Json, Router
@@ -7,11 +7,11 @@ use serde::Serialize;
 use thiserror::Error;
 use tokio::{io::{self, AsyncBufReadExt}, select, signal};
 
+use data_collector::DataCollector;
 use repo::get_test_repo_routes;
 use runner::get_test_runner_routes;
-use data_collector::SharedDataCollector;
-use test_data_store::SharedTestDataStore;
-use test_runner::SharedTestRunner;
+use test_data_store::TestDataStore;
+use test_runner::TestRunner;
 
 pub mod repo;
 pub mod runner;
@@ -84,7 +84,7 @@ struct DataCollectorStateResponse {
     pub data_collection_ids: Vec<String>,
 }
 
-pub(crate) async fn start_web_api(port: u16, test_data_store: SharedTestDataStore, test_runner: SharedTestRunner, data_collector: SharedDataCollector) {
+pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>, test_runner: Arc<TestRunner>, data_collector: Arc<DataCollector>) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
     let app = Router::new()
@@ -138,14 +138,11 @@ async fn shutdown_signal() {
 }
 
 async fn service_info_handler(
-    data_collector_state: Extension<SharedDataCollector>,
-    test_data_store: Extension<SharedTestDataStore>,
-    test_runner_state: Extension<SharedTestRunner>,
+    data_collector: Extension<Arc<DataCollector>>,
+    test_data_store: Extension<Arc<TestDataStore>>,
+    test_runner: Extension<Arc<TestRunner>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - service_info");
-
-    let test_runner = test_runner_state.read().await;
-    let data_collector = data_collector_state.read().await;
 
     Ok(Json(TestServiceStateResponse {
         data_store: TestDataStoreStateResponse {

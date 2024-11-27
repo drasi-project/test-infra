@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use axum::{ extract::{Extension, Path}, response::IntoResponse, routing::get, Json, Router };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use test_data_store::{test_repo_storage::{repo_clients::RemoteTestRepoConfig, models::TestDefinition, TestRepoStorage, TestSourceDataset, TestSourceStorage, TestStorage}, SharedTestDataStore};
+use test_data_store::{test_repo_storage::{models::TestDefinition, repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestSourceDataset, TestSourceStorage, TestStorage}, TestDataStore};
 
 use super::TestServiceWebApiError;
 
@@ -85,7 +87,7 @@ pub fn get_test_repo_routes() -> Router {
 }
 
 pub async fn get_test_repo_list_handler(
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_list");
 
@@ -95,7 +97,7 @@ pub async fn get_test_repo_list_handler(
 
 pub async fn get_test_repo_test_list_handler(
     Path(repo_id): Path<String>,
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_list - repo_id:{}", repo_id);
 
@@ -106,7 +108,7 @@ pub async fn get_test_repo_test_list_handler(
 
 pub async fn get_test_repo_test_source_list_handler(
     Path((repo_id, test_id)): Path<(String, String)>,
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_source_list - repo_id:{}, test_id:{}", repo_id, test_id);
 
@@ -118,7 +120,7 @@ pub async fn get_test_repo_test_source_list_handler(
 
 pub async fn get_test_repo_handler (
     Path(repo_id): Path<String>,
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo - repo_id:{}", repo_id);
 
@@ -128,7 +130,7 @@ pub async fn get_test_repo_handler (
 
 pub async fn get_test_repo_test_handler (
     Path((repo_id, test_id)): Path<(String, String)>,
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test - repo_id:{}, test_id:{}", repo_id, test_id);
 
@@ -139,7 +141,7 @@ pub async fn get_test_repo_test_handler (
 
 pub async fn get_test_repo_test_source_handler (
     Path((repo_id, test_id, source_id)): Path<(String, String, String)>,
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_source - repo_id:{}, test_id:{}, source_id:{}", repo_id, test_id, source_id);
 
@@ -150,7 +152,7 @@ pub async fn get_test_repo_test_source_handler (
 }
 
 pub async fn post_test_repo_handler (
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_test_repo");
@@ -163,7 +165,7 @@ pub async fn post_test_repo_handler (
 
 pub async fn post_test_repo_test_handler (
     Path(repo_id): Path<String>,
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_test_repo_test - repo_id:{}", repo_id);
@@ -177,7 +179,7 @@ pub async fn post_test_repo_test_handler (
 
 pub async fn post_test_repo_test_source_handler (
     Path((repo_id, test_id)): Path<(String, String)>,
-    test_data_store: Extension<SharedTestDataStore>,
+    test_data_store: Extension<Arc<TestDataStore>>,
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_test_repo_test_source - repo_id:{}, test_id:{}", repo_id, test_id);

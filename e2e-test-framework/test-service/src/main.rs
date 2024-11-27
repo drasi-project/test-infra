@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use data_collector::{config::DataCollectorConfig, DataCollector};
 use test_data_store::{TestDataStoreConfig, TestDataStore};
 use test_runner::{TestRunnerConfig, TestRunner};
-use tokio::sync::RwLock;
 
 mod web_api;
 
@@ -105,18 +104,18 @@ async fn main() {
         panic!("Error creating TestDataStore: {}", err);
     }));
 
-    let mut data_collector = DataCollector::new(test_service_config.data_collector, test_data_store.clone()).await.unwrap_or_else(|err| {
+    let data_collector = Arc::new(DataCollector::new(test_service_config.data_collector, test_data_store.clone()).await.unwrap_or_else(|err| {
         panic!("Error creating DataCollector: {}", err);
-    });
+    }));
 
     // Start the DataCollector. This will start any collectors that are configured to start on launch.
     data_collector.start().await.unwrap_or_else(|err| {
         panic!("Error starting DataCollector: {}", err);
     });
 
-    let mut test_runner = TestRunner::new(test_service_config.test_runner, test_data_store.clone()).await.unwrap_or_else(|err| {
+    let test_runner = Arc::new(TestRunner::new(test_service_config.test_runner, test_data_store.clone()).await.unwrap_or_else(|err| {
         panic!("Error creating TestRunner: {}", err);
-    });
+    }));
 
     // Start the TestRunner. This will start any players that are configured to start on launch.
     test_runner.start().await.unwrap_or_else(|err| {
@@ -127,7 +126,7 @@ async fn main() {
     web_api::start_web_api(
         host_params.port, 
         test_data_store, 
-        Arc::new(RwLock::new(test_runner)), 
-        Arc::new(RwLock::new(data_collector))
+        test_runner, 
+        data_collector
     ).await;
 }

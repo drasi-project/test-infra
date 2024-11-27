@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorConfig, SourceChangeGeneratorState};
-use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, SharedTestDataStore};
+use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, TestDataStore};
 
 pub mod source_change_generators;
 pub mod source_change_dispatchers;
@@ -35,20 +35,18 @@ pub enum TestRunnerStatus {
     Error(String),
 }
 
-pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
-
 #[derive(Debug)]
 pub struct TestRunner {
-    data_store: SharedTestDataStore,
+    data_store: Arc<TestDataStore>,
     sources: Arc<RwLock<HashMap<TestRunSourceId, TestRunSource>>>,
     status: Arc<RwLock<TestRunnerStatus>>,
 }
 
 impl TestRunner {
-    pub async fn new(config: TestRunnerConfig, data_store: SharedTestDataStore) -> anyhow::Result<Self> {   
+    pub async fn new(config: TestRunnerConfig, data_store: Arc<TestDataStore>) -> anyhow::Result<Self> {   
         log::debug!("Creating TestRunner from {:#?}", config);
 
-        let mut test_runner = TestRunner {
+        let test_runner = TestRunner {
             data_store,
             sources: Arc::new(RwLock::new(HashMap::new())),
             status: Arc::new(RwLock::new(TestRunnerStatus::Initialized)),
@@ -64,7 +62,7 @@ impl TestRunner {
         Ok(test_runner)
     }
     
-    pub async fn add_test_source(&mut self, config: TestRunSourceConfig) -> anyhow::Result<TestRunSourceId> {
+    pub async fn add_test_source(&self, config: TestRunSourceConfig) -> anyhow::Result<TestRunSourceId> {
         log::trace!("Adding TestRunSource from {:#?}", config);
 
         // If the TestRunner is in an Error state, return an error.
@@ -107,10 +105,6 @@ impl TestRunner {
     pub async fn contains_test_source(&self, test_run_source_id: &str) -> anyhow::Result<bool> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
         Ok(self.sources.read().await.contains_key(&test_run_source_id))
-    }
-
-    pub async fn get_data_store(&self) -> anyhow::Result<SharedTestDataStore> {
-        Ok(self.data_store.clone())
     }
     
     pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
@@ -202,7 +196,7 @@ impl TestRunner {
     //     self.data_store.match_bootstrap_dataset(requested_labels)
     // }
 
-    pub async fn start(&mut self) -> anyhow::Result<TestRunnerStatus> {
+    pub async fn start(&self) -> anyhow::Result<TestRunnerStatus> {
 
         match &self.get_status().await? {
             TestRunnerStatus::Initialized => {

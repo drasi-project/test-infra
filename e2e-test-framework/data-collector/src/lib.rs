@@ -1,11 +1,11 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use futures::future::join_all;
 use serde::Serialize;
 
 use config::{DataCollectionConfig, DataCollectorConfig, DataCollectionSourceConfig};
 use source::DataCollectionSource;
-use test_data_store::{data_collection_storage::DataCollectionStorage, test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage}, SharedTestDataStore};
+use test_data_store::{data_collection_storage::DataCollectionStorage, TestDataStore};
 use tokio::sync::RwLock;
 
 pub mod config;
@@ -22,23 +22,21 @@ pub enum DataCollectorStatus {
     Error(String),
 }
 
-pub type SharedDataCollector = Arc<RwLock<DataCollector>>;
-
 #[derive(Debug)]
 pub struct DataCollector {
-    data_collections: HashMap<String, DataCollection>,
-    data_store: SharedTestDataStore,
-    status: DataCollectorStatus,
+    data_collections: Arc<RwLock<HashMap<String, DataCollection>>>,
+    data_store: Arc<TestDataStore>,
+    status: Arc<RwLock<DataCollectorStatus>>,
 }
 
 impl DataCollector {
-    pub async fn new(config: DataCollectorConfig, data_store: SharedTestDataStore) -> anyhow::Result<Self> {   
+    pub async fn new(config: DataCollectorConfig, data_store: Arc<TestDataStore>) -> anyhow::Result<Self> {   
         log::debug!("Creating DataCollector from {:#?}", config);
 
-        let mut data_collector = DataCollector {
-            data_collections: HashMap::new(),
+        let data_collector = DataCollector {
+            data_collections: Arc::new(RwLock::new(HashMap::new())),
             data_store,
-            status: DataCollectorStatus::Initialized,
+            status: Arc::new(RwLock::new(DataCollectorStatus::Initialized)),
         };
 
         // Add the initial set of DataCollections.
@@ -52,13 +50,15 @@ impl DataCollector {
         Ok(data_collector)
     }
     
-    pub async fn add_data_collection(&mut self, data_collection_config: DataCollectionConfig) -> anyhow::Result<DataCollection> {
+    pub async fn add_data_collection(&self, data_collection_config: DataCollectionConfig) -> anyhow::Result<DataCollection> {
         log::trace!("Adding DataCollection from {:#?}", data_collection_config);
 
         // If the DataCollector is in an Error state, return an error.
-        if let DataCollectorStatus::Error(msg) = &self.status {
+        if let DataCollectorStatus::Error(msg) = &self.get_status().await? {
             anyhow::bail!("DataCollector is in an Error state: {}", msg);
         };
+
+        let mut collections_lock = self.data_collections.write().await;
 
         // Fail if the DataCollector already contains a DataCollection with the same ID.
         if self.contains_data_collection(&data_collection_config.id).await? {
@@ -69,32 +69,44 @@ impl DataCollector {
         let storage = self.data_store.get_data_collection_storage(&data_collection_config.id).await?;
         
         let data_collection = DataCollection::new(data_collection_config, storage).await?;
-        self.data_collections.insert(data_collection.id.clone(), data_collection.clone());
+        collections_lock.insert(data_collection.id.clone(), data_collection.clone());
 
         Ok(data_collection)
     }
 
-    pub async fn add_test_repo(&mut self, test_repo_config: RemoteTestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
-        log::trace!("Adding TestRepo from {:#?}", test_repo_config);
-
-        // If the DataCollector is in an Error state, return an error.
-        if let DataCollectorStatus::Error(msg) = &self.status {
-            anyhow::bail!("DataCollector is in an Error state: {}", msg);
-        };
-
-        self.data_store.add_remote_test_repo(test_repo_config.clone()).await
+    pub async fn contains_data_collection(&self, data_collection_id: &str) -> anyhow::Result<bool>  {
+        Ok(self.data_collections.read().await.contains_key(data_collection_id))
     }
 
-    pub async fn start_data_collection_sources(&mut self, data_collection_id: &str, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
+    pub async fn get_data_collection_ids(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.data_collections.read().await.keys().cloned().collect())
+    }
+
+    pub async fn get_status(&self) -> anyhow::Result<DataCollectorStatus> {
+        Ok(self.status.read().await.clone())
+    }
+
+    async fn _set_status(&self, status: DataCollectorStatus) {
+        let mut write_lock = self.status.write().await;
+        *write_lock = status.clone();
+    }
+
+    pub async fn start(&self) -> anyhow::Result<()> {
+        log::trace!("Starting DataCollector");
+
+        Ok(())
+    }
+
+    pub async fn start_data_collection_sources(&self, data_collection_id: &str, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
         log::trace!("Starting DataCollection Sources - data_collection_id:{}, record_bootstrap_data:{}, start_change_recorder:{}", data_collection_id, record_bootstrap_data, start_change_recorder);
 
         // If the DataCollector is in an Error state, return an error.
-        if let DataCollectorStatus::Error(msg) = &self.status {
+        if let DataCollectorStatus::Error(msg) = &self.get_status().await? {
             anyhow::bail!("DataCollector is in an Error state: {}", msg);
         };
 
         // Get the DataCollection from the DataCollector or fail if it doesn't exist.
-        match self.data_collections.get_mut(data_collection_id) {
+        match self.data_collections.write().await.get_mut(data_collection_id) {
             Some(data_collection) => {
                 data_collection.start_sources(record_bootstrap_data, start_change_recorder).await
             },
@@ -103,54 +115,24 @@ impl DataCollector {
             }
         }
     }
-
-    pub async fn contains_test_repo(&self, test_repo_id: &str) -> anyhow::Result<bool> {
-        self.data_store.contains_test_repo(test_repo_id).await
-    }
-
-    pub async fn contains_data_collection(&self, data_collection_id: &str) -> anyhow::Result<bool>  {
-        Ok(self.data_collections.contains_key(data_collection_id))
-    }
-
-    pub async fn get_data_collection_ids(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self.data_collections.keys().cloned().collect())
-    }
-
-    pub async fn get_data_store_path(&self) -> anyhow::Result<PathBuf> {
-        self.data_store.get_data_store_path().await
-    }
-
-    pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        self.data_store.get_test_repo_ids().await
-    }
-
-    pub async fn get_status(&self) -> anyhow::Result<DataCollectorStatus> {
-        Ok(self.status.clone())
-    }
-
-    pub async fn start(&mut self) -> anyhow::Result<()> {
-        log::trace!("Starting DataCollector");
-
-        Ok(())
-    }
 }
 
 
 #[derive(Clone, Debug)]
 pub struct DataCollection {
     id: String,
-    sources: HashMap<String, DataCollectionSource>,    
-    storage: DataCollectionStorage,
+    sources: Arc<RwLock<HashMap<String, DataCollectionSource>>>,  
+    storage: DataCollectionStorage
 }
 
 impl DataCollection {
     pub async fn new(config: DataCollectionConfig, storage: DataCollectionStorage) -> anyhow::Result<Self> {
         log::debug!("Creating DataCollection from config {:#?}", config);
 
-        let mut data_collection = DataCollection {
+        let data_collection = DataCollection {
             id: config.id.clone(),
-            sources: HashMap::new(),
-            storage: storage,
+            sources: Arc::new(RwLock::new(HashMap::new())),
+            storage,
         };
     
         for source_config in config.sources {
@@ -160,7 +142,7 @@ impl DataCollection {
         Ok(data_collection)
     }
 
-    pub async fn add_source(&mut self, config: DataCollectionSourceConfig) -> anyhow::Result<DataCollectionSource> {
+    pub async fn add_source(&self, config: DataCollectionSourceConfig) -> anyhow::Result<DataCollectionSource> {
         log::trace!("Adding DataCollectionSource from config {:#?}", config);
 
         let source_id = config.source_id.clone();
@@ -172,16 +154,17 @@ impl DataCollection {
         
         let source = DataCollectionSource::new(config, self.storage.get_source_storage(&source_id, false).await?).await?;
 
-        self.sources.insert(source_id.clone(), source.clone());
+        let mut sources_lock = self.sources.write().await;
+        sources_lock.insert(source_id.clone(), source.clone());
 
         Ok(source)
     }    
 
     pub async fn contains_source(&self, source_id: &str) -> anyhow::Result<bool> {
-        Ok(self.sources.contains_key(source_id))
+        Ok(self.sources.read().await.contains_key(source_id))
     }
 
-    pub async fn start_sources(&mut self, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
+    pub async fn start_sources(&self, record_bootstrap_data: bool, start_change_recorder:bool) -> anyhow::Result<()> {
         log::trace!("Starting DataCollectionSources - record_bootstrap_data:{}, start_change_recorder:{}", record_bootstrap_data, start_change_recorder);
 
         // TODO: If record_bootstrap_data is true, start the BootstrapDataRecorder for each Source.
@@ -189,7 +172,8 @@ impl DataCollection {
         // If start_change_recorder is true, start the SourceChangeRecorder for each DataCollectionSource.
         // Start each DataCollectionSource in parallel, and wait for all to complete before returning.
         if start_change_recorder {
-            let tasks: Vec<_> = self.sources.iter_mut().map(|(_, source)| {
+            let mut sources_lock = self.sources.write().await;
+            let tasks: Vec<_> = sources_lock.iter_mut().map(|(_, source)| {
                 let mut source = source.clone();
                 tokio::spawn(async move {
                     source.start_source_change_recorder().await
@@ -246,9 +230,6 @@ mod tests {
         // Check that the DataCollector is in the Initialized state.
         assert_eq!(data_collector.get_status().await?, DataCollectorStatus::Initialized);
 
-        // Check that the data cache folder was created.
-        assert_eq!(data_collector.get_data_store_path().await.unwrap(), data_store_path_buf);
-
         // Delete the data cache folder and test that the operation was successful;
         assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
 
@@ -291,7 +272,7 @@ mod tests {
                 }],
             }]
         };
-        let mut data_collector = DataCollector::new(config, test_data_store).await.unwrap();
+        let data_collector = DataCollector::new(config, test_data_store).await.unwrap();
 
         // Check that the DataCollector is in the Initialized state.
         assert_eq!(data_collector.get_status().await?, DataCollectorStatus::Initialized);

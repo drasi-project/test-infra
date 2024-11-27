@@ -47,8 +47,6 @@ pub struct TestDataStoreInfo {
     pub test_run_ids: Vec<String>,
 }
 
-pub type SharedTestDataStore = Arc<TestDataStore>;
-
 #[derive(Clone, Debug)]
 pub struct TestDataStore {
     pub data_collection_store: Arc<Mutex<DataCollectionStore>>,

@@ -40,8 +40,8 @@ pub type SharedTestRunner = Arc<RwLock<TestRunner>>;
 #[derive(Debug)]
 pub struct TestRunner {
     data_store: SharedTestDataStore,
-    sources: HashMap<TestRunSourceId, TestRunSource>,
-    status: TestRunnerStatus,
+    sourcesx: Arc<RwLock<HashMap<TestRunSourceId, TestRunSource>>>,
+    status: Arc<RwLock<TestRunnerStatus>>,
 }
 
 impl TestRunner {
@@ -50,8 +50,8 @@ impl TestRunner {
 
         let mut test_runner = TestRunner {
             data_store,
-            sources: HashMap::new(),
-            status: TestRunnerStatus::Initialized,
+            sourcesx: Arc::new(RwLock::new(HashMap::new())),
+            status: Arc::new(RwLock::new(TestRunnerStatus::Initialized)),
         };
 
         // Add the initial set of Test Run Sources.
@@ -74,8 +74,10 @@ impl TestRunner {
         
         let id = TestRunSourceId::try_from(&config)?;
 
+        let mut sources_lock = self.sourcesx.write().await;
+
         // Fail if the TestRunner already contains a TestRunSource with the specified Id.
-        if self.sources.contains_key(&id) {
+        if sources_lock.contains_key(&id) {
             anyhow::bail!("TestRunner already contains TestRunSource with ID: {:?}", &id);
         }
 
@@ -93,10 +95,10 @@ impl TestRunner {
         let start_immediately = 
             self.get_status().await? == TestRunnerStatus::Running && test_run_source.start_immediately;
 
-        self.sources.insert(id.clone(), test_run_source);
+        sources_lock.insert(id.clone(), test_run_source);
         
         if start_immediately {
-            self.sources.get(&id).unwrap().start_source_change_generator().await?;
+            sources_lock.get(&id).unwrap().start_source_change_generator().await?;
         }
 
         Ok(id)
@@ -104,7 +106,7 @@ impl TestRunner {
 
     pub async fn contains_test_source(&self, test_run_source_id: &str) -> anyhow::Result<bool> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
-        Ok(self.sources.contains_key(&test_run_source_id))
+        Ok(self.sourcesx.read().await.contains_key(&test_run_source_id))
     }
 
     pub async fn get_data_store(&self) -> anyhow::Result<SharedTestDataStore> {
@@ -112,12 +114,12 @@ impl TestRunner {
     }
     
     pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
-        Ok(self.status.clone())
+        Ok(self.status.read().await.clone())
     }
 
     pub async fn get_test_source_state(&self, test_run_source_id: &str) -> anyhow::Result<TestRunSourceState> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
-        match self.sources.get(&test_run_source_id) {
+        match self.sourcesx.read().await.get(&test_run_source_id) {
             Some(source) => {
                 source.get_state().await
             },
@@ -128,16 +130,17 @@ impl TestRunner {
     }
 
     pub async fn get_test_source_ids(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self.sources.keys().map(|id| id.to_string()).collect())
+        Ok(self.sourcesx.read().await.keys().map(|id| id.to_string()).collect())
     }
 
-    async fn set_status(&mut self, status: TestRunnerStatus) {
-        self.status = status;
+    async fn set_status(&self, status: TestRunnerStatus) {
+        let mut write_lock = self.status.write().await;
+        *write_lock = status.clone();
     }
 
     pub async fn test_source_pause(&self, test_run_source_id: &str) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
-        match self.sources.get(&test_run_source_id) {
+        match self.sourcesx.read().await.get(&test_run_source_id) {
             Some(source) => {
                 source.pause_source_change_generator().await
             },
@@ -149,7 +152,7 @@ impl TestRunner {
 
     pub async fn test_source_skip(&self, test_run_source_id: &str, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
-        match self.sources.get(&test_run_source_id) {
+        match self.sourcesx.read().await.get(&test_run_source_id) {
             Some(source) => {
                 source.skip_source_change_generator(skips).await
             },
@@ -161,7 +164,7 @@ impl TestRunner {
 
     pub async fn test_source_start(&self, test_run_source_id: &str) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
-        match self.sources.get(&test_run_source_id) {
+        match self.sourcesx.read().await.get(&test_run_source_id) {
             Some(source) => {
                 source.start_source_change_generator().await
             },
@@ -173,7 +176,7 @@ impl TestRunner {
 
     pub async fn test_source_step(&self, test_run_source_id: &str, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
-        match self.sources.get(&test_run_source_id) {
+        match self.sourcesx.read().await.get(&test_run_source_id) {
             Some(source) => {
                 source.step_source_change_generator(steps).await
             },
@@ -185,7 +188,7 @@ impl TestRunner {
 
     pub async fn test_source_stop(&self, test_run_source_id: &str) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
-        match self.sources.get(&test_run_source_id) {
+        match self.sourcesx.read().await.get(&test_run_source_id) {
             Some(source) => {
                 source.stop_source_change_generator().await
             },
@@ -219,7 +222,8 @@ impl TestRunner {
 
         // Iterate over the TestRunSources and start each one if it is configured to start immediately.
         // If any of the TestSources fail to start, set the TestRunnerStatus to Error and return an error.
-        for (_, source) in &self.sources {
+        let sources_lock = self.sourcesx.read().await;
+        for (_, source) in &*sources_lock {
             if source.start_immediately {
                 match source.start_source_change_generator().await {
                     Ok(response) => {

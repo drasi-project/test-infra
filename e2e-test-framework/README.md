@@ -171,3 +171,13 @@ Delete the E2ETestSourceProvider
 drasi delete sourceprovider E2ETestSource
 ```
 
+
+
+kind load docker-image drasi-project/e2e-test-service:0.1.5 --name kind
+kind load docker-image drasi-project/e2e-test-proxy:0.1.5 --name kind
+
+docker tag drasi-project/e2e-test-service:0.1.5 ghcr.io/drasi-project/e2e-test-proxy:0.1.5
+docker tag drasi-project/e2e-test-proxy:0.1.5 ghcr.io/drasi-project/e2e-test-proxy:0.1.5
+
+kind load docker-image ghcr.io/drasi-project/e2e-test-service:0.1.5 --name kind
+kind load docker-image ghcr.io/drasi-project/e2e-test-proxy:0.1.5 --name kind

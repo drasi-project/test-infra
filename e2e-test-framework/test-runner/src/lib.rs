@@ -68,7 +68,7 @@ impl TestRunner {
         log::trace!("Adding TestRunSource from {:#?}", config);
 
         // If the TestRunner is in an Error state, return an error.
-        if let TestRunnerStatus::Error(msg) = &self.status {
+        if let TestRunnerStatus::Error(msg) = &self.get_status().await? {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
         
@@ -90,7 +90,8 @@ impl TestRunner {
         // Create the TestRunSource and add it to the TestRunner.
         let test_run_source = TestRunSource::new(config, input_storage, output_storage).await?;        
 
-        let start_immediately = self.status == TestRunnerStatus::Running && test_run_source.start_immediately;
+        let start_immediately = 
+            self.get_status().await? == TestRunnerStatus::Running && test_run_source.start_immediately;
 
         self.sources.insert(id.clone(), test_run_source);
         
@@ -128,6 +129,10 @@ impl TestRunner {
 
     pub async fn get_test_source_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.sources.keys().map(|id| id.to_string()).collect())
+    }
+
+    async fn set_status(&mut self, status: TestRunnerStatus) {
+        self.status = status;
     }
 
     pub async fn test_source_pause(&self, test_run_source_id: &str) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
@@ -194,9 +199,9 @@ impl TestRunner {
     //     self.data_store.match_bootstrap_dataset(requested_labels)
     // }
 
-    pub async fn start(&mut self) -> anyhow::Result<()> {
+    pub async fn start(&mut self) -> anyhow::Result<TestRunnerStatus> {
 
-        match &self.status {
+        match &self.get_status().await? {
             TestRunnerStatus::Initialized => {
                 log::info!("Starting TestRunner...");
             },
@@ -213,31 +218,34 @@ impl TestRunner {
         };
 
         // Iterate over the TestRunSources and start each one if it is configured to start immediately.
+        // If any of the TestSources fail to start, set the TestRunnerStatus to Error and return an error.
         for (_, source) in &self.sources {
             if source.start_immediately {
-                source.start_source_change_generator().await?;
+                match source.start_source_change_generator().await {
+                    Ok(response) => {
+                        match response.result {
+                            Ok(_) => {},
+                            Err(e) => {
+                                let error = TestRunnerStatus::Error(format!("Error starting TestRunSources: {}", e));
+                                self.set_status(error.clone()).await;
+                                anyhow::bail!("{:?}", error);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        let error = TestRunnerStatus::Error(format!("Error starting TestRunSources: {}", e));
+                        self.set_status(error.clone()).await;
+                        anyhow::bail!("{:?}", error);
+                    }
+                }
             }
         }
-
-        // If any of the SourceChangeGenerators fail to start, set the TestRunnerStatus to Error and return an error.
-        // for (_, source) in &self.sources {
-        //     if source.change_script_player.as_ref().unwrap().get_settings().source_change_generator.start_immediately {
-        //         match &source.change_script_player.as_ref().unwrap().start().await {
-        //             Ok(_) => {},
-        //             Err(e) => {
-        //                 let msg = format!("Error starting ChangeScriptPlayer: {}", e);
-        //                 self.status = TestRunnerStatus::Error(msg);
-        //                 anyhow::bail!("{:?}", self.status);
-        //             }
-        //         }
-        //     }
-        // }
         
         // Set the TestRunnerStatus to Running.
         log::info!("Test Runner started successfully");            
-        self.status = TestRunnerStatus::Running;
+        self.set_status(TestRunnerStatus::Running).await;
 
-        Ok(())
+        Ok(TestRunnerStatus::Running)
     }
 }
 

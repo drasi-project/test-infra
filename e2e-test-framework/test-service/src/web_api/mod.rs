@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Serialize;
 use thiserror::Error;
-use tokio::{io::{self, AsyncBufReadExt}, select, signal};
+use tokio::{select, signal};
 
 use data_collector::DataCollector;
 use repo::get_test_repo_routes;
@@ -104,7 +104,7 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>
     // Graceful shutdown when receiving `Ctrl+C` or ENTER
     let graceful = server.with_graceful_shutdown(shutdown_signal());
 
-    println!("\n\nPress ENTER to stop the server...\n\n");
+    println!("\n\nPress CTRL-C to stop the server...\n\n");
 
     if let Err(err) = graceful.await {
         eprintln!("Server error: {}", err);
@@ -113,23 +113,30 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>
 }
 
 async fn shutdown_signal() {
-    // Create two tasks: one for Ctrl+C and another for ENTER
+    // Create two tasks: one for Ctrl+C and another for SIGTERM
+    // Either will trigger a shutdown
     let ctrl_c = async {
         signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
         println!("\nReceived Ctrl+C, shutting down...");
     };
 
-    let enter = async {
-        let mut input = String::new();
-        let mut reader = io::BufReader::new(io::stdin());
-        reader.read_line(&mut input).await.expect("Failed to read line");
-        println!("Received ENTER, shutting down...");
+    // Listen for SIGTERM (Docker stop signal)
+    let sigterm = async {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+            sigterm.recv().await;
+            println!("\nReceived SIGTERM, shutting down...");
+        }
+        #[cfg(not(unix))]
+        futures::future::pending::<()>().await; // Fallback for non-Unix systems
     };
-
+    
     // Wait for either signal
     select! {
         _ = ctrl_c => {},
-        _ = enter => {},
+        _ = sigterm => {},
     }
 
     println!("Cleaning up resources...");

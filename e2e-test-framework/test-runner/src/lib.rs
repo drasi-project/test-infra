@@ -4,9 +4,11 @@ use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use bootstrap_data_generators::{BootstrapDataGenerator, BootstrapDataGeneratorConfig};
 use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorConfig, SourceChangeGeneratorState};
 use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, TestDataStore};
 
+pub mod bootstrap_data_generators;
 pub mod source_change_generators;
 pub mod source_change_dispatchers;
 
@@ -419,27 +421,5 @@ impl TestRunSource {
                 anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
             }
         }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BootstrapDataGeneratorConfig {
-    #[serde(default)]
-    pub time_mode: Option<TimeMode>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct BootstrapDataGenerator {
-    pub test_run_source_id: TestRunSourceId,
-    pub time_mode: TimeMode,
-}
-
-impl BootstrapDataGenerator {
-    pub fn new(test_run_source_id: TestRunSourceId, config: &BootstrapDataGeneratorConfig) -> anyhow::Result<Self> {
-        // Before this is called, we have ensured all the missing TestRunSourceConfig fields are filled.
-        Ok(Self {
-            test_run_source_id,
-            time_mode: config.time_mode.clone().unwrap(),
-        })
     }
 }

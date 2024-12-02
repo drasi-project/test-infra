@@ -4,7 +4,7 @@ use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use bootstrap_data_generators::{BootstrapDataGenerator, BootstrapDataGeneratorConfig};
+use bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapDataGenerator, BootstrapDataGeneratorConfig};
 use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorConfig, SourceChangeGeneratorState};
 use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, TestDataStore};
 
@@ -306,7 +306,8 @@ pub struct TestRunSourceState {
 pub struct TestRunSource {
     pub id: TestRunSourceId,
     pub start_immediately: bool,
-    pub bootstrap_data_generator: Option<BootstrapDataGenerator>,
+    #[debug(skip)]
+    pub bootstrap_data_generator: Option<Box<dyn BootstrapDataGenerator + Send + Sync>>,
     #[debug(skip)]
     pub source_change_generator: Option<Box<dyn SourceChangeGenerator + Send + Sync>>,    
 }
@@ -321,12 +322,12 @@ impl TestRunSource {
             .. 
         } = config;
 
-        let bootstrap_data_generator = match &bootstrap_data_generator_config {
-            Some(bootstrap_data_generator_config) => {
-                Some(BootstrapDataGenerator::new(id.clone(), bootstrap_data_generator_config)?)
-            },
-            None => None,
-        };
+        let bootstrap_data_generator = create_bootstrap_data_generator(
+            id.clone(),
+            bootstrap_data_generator_config,
+            test_data_store.clone(),
+            result_store.clone()
+        ).await?;
 
         let source_change_generator = create_source_change_generator(
             id.clone(),

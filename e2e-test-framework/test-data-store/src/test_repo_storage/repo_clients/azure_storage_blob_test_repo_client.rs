@@ -49,7 +49,7 @@ impl AzureStorageBlobTestRepoClient {
         log::debug!("Creating AzureStorageBlobTestRepoClient from common_config:{:?} and unique_config:{:?}, ", common_config, unique_config);
 
         let settings = AzureStorageBlobTestRepoClientSettings::new(common_config, unique_config).await?;
-        log::trace!("Creating AzureStorageBlobTestRepoClientSettings with settings: {:?}, ", settings);
+        log::trace!("Creating AzureStorageBlobTestRepoClients with settings: {:?}, ", settings);
         
         Ok(Box::new( Self { settings }))
     }

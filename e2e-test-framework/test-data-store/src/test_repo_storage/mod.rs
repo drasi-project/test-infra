@@ -276,17 +276,17 @@ impl TestSourceStorage {
 
         // Read the bootstrap script files.
         let file_path_list: Vec<PathBuf> = WalkDir::new(&self.bootstrap_data_scripts_path)
-        .into_iter()
-        .filter_map(|entry| {
-            let entry = entry.ok()?; // Skip over any errors
-            let path = entry.path().to_path_buf();
-            if path.is_file() {
-                Some(path)
-            } else {
-                None
-            }
-        })
-        .collect();
+            .into_iter()
+            .filter_map(|entry| {
+                let entry = entry.ok()?; // Skip over any errors
+                let path = entry.path().to_path_buf();
+                if path.is_file() {
+                    Some(path)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         for file_path in file_path_list {
             let data_type_name = file_path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string();

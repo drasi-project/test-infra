@@ -1,12 +1,12 @@
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{collections::{HashMap, HashSet}, fmt, sync::Arc};
 
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapDataGenerator, BootstrapDataGeneratorConfig};
+use bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator, BootstrapDataGeneratorConfig};
 use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorConfig, SourceChangeGeneratorState};
-use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, TestDataStore};
+use test_data_store::{test_repo_storage::{models::{QueryId, SourceDefinition, TimeMode}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, TestDataStore};
 
 pub mod bootstrap_data_generators;
 pub mod source_change_generators;
@@ -81,6 +81,14 @@ impl TestRunner {
             anyhow::bail!("TestRunner already contains TestRunSource with ID: {:?}", &id);
         }
 
+        // Get the SourceDefinition that the TestRunSource is associated with.
+        let test_definition = self.data_store.get_test_definition_for_test_run_source(&id).await?;
+        let source_definition = match test_definition.sources.iter().find(|source| source.id == config.test_source_id)
+        {
+            Some(source_definition) => source_definition.clone(),
+            None => anyhow::bail!("SourceDefinition not found for TestRunSource: {:?}", &id)
+        };
+
         // Get the INPUT Test Data storage for the TestRunSource.
         // This is where the TestRunSource will read the Test Data from.
         let input_storage = self.data_store.get_test_source_storage_for_test_run_source(&id).await?;
@@ -90,7 +98,7 @@ impl TestRunner {
         let output_storage = self.data_store.get_test_run_source_storage(&id).await?;
 
         // Create the TestRunSource and add it to the TestRunner.
-        let test_run_source = TestRunSource::new(config, input_storage, output_storage).await?;        
+        let test_run_source = TestRunSource::new(config, source_definition, input_storage, output_storage).await?;        
 
         let start_immediately = 
             self.get_status().await? == TestRunnerStatus::Running && test_run_source.start_immediately;
@@ -109,6 +117,21 @@ impl TestRunner {
         Ok(self.sources.read().await.contains_key(&test_run_source_id))
     }
     
+    pub async fn get_bootstrap_data_for_query(&self, query_id: &str, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
+        log::debug!("Query ID: {}, Node Labels: {:?}, Rel Labels: {:?}", query_id, node_labels, rel_labels);
+
+        let sources_lock = self.sources.read().await;
+
+        let mut bootstrap_data = BootstrapData::new();
+
+        for (_, source) in &*sources_lock {
+            let source_data = source.get_bootstrap_data_for_query(query_id.try_into()?, node_labels, rel_labels).await?;
+            bootstrap_data.merge(source_data);
+        }
+
+        Ok(bootstrap_data)
+    }
+
     pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
         Ok(self.status.read().await.clone())
     }
@@ -193,10 +216,6 @@ impl TestRunner {
             }
         }
     }
-
-    // pub async fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
-    //     self.data_store.match_bootstrap_dataset(requested_labels)
-    // }
 
     pub async fn start(&self) -> anyhow::Result<TestRunnerStatus> {
 
@@ -310,10 +329,16 @@ pub struct TestRunSource {
     pub bootstrap_data_generator: Option<Box<dyn BootstrapDataGenerator + Send + Sync>>,
     #[debug(skip)]
     pub source_change_generator: Option<Box<dyn SourceChangeGenerator + Send + Sync>>,    
+    pub subscribers: Vec<QueryId>
 }
 
 impl TestRunSource {
-    pub async fn new(config: TestRunSourceConfig, test_data_store: TestSourceStorage, result_store: TestRunSourceStorage) -> anyhow::Result<Self> {
+    pub async fn new(
+        config: TestRunSourceConfig, 
+        source_definition: SourceDefinition,
+        test_data_store: TestSourceStorage, 
+        result_store: TestRunSourceStorage
+    ) -> anyhow::Result<Self> {
         let id = TestRunSourceId::try_from(&config)?;
 
         let TestRunSourceConfig { 
@@ -336,12 +361,26 @@ impl TestRunSource {
             result_store
         ).await?;
     
+        let subscribers = source_definition.subscribers.clone();
+
         Ok(Self { 
             id, 
             start_immediately: config.start_immediately,
             bootstrap_data_generator, 
-            source_change_generator 
+            source_change_generator,
+            subscribers
         })
+    }
+
+    pub async fn get_bootstrap_data_for_query(&self, query_id: QueryId, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
+        log::debug!("Query ID: {:?}, Node Labels: {:?}, Rel Labels: {:?}", query_id, node_labels, rel_labels);
+
+        // If the QueryId is in the subscribers list, return the BootstrapData.
+        if self.bootstrap_data_generator.is_some() && self.subscribers.contains(&query_id) {
+            self.bootstrap_data_generator.as_ref().unwrap().get_data(node_labels, rel_labels).await
+        } else {
+            Ok(BootstrapData::new())
+        }
     }
 
     pub async fn get_state(&self) -> anyhow::Result<TestRunSourceState> {

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use test_run_storage::{TestRunId, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
-use test_repo_storage::{repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceDataset, TestSourceStorage};
+use test_repo_storage::{models::TestDefinition, repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceDataset, TestSourceStorage};
 use tokio::sync::Mutex;
 
 pub mod data_collection_storage;
@@ -96,6 +96,13 @@ impl TestDataStore {
         Ok(self.test_repo_store.lock().await.contains_test_repo(id).await?)
     }
 
+    pub async fn get_test_definition(&self, repo_id: &str, test_id: &str) -> anyhow::Result<TestDefinition> {
+        Ok(self.test_repo_store.lock().await
+            .get_test_repo(repo_id).await?
+            .get_test(test_id, false).await?
+            .test_definition.clone())
+    }
+
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.test_repo_store.lock().await.get_test_repo_ids().await?)
     }
@@ -120,6 +127,13 @@ impl TestDataStore {
             &test_run_source_id.test_run_id.test_repo_id, 
             &test_run_source_id.test_run_id.test_id, 
             &test_run_source_id.test_source_id
+        ).await
+    }
+
+    pub async fn get_test_definition_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestDefinition> {
+        self.get_test_definition(
+            &test_run_source_id.test_run_id.test_repo_id, 
+            &test_run_source_id.test_run_id.test_id
         ).await
     }
 
@@ -162,35 +176,4 @@ impl TestDataStore {
     pub async fn get_data_collection_storage(&self, id: &str) -> anyhow::Result<DataCollectionStorage> {
         Ok(self.data_collection_store.lock().await.get_data_collection_storage(id, false).await?)
     }
-
-
-
-    // This function is used to figure out which dataset to use to service a bootstrap request.
-    // It is a workaround for the fact that a Drasi Source issues a simple "acquire" request, assuming
-    // the SourceProxy it is connected to will only be dealing with a single DB connection, whereas the 
-    // TestRunner can be simulating multiple sources concurrently. Would be better to do something else here, 
-    // but it is sufficient for now.
-    // pub async fn match_bootstrap_dataset(&self, requested_labels: &HashSet<String>) -> anyhow::Result<Option<TestSourceDataset>> {
-    //     let mut best_match = None;
-    //     let mut best_match_count = 0;
-
-    //     let test_repo_stores = self.test_repo_stores.lock().await;
-
-    //     for (_, repo) in test_repo_stores.iter() {
-
-    //         let test_source_datasets = repo.test_source_datasets.lock().await;
-    //         let test_source_datasets_iter = test_source_datasets.iter();
-
-    //         for (_, ds) in test_source_datasets_iter {
-    //             let match_count = ds.count_bootstrap_type_intersection(&requested_labels);
-
-    //             if match_count > best_match_count {
-    //                 best_match = Some(ds);
-    //                 best_match_count = match_count;
-    //             }
-    //         }
-    //     }
-
-    //     Ok(best_match.map(|ds| ds.clone()))
-    // }
 }

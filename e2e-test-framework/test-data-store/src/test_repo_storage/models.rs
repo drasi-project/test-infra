@@ -228,6 +228,7 @@ pub struct SourceDefinition {
     pub id: String,
     pub bootstrap_data_generator: BootstrapDataGeneratorDefinition,
     pub source_change_generator: SourceChangeGeneratorDefinition,
+    pub subscribers: Vec<QueryId>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -246,6 +247,40 @@ pub struct SourceChangeGeneratorDefinition {
     pub spacing_mode: SpacingMode,
     pub time_mode: TimeMode,
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum ParseQueryIdError {
+    #[error("Invalid format for QueryId - {0}")]
+    InvalidFormat(String),
+    #[error("Invalid values for QueryId - {0}")]
+    InvalidValues(String),
+}
+
+impl TryFrom<&str> for QueryId {
+    type Error = ParseQueryIdError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let parts: Vec<&str> = value.split('.').collect();
+        if parts.len() == 2 {
+            Ok(QueryId {
+                node_id: parts[0].to_string(), 
+                query_id: parts[1].to_string(), 
+            })
+        } else {
+            Err(ParseQueryIdError::InvalidFormat(value.to_string()))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueryId {
+    #[serde(default = "default_query_node_id")]
+    pub node_id: String,
+    #[serde(default = "default_query_id")]
+    pub query_id: String,
+}
+fn default_query_node_id() -> String { "default".to_string() }
+fn default_query_id() -> String { "test_query".to_string() }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct QueryDefinition {

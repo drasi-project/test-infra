@@ -152,7 +152,6 @@ impl TestRepoStorage {
                 repo_id: self.id.clone(),
                 sources_path,
                 test_definition,
-                
             })    
         } else {
 

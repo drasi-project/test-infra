@@ -1,11 +1,14 @@
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{models::TimeMode, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::TimeMode, scripts::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 
-use super::{BootstrapDataGenerator, CommonBootstrapDataGeneratorConfig, ScriptBootstrapDataGeneratorConfig};
+use super::{BootstrapData, BootstrapDataGenerator, CommonBootstrapDataGeneratorConfig, ScriptBootstrapDataGeneratorConfig};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ScriptBootstrapDataGenerator {
+    pub input_storage: TestSourceStorage,
     pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
 }
@@ -15,10 +18,11 @@ impl ScriptBootstrapDataGenerator {
         test_run_source_id: TestRunSourceId, 
         common_config: CommonBootstrapDataGeneratorConfig, 
         _unique_config: ScriptBootstrapDataGeneratorConfig, 
-        _input_storage: TestSourceStorage, 
+        input_storage: TestSourceStorage, 
         _output_storage: TestRunSourceStorage
     ) -> anyhow::Result<Box<dyn BootstrapDataGenerator + Send + Sync>> {
         Ok(Box::new(Self {
+            input_storage,
             test_run_source_id,
             time_mode: common_config.time_mode.clone(),
         }))
@@ -27,7 +31,38 @@ impl ScriptBootstrapDataGenerator {
 
 #[async_trait]
 impl BootstrapDataGenerator for ScriptBootstrapDataGenerator {
-    async fn get_data(&self) -> anyhow::Result<()> {
-        Ok(())
+    async fn get_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
+        log::debug!("Node labels: [{:?}], Rel labels: [{:?}]", node_labels, rel_labels);
+
+        let mut bootstrap_data = BootstrapData::new();
+
+        let data = self.input_storage.get_dataset().await?;
+
+        for (label, files) in data.bootstrap_data_script_files {
+            if node_labels.contains(&label) {
+                let mut nodes: Vec<NodeRecord> = Vec::new();
+
+                for record in BootstrapScriptReader::new(files)? {
+                    match record?.record {
+                        BootstrapScriptRecord::Node(node) => nodes.push(node),
+                        BootstrapScriptRecord::Finish(_) => break,
+                        _ => {}
+                    }
+                }
+                bootstrap_data.nodes.insert(label.clone(), nodes);
+            } else if rel_labels.contains(&label) {
+                let mut rels: Vec<RelationRecord> = Vec::new();
+
+                for record in BootstrapScriptReader::new(files)? {
+                    match record?.record {
+                        BootstrapScriptRecord::Relation(rel) => rels.push(rel),
+                        BootstrapScriptRecord::Finish(_) => break,
+                        _ => {}
+                    }
+                }
+                bootstrap_data.rels.insert(label.clone(), rels);
+            }
+        }
+        Ok(bootstrap_data)
     }
 }

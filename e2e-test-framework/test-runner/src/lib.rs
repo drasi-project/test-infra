@@ -16,12 +16,16 @@ pub mod source_change_dispatchers;
 pub struct TestRunnerConfig {
     #[serde(default)]
     pub sources: Vec<TestRunSourceConfig>,
+    #[serde(default = "is_true")]
+    pub start_immediately: bool,    
 }
+fn is_true() -> bool { true }
 
 impl Default for TestRunnerConfig {
     fn default() -> Self {
         TestRunnerConfig {
             sources: Vec::new(),
+            start_immediately: false,
         }
     }
 }
@@ -60,6 +64,10 @@ impl TestRunner {
         };
 
         log::debug!("TestRunner created -  {:?}", &test_runner);
+
+        if config.start_immediately {
+            test_runner.start().await?;
+        }
 
         Ok(test_runner)
     }
@@ -275,12 +283,12 @@ pub struct TestRunSourceConfig {
     #[serde(default = "random_test_run_id")]
     pub test_run_id: String,
     pub test_source_id: String,
-    #[serde(default = "is_true")]
+    #[serde(default = "is_false")]
     pub start_immediately: bool,    
     pub bootstrap_data_generator: Option<BootstrapDataGeneratorDefinition>,
     pub source_change_generator: Option<SourceChangeGeneratorDefinition>,
 }
-fn is_true() -> bool { false }
+fn is_false() -> bool { false }
 fn random_test_run_id() -> String { chrono::Utc::now().format("%Y%m%d%H%M%S").to_string() }
 
 impl TryFrom<&TestRunSourceConfig> for TestRunId {

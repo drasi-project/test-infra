@@ -117,11 +117,6 @@ async fn main() {
         panic!("Error creating TestRunner: {}", err);
     }));
 
-    // Start the TestRunner. This will start any players that are configured to start on launch.
-    test_runner.start().await.unwrap_or_else(|err| {
-        panic!("Error starting TestRunner: {}", err);
-    });
-    
     // Start the Web API.
     web_api::start_web_api(
         host_params.port, 

@@ -224,12 +224,12 @@ impl TestRunner {
                 log::info!("Starting TestRunner...");
             },
             TestRunnerStatus::Running => {
-                let msg = format!("Test Runner has already been Running, cannot start.");
+                let msg = format!("Test Runner is already been Running, cannot start.");
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
             },
             TestRunnerStatus::Error(_) => {
-                let msg = format!("Test Runner is in an Error state, cannot start.");
+                let msg = format!("Test Runner is in an Error state, cannot Start.");
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
             },

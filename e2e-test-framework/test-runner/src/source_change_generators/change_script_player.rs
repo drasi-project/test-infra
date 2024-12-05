@@ -193,7 +193,7 @@ impl ChangeScriptPlayer {
         let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
 
         let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, delayer_tx_channel.clone(), settings.clone()));
-        let delayer_thread_handle = tokio::spawn(delayer_thread(delayer_rx_channel, player_tx_channel.clone()));
+        let delayer_thread_handle = tokio::spawn(delayer_thread(delayer_rx_channel, player_tx_channel.clone(), settings.clone()));
 
         Ok(Box::new(Self {
             settings,
@@ -267,8 +267,7 @@ impl SourceChangeGenerator for ChangeScriptPlayer {
 // The ChangeScriptPlayer thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
 // The Web API function communicate via a channel and provide oneshot channels for the ChangeScriptPlayer to send responses back.
 pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMessage>, delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>, player_settings: ScriptSourceGeneratorSettings) {
-
-    log::info!("Player thread started...");
+    log::info!("ChangeScriptPlayer {} player thread started...", player_settings.id);
 
     // Initialize the ChangeScriptPlayer infrastructure.
     // Create a ChangeScriptReader to read the ChangeScript files.
@@ -381,8 +380,6 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
         }
     };
 
-    log::trace!("Starting ChangeScriptPlayer loop...");
-
     // Loop to process messages sent to the ChangeScriptPlayer and read data from Change Script.
     // Always process all messages in the command channel and act on them first.
     // If there are no messages and the ChangeScriptPlayer is running, stepping, or skipping, continue processing the Change Script.
@@ -403,8 +400,6 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
             || player_state.status == SourceChangeGeneratorStatus::Error;
         
         let message: Option<ChangeScriptPlayerMessage> = if block_on_message {
-            log::trace!("ChangeScriptPlayer Thread Blocked; waiting for a command message...");
-
             match player_rx_channel.recv().await {
                 Some(message) => {
                     log::trace!("Received {:?} command message.", message.command);
@@ -417,11 +412,8 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                 },
             }
         } else {
-            log::trace!("ChangeScriptPlayer Thread Unblocked; TRYing for a command message before processing next script record");
-
             match player_rx_channel.try_recv() {
                 Ok(message) => {
-                    log::trace!("Received {:?} command message.", message.command);
                     Some(message)
                 },
                 Err(Empty) => None,
@@ -679,7 +671,7 @@ async fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, 
         ChangeScriptRecord::PauseCommand(_) => {
             // Process the PauseCommand only if the Player is not configured to ignore them.
             if player_state.ignore_scripted_pause_commands {
-                log::info!("Ignoring Change Script Pause Command: {:?}", record);
+                log::debug!("Ignoring Change Script Pause Command: {:?}", record);
             } else {
                 let _ = match player_state.status {
                     SourceChangeGeneratorStatus::Running => transition_from_running_state(&ChangeScriptPlayerCommand::Pause, player_state),
@@ -693,7 +685,7 @@ async fn resolve_test_script_record_effect(record: ScheduledChangeScriptRecord, 
             }
         },
         ChangeScriptRecord::Label(label_record) => {
-            log::info!("Reached Change Script Label: {:?}", label_record);
+            log::debug!("Reached Change Script Label: {:?}", label_record);
         },
         ChangeScriptRecord::Finish(_) => {
             transition_to_finished_state(player_state);
@@ -911,17 +903,12 @@ fn transition_to_error_state(error_message: &str, player_state: &mut ScriptSourc
     player_state.error_message = Some(error_message.to_string());
 }
 
-pub async fn delayer_thread(mut delayer_rx_channel: Receiver<DelayChangeScriptRecordMessage>, player_tx_channel: Sender<ChangeScriptPlayerMessage>) {
-    log::info!("Record delayer thread started...");
-    log::trace!("Starting ChangeScriptRecord Delayer loop...");
+pub async fn delayer_thread(mut delayer_rx_channel: Receiver<DelayChangeScriptRecordMessage>, player_tx_channel: Sender<ChangeScriptPlayerMessage>, player_settings: ScriptSourceGeneratorSettings) {
+    log::info!("ChangeScriptPlayer {} delayer thread started...", player_settings.id);
 
     loop {
-        log::trace!("Top of ChangeScriptRecord Delayer loop.");
-
         match delayer_rx_channel.recv().await {
             Some(message) => {
-                log::debug!("Processing DelayChangeScriptRecordMessage: {:?}", message);
-
                 // Sleep for the specified time.
                 sleep(Duration::from_nanos(message.delay_ns)).await;
 
@@ -933,9 +920,7 @@ pub async fn delayer_thread(mut delayer_rx_channel: Receiver<DelayChangeScriptRe
                 let response = player_tx_channel.send(msg).await;
 
                 match response {
-                    Ok(_) => {
-                        log::debug!("Sent ProcessDelayedRecord command to ChangeScriptPlayer.");
-                    },
+                    Ok(_) => {},
                     Err(e) => {
                         log::error!("Error sending ProcessDelayedRecord command to ChangeScriptPlayer: {:?}", e);
                     }
@@ -973,8 +958,8 @@ fn log_test_script_player_state(msg: &str, state: &ScriptSourceGeneratorState) {
     match log::max_level() {
         log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, state),
         log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, state),
-        log::LevelFilter::Info => log::info!("{} - status:{:?}, error_message:{:?}, start_replay_time:{:?}, current_replay_time:{:?}, skips_remaining:{:?}, steps_remaining:{:?}",
-            msg, state.status, state.error_message, state.start_replay_time, state.current_replay_time, state.skips_remaining, state.steps_remaining),
+        // log::LevelFilter::Info => log::info!("{} - status:{:?}, error_message:{:?}, start_replay_time:{:?}, current_replay_time:{:?}, skips_remaining:{:?}, steps_remaining:{:?}",
+        //     msg, state.status, state.error_message, state.start_replay_time, state.current_replay_time, state.skips_remaining, state.steps_remaining),
         _ => {}
     }
 }

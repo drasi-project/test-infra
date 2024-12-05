@@ -30,7 +30,7 @@ pub struct JsonlFileSourceChangeDispatcher {
 impl JsonlFileSourceChangeDispatcher {
     pub fn new(settings: JsonlFileSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
 
-        log::info!("Initializing from {:?}", settings);
+        log::debug!("Initializing from {:?}", settings);
 
         // Make sure the local change_data_folder exists, if not, create it.
         // If the folder cannot be created, return an error.

@@ -26,7 +26,7 @@ pub struct ConsoleSourceChangeDispatcher {
 impl ConsoleSourceChangeDispatcher {
     pub fn new(settings: ConsoleSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
 
-        log::info!("Initializing from {:?}", settings);
+        log::debug!("Initializing from {:?}", settings);
 
         Ok(Box::new(Self { settings }))
     }

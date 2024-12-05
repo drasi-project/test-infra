@@ -34,7 +34,7 @@ pub struct DaprSourceChangeDispatcher {
 impl DaprSourceChangeDispatcher {
     pub fn new(settings: DaprSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
 
-        log::info!("Initializing from {:?}", settings);
+        log::debug!("Initializing from {:?}", settings);
 
         let publisher = DaprHttpPublisher::new(
             settings.host.clone(),

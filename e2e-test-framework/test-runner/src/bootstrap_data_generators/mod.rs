@@ -4,30 +4,9 @@ use async_trait::async_trait;
 
 use bootstrap_script_player::ScriptBootstrapDataGenerator;
 use serde::{Deserialize, Serialize};
-use test_data_store::{test_repo_storage::{models::TimeMode, scripts::bootstrap_script_file_reader::{NodeRecord, RelationRecord}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::BootstrapDataGeneratorDefinition, scripts::bootstrap_script_file_reader::{NodeRecord, RelationRecord}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 
 mod bootstrap_script_player;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum BootstrapDataGeneratorConfig {
-    Script {
-        #[serde(flatten)]
-        common_config: CommonBootstrapDataGeneratorConfig,
-        #[serde(flatten)]
-        unique_config: ScriptBootstrapDataGeneratorConfig,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommonBootstrapDataGeneratorConfig {
-    #[serde(default)]
-    pub time_mode: TimeMode,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ScriptBootstrapDataGeneratorConfig {
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum BootstrapDataGeneratorError {
@@ -72,13 +51,14 @@ impl BootstrapDataGenerator for Box<dyn BootstrapDataGenerator + Send + Sync> {
 
 pub async fn create_bootstrap_data_generator(
     id: TestRunSourceId, 
-    config: Option<BootstrapDataGeneratorConfig>,
+    definition: Option<BootstrapDataGeneratorDefinition>,
+    _test_run_overrides: Option<BootstrapDataGeneratorDefinition>,
     input_storage: TestSourceStorage, 
     output_storage: TestRunSourceStorage
 ) -> anyhow::Result<Option<Box<dyn BootstrapDataGenerator + Send + Sync>>> {
-    match config {
+    match definition {
         None => Ok(None),
-        Some(BootstrapDataGeneratorConfig::Script{common_config, unique_config}) => {
+        Some(BootstrapDataGeneratorDefinition::Script{common_config, unique_config}) => {
             Ok(Some(Box::new(ScriptBootstrapDataGenerator::new(
                 id, 
                 common_config, 

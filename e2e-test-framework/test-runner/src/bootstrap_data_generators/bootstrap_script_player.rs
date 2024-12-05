@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{models::TimeMode, scripts::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::{CommonBootstrapDataGeneratorDefinition, ScriptBootstrapDataGeneratorDefinition, TimeMode}, scripts::bootstrap_script_file_reader::{BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 
-use super::{BootstrapData, BootstrapDataGenerator, CommonBootstrapDataGeneratorConfig, ScriptBootstrapDataGeneratorConfig};
+use super::{BootstrapData, BootstrapDataGenerator};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ScriptBootstrapDataGenerator {
@@ -16,8 +16,8 @@ pub struct ScriptBootstrapDataGenerator {
 impl ScriptBootstrapDataGenerator {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        common_config: CommonBootstrapDataGeneratorConfig, 
-        _unique_config: ScriptBootstrapDataGeneratorConfig, 
+        common_config: CommonBootstrapDataGeneratorDefinition, 
+        _unique_config: ScriptBootstrapDataGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         _output_storage: TestRunSourceStorage
     ) -> anyhow::Result<Box<dyn BootstrapDataGenerator + Send + Sync>> {

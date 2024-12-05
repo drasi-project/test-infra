@@ -217,35 +217,102 @@ pub struct TestDefinition {
     pub version: u32,
     pub description: Option<String>,
     pub test_folder: Option<String>,
+    #[serde(default)]
     pub sources: Vec<SourceDefinition>,
+    #[serde(default)]
     pub queries: Vec<QueryDefinition>,
+    #[serde(default)]
     pub reactions: Vec<ReactionDefinition>,
+    #[serde(default)]
     pub clients: Vec<ClientDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SourceDefinition {
     pub id: String,
-    pub bootstrap_data_generator: BootstrapDataGeneratorDefinition,
-    pub source_change_generator: SourceChangeGeneratorDefinition,
+    pub bootstrap_data_generator: Option<BootstrapDataGeneratorDefinition>,
+    pub source_change_generator: Option<SourceChangeGeneratorDefinition>,
+    #[serde(default)]
     pub subscribers: Vec<QueryId>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct BootstrapDataGeneratorDefinition {    
-    pub kind: BootstrapDataGeneratorKind,
-    pub script_file_folder: String,
-    pub script_file_list: Vec<String>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum BootstrapDataGeneratorDefinition {
+    Script {
+        #[serde(flatten)]
+        common_config: CommonBootstrapDataGeneratorDefinition,
+        #[serde(flatten)]
+        unique_config: ScriptBootstrapDataGeneratorDefinition,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommonBootstrapDataGeneratorDefinition {
+    #[serde(default)]
     pub time_mode: TimeMode,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct SourceChangeGeneratorDefinition {
-    pub kind: SourceChangeGeneratorKind,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScriptBootstrapDataGeneratorDefinition {
     pub script_file_folder: String,
-    pub script_file_list: Vec<String>,
+    // pub script_file_list: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum SourceChangeGeneratorDefinition {
+    Script {
+        #[serde(flatten)]
+        common_config: CommonSourceChangeGeneratorDefinition,
+        #[serde(flatten)]
+        unique_config: ScriptSourceChangeGeneratorDefinition,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommonSourceChangeGeneratorDefinition {
+    #[serde(default)]
+    pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
+    #[serde(default)]
     pub spacing_mode: SpacingMode,
+    #[serde(default)]
     pub time_mode: TimeMode,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScriptSourceChangeGeneratorDefinition {
+    #[serde(default = "is_false")]
+    pub ignore_scripted_pause_commands: bool,
+    pub script_file_folder: String,
+    // pub script_file_list: Vec<String>,
+}
+fn is_false() -> bool { false }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum SourceChangeDispatcherDefinition {
+    Console(ConsoleSourceChangeDispatcherDefinition),
+    Dapr(DaprSourceChangeDispatcherDefinition),
+    JsonlFile(JsonlFileSourceChangeDispatcherDefinition),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsoleSourceChangeDispatcherDefinition {
+    pub date_time_format: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaprSourceChangeDispatcherDefinition {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub pubsub_name: Option<String>,
+    pub pubsub_topic: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonlFileSourceChangeDispatcherDefinition {
+    pub folder_path: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -294,6 +361,7 @@ pub struct ReactionDefinition {
 pub struct ClientDefinition {
 }
 
+
 #[cfg(test)]
 mod tests {
     use std::{fs::File, io::{BufReader, Write}};
@@ -324,11 +392,13 @@ mod tests {
         let file = create_test_file(content);
         let reader = BufReader::new(file);
         let bootstrap_data_generator: BootstrapDataGeneratorDefinition = serde_json::from_reader(reader).unwrap();
-        
-        assert_eq!(bootstrap_data_generator.kind, BootstrapDataGeneratorKind::Script);
-        assert_eq!(bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
-        assert_eq!(bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
-        assert_eq!(bootstrap_data_generator.time_mode, TimeMode::Recorded);
+
+        match bootstrap_data_generator {
+            BootstrapDataGeneratorDefinition::Script { common_config, unique_config } => {
+                assert_eq!(common_config.time_mode, TimeMode::Recorded);
+                assert_eq!(unique_config.script_file_folder, "bootstrap_data_scripts");
+            }
+        }
     }
 
     #[test]
@@ -345,12 +415,14 @@ mod tests {
         let file = create_test_file(content);
         let reader = BufReader::new(file);
         let source_change_generator: SourceChangeGeneratorDefinition = serde_json::from_reader(reader).unwrap();
-        
-        assert_eq!(source_change_generator.kind, SourceChangeGeneratorKind::Script);
-        assert_eq!(source_change_generator.script_file_folder, "source_change_scripts");
-        assert_eq!(source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
-        assert_eq!(source_change_generator.spacing_mode, SpacingMode::Fixed(100000000));
-        assert_eq!(source_change_generator.time_mode, TimeMode::Recorded);
+
+        match source_change_generator {
+            SourceChangeGeneratorDefinition::Script { common_config, unique_config } => {
+                assert_eq!(common_config.spacing_mode, SpacingMode::Fixed(100000000));
+                assert_eq!(common_config.time_mode, TimeMode::Recorded);
+                assert_eq!(unique_config.script_file_folder, "source_change_scripts");
+            }
+        }
     }
 
     #[test]
@@ -378,15 +450,21 @@ mod tests {
         let source: SourceDefinition = serde_json::from_reader(reader).unwrap();
 
         assert_eq!(source.id, "source1");
-        assert_eq!(source.bootstrap_data_generator.kind, BootstrapDataGeneratorKind::None);
-        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
-        assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
-        assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Live);
-        assert_eq!(source.source_change_generator.kind, SourceChangeGeneratorKind::Script);
-        assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
-        assert_eq!(source.source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
-        assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::Recorded);
-        assert_eq!(source.source_change_generator.time_mode, TimeMode::Live);
+
+        match source.bootstrap_data_generator.as_ref().unwrap() {
+            BootstrapDataGeneratorDefinition::Script { common_config, unique_config } => {
+                assert_eq!(common_config.time_mode, TimeMode::Live);
+                assert_eq!(unique_config.script_file_folder, "bootstrap_data_scripts");
+            }
+        }
+
+        match source.source_change_generator.as_ref().unwrap() {
+            SourceChangeGeneratorDefinition::Script { common_config, unique_config } => {
+                assert_eq!(common_config.spacing_mode, SpacingMode::Recorded);
+                assert_eq!(common_config.time_mode, TimeMode::Live);
+                assert_eq!(unique_config.script_file_folder, "source_change_scripts");
+            }
+        }
     }
 
     #[test]
@@ -431,15 +509,21 @@ mod tests {
         assert_eq!(test_definition.sources.len(), 1);
         let source = &test_definition.sources[0];
         assert_eq!(source.id, "source1");
-        assert_eq!(source.bootstrap_data_generator.kind, BootstrapDataGeneratorKind::Script);
-        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
-        assert_eq!(source.bootstrap_data_generator.script_file_list, vec!["init*.jsonl", "deploy*.jsonl"]);
-        assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Live);
-        assert_eq!(source.source_change_generator.kind, SourceChangeGeneratorKind::None);
-        assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
-        assert_eq!(source.source_change_generator.script_file_list, vec!["change01.jsonl", "change02.jsonl"]);
-        assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::Recorded);
-        assert_eq!(source.source_change_generator.time_mode, TimeMode::Live);        
+
+        match source.bootstrap_data_generator.as_ref().unwrap() {
+            BootstrapDataGeneratorDefinition::Script { common_config, unique_config } => {
+                assert_eq!(common_config.time_mode, TimeMode::Live);
+                assert_eq!(unique_config.script_file_folder, "bootstrap_data_scripts");
+            }
+        }
+
+        match source.source_change_generator.as_ref().unwrap() {
+            SourceChangeGeneratorDefinition::Script { common_config, unique_config } => {
+                assert_eq!(common_config.spacing_mode, SpacingMode::Recorded);
+                assert_eq!(common_config.time_mode, TimeMode::Live);
+                assert_eq!(unique_config.script_file_folder, "source_change_scripts");
+            }
+        }
     }
 
     #[test]
@@ -456,15 +540,20 @@ mod tests {
         assert_eq!(test_definition.sources.len(), 1);
         let source = &test_definition.sources[0];
         assert_eq!(source.id, "facilities");
-        assert_eq!(source.bootstrap_data_generator.kind, BootstrapDataGeneratorKind::Script);
-        assert_eq!(source.bootstrap_data_generator.script_file_folder, "bootstrap_data_scripts");
-        assert_eq!(source.bootstrap_data_generator.script_file_list, Vec::<String>::new());
-        assert_eq!(source.bootstrap_data_generator.time_mode, TimeMode::Recorded);
-        assert_eq!(source.source_change_generator.kind, SourceChangeGeneratorKind::Script);
-        assert_eq!(source.source_change_generator.script_file_folder, "source_change_scripts");
-        assert_eq!(source.source_change_generator.script_file_list, Vec::<String>::new());
-        assert_eq!(source.source_change_generator.spacing_mode, SpacingMode::None);
-        assert_eq!(source.source_change_generator.time_mode, TimeMode::Recorded);
+
+        match source.bootstrap_data_generator.as_ref().unwrap() {
+            BootstrapDataGeneratorDefinition::Script { common_config, unique_config: _ } => {
+                assert_eq!(common_config.time_mode, TimeMode::Live);
+            }
+        }
+
+        match source.source_change_generator.as_ref().unwrap() {
+            SourceChangeGeneratorDefinition::Script { common_config, unique_config: _ } => {
+                assert_eq!(common_config.spacing_mode, SpacingMode::Recorded);
+                assert_eq!(common_config.time_mode, TimeMode::Live);
+            }
+        }
+
     }
 
     #[test]

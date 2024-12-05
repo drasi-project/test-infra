@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use chrono::prelude::*;
 
-use test_data_store::test_repo_storage::scripts::SourceChangeEvent;
+use test_data_store::test_repo_storage::{models::ConsoleSourceChangeDispatcherDefinition, scripts::SourceChangeEvent};
 
-use super::{ConsoleSourceChangeDispatcherConfig, SourceChangeDispatcher};
+use super::SourceChangeDispatcher;
 
 #[derive(Debug)]
 
@@ -12,7 +12,7 @@ pub struct ConsoleSourceChangeDispatcherSettings {
 }
 
 impl ConsoleSourceChangeDispatcherSettings {
-    pub fn new(config: &ConsoleSourceChangeDispatcherConfig) -> anyhow::Result<Self> {
+    pub fn new(config: &ConsoleSourceChangeDispatcherDefinition) -> anyhow::Result<Self> {
         return Ok(Self {
             date_time_format: config.date_time_format.clone().unwrap_or("%Y-%m-%d %H:%M:%S%.f".to_string()),
         });

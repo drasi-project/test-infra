@@ -8,18 +8,18 @@ use tokio::sync::mpsc::error::TryRecvError::{Empty, Disconnected};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
-use test_data_store::{test_repo_storage::{models::SpacingMode, scripts::{change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode}, scripts::{change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 
 use crate::{
     source_change_dispatchers::{
         console_dispatcher::{ConsoleSourceChangeDispatcher, ConsoleSourceChangeDispatcherSettings}, 
         dapr_dispatcher::{DaprSourceChangeDispatcher, DaprSourceChangeDispatcherSettings}, 
-        jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, SourceChangeDispatcherConfig, 
+        jsonl_file_dispatcher::{JsonlFileSourceChangeDispatcher, JsonlFileSourceChangeDispatcherSettings}, 
     }, TimeMode
 };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
 
-use super::{CommonSourceChangeGeneratorConfig, ScriptSourceChangeGeneratorConfig, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStatus};
+use super::{SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStatus};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScriptSourceGeneratorError {
@@ -48,7 +48,7 @@ pub struct ScriptSourceGeneratorSettings {
     pub id: TestRunSourceId,
     pub ignore_scripted_pause_commands: bool,
     pub input_storage: TestSourceStorage,
-    pub dispatchers: Vec<SourceChangeDispatcherConfig>,
+    pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub output_storage: TestRunSourceStorage,
     pub spacing_mode: SpacingMode,
     pub time_mode: TimeMode,
@@ -57,8 +57,8 @@ pub struct ScriptSourceGeneratorSettings {
 impl ScriptSourceGeneratorSettings {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        common_config: CommonSourceChangeGeneratorConfig, 
-        unique_config: ScriptSourceChangeGeneratorConfig, 
+        common_config: CommonSourceChangeGeneratorDefinition, 
+        unique_config: ScriptSourceChangeGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         output_storage: TestRunSourceStorage
     ) -> anyhow::Result<Self> {
@@ -185,7 +185,7 @@ pub struct ChangeScriptPlayer {
 }
 
 impl ChangeScriptPlayer {
-    pub async fn new(test_run_source_id: TestRunSourceId, common_config: CommonSourceChangeGeneratorConfig, unique_config: ScriptSourceChangeGeneratorConfig, input_storage: TestSourceStorage, output_storage: TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeGenerator + Send + Sync>> {
+    pub async fn new(test_run_source_id: TestRunSourceId, common_config: CommonSourceChangeGeneratorDefinition, unique_config: ScriptSourceChangeGeneratorDefinition, input_storage: TestSourceStorage, output_storage: TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeGenerator + Send + Sync>> {
         let settings = ScriptSourceGeneratorSettings::new(test_run_source_id, common_config, unique_config, input_storage, output_storage).await?;
         log::debug!("Creating ChangeScriptPlayer from {:#?}", &settings);
 
@@ -314,7 +314,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
 
             for dispatcher_config in player_settings.dispatchers.iter() {
                 match dispatcher_config {
-                    SourceChangeDispatcherConfig::Dapr(dapr_config) => {
+                    SourceChangeDispatcherDefinition::Dapr(dapr_config) => {
                         match DaprSourceChangeDispatcherSettings::new(dapr_config, player_settings.id.test_source_id.clone()) {
                             Ok(settings) => {
                                 match DaprSourceChangeDispatcher::new(settings) {
@@ -329,7 +329,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                             }
                         }
                     },
-                    SourceChangeDispatcherConfig::Console(console_config ) => {
+                    SourceChangeDispatcherDefinition::Console(console_config ) => {
                         match ConsoleSourceChangeDispatcherSettings::new(console_config) {
                             Ok(settings) => {
                                 match ConsoleSourceChangeDispatcher::new(settings) {
@@ -344,7 +344,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
                             }
                         }
                     },
-                    SourceChangeDispatcherConfig::JsonlFile(jsonl_file_config) => {
+                    SourceChangeDispatcherDefinition::JsonlFile(jsonl_file_config) => {
                         let folder_path = match &jsonl_file_config.folder_path {
                             Some(config_path) => 
                                 player_settings.output_storage.source_change_path.join(config_path),

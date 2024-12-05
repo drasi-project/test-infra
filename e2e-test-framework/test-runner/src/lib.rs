@@ -4,9 +4,9 @@ use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator, BootstrapDataGeneratorConfig};
-use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorConfig, SourceChangeGeneratorState};
-use test_data_store::{test_repo_storage::{models::{QueryId, SourceDefinition, TimeMode}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, TestDataStore};
+use bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator};
+use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState};
+use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinition, QueryId, SourceChangeGeneratorDefinition, SourceDefinition, TimeMode}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}, TestDataStore};
 
 pub mod bootstrap_data_generators;
 pub mod source_change_generators;
@@ -64,15 +64,15 @@ impl TestRunner {
         Ok(test_runner)
     }
     
-    pub async fn add_test_source(&self, config: TestRunSourceConfig) -> anyhow::Result<TestRunSourceId> {
-        log::trace!("Adding TestRunSource from {:#?}", config);
+    pub async fn add_test_source(&self, test_run_config: TestRunSourceConfig) -> anyhow::Result<TestRunSourceId> {
+        log::trace!("Adding TestRunSource from {:#?}", test_run_config);
 
         // If the TestRunner is in an Error state, return an error.
         if let TestRunnerStatus::Error(msg) = &self.get_status().await? {
             anyhow::bail!("TestRunner is in an Error state: {}", msg);
         };
         
-        let id = TestRunSourceId::try_from(&config)?;
+        let id = TestRunSourceId::try_from(&test_run_config)?;
 
         let mut sources_lock = self.sources.write().await;
 
@@ -83,7 +83,7 @@ impl TestRunner {
 
         // Get the SourceDefinition that the TestRunSource is associated with.
         let test_definition = self.data_store.get_test_definition_for_test_run_source(&id).await?;
-        let source_definition = match test_definition.sources.iter().find(|source| source.id == config.test_source_id)
+        let source_definition = match test_definition.sources.iter().find(|source| source.id == test_run_config.test_source_id)
         {
             Some(source_definition) => source_definition.clone(),
             None => anyhow::bail!("SourceDefinition not found for TestRunSource: {:?}", &id)
@@ -98,7 +98,7 @@ impl TestRunner {
         let output_storage = self.data_store.get_test_run_source_storage(&id).await?;
 
         // Create the TestRunSource and add it to the TestRunner.
-        let test_run_source = TestRunSource::new(config, source_definition, input_storage, output_storage).await?;        
+        let test_run_source = TestRunSource::new(source_definition, test_run_config, input_storage, output_storage).await?;        
 
         let start_immediately = 
             self.get_status().await? == TestRunnerStatus::Running && test_run_source.start_immediately;
@@ -277,8 +277,8 @@ pub struct TestRunSourceConfig {
     pub test_source_id: String,
     #[serde(default = "is_true")]
     pub start_immediately: bool,    
-    pub bootstrap_data_generator: Option<BootstrapDataGeneratorConfig>,
-    pub source_change_generator: Option<SourceChangeGeneratorConfig>,
+    pub bootstrap_data_generator: Option<BootstrapDataGeneratorDefinition>,
+    pub source_change_generator: Option<SourceChangeGeneratorDefinition>,
 }
 fn is_true() -> bool { false }
 fn random_test_run_id() -> String { chrono::Utc::now().format("%Y%m%d%H%M%S").to_string() }
@@ -334,38 +334,46 @@ pub struct TestRunSource {
 
 impl TestRunSource {
     pub async fn new(
-        config: TestRunSourceConfig, 
-        source_definition: SourceDefinition,
+        test_source_definition: SourceDefinition,
+        test_run_source_config: TestRunSourceConfig,
         test_data_store: TestSourceStorage, 
         result_store: TestRunSourceStorage
     ) -> anyhow::Result<Self> {
-        let id = TestRunSourceId::try_from(&config)?;
+
+        let id = TestRunSourceId::try_from(&test_run_source_config)?;
+
+        let SourceDefinition {
+            bootstrap_data_generator: bootstrap_data_generator_definition,
+            source_change_generator: source_change_generator_definition,
+            subscribers,
+            ..
+        } = test_source_definition;
 
         let TestRunSourceConfig { 
-            bootstrap_data_generator: bootstrap_data_generator_config, 
-            source_change_generator: source_change_generator_config, 
+            bootstrap_data_generator: bootstrap_data_generator_overrides, 
+            source_change_generator: source_change_generator_overrides,             
             .. 
-        } = config;
+        } = test_run_source_config;
 
         let bootstrap_data_generator = create_bootstrap_data_generator(
             id.clone(),
-            bootstrap_data_generator_config,
+            bootstrap_data_generator_definition,
+            bootstrap_data_generator_overrides,
             test_data_store.clone(),
             result_store.clone()
         ).await?;
 
         let source_change_generator = create_source_change_generator(
             id.clone(),
-            source_change_generator_config,
+            source_change_generator_definition,
+            source_change_generator_overrides,
             test_data_store,
             result_store
         ).await?;
     
-        let subscribers = source_definition.subscribers.clone();
-
         Ok(Self { 
             id, 
-            start_immediately: config.start_immediately,
+            start_immediately: test_run_source_config.start_immediately,
             bootstrap_data_generator, 
             source_change_generator,
             subscribers

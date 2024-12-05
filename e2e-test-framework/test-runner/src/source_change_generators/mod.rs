@@ -1,41 +1,11 @@
 use async_trait::async_trait;
 
 use change_script_player::ChangeScriptPlayer;
-use serde::{Deserialize, Serialize};
-use test_data_store::{test_repo_storage::{models::{SpacingMode, TimeMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use serde::Serialize;
+use test_data_store::{test_repo_storage::{models::SourceChangeGeneratorDefinition, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 use tokio::sync::oneshot;
 
-use crate::source_change_dispatchers::SourceChangeDispatcherConfig;
-
 pub mod change_script_player;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum SourceChangeGeneratorConfig {
-    Script {
-        #[serde(flatten)]
-        common_config: CommonSourceChangeGeneratorConfig,
-        #[serde(flatten)]
-        unique_config: ScriptSourceChangeGeneratorConfig,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommonSourceChangeGeneratorConfig {
-    #[serde(default)]
-    pub dispatchers: Vec<SourceChangeDispatcherConfig>,
-    #[serde(default)]
-    pub spacing_mode: SpacingMode,
-    #[serde(default)]
-    pub time_mode: TimeMode,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ScriptSourceChangeGeneratorConfig {
-    #[serde(default = "is_false")]
-    pub ignore_scripted_pause_commands: bool,
-}
-fn is_false() -> bool { false }
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeGeneratorError {
@@ -165,13 +135,14 @@ impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
 
 pub async fn create_source_change_generator(
     id: TestRunSourceId, 
-    config: Option<SourceChangeGeneratorConfig>,
+    definition: Option<SourceChangeGeneratorDefinition>,
+    _test_run_overrides: Option<SourceChangeGeneratorDefinition>,
     input_storage: TestSourceStorage, 
     output_storage: TestRunSourceStorage
 ) -> anyhow::Result<Option<Box<dyn SourceChangeGenerator + Send + Sync>>> {
-    match config {
+    match definition {
         None => Ok(None),
-        Some(SourceChangeGeneratorConfig::Script{common_config, unique_config}) => {
+        Some(SourceChangeGeneratorDefinition::Script{common_config, unique_config}) => {
             Ok(Some(Box::new(ChangeScriptPlayer::new(
                 id, 
                 common_config, 

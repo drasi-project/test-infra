@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use drasi_comms_abstractions::comms::{Headers, Publisher};
 use drasi_comms_dapr::comms::DaprHttpPublisher;
 
-use test_data_store::test_repo_storage::scripts::SourceChangeEvent;
+use test_data_store::test_repo_storage::{models::DaprSourceChangeDispatcherDefinition, scripts::SourceChangeEvent};
 
-use super::{DaprSourceChangeDispatcherConfig, SourceChangeDispatcher};
+use super::SourceChangeDispatcher;
 
 #[derive(Debug)]
 pub struct DaprSourceChangeDispatcherSettings {
@@ -16,7 +16,7 @@ pub struct DaprSourceChangeDispatcherSettings {
 }
 
 impl DaprSourceChangeDispatcherSettings {
-    pub fn new(config: &DaprSourceChangeDispatcherConfig, source_id: String) -> anyhow::Result<Self> {
+    pub fn new(config: &DaprSourceChangeDispatcherDefinition, source_id: String) -> anyhow::Result<Self> {
         Ok(Self {
             host: config.host.clone().unwrap_or("127.0.0.1".to_string()),
             port: config.port.unwrap_or(3500),

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use test_data_store::test_repo_storage::models::JsonlFileSourceChangeDispatcherDefinition;
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -6,7 +7,7 @@ use std::path::PathBuf;
 
 use test_data_store::test_repo_storage::scripts::SourceChangeEvent;
 
-use super::{JsonlFileSourceChangeDispatcherConfig, SourceChangeDispatcher, SourceChangeDispatcherError};
+use super::{SourceChangeDispatcher, SourceChangeDispatcherError};
 
 #[derive(Debug)]
 pub struct JsonlFileSourceChangeDispatcherSettings {
@@ -14,7 +15,7 @@ pub struct JsonlFileSourceChangeDispatcherSettings {
 }
 
 impl JsonlFileSourceChangeDispatcherSettings {
-    pub fn new(_config: &JsonlFileSourceChangeDispatcherConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(_config: &JsonlFileSourceChangeDispatcherDefinition, folder_path: PathBuf) -> anyhow::Result<Self> {
         return Ok(Self {
             folder_path,
         });

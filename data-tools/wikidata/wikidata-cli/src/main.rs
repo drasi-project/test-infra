@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{cmp, path::PathBuf};
 
 use chrono::NaiveDateTime;
 use clap::{Args, Parser, Subcommand};
@@ -118,6 +118,13 @@ struct GetTypeCommandArgs {
 impl GetTypeCommandArgs {
     fn get_type_query_args(&self, parent_path: PathBuf, overwrite: bool) -> anyhow::Result<Vec<ItemTypeQueryArgs>> {
 
+        let rev_count = match (self.rev_start, self.rev_end) {
+            // For a date range, the default is to retrieve all revisions; we use a large number,
+            // otherwise the default is to retrieve only 1 revision.
+            (Some(_), Some(_)) => self.rev_count.unwrap_or(9999999),
+            _ => self.rev_count.unwrap_or(1),
+        };
+
         let mut queries = Vec::new();
 
         for item_type in &self.item_types {
@@ -125,7 +132,7 @@ impl GetTypeCommandArgs {
                 folder_path: parent_path.join(item_type.to_string()),
                 item_type: item_type.clone(),
                 overwrite,
-                rev_count: self.rev_count,
+                rev_count,
                 rev_end: self.rev_end.clone(),
                 rev_start: self.rev_start.clone()
             });
@@ -162,12 +169,20 @@ struct GetItemCommandArgs {
 
 impl GetItemCommandArgs {
     fn get_item_list_query_args(&self, parent_path: PathBuf, overwrite: bool) -> anyhow::Result<ItemListQueryArgs> {
+
+        let rev_count = match (self.rev_start, self.rev_end) {
+            // For a date range, the default is to retrieve all revisions; w use a large number,
+            // otherwise the default is to retrieve only 1 revision.
+            (Some(_), Some(_)) => self.rev_count.unwrap_or(9999999),
+            _ => self.rev_count.unwrap_or(1),
+        };
+
         Ok(ItemListQueryArgs {
             folder_path: parent_path.join(self.item_type.to_string()),
             item_type: self.item_type,
             item_ids: self.item_ids.clone(),
             overwrite,
-            rev_count: self.rev_count,
+            rev_count,
             rev_end: self.rev_end.clone(),
             rev_start: self.rev_start.clone()
         })
@@ -197,7 +212,7 @@ struct ItemTypeQueryArgs {
     pub folder_path: PathBuf,
     pub item_type: ItemType,
     pub overwrite: bool,
-    pub rev_count: Option<usize>,
+    pub rev_count: usize,
     pub rev_end: Option<NaiveDateTime>,
     pub rev_start: Option<NaiveDateTime>,
 }
@@ -208,7 +223,7 @@ struct ItemListQueryArgs {
     pub item_type: ItemType,
     pub item_ids: Vec<String>,
     pub overwrite: bool,
-    pub rev_count: Option<usize>,
+    pub rev_count: usize,
     pub rev_end: Option<NaiveDateTime>,
     pub rev_start: Option<NaiveDateTime>,
 }
@@ -219,7 +234,7 @@ struct ItemRevsQueryArgs {
     pub item_type: ItemType,
     pub item_id: String,
     pub overwrite: bool,
-    pub rev_count: Option<usize>,
+    pub rev_count: usize,
     pub rev_end: Option<NaiveDateTime>,
     pub rev_start: Option<NaiveDateTime>,
 }
@@ -442,6 +457,7 @@ async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Result<()
     Ok(())
 }
 
+
 async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Result<()> {        
     log::info!("Download Item Revisions using {:?}", query_args);
 
@@ -452,6 +468,9 @@ async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Resu
     if !query_args.folder_path.exists() {
         fs::create_dir_all(&query_args.folder_path).await?;
     }
+
+    let target_revision_count = query_args.rev_count;
+    let mut fetched_revision_count = 0;
 
     let client = Client::new();
     let mut continuation_token: Option<Continuation> = None;
@@ -488,6 +507,11 @@ async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Resu
                         let mut file = fs::File::create(revision_file).await?;
                         file.write_all(serde_json::to_string(&item_rev_content)?.as_bytes()).await?;
 
+                        fetched_revision_count += 1;
+
+                        if fetched_revision_count >= target_revision_count {
+                            break;
+                        };
                     } else  {
                         log::warn!("No slots found in Item {:?} Revision {:?}", &query_args.item_id, revision.revid);
                     }
@@ -495,17 +519,20 @@ async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Resu
             }
         }
 
-        // Check if there is a continuation token for pagination, if not break the loop;
-        continuation_token = match response.continuation {
-            Some(token) => Some(token),
-            None => break,
-        }; 
+        // If we have reached the desired rev_count or there is no continuation token for pagination, break the loop;
+        if fetched_revision_count >= target_revision_count || response.continuation.is_none() {
+            break;
+        } else {
+            continuation_token = response.continuation;
+        }
     }
 
     Ok(())
 }
 
 fn create_item_revision_request(client: &Client, query_args: &ItemRevsQueryArgs, continuation: Option<Continuation>) -> anyhow::Result<RequestBuilder> {
+
+    let rvlimit: usize = 50;
 
     let mut request = client
         .get("https://www.wikidata.org/w/api.php")
@@ -520,32 +547,43 @@ fn create_item_revision_request(client: &Client, query_args: &ItemRevsQueryArgs,
     request = match (query_args.rev_start, query_args.rev_end) {
         (Some(start_datetime), Some(end_datetime)) => {
             // Get the revisions between the start and end date
+            // If a rev_count is provided, get that number of revisions, otherwise get 1.
+            // Set rvlimit to be smart about how many to fetch with each request.
             if end_datetime < start_datetime {
                 anyhow::bail!("End date must be equal to or after the start date");
             }
             request
+                .query(&[("rvstart", end_datetime.to_string())])
                 .query(&[("rvend", start_datetime.to_string())])
-                .query(&[("rvlimit", query_args.rev_count.unwrap_or(1).to_string())])
-                .query(&[("rvdir", "older".to_string())])
+                .query(&[("rvdir", "older")])
+                .query(&[("rvlimit", 50)])
         }
         (Some(start_datetime), None) => {
-            // Get the count of revisions after to the start date
+            // Get revisions after to the start date
+            // If a rev_count is provided, get that number of revisions, otherwise get 1.
+            // Set rvlimit to be smart about how many to fetch with each request.
             request
-                .query(&[("rvend", start_datetime.to_string())])
-                .query(&[("rvlimit", query_args.rev_count.unwrap_or(1).to_string())])
-                .query(&[("rvdir", "older".to_string())])
+                .query(&[("rvstart", start_datetime.to_string())])
+                .query(&[("rvdir", "newer")])
+                .query(&[("rvlimit", cmp::min(rvlimit, query_args.rev_count).to_string())])
         }
         (None, Some(end_datetime)) => {
-            // Get the count of revisions prior to the end date
+            // Get revisions prior to the end date
+            // If a rev_count is provided, get that number of revisions, otherwise get 1.
+            // Set rvlimit to be smart about how many to fetch with each request.
             request
                 .query(&[("rvstart", end_datetime.to_string())])
-                .query(&[("rvlimit", query_args.rev_count.unwrap_or(1).to_string())])
-                .query(&[("rvdir", "older".to_string())])
-        },
+                .query(&[("rvdir", "older")])
+                .query(&[("rvlimit", cmp::min(rvlimit, query_args.rev_count).to_string())])
+            },
         (None, None) => {
+            // Get revisions prior to NOW.
+            // If a rev_count is provided, get that number of revisions, otherwise get 1.
+            // Set rvlimit to be smart about how many to fetch with each request.
             request
-                .query(&[("rvlimit", query_args.rev_count.unwrap_or(1).to_string())])
-                .query(&[("rvdir", "newer".to_string())])
+            .query(&[("rvstart", "now")])
+            .query(&[("rvdir", "older")])
+            .query(&[("rvlimit", cmp::min(rvlimit, query_args.rev_count).to_string())])
         },
     };
 

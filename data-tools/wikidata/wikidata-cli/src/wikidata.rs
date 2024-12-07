@@ -1,5 +1,8 @@
 use std::{fmt::Display, hash::{Hash, Hasher}, str::FromStr};
 
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
 use clap::ValueEnum;
 
 /// Enum representing the different types of WikiData Item that can be downloaded
@@ -50,39 +53,79 @@ impl Hash for ItemType {
     }
 }
 
-// pub struct WikiDataItemRevision {
-//     pub id: String,
-//     pub item_id: String,
-//     pub timestamp: String,
-//     pub user: String,
-//     pub user_id: String,
-//     pub comment: String,
-//     pub content: String,
-// }
 
-// pub struct Country {
-//     pub id: String,
-//     pub name: String,
-//     pub population: Option<u64>,
-//     pub area: Option<f64>,
-//     pub capital: Option<String>,
-//     pub continent: Option<String>,
-//     pub currency: Option<String>,
-//     pub official_language: Option<String>,
-//     pub calling_code: Option<String>,
-//     pub flag: Option<String>,
-// }
+#[derive(Deserialize, Debug)]
+pub struct ApiResponse {
+    #[serde(rename = "continue")]
+    pub continuation: Option<Continuation>,
+    pub query: Query,
+}
 
-// impl Country {
-//     pub fn new(item_rev: WikiDataItemRevision) {
+#[derive(Deserialize, Debug)]
+pub struct Continuation {
+    #[serde(rename = "continue")]
+    pub continuation: String,
+    pub rvcontinue: String,
+}
 
-//     }
+#[derive(Deserialize, Debug)]
+pub struct Query {
+    pub pages: std::collections::HashMap<String, Page>, // Pages keyed by page ID
+}
 
-//     pub fn get_item_list_query() -> String {
-//         format!("SELECT ?item ?itemLabel WHERE {{
-//             ?item wdt:P31 wd:Q6256.
-//             SERVICE wikibase:label {{ bd:serviceParam wikibase:language \"en\". }}
-//         }}")
-//     }
+#[derive(Deserialize, Debug)]
+pub struct Page {
+    pub pageid: u32,
+    pub ns: u32,
+    pub title: String,    
+    pub revisions: Option<Vec<Revision>>,
+}
 
-// }
+#[derive(Deserialize, Debug, Serialize)]
+pub struct Revision {
+    pub revid: u64,
+    pub parentid: u64,
+    pub timestamp: String,
+    pub user: Option<String>,
+    pub comment: Option<String>,
+    pub slots: Option<std::collections::HashMap<String, Slot>>,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub struct Slot {
+    pub contentmodel: String,
+    pub contentformat: String,
+    #[serde(rename = "*")]
+    pub content: String,
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub struct ItemRevisionFileContent {
+    pub revid: u64,
+    pub parentid: u64,
+    pub timestamp: String,
+    pub user: Option<String>,
+    pub comment: Option<String>,
+    pub content: Option<Value>,
+}
+
+impl ItemRevisionFileContent {
+    pub fn new(revision: &Revision) -> anyhow::Result<Self> {
+        let mut irfc = Self {
+            revid: revision.revid,
+            parentid: revision.parentid,
+            timestamp: revision.timestamp.clone(),
+            user: revision.user.clone(),
+            comment: revision.comment.clone(),
+            content: None,
+        };
+
+        if let Some(slots) = &revision.slots {
+            if let Some(slot) = slots.get("main") {
+                irfc.content = Some(serde_json::from_str(&slot.content)?);
+            }
+        }
+
+        Ok(irfc)
+    }
+}

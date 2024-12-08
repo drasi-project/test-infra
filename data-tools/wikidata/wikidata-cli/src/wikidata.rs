@@ -156,7 +156,7 @@ pub struct ItemListQueryArgs {
 #[derive(Debug)]
 struct ItemRevsQueryArgs {
     pub folder_path: PathBuf,
-    pub item_type: ItemType,
+    // pub item_type: ItemType,
     pub item_id: String,
     pub overwrite: bool,
     pub rev_count: usize,
@@ -199,7 +199,7 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
         let item_id = uri.rsplit('/').next().unwrap();
 
         item_rev_queries.push(ItemRevsQueryArgs {
-            item_type: query_args.item_type.clone(),
+            // item_type: query_args.item_type.clone(),
             item_id: item_id.to_string(),
             folder_path: query_args.folder_path.join(item_id),
             overwrite: query_args.overwrite,
@@ -249,7 +249,7 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
         let item_id = uri.rsplit('/').next().unwrap();
 
         item_rev_queries.push(ItemRevsQueryArgs {
-            item_type: query_args.item_type.clone(),
+            // item_type: query_args.item_type.clone(),
             item_id: item_id.to_string(),
             folder_path: query_args.folder_path.join(item_id),
             overwrite: query_args.overwrite,

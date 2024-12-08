@@ -5,10 +5,11 @@ use clap::ValueEnum;
 use reqwest::{Client, RequestBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use strum_macros::EnumIter;
 use tokio::{fs, io::AsyncWriteExt};
 
 /// Enum representing the different types of WikiData Item that can be downloaded
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, EnumIter, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum ItemType {
     City,
     Country

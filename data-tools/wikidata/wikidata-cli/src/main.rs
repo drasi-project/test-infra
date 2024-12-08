@@ -2,8 +2,11 @@ use std::path::PathBuf;
 
 use chrono::NaiveDateTime;
 use clap::{Args, Parser, Subcommand};
+use script::generate_item_scripts;
+use tokio::fs;
 use wikidata::{download_item_list, download_item_type, ItemListQueryArgs, ItemType, ItemTypeQueryArgs };
 
+mod script;
 mod wikidata;
 
 /// String constant representing the default WikiData data cache folder path
@@ -50,15 +53,15 @@ enum Commands {
         #[arg(short = 'g', long, default_value_t = false)]
         script: bool,
     },    
-    // /// Generate test scripts from the downloaded item data.
-    // Script {
-    //     #[command(flatten)]
-    //     data_selection: ScriptItemCommandArgs,
+    /// Generate test scripts from the downloaded item data.
+    Script {
+        #[command(flatten)]
+        data_selection: ScriptItemCommandArgs,
 
-    //     /// A flag to indicate whether existing files should be overwritten
-    //     #[arg(short = 'o', long, default_value_t = false)]
-    //     overwrite: bool,
-    // },
+        /// A flag to indicate whether existing files should be overwritten
+        #[arg(short = 'o', long, default_value_t = false)]
+        overwrite: bool,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -170,6 +173,10 @@ struct ScriptItemCommandArgs {
     /// Supported formats are here https://docs.rs/chrono/latest/chrono/naive/struct.NaiveDateTime.html#method.parse_from_str
     #[arg(short = 's', long)]
     rev_start: Option<NaiveDateTime>,
+
+    /// The ID of the test to generate scipts for.
+    #[arg(short = 'i', long, )]
+    test_id: String,
 }
 
 #[tokio::main]
@@ -187,15 +194,9 @@ async fn main() {
         Commands::GetItems { data_selection, overwrite, script } => {
             handle_get_items_command(data_selection, cache_folder_path, overwrite, script).await
         }
-        // Commands::Script { data_selection, overwrite } => {
-        //     handle_script_command(data_selection, cache_folder_path, overwrite).await
-        // }
-        // Commands::Load { data_selection, database_url, database_user, database_password } => {
-        //     handle_load_command(data_selection, cache_folder_path, database_url, database_user, database_password).await
-        // },
-        // Commands::InitDB { database_url, database_user, database_password , overwrite} => {
-        //     handle_initdb_command(database_url, database_user, database_password, overwrite).await
-        // }
+        Commands::Script { data_selection, overwrite } => {
+            handle_script_items_command(data_selection, cache_folder_path, overwrite).await
+        }
     };
 
     match res {
@@ -209,7 +210,7 @@ async fn main() {
 }
 
 async fn handle_get_types_command(args: GetTypeCommandArgs, cache_folder_path: PathBuf, overwrite: bool, script: bool ) -> anyhow::Result<()> {
-    log::info!("GetTypes command using {:?}", args);
+    log::info!("Get Types command using {:?}", args);
 
     // Display a summary of what the command is going to do.
     println!("Getting WikiData Types:");
@@ -268,7 +269,7 @@ async fn handle_get_types_command(args: GetTypeCommandArgs, cache_folder_path: P
 }
 
 async fn handle_get_items_command(args: GetItemCommandArgs, cache_folder_path: PathBuf, overwrite: bool, script: bool ) -> anyhow::Result<()> {
-    log::info!("GetItems command using {:?}", args);
+    log::info!("Get Items command using {:?}", args);
 
     // Display a summary of what the command is going to do.
     println!("Getting WikiData Items:");
@@ -284,6 +285,32 @@ async fn handle_get_items_command(args: GetItemCommandArgs, cache_folder_path: P
     // For each Item, download the Item Revisions based on the criteria provided.
     let query_args = args.get_item_list_query_args(item_folder, overwrite)?;
     download_item_list(&query_args).await?;
+
+    Ok(())
+}
+
+async fn handle_script_items_command(args: ScriptItemCommandArgs, cache_folder_path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
+    log::info!("Script Items command using {:?}", args);
+
+    // Display a summary of what the command is going to do.
+    println!("Scripting WikiData Items:");
+    println!("  - test ID: {:?}", &args.test_id);
+    println!("  - date range: {:?} to {:?}", &args.rev_start, &args.rev_end);
+    println!("  - item types: {:?}", &args.item_types);
+    println!("  - cache folder: {:?}", cache_folder_path);
+    println!("  - overwrite: {}", overwrite);
+
+    let script_folder_path = cache_folder_path.join("scripts").join(&args.test_id);
+
+    if overwrite && script_folder_path.exists() {
+        fs::remove_dir_all(&script_folder_path).await?;
+    }
+
+    if !script_folder_path.exists() {
+        fs::create_dir_all(&script_folder_path).await?;
+    }
+
+    generate_item_scripts(&args, script_folder_path).await?;
 
     Ok(())
 }

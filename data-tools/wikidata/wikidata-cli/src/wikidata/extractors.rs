@@ -16,14 +16,27 @@ fn extract_property_value(claims: &Map<String, Value>, prop: &str, get_first: bo
 fn extract_area_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
     let val_opt = extract_property_value(claims, "P2046", true);
     if let Some(val) = val_opt {
-        // log::error!("Area: {:?}", val);
-
         let val = val.get("amount")
             .and_then(|val| val.as_str())
             .unwrap()
             .parse::<f64>()?;
 
         properties.insert("area".to_string(), val.into());
+    };
+
+    Ok(())
+}
+
+// Extract Country Property (P17)
+// This is the ID of the COuntry to which some entity is located in, e.g. a City has this property.
+fn extract_country_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
+    let val_opt = extract_property_value(claims, "P17", true);
+    if let Some(val) = val_opt {
+        let val = val.get("id")
+            .and_then(|val| val.as_str())
+            .unwrap();
+
+        properties.insert("country_id".to_string(), val.into());
     };
 
     Ok(())
@@ -47,9 +60,6 @@ fn extract_coordinate_location_property(claims: &Map<String, Value>, properties:
 fn extract_population_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
     let val_opt = extract_property_value(claims, "P1082", false);
     if let Some(val) = val_opt {
-        // Get the value of the "amount" field turn it into a number.
-        // log::error!("Population: {:?}", val);
-
         let val = val.get("amount")
             .and_then(|val| val.as_str())
             .unwrap()
@@ -117,8 +127,9 @@ fn parse_city_item_props(content: &Value) -> anyhow::Result<Map<String, Value>> 
     let mut properties = serde_json::Map::new();
 
     // Check if "claims" field exists and is an object
-    extract_area_property(claims, &mut properties)?;
+    extract_area_property(claims, &mut properties)?;    
     extract_coordinate_location_property(claims, &mut properties)?;
+    extract_country_property(claims, &mut properties)?;    
     extract_population_property(claims, &mut properties)?;
 
     extract_name_label(content, &mut properties, "en")?;

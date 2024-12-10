@@ -4,7 +4,7 @@ use axum::{response::IntoResponse, Extension, Json};
 use serde::{Deserialize, Serialize, Serializer };
 use serde_json::{json, Value};
 
-use test_data_store::test_repo_storage::scripts::bootstrap_script_file_reader::{NodeRecord, RelationRecord};
+use test_data_store::test_repo_storage::scripts::{NodeRecord, RelationRecord};
 use test_runner::{bootstrap_data_generators::BootstrapData, TestRunner, TestRunnerStatus};
 
 use super::TestServiceWebApiError;

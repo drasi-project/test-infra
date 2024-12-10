@@ -2,6 +2,7 @@ use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 
 pub mod bootstrap_script_file_reader;
+pub mod bootstrap_script_file_writer;
 pub mod change_script_file_reader;
 pub mod change_script_file_writer;
 
@@ -66,13 +67,24 @@ impl std::fmt::Display for SourceChangeEvent {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")] // This will use the "kind" field to determine the enum variant
+pub enum BootstrapScriptRecord {
+    Comment(CommentRecord),
+    Header(BootstrapHeaderRecord),
+    Label(LabelRecord),
+    Node(NodeRecord),
+    Relation(RelationRecord),
+    Finish(BootstrapFinishRecord),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")] // This will use the "kind" field to determine the enum variant
 pub enum ChangeScriptRecord {
     Comment(CommentRecord),
-    Header(HeaderRecord),
+    Header(ChangeHeaderRecord),
     Label(LabelRecord),
     PauseCommand(PauseCommandRecord),
     SourceChange(SourceChangeRecord),
-    Finish(FinishRecord),
+    Finish(ChangeFinishRecord),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -81,15 +93,31 @@ pub struct CommentRecord {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HeaderRecord {
+pub struct BootstrapHeaderRecord {
     pub start_time: DateTime<FixedOffset>,
     #[serde(default)]
     pub description: String,
 }
 
-impl Default for HeaderRecord {
+impl Default for BootstrapHeaderRecord {
     fn default() -> Self {
-        HeaderRecord {
+        BootstrapHeaderRecord {
+            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
+            description: "Error: Header record not found.".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChangeHeaderRecord {
+    pub start_time: DateTime<FixedOffset>,
+    #[serde(default)]
+    pub description: String,
+}
+
+impl Default for ChangeHeaderRecord {
+    fn default() -> Self {
+        ChangeHeaderRecord {
             start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
             description: "Error: Header record not found.".to_string(),
         }
@@ -116,7 +144,13 @@ pub struct PauseCommandRecord {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FinishRecord {
+pub struct BootstrapFinishRecord {
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChangeFinishRecord {
     #[serde(default)]
     pub offset_ns: u64,
     #[serde(default)]
@@ -139,4 +173,24 @@ pub struct SequencedChangeScriptRecord {
     pub seq: u64,
     pub offset_ns: u64,
     pub record: ChangeScriptRecord,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NodeRecord {
+    pub id: String,
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub properties: serde_json::Value
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RelationRecord {
+    pub id: String,
+    pub labels: Vec<String>,
+    pub start_id: String,
+    pub start_label: Option<String>,
+    pub end_id: String,
+    pub end_label: Option<String>,    
+    #[serde(default)]
+    pub properties: serde_json::Value
 }

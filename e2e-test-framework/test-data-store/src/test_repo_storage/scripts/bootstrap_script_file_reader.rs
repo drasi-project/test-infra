@@ -1,7 +1,8 @@
 use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf};
 
-use chrono::{DateTime, FixedOffset};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+use super::{BootstrapScriptRecord, BootstrapFinishRecord, BootstrapHeaderRecord};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BootstrapScriptReaderError {
@@ -13,71 +14,6 @@ pub enum BootstrapScriptReaderError {
     FileReadError(String),
     #[error("Bad record format in file {0}: Error - {1}; Record - {2}")]
     BadRecordFormat(String, String, String),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")] // This will use the "kind" field to determine the enum variant
-pub enum BootstrapScriptRecord {
-    Comment(CommentRecord),
-    Header(HeaderRecord),
-    Label(LabelRecord),
-    Node(NodeRecord),
-    Relation(RelationRecord),
-    Finish(FinishRecord),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommentRecord {
-    pub comment: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HeaderRecord {
-    pub start_time: DateTime<FixedOffset>,
-    #[serde(default)]
-    pub description: String,
-}
-
-impl Default for HeaderRecord {
-    fn default() -> Self {
-        HeaderRecord {
-            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
-            description: "Error: Header record not found.".to_string(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LabelRecord {
-    pub label: String,
-    #[serde(default)]
-    pub description: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NodeRecord {
-    pub id: String,
-    pub labels: Vec<String>,
-    #[serde(default)]
-    pub properties: serde_json::Value
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RelationRecord {
-    pub id: String,
-    pub labels: Vec<String>,
-    pub start_id: String,
-    pub start_label: Option<String>,
-    pub end_id: String,
-    pub end_label: Option<String>,    
-    #[serde(default)]
-    pub properties: serde_json::Value
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FinishRecord {
-    #[serde(default)]
-    pub description: String,
 }
 
 // The SequencedBootstrapScriptRecord struct wraps a BootstrapScriptRecord and ensures that each record has a 
@@ -94,7 +30,7 @@ pub struct BootstrapScriptReader {
     files: Vec<PathBuf>,
     next_file_index: usize,
     current_reader: Option<BufReader<File>>,
-    header: HeaderRecord,
+    header: BootstrapHeaderRecord,
     footer: Option<SequencedBootstrapScriptRecord>,
     seq: u64,
 }
@@ -105,16 +41,11 @@ impl BootstrapScriptReader {
             files,
             next_file_index: 0,
             current_reader: None,
-            header: HeaderRecord::default(),
+            header: BootstrapHeaderRecord::default(),
             footer: None,
             seq: 0,
         };
 
-        // TODO: The first record from a new BootstrapScriptReader should always be a Header record.
-        // Read the first record from the BootstrapScriptReader and check that it is a Header record; if not return an error.
-        // I made this decision to simplify the determination of script starting time. This may need to be revisited, as we could derive
-        // the starting time from the first SourceChangeEvent record. However, we would also need to deal with Label and Pause records that
-        // currently only have offsets, not absolute times. A Header record will do for now and may eventually be useful for other purposes.
         let read_result = reader.get_next_record();
 
         if let Ok(seq_rec) = read_result {
@@ -130,7 +61,7 @@ impl BootstrapScriptReader {
     }
 
     // Function to get the header record from the script.
-    pub fn get_header(&self) -> HeaderRecord {
+    pub fn get_header(&self) -> BootstrapHeaderRecord {
         self.header.clone()
     }
 
@@ -203,7 +134,7 @@ impl BootstrapScriptReader {
         } else {
             // Generate a synthetic Finish record to mark the end of the script.
             self.footer = Some(SequencedBootstrapScriptRecord {
-                record: BootstrapScriptRecord::Finish(FinishRecord { description: "Auto generated at end of script.".to_string() }),
+                record: BootstrapScriptRecord::Finish(BootstrapFinishRecord { description: "Auto generated at end of script.".to_string() }),
                 seq: self.seq,
             });
             Ok(self.footer.as_ref().unwrap().clone())
@@ -240,7 +171,7 @@ impl Iterator for BootstrapScriptReader {
     type Item = anyhow::Result<SequencedBootstrapScriptRecord>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // If the ChangeScriptReader has finished reading all files, return None.
+        // If the BootstrapScriptReader has finished reading all files, return None.
         // This is determined by the value of 'footer', which will be set to a Finish record when the last record is read.
         if self.footer.is_some() {
             None

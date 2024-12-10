@@ -1,6 +1,6 @@
 use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf};
 
-use super::{ChangeScriptRecord, FinishRecord, HeaderRecord, SequencedChangeScriptRecord};
+use super::{ChangeScriptRecord, ChangeFinishRecord, ChangeHeaderRecord, SequencedChangeScriptRecord};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChangeScriptReaderError {
@@ -20,7 +20,7 @@ pub struct ChangeScriptReader {
     files: Vec<PathBuf>,
     next_file_index: usize,
     current_reader: Option<BufReader<File>>,
-    header: HeaderRecord,
+    header: ChangeHeaderRecord,
     footer: Option<SequencedChangeScriptRecord>,
     seq: u64,
     offset_ns: u64,
@@ -32,7 +32,7 @@ impl ChangeScriptReader {
             files,
             next_file_index: 0,
             current_reader: None,
-            header: HeaderRecord::default(),
+            header: ChangeHeaderRecord::default(),
             footer: None,
             seq: 0,
             offset_ns: 0,
@@ -62,7 +62,7 @@ impl ChangeScriptReader {
     // }
 
     // Function to get the header record from the script.
-    pub fn get_header(&self) -> HeaderRecord {
+    pub fn get_header(&self) -> ChangeHeaderRecord {
         self.header.clone()
     }
 
@@ -175,7 +175,7 @@ impl ChangeScriptReader {
         } else {
             // Generate a synthetic Finish record to mark the end of the script.
             self.footer = Some(SequencedChangeScriptRecord {
-                record: ChangeScriptRecord::Finish(FinishRecord { offset_ns: self.offset_ns, description: "Auto generated at end of script.".to_string() }),
+                record: ChangeScriptRecord::Finish(ChangeFinishRecord { offset_ns: self.offset_ns, description: "Auto generated at end of script.".to_string() }),
                 seq: self.seq,
                 offset_ns: self.offset_ns
             });

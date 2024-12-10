@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use bootstrap_script_player::ScriptBootstrapDataGenerator;
 use serde::{Deserialize, Serialize};
-use test_data_store::{test_repo_storage::{models::BootstrapDataGeneratorDefinition, scripts::bootstrap_script_file_reader::{NodeRecord, RelationRecord}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::BootstrapDataGeneratorDefinition, scripts::{NodeRecord, RelationRecord}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 
 mod bootstrap_script_player;
 

@@ -138,7 +138,7 @@ pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path:
         None => "wikidata".to_string(),
     };
 
-    let script_path = script_root_path.join(&args.test_id);
+    let script_path = script_root_path.join( format!("{}/sources/{}", &args.test_id, &source_id));
 
     if overwrite && script_path.exists() {
         fs::remove_dir_all(&script_path).await?;
@@ -162,7 +162,7 @@ pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path:
     ).await?;
     log::error!("Change script source files: {:#?}", change_script_source_files); 
 
-    let change_script_path = script_path.join("change");
+    let change_script_path = script_path.join("source_change_scripts");
     fs::create_dir_all(&change_script_path).await?;
 
     let script_begin_ns = script_begin_datetime.and_utc().timestamp_nanos_opt().unwrap_or_default() as u64;

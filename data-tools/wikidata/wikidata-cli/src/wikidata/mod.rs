@@ -10,8 +10,6 @@ use tokio::{fs, io::AsyncWriteExt};
 
 pub mod extractors;
 
-// use crate::script::{ChangeScriptRecord, SourceChangeEvent, SourceChangeEventPayload};
-
 /// Enum representing the different types of WikiData Item that can be downloaded
 #[derive(Copy, Clone, Debug, PartialEq, EnumIter, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
 pub enum ItemType {
@@ -29,11 +27,19 @@ impl ItemType {
         }
     }
 
-    pub fn as_node_label(&self) -> &str {
+    pub fn as_label(&self) -> &str {
         match self {
             ItemType::City => "City",
             ItemType::Continent => "Continent",
             ItemType::Country => "Country",
+        }
+    }
+
+    pub fn is_node(&self) -> bool {
+        match self {
+            ItemType::City => true,
+            ItemType::Continent => true,
+            ItemType::Country => true,
         }
     }
 }
@@ -155,23 +161,6 @@ impl ItemRevisionFileContent {
 
         Ok(irfc)
     }
-
-    // pub fn try_to_change_script_record(&self) -> anyhow::Result<ChangeScriptRecord> {
-    //     match self.item_type {
-    //         ItemType::City => {
-    //             let city = parse_city(self.content.as_ref().unwrap()).unwrap();
-    //             Ok(ChangeScriptRecord::City(city))
-    //         }
-    //         ItemType::Continent => {
-    //             let continent = try_parse_continent(self.content.as_ref().unwrap()).unwrap();
-    //             Ok(ChangeScriptRecord::Continent(continent))
-    //         }
-    //         ItemType::Country => {
-    //             let country = parse_country(self.content.as_ref().unwrap()).unwrap();
-    //             Ok(ChangeScriptRecord::Country(country))
-    //         }
-    //     }
-    // }
 }
 
 #[derive(Debug)]
@@ -345,16 +334,34 @@ async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Resu
                     // Construct the revision
                     let item_rev_content = ItemRevisionFileContent::new(query_args.item_id.clone(), query_args.item_type, revision)?;
 
+                    // Create a file name and path from the Revision Timestamp
+                    let filename = item_rev_content.timestamp.replace(":", "-").replace("T", "_");
+                    let revision_file = query_args.folder_path.join(format!("{}.json", filename));
+                    
+                    // If the revision file already exists, dont rewrite it.
+                    // This will allow for incremental fetching of content over multiiple runs in case of failure
+                    if revision_file.exists() {
+                        log::warn!("Revision {:?} already exists in Item {:?}", revision.revid, &query_args.item_id);
+                        continue;
+                    }
+
                     if item_rev_content.content.is_some() {
+                        // Skip the revision if its claims don't exist or are empty.
+                        let has_claims = item_rev_content.content
+                            .as_ref().unwrap()
+                            .get("claims")
+                            .map_or(true, |claims| !claims.is_array() || claims.as_array().unwrap().is_empty());
+
+                        if !has_claims {
+                            log::error!("No claims found in Item {:?} Revision {:?}", &query_args.item_id, revision.revid);
+                            continue;
+                        }
+
                         if !query_args.folder_path.exists() {
                             fs::create_dir_all(&query_args.folder_path).await?;
                         }
 
-                        // Create a file name from the Revision Timestamp
-                        let filename = item_rev_content.timestamp.replace(":", "-").replace("T", "_");
-
-                        // Save the revision to a file in the item folder
-                        let revision_file = query_args.folder_path.join(format!("{}.json", filename));
+                        // // Save the revision to a file in the item folder
                         let mut file = fs::File::create(revision_file).await?;
                         file.write_all(serde_json::to_string(&item_rev_content)?.as_bytes()).await?;
 

@@ -1,4 +1,5 @@
 use serde_json::{json, Value, Map};
+use test_data_store::test_repo_storage::scripts::{BootstrapScriptRecord, NodeRecord, RelationRecord};
 
 use super::{ItemRevisionFileContent, ItemType};
 
@@ -124,11 +125,45 @@ pub fn parse_item_revision(item_type:ItemType, revision: &ItemRevisionFileConten
 
     let value = json!({
         "id": revision.item_id,
-        "labels": [item_type.as_node_label()],
+        "labels": [item_type.as_label()],
         "properties": props
     });
 
     Ok(value)
+}
+
+pub fn item_revision_to_bootstrap_data_record(item_type:ItemType, revision: &ItemRevisionFileContent) -> anyhow::Result<BootstrapScriptRecord> {
+
+    let id = revision.item_id.clone();
+
+    let content = match revision.content {
+        Some(ref content) => content,
+        None => anyhow::bail!("No content found in revision"),
+    };
+
+    let properties = match item_type {
+        ItemType::City => parse_city_item_props(content),
+        ItemType::Continent => parse_continent_item_props(content),
+        ItemType::Country => parse_country_item_props(content),
+    }?;
+
+    if item_type.is_node() {
+        return Ok(BootstrapScriptRecord::Node(NodeRecord {
+            id,
+            labels: vec![item_type.as_label().to_string()],
+            properties: json!(properties),
+        }));
+    } else {
+        return Ok(BootstrapScriptRecord::Relation(RelationRecord {
+            id,
+            labels: vec![item_type.as_label().to_string()],
+            start_id: "".to_string(),
+            start_label: None,
+            end_id: "".to_string(),
+            properties: json!(properties),
+            end_label: None,
+    }));
+    }
 }
 
 fn parse_city_item_props(content: &Value) -> anyhow::Result<Map<String, Value>> {

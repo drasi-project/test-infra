@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use chrono::NaiveDateTime;
 use clap::{Args, Parser, Subcommand};
-use script::generate_test_scripts;
+use script::create_test_scripts;
 use wikidata::{download_item_list, download_item_type, ItemListQueryArgs, ItemType, ItemTypeQueryArgs };
 
 mod script;
@@ -161,10 +161,6 @@ impl GetItemCommandArgs {
 
 #[derive(Args, Debug)]
 struct MakeScriptCommandArgs {
-    /// Supported formats are here https://docs.rs/chrono/latest/chrono/naive/struct.NaiveDateTime.html#method.parse_from_str
-    #[arg(short = 'b', long)]
-    begin_script: Option<NaiveDateTime>,
-
     /// The types of WikiData Items to script
     #[arg(short = 't', long, value_enum, value_delimiter=',')]
     item_types: Vec<ItemType>,
@@ -234,43 +230,6 @@ async fn handle_get_types_command(args: GetTypeCommandArgs, cache_folder_path: P
         download_item_type(&query_arg).await?;
     };
 
-    // let downloads = create_gdelt_file_list(
-    //     start_datetime, 
-    //     end_datetime,
-    //     data_selection.data_type.iter().cloned().collect(),
-    //     cache_folder_path,
-    //     overwrite,
-    // ).unwrap();
-
-    // Display the list of files to be downloaded, without taking ownership of the list or content
-    // println!("Download Tasks:");
-    // for file_info in &downloads {
-    //     println!("  - {:?}", file_info);
-    // }
-
-    // Download the files
-    // let download_results = download_item_revisions(downloads).await.unwrap();
-
-    // println!("File download results:");
-    // for file_info in &download_results {
-    //     println!("  - {:?}", file_info);
-    // }
-
-    // Unzip the files if the unzip flag is set
-    // if unzip {
-    //     let unzip_results = unzip_gdelt_files(download_results).await.unwrap();
-
-        // println!("File unzip results:");
-        // for file_info in &unzip_results {
-        //     println!("  - {:?}", file_info);
-        // }
-
-        // summarize_fileinfo_results(unzip_results);
-
-    // } else {
-        // summarize_fileinfo_results(download_results);
-    // }
-
     Ok(())
 }
 
@@ -302,7 +261,6 @@ async fn handle_make_script_command(args: MakeScriptCommandArgs, cache_folder_pa
     println!("Scripting WikiData Types:");
     println!("  - test ID: {:?}", &args.test_id);
     println!("  - source ID: {:?}", &args.source_id);
-    println!("  - begin script: {:?}", &args.begin_script);
     println!("  - date range: {:?} to {:?}", &args.rev_start, &args.rev_end);
     println!("  - item types: {:?}", &args.item_types);
     println!("  - cache folder: {:?}", cache_folder_path);
@@ -311,7 +269,7 @@ async fn handle_make_script_command(args: MakeScriptCommandArgs, cache_folder_pa
     let item_root_path = cache_folder_path.join("items");
     let script_root_path = cache_folder_path.join("scripts");
 
-    generate_test_scripts(&args, item_root_path, script_root_path, overwrite).await?;
+    create_test_scripts(&args, item_root_path, script_root_path, overwrite).await?;
 
     Ok(())
 }

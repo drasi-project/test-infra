@@ -1,16 +1,69 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use chrono::{NaiveDateTime, ParseError};
+use chrono::{FixedOffset, NaiveDateTime, ParseError, TimeZone};
+use serde::Serialize;
 use strum::IntoEnumIterator;
+use test_data_store::test_repo_storage::scripts::bootstrap_script_file_writer::{BootstrapScriptWriter, BootstrapScriptWriterSettings};
 use test_data_store::test_repo_storage::scripts::change_script_file_writer::{ChangeScriptWriter, ChangeScriptWriterSettings};
-use test_data_store::test_repo_storage::scripts::{ChangeScriptRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo, SourceChangeRecord};
+use test_data_store::test_repo_storage::scripts::{BootstrapHeaderRecord, BootstrapScriptRecord, ChangeHeaderRecord, ChangeScriptRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo, SourceChangeRecord};
 use tokio::fs;
 
+use crate::wikidata::extractors::item_revision_to_bootstrap_data_record;
 use crate::MakeScriptCommandArgs;
 use crate::wikidata::{ItemRevisionFileContent, ItemType, extractors::parse_item_revision};
 
-pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path: PathBuf, script_root_path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
+#[derive(Debug, Serialize)]
+pub struct ScriptSourceFiles {
+    start_datetime: NaiveDateTime,
+    start_datetime_ns: u64,
+    end_datetime: NaiveDateTime,
+    bootstrap_script_files: HashMap<ItemType, Vec<(NaiveDateTime, PathBuf)>>,
+    change_script_files: Vec<(NaiveDateTime, ItemType, PathBuf, Option<(NaiveDateTime, PathBuf)>)>,
+}
+
+async fn create_bootstrap_data_record(item_type: ItemType, path: PathBuf) -> anyhow::Result<BootstrapScriptRecord> {
+    let revision_file_str = fs::read_to_string(path).await?;
+    let item_revision: ItemRevisionFileContent = serde_json::from_str(&revision_file_str)?;
+
+    item_revision_to_bootstrap_data_record(item_type, &item_revision)
+}
+
+async fn create_source_change_record(item_type: ItemType, op: String, offset_ns: u64, ts_ms: u64, source: SourceChangeEventSourceInfo, before: Option<PathBuf>, after: Option<PathBuf>) -> anyhow::Result<ChangeScriptRecord> {
+    let before = match before {
+        Some(path) => {
+            let revision_file_str = fs::read_to_string(path).await?;
+            let item_revision: ItemRevisionFileContent = serde_json::from_str(&revision_file_str)?;
+            parse_item_revision(item_type, &item_revision)?
+        },
+        None => serde_json::json!({}),
+    };
+
+    let after = match after {
+        Some(path) => {
+            let revision_file_str = fs::read_to_string(path).await?;
+            let item_revision: ItemRevisionFileContent = serde_json::from_str(&revision_file_str)?;
+            parse_item_revision(item_type, &item_revision)?
+        },
+        None => serde_json::json!({}),
+    };
+
+    Ok(ChangeScriptRecord::SourceChange(SourceChangeRecord {
+        offset_ns,
+        source_change_event: SourceChangeEvent {
+            op,
+            ts_ms,
+            schema: "".to_string(),
+            payload: SourceChangeEventPayload {
+                source,
+                before,
+                after,
+            }
+        }
+    }))
+}
+
+pub async fn create_test_scripts(args: &MakeScriptCommandArgs, item_root_path: PathBuf, script_root_path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
     log::info!("Generating test scripts for test ID: {}", args.test_id);
 
     // Create the list of item type folder paths to generate scripts for
@@ -34,8 +87,8 @@ pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path:
             (NaiveDateTime::MIN, NaiveDateTime::MAX)
         },
     };
+    let start_datetime_ns = start_datetime.and_utc().timestamp_nanos_opt().unwrap() as u64;
 
-    let script_begin_datetime = args.begin_script.unwrap_or(start_datetime);
     let source_id = match &args.source_id {
         Some(id) => id.clone(),
         None => "wikidata".to_string(),
@@ -51,176 +104,185 @@ pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path:
         fs::create_dir_all(&script_path).await?;
     }
 
-    let bootstrap_script_source_files = get_bootstrap_script_source_files(
+    let script_source_files = select_script_source_files(
         type_paths.clone(),
         start_datetime,
         end_datetime,
     ).await?;
-    log::error!("Bootstrap script source files: {:#?}", bootstrap_script_source_files);
 
-    let change_script_source_files = get_change_script_source_files(
-        type_paths.clone(),
-        start_datetime,
-        end_datetime,
-    ).await?;
-    log::error!("Change script source files: {:#?}", change_script_source_files); 
+    // Write the list of source files to the script folder for reference.
+    let script_source_files_path = script_path.join("script_source_files.json");
+    fs::write(&script_source_files_path, serde_json::to_string_pretty(&script_source_files)?).await?;
 
-    let change_script_path = script_path.join("source_change_scripts");
-    fs::create_dir_all(&change_script_path).await?;
+    // GENERATE BOOTSTRAP SCRIPTS
+    // Create the bootstrap script files from script_source_files.bootstrap_script_files
+    for (item_type, item_files) in script_source_files.bootstrap_script_files {
+        log::trace!("Processing bootstrap script files for type: {:?}", item_type);
 
-    let script_begin_ns = script_begin_datetime.and_utc().timestamp_nanos_opt().unwrap_or_default() as u64;
-    let mut lsn = 0;
+        // Create the Bootstrap Script Writer and write the header record.
+        let bootstrap_script_path = script_path.join("bootstrap_scripts").join(item_type.as_label());
+        let mut bootstrap_script_writer = BootstrapScriptWriter::new(
+            BootstrapScriptWriterSettings {
+                folder_path: bootstrap_script_path,
+                script_name: "init".to_string(),
+                max_size: Some(100),
+        })?;
+        let header = BootstrapScriptRecord::Header(BootstrapHeaderRecord {
+            start_time: FixedOffset::east_opt(0).unwrap().from_utc_datetime(&start_datetime),
+            description: format!("Drasi Bootstrap Data Script for TestID {}, SourceID: {}",args.test_id, source_id),
+        });
+        bootstrap_script_writer.write_record(&header)?;
+    
+        for (_, path) in item_files {
+            log::trace!("Processing bootstrap script file: {:?}", path);
+            bootstrap_script_writer.write_record(&create_bootstrap_data_record(item_type, path).await?)?;
+        }
+    }
 
-    let change_script_settings = ChangeScriptWriterSettings {
-        folder_path: change_script_path.clone(),
-        script_name: "change_log".to_string(),
-        max_size: Some(100)    
+    // GENERATE CHANGE SCRIPTS
+    // Create the Change Script Writer and write the header record.
+    let mut change_script_writer = ChangeScriptWriter::new(
+        ChangeScriptWriterSettings {
+            folder_path: script_path.clone(),
+            script_name: "source_change_scripts".to_string(),
+            max_size: Some(1000)    
+    })?;
+    let header = ChangeScriptRecord::Header(ChangeHeaderRecord {
+        start_time: FixedOffset::east_opt(0).unwrap().from_utc_datetime(&start_datetime),
+        description: format!("Drasi Source Change Script for TestID {}, SourceID: {}",args.test_id, source_id),
+    });
+    change_script_writer.write_record(&header)?;
+
+    let mut lsn: u64 = 0;
+    let source_info = SourceChangeEventSourceInfo {
+        db: source_id.clone(),
+        table: "node".to_string(),
+        ts_ms: 0,
+        ts_sec: 0,
+        lsn,
     };
 
-    let mut script_writer = ChangeScriptWriter::new(change_script_settings)?;
+    for (timestamp, item_type, path, previous) in script_source_files.change_script_files {
+        log::trace!("Processing change script file: {:?}", path);
 
-    for (timestamp, item_type, path) in change_script_source_files {
-        // Read the revision from the file.
-        let revision_file_str = fs::read_to_string(path).await?;
-        let item_revision: ItemRevisionFileContent = serde_json::from_str(&revision_file_str)?;        
+        if timestamp >= start_datetime && timestamp <= end_datetime {
+            let ts_ns = timestamp.and_utc().timestamp_nanos_opt().unwrap_or_default() as u64;
+            let source_info = SourceChangeEventSourceInfo {
+                ts_ms: ts_ns / 1_000_000,
+                ts_sec: ts_ns / 1_000_000_000,
+                lsn,
+                ..source_info.clone()
+            };
 
-        let ts_ns = timestamp.and_utc().timestamp_nanos_opt().unwrap_or_default() as u64;
-        let ts_ms = ts_ns / 1_000_000;
-        let ts_sec = ts_ms / 1_000;
-
-        let script_record = ChangeScriptRecord::SourceChange(SourceChangeRecord {
-            offset_ns: ts_ns - script_begin_ns,
-            source_change_event: SourceChangeEvent {
-                op: "u".to_string(),
-                ts_ms,
-                schema: "".to_string(),
-                payload: SourceChangeEventPayload {
-                    source: SourceChangeEventSourceInfo {
-                        db: source_id.clone(),
-                        table: "node".to_string(),
-                        ts_ms,
-                        ts_sec,
-                        lsn,
-                    },
-                    before: parse_item_revision(item_type, &item_revision)?,
-                    after: serde_json::json!({}),
+            let (op, before_path, after_path) = match previous {
+                Some((_, prev_path)) => {
+                    ("u".to_string(), Some(prev_path.clone()), Some(path.clone()))
                 },
-            },
-        });
+                None => {
+                    ("i".to_string(), None, Some(path.clone()))
+                }
+            }; 
 
-        script_writer.write_record(&script_record)?;
+            let rec_create = create_source_change_record(
+                item_type, op, ts_ns - start_datetime_ns, source_info.ts_ms, source_info, before_path, after_path);
 
-        lsn += 1;
+            match rec_create.await {
+                Ok(record) => {
+                    change_script_writer.write_record(&record)?;
+                    lsn += 1;
+                },
+                Err(e) => {
+                    log::error!("Error creating source change record from revision: {:?}, error: {:?}", path.clone(), e);
+                }
+            }
+        };
     }
 
     Ok(())
 }
 
-/// Parses the timestamp from a filename and returns a NaiveDateTime.
-fn parse_timestamp_from_filename(file_name: &str) -> Result<NaiveDateTime, ParseError> {
+fn parse_timestamp_from_filename(file_name: &str) -> anyhow::Result<NaiveDateTime, ParseError> {
     NaiveDateTime::parse_from_str(file_name.trim_end_matches(".json"), "%Y-%m-%d_%H-%M-%SZ")
 }
 
-/// Gets the bootstrap script files based on the requirements.
-pub async fn get_bootstrap_script_source_files(
-    type_paths: Vec<(ItemType, PathBuf)>,
-    start_datetime: NaiveDateTime,
-    end_datetime: NaiveDateTime,
-) -> anyhow::Result<HashMap<ItemType, Vec<(NaiveDateTime, PathBuf)>>> {
-    let mut result = HashMap::new();
+pub async fn select_script_source_files( 
+    item_type_paths: Vec<(ItemType, PathBuf)>, start_datetime: NaiveDateTime, end_datetime: NaiveDateTime,
+) -> anyhow::Result<ScriptSourceFiles> {
 
-    for (item_type, type_path) in type_paths {
-        if !type_path.exists() || !type_path.is_dir() {
+    let mut bootstrap_script_files = HashMap::new();
+    let mut change_script_files = Vec::new();
+
+    // Loop through the item type folders.
+    for (item_type, item_type_path) in item_type_paths {
+        if !item_type_path.exists() || !item_type_path.is_dir() {
             continue;
         }
 
-        let mut type_files = Vec::new();
+        let mut item_type_bootstrap_files: Vec<(NaiveDateTime, PathBuf)> = Vec::new();
 
-        if let Ok(mut items) = fs::read_dir(type_path).await {
+        if let Ok(mut items) = fs::read_dir(item_type_path).await {
             while let Some(item) = items.next_entry().await? {
                 let item_path = item.path();
                 if !item_path.is_dir() {
                     continue;
                 }
 
-                // Find the oldest revision file within the date range.
-                let mut oldest_file: Option<(NaiveDateTime, PathBuf)> = None;
-                if let Ok(mut files) = fs::read_dir(item_path).await {
-                    while let Some(file) = files.next_entry().await? {
-                        if let Some(file_name) = file.file_name().to_str() {
-                            if let Ok(timestamp) = parse_timestamp_from_filename(file_name) {
-                                if timestamp >= start_datetime && timestamp <= end_datetime {
-                                    match &oldest_file {
-                                        Some((oldest_time, _)) if &timestamp < oldest_time => {
-                                            oldest_file = Some((timestamp, file.path()))
-                                        }
-                                        None => oldest_file = Some((timestamp, file.path())),
-                                        _ => {}
-                                    }
-                                }
-                            }
+                let mut item_revision_files: Vec<(NaiveDateTime, PathBuf)> = Vec::new();
+
+                let mut files = fs::read_dir(item_path).await?;
+                while let Some(file) = files.next_entry().await? {
+                    let file_path = file.path();
+                    if let Some(file_name) = file_path.file_name().and_then(|f| f.to_str()) {
+                        if file_name.ends_with(".json") {
+                            item_revision_files.push((parse_timestamp_from_filename(file_name)?, file_path));
                         }
                     }
                 }
 
-                if let Some((timestamp, path)) = oldest_file {
-                    type_files.push((timestamp, path));
-                }
-            }
-        }
+                item_revision_files.sort_by_key(|(timestamp, _)| *timestamp);
 
-        if !type_files.is_empty() {
-            result.insert(item_type, type_files);
-        }
-    }
+                let mut selected_item_rev_files: Vec<(NaiveDateTime, ItemType, PathBuf, Option<(NaiveDateTime, PathBuf)>)> = Vec::new();
+                let mut bootstrap_rev: Option<(NaiveDateTime, PathBuf)> = None;
+                let mut prev_rev: Option<(NaiveDateTime, PathBuf)> = None;
 
-    Ok(result)
-}
-
-/// Gets the change script files based on the requirements.
-pub async fn get_change_script_source_files(
-    type_paths: Vec<(ItemType, PathBuf)>,
-    start_datetime: NaiveDateTime,
-    end_datetime: NaiveDateTime,
-) -> anyhow::Result<Vec<(NaiveDateTime, ItemType, PathBuf)>> {
-    let mut result = Vec::new();
-
-    for (item_type, type_path) in type_paths {
-        if !type_path.exists() || !type_path.is_dir() {
-            continue;
-        }
-
-        if let Ok(mut items) = fs::read_dir(type_path).await {
-            while let Some(item) = items.next_entry().await? {
-                let item_path = item.path();
-                if !item_path.is_dir() {
-                    continue;
-                }
-
-                let mut valid_files = Vec::new();
-
-                if let Ok(mut files) = fs::read_dir(item_path).await {
-                    while let Some(file) = files.next_entry().await? {
-                        if let Some(file_name) = file.file_name().to_str() {
-                            if let Ok(timestamp) = parse_timestamp_from_filename(file_name) {
-                                if timestamp >= start_datetime && timestamp <= end_datetime {
-                                    valid_files.push((timestamp, item_type, file.path()));
-                                }
-                            }
-                        }
+                // Iterate through the possible item_revision_files and select only those that fall in the time range for inclusion
+                // in the change_script. Handle identification of bootstrap revisions.
+                for (timestamp, path) in item_revision_files {
+                    if timestamp < start_datetime {
+                        bootstrap_rev = Some((timestamp, path.clone()));
+                        prev_rev = Some((timestamp, path));
+                    } else if timestamp >= start_datetime && timestamp <= end_datetime {
+                        selected_item_rev_files.push((timestamp, item_type, path.clone(), prev_rev));
+                        prev_rev = Some((timestamp, path));
+                    } else if timestamp > end_datetime {
+                        break;
                     }
                 }
 
-                // Sort files by timestamp and discard the oldest.
-                valid_files.sort_by_key(|(timestamp, _, _)| *timestamp);
-                if valid_files.len() > 1 {
-                    result.extend(valid_files.into_iter().skip(1));
+                if let Some((timestamp, path)) = bootstrap_rev {
+                    item_type_bootstrap_files.push((timestamp, path));
+                }
+
+                if selected_item_rev_files.len() > 1 {
+                    change_script_files.extend(selected_item_rev_files.into_iter());
                 }
             }
         }
+
+        if item_type_bootstrap_files.len() > 0 {
+            bootstrap_script_files.insert(item_type, item_type_bootstrap_files);
+        };
     }
 
-    // Sort the result by timestamp.
-    result.sort_by_key(|(timestamp, _, _)| *timestamp);
+    change_script_files.sort_by_key(|(timestamp, _, _, _)| *timestamp);
+
+    let result = ScriptSourceFiles {
+        bootstrap_script_files,
+        change_script_files,
+        start_datetime,
+        start_datetime_ns: start_datetime.and_utc().timestamp_nanos_opt().unwrap() as u64,
+        end_datetime,
+    };
+
     Ok(result)
 }

@@ -1,11 +1,111 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use chrono::{NaiveDateTime, ParseError};
+
+use chrono::{DateTime, FixedOffset, NaiveDateTime, ParseError};
+use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use tokio::fs;
 
 use crate::MakeScriptCommandArgs;
-use crate::wikidata::ItemType;
+use crate::wikidata::{ItemRevisionFileContent, ItemType, extractors::parse_item_revision};
+
+type SourceChangeEventBefore = serde_json::Value; // Arbitrary JSON object for before
+type SourceChangeEventAfter = serde_json::Value; // Arbitrary JSON object for after
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceChangeEvent {
+    pub op: String,
+    pub ts_ms: u64,
+    pub schema: String,
+    pub payload: SourceChangeEventPayload,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceChangeEventPayload {
+    pub source: SourceChangeEventSourceInfo,
+    pub before: SourceChangeEventBefore, 
+    pub after: SourceChangeEventAfter,  
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceChangeEventSourceInfo {
+    pub db: String,
+    pub table: String,
+    pub ts_ms: u64,
+    pub ts_sec: u64,
+    pub lsn: u64,
+}
+
+impl std::fmt::Display for SourceChangeEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+
+        match serde_json::to_string(self) {
+            Ok(json_data) => {
+                let json_data_unescaped = json_data
+                    .replace("\\\"", "\"") 
+                    .replace("\\'", "'"); 
+
+                write!(f, "{}", json_data_unescaped)
+            },
+            Err(e) => return write!(f, "Error serializing SourceChangeEvent: {:?}. Error: {}", self, e),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")] // This will use the "kind" field to determine the enum variant
+pub enum ChangeScriptRecord {
+    Comment(CommentRecord),
+    Header(HeaderRecord),
+    Label(LabelRecord),
+    SourceChange(SourceChangeRecord),
+    Finish(FinishRecord),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommentRecord {
+    pub comment: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HeaderRecord {
+    pub start_time: DateTime<FixedOffset>,
+    #[serde(default)]
+    pub description: String,
+}
+
+impl Default for HeaderRecord {
+    fn default() -> Self {
+        HeaderRecord {
+            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
+            description: "Error: Header record not found.".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LabelRecord {
+    #[serde(default)]
+    pub offset_ns: u64,
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FinishRecord {
+    #[serde(default)]
+    pub offset_ns: u64,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceChangeRecord {
+    #[serde(default)]
+    pub offset_ns: u64,
+    pub source_change_event: SourceChangeEvent,
+}
 
 pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path: PathBuf, script_root_path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
     log::info!("Generating test scripts for test ID: {}", args.test_id);
@@ -32,6 +132,12 @@ pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path:
         },
     };
 
+    let script_begin_datetime = args.begin_script.unwrap_or(start_datetime);
+    let source_id = match &args.source_id {
+        Some(id) => id.clone(),
+        None => "wikidata".to_string(),
+    };
+
     let script_path = script_root_path.join(&args.test_id);
 
     if overwrite && script_path.exists() {
@@ -55,6 +161,51 @@ pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path:
         end_datetime,
     ).await?;
     log::error!("Change script source files: {:#?}", change_script_source_files); 
+
+    let change_script_path = script_path.join("change");
+    fs::create_dir_all(&change_script_path).await?;
+
+    let script_begin_ns = script_begin_datetime.and_utc().timestamp_nanos_opt().unwrap_or_default() as u64;
+    let mut lsn = 0;
+
+    for (timestamp, item_type, path) in change_script_source_files {
+        let script_file_name = format!("{}.json", timestamp.format("%Y-%m-%d_%H-%M-%SZ"));
+
+        // Read the revision from the file.
+        let revision_file_str = fs::read_to_string(path).await?;
+        let item_revision: ItemRevisionFileContent = serde_json::from_str(&revision_file_str)?;        
+
+        let ts_ns = timestamp.and_utc().timestamp_nanos_opt().unwrap_or_default() as u64;
+        let ts_ms = ts_ns / 1_000_000;
+        let ts_sec = ts_ms / 1_000;
+
+        let script_record = ChangeScriptRecord::SourceChange(SourceChangeRecord {
+            offset_ns: ts_ns - script_begin_ns,
+            source_change_event: SourceChangeEvent {
+                op: "u".to_string(),
+                ts_ms,
+                schema: "".to_string(),
+                payload: SourceChangeEventPayload {
+                    source: SourceChangeEventSourceInfo {
+                        db: source_id.clone(),
+                        table: "node".to_string(),
+                        ts_ms,
+                        ts_sec,
+                        lsn,
+                    },
+                    before: parse_item_revision(item_type, &item_revision)?,
+                    after: serde_json::json!({}),
+                },
+            },
+        });
+
+        let script_data = serde_json::to_string_pretty(&script_record)?;
+
+        let script_file_path = change_script_path.join(&script_file_name);
+        fs::write(&script_file_path, script_data).await?;
+
+        lsn += 1;
+    }
 
     Ok(())
 }
@@ -125,10 +276,10 @@ pub async fn get_change_script_source_files(
     type_paths: Vec<(ItemType, PathBuf)>,
     start_datetime: NaiveDateTime,
     end_datetime: NaiveDateTime,
-) -> anyhow::Result<Vec<(NaiveDateTime, PathBuf)>> {
+) -> anyhow::Result<Vec<(NaiveDateTime, ItemType, PathBuf)>> {
     let mut result = Vec::new();
 
-    for (_, type_path) in type_paths {
+    for (item_type, type_path) in type_paths {
         if !type_path.exists() || !type_path.is_dir() {
             continue;
         }
@@ -147,7 +298,7 @@ pub async fn get_change_script_source_files(
                         if let Some(file_name) = file.file_name().to_str() {
                             if let Ok(timestamp) = parse_timestamp_from_filename(file_name) {
                                 if timestamp >= start_datetime && timestamp <= end_datetime {
-                                    valid_files.push((timestamp, file.path()));
+                                    valid_files.push((timestamp, item_type, file.path()));
                                 }
                             }
                         }
@@ -155,7 +306,7 @@ pub async fn get_change_script_source_files(
                 }
 
                 // Sort files by timestamp and discard the oldest.
-                valid_files.sort_by_key(|(timestamp, _)| *timestamp);
+                valid_files.sort_by_key(|(timestamp, _, _)| *timestamp);
                 if valid_files.len() > 1 {
                     result.extend(valid_files.into_iter().skip(1));
                 }
@@ -164,6 +315,6 @@ pub async fn get_change_script_source_files(
     }
 
     // Sort the result by timestamp.
-    result.sort_by_key(|(timestamp, _)| *timestamp);
+    result.sort_by_key(|(timestamp, _, _)| *timestamp);
     Ok(result)
 }

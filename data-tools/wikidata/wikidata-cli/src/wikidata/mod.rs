@@ -8,18 +8,32 @@ use serde_json::Value;
 use strum_macros::EnumIter;
 use tokio::{fs, io::AsyncWriteExt};
 
+pub mod extractors;
+
+// use crate::script::{ChangeScriptRecord, SourceChangeEvent, SourceChangeEventPayload};
+
 /// Enum representing the different types of WikiData Item that can be downloaded
-#[derive(Copy, Clone, Debug, PartialEq, EnumIter, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, EnumIter, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
 pub enum ItemType {
     City,
+    Continent,
     Country
 }
 
 impl ItemType {
-    pub fn as_id(&self) -> &str {
+    pub fn as_wikidata_id(&self) -> &str {
         match self {
             ItemType::City => "Q515",
+            ItemType::Continent => "Q5107",
             ItemType::Country => "Q6256",
+        }
+    }
+
+    pub fn as_node_label(&self) -> &str {
+        match self {
+            ItemType::City => "City",
+            ItemType::Continent => "Continent",
+            ItemType::Country => "Country",
         }
     }
 }
@@ -32,6 +46,7 @@ impl FromStr for ItemType {
 
         match input.as_str() {
             "city" => Ok(ItemType::City),
+            "continent" => Ok(ItemType::Continent),
             "country" => Ok(ItemType::Country),
             _ => Err(format!("Unknown variant: {}", input)),
         }
@@ -42,6 +57,7 @@ impl Display for ItemType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ItemType::City => write!(f, "city"),
+            ItemType::Continent => write!(f, "continent"),
             ItemType::Country => write!(f, "country"),
         }
     }
@@ -51,6 +67,7 @@ impl Hash for ItemType {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             ItemType::City => "city".hash(state),
+            ItemType::Continent => "continent".hash(state),
             ItemType::Country => "country".hash(state),
         }
     }
@@ -90,6 +107,7 @@ pub struct Revision {
     pub parentid: u64,
     pub timestamp: String,
     pub user: Option<String>,
+    pub userid: Option<u64>,
     pub comment: Option<String>,
     pub slots: Option<std::collections::HashMap<String, Slot>>,
 }
@@ -104,21 +122,27 @@ pub struct Slot {
 
 #[derive(Deserialize, Debug, Serialize)]
 pub struct ItemRevisionFileContent {
-    pub revid: u64,
-    pub parentid: u64,
+    pub item_id: String,
+    pub item_type: ItemType,
+    pub rev_id: u64,
+    pub parent_id: u64,
     pub timestamp: String,
     pub user: Option<String>,
+    pub user_id: Option<u64>,
     pub comment: Option<String>,
     pub content: Option<Value>,
 }
 
 impl ItemRevisionFileContent {
-    pub fn new(revision: &Revision) -> anyhow::Result<Self> {
+    pub fn new(item_id: String, item_type: ItemType, revision: &Revision) -> anyhow::Result<Self> {
         let mut irfc = Self {
-            revid: revision.revid,
-            parentid: revision.parentid,
+            item_id,
+            item_type,
+            rev_id: revision.revid,
+            parent_id: revision.parentid,
             timestamp: revision.timestamp.clone(),
             user: revision.user.clone(),
+            user_id: revision.userid.clone(),
             comment: revision.comment.clone(),
             content: None,
         };
@@ -131,6 +155,23 @@ impl ItemRevisionFileContent {
 
         Ok(irfc)
     }
+
+    // pub fn try_to_change_script_record(&self) -> anyhow::Result<ChangeScriptRecord> {
+    //     match self.item_type {
+    //         ItemType::City => {
+    //             let city = parse_city(self.content.as_ref().unwrap()).unwrap();
+    //             Ok(ChangeScriptRecord::City(city))
+    //         }
+    //         ItemType::Continent => {
+    //             let continent = try_parse_continent(self.content.as_ref().unwrap()).unwrap();
+    //             Ok(ChangeScriptRecord::Continent(continent))
+    //         }
+    //         ItemType::Country => {
+    //             let country = parse_country(self.content.as_ref().unwrap()).unwrap();
+    //             Ok(ChangeScriptRecord::Country(country))
+    //         }
+    //     }
+    // }
 }
 
 #[derive(Debug)]
@@ -157,7 +198,7 @@ pub struct ItemListQueryArgs {
 #[derive(Debug)]
 struct ItemRevsQueryArgs {
     pub folder_path: PathBuf,
-    // pub item_type: ItemType,
+    pub item_type: ItemType,
     pub item_id: String,
     pub overwrite: bool,
     pub rev_count: usize,
@@ -179,7 +220,7 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
     // SPARQL query for items of the specified type
     let sparql_query = format!( 
         r#"SELECT ?item WHERE {{ ?item wdt:P31 wd:{}.}}"#, 
-        query_args.item_type.as_id() 
+        query_args.item_type.as_wikidata_id() 
     );
 
     let client = Client::new();
@@ -200,7 +241,7 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
         let item_id = uri.rsplit('/').next().unwrap();
 
         item_rev_queries.push(ItemRevsQueryArgs {
-            // item_type: query_args.item_type.clone(),
+            item_type: query_args.item_type,
             item_id: item_id.to_string(),
             folder_path: query_args.folder_path.join(item_id),
             overwrite: query_args.overwrite,
@@ -228,7 +269,7 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
 
     let sparql_query = format!( 
         r#"SELECT ?item WHERE {{ ?item wdt:P31 wd:{}. VALUES ?item {{ {} }} }}"#, 
-        query_args.item_type.as_id(), 
+        query_args.item_type.as_wikidata_id(), 
         item_list_string
     );
 
@@ -250,7 +291,7 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
         let item_id = uri.rsplit('/').next().unwrap();
 
         item_rev_queries.push(ItemRevsQueryArgs {
-            // item_type: query_args.item_type.clone(),
+            item_type: query_args.item_type,
             item_id: item_id.to_string(),
             folder_path: query_args.folder_path.join(item_id),
             overwrite: query_args.overwrite,
@@ -297,12 +338,12 @@ async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Resu
             if let Some(revisions) = &page.revisions {
                 for revision in revisions {
                     log::trace!(
-                        "Item ID {:?}, Revision ID: {}, Timestamp: {}, User: {:?}, Comment: {:?}",
-                        &query_args.item_id, revision.revid, revision.timestamp, revision.user, revision.comment
+                        "Item ID {:?}, Revision ID: {}, Timestamp: {}, User: {:?}, UserId: {:?}, Comment: {:?}",
+                        &query_args.item_id, revision.revid, revision.timestamp, revision.user, revision.userid, revision.comment
                     );
 
                     // Construct the revision
-                    let item_rev_content = ItemRevisionFileContent::new(revision)?;
+                    let item_rev_content = ItemRevisionFileContent::new(query_args.item_id.clone(), query_args.item_type, revision)?;
 
                     if item_rev_content.content.is_some() {
                         if !query_args.folder_path.exists() {
@@ -350,7 +391,7 @@ fn create_item_revision_request(client: &Client, query_args: &ItemRevsQueryArgs,
         .query(&[("format", "json")])
         .query(&[("prop", "revisions")])
         .query(&[("titles", query_args.item_id.clone())])
-        .query(&[("rvprop", "ids|timestamp|user|comment|content")])
+        .query(&[("rvprop", "ids|timestamp|user|userid|comment|content")])
         .query(&[("rvslots", "main")])
         .header("User-Agent", "DrasiWikiDataCli/0.1 (info@drasi.io)");
 

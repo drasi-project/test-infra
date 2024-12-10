@@ -161,10 +161,14 @@ impl GetItemCommandArgs {
 
 #[derive(Args, Debug)]
 struct MakeScriptCommandArgs {
+    /// Supported formats are here https://docs.rs/chrono/latest/chrono/naive/struct.NaiveDateTime.html#method.parse_from_str
+    #[arg(short = 'b', long)]
+    begin_script: Option<NaiveDateTime>,
+
     /// The types of WikiData Items to script
     #[arg(short = 't', long, value_enum, value_delimiter=',')]
     item_types: Vec<ItemType>,
-
+    
     /// Supported formats are here https://docs.rs/chrono/latest/chrono/naive/struct.NaiveDateTime.html#method.parse_from_str
     #[arg(short = 'e', long)]
     rev_end: Option<NaiveDateTime>,
@@ -173,6 +177,9 @@ struct MakeScriptCommandArgs {
     #[arg(short = 's', long)]
     rev_start: Option<NaiveDateTime>,
 
+    #[arg(short = 'd', long)]
+    source_id: Option<String>,
+    
     /// The ID of the test to generate scipts for.
     #[arg(short = 'i', long, )]
     test_id: String,
@@ -294,6 +301,8 @@ async fn handle_make_script_command(args: MakeScriptCommandArgs, cache_folder_pa
     // Display a summary of what the command is going to do.
     println!("Scripting WikiData Types:");
     println!("  - test ID: {:?}", &args.test_id);
+    println!("  - source ID: {:?}", &args.source_id);
+    println!("  - begin script: {:?}", &args.begin_script);
     println!("  - date range: {:?} to {:?}", &args.rev_start, &args.rev_end);
     println!("  - item types: {:?}", &args.item_types);
     println!("  - cache folder: {:?}", cache_folder_path);

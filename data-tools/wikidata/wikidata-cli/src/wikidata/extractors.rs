@@ -27,16 +27,16 @@ fn extract_area_property(claims: &Map<String, Value>, properties: &mut Map<Strin
     Ok(())
 }
 
-// Extract Country Property (P17)
-// This is the ID of the COuntry to which some entity is located in, e.g. a City has this property.
-fn extract_country_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
-    let val_opt = extract_property_value(claims, "P17", true);
+// Extract Continent Property (P30)
+// This is the ID of the Continent to which some entity is located in, e.g. a Country has this property.
+fn extract_continent_id_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
+    let val_opt = extract_property_value(claims, "P30", true);
     if let Some(val) = val_opt {
         let val = val.get("id")
             .and_then(|val| val.as_str())
             .unwrap();
 
-        properties.insert("country_id".to_string(), val.into());
+        properties.insert("continent_id".to_string(), val.into());
     };
 
     Ok(())
@@ -51,6 +51,21 @@ fn extract_coordinate_location_property(claims: &Map<String, Value>, properties:
 
         let val = format!("{},{}", lat, lon);
         properties.insert("coordinate_location".to_string(), val.into());
+    };
+
+    Ok(())
+}
+
+// Extract Country Property (P17)
+// This is the ID of the Country to which some entity is located in, e.g. a City has this property.
+fn extract_country_id_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
+    let val_opt = extract_property_value(claims, "P17", true);
+    if let Some(val) = val_opt {
+        let val = val.get("id")
+            .and_then(|val| val.as_str())
+            .unwrap();
+
+        properties.insert("country_id".to_string(), val.into());
     };
 
     Ok(())
@@ -129,7 +144,7 @@ fn parse_city_item_props(content: &Value) -> anyhow::Result<Map<String, Value>> 
     // Check if "claims" field exists and is an object
     extract_area_property(claims, &mut properties)?;    
     extract_coordinate_location_property(claims, &mut properties)?;
-    extract_country_property(claims, &mut properties)?;    
+    extract_country_id_property(claims, &mut properties)?;    
     extract_population_property(claims, &mut properties)?;
 
     extract_name_label(content, &mut properties, "en")?;
@@ -170,6 +185,7 @@ fn parse_country_item_props(content: &Value) -> anyhow::Result<Map<String, Value
     // Check if "claims" field exists and is an object
     extract_area_property(claims, &mut properties)?;
     extract_population_property(claims, &mut properties)?;
+    extract_continent_id_property(claims, &mut properties)?;    
     extract_coordinate_location_property(claims, &mut properties)?;
 
     extract_name_label(content, &mut properties, "en")?;

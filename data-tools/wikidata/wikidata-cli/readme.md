@@ -45,6 +45,9 @@ https://www.wikidata.org/wiki/Property:P1082
 area
 https://www.wikidata.org/wiki/Property:P2046
 
+continent_id
+https://www.wikidata.org/wiki/Property:P30
+
 coordinate_location
 https://www.wikidata.org/wiki/Property:P625
 
@@ -59,12 +62,10 @@ https://www.wikidata.org/wiki/Property:P1082
 
 
 
-
+TODO
 Life Expectancy
 https://www.wikidata.org/wiki/Property:P2250
 
-Continent
-https://www.wikidata.org/wiki/Property:P30
 
 Capital
 https://www.wikidata.org/wiki/Property:P36
@@ -103,7 +104,7 @@ https://www.wikidata.org/wiki/Property:P1082
 
 
 
-
+TODO
 
 Founded / Inception
 https://www.wikidata.org/wiki/Property:P571

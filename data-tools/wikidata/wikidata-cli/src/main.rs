@@ -66,7 +66,7 @@ enum Commands {
 #[derive(Args, Debug)]
 struct GetTypeCommandArgs {
     /// The types of WikiData Items to get
-    #[arg(short = 't', long, value_enum, default_value = "city", value_delimiter=',')]
+    #[arg(short = 't', long, value_enum, default_value = "", value_delimiter=',')]
     item_types: Vec<ItemType>,
 
     /// The maximum number of Item Revisions to get

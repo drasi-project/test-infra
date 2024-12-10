@@ -1,111 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use chrono::{DateTime, FixedOffset, NaiveDateTime, ParseError};
-use serde::{Deserialize, Serialize};
+use chrono::{NaiveDateTime, ParseError};
 use strum::IntoEnumIterator;
+use test_data_store::test_repo_storage::scripts::change_script_file_writer::{ChangeScriptWriter, ChangeScriptWriterSettings};
+use test_data_store::test_repo_storage::scripts::{ChangeScriptRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo, SourceChangeRecord};
 use tokio::fs;
 
 use crate::MakeScriptCommandArgs;
 use crate::wikidata::{ItemRevisionFileContent, ItemType, extractors::parse_item_revision};
-
-type SourceChangeEventBefore = serde_json::Value; // Arbitrary JSON object for before
-type SourceChangeEventAfter = serde_json::Value; // Arbitrary JSON object for after
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceChangeEvent {
-    pub op: String,
-    pub ts_ms: u64,
-    pub schema: String,
-    pub payload: SourceChangeEventPayload,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceChangeEventPayload {
-    pub source: SourceChangeEventSourceInfo,
-    pub before: SourceChangeEventBefore, 
-    pub after: SourceChangeEventAfter,  
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceChangeEventSourceInfo {
-    pub db: String,
-    pub table: String,
-    pub ts_ms: u64,
-    pub ts_sec: u64,
-    pub lsn: u64,
-}
-
-impl std::fmt::Display for SourceChangeEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-
-        match serde_json::to_string(self) {
-            Ok(json_data) => {
-                let json_data_unescaped = json_data
-                    .replace("\\\"", "\"") 
-                    .replace("\\'", "'"); 
-
-                write!(f, "{}", json_data_unescaped)
-            },
-            Err(e) => return write!(f, "Error serializing SourceChangeEvent: {:?}. Error: {}", self, e),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")] // This will use the "kind" field to determine the enum variant
-pub enum ChangeScriptRecord {
-    Comment(CommentRecord),
-    Header(HeaderRecord),
-    Label(LabelRecord),
-    SourceChange(SourceChangeRecord),
-    Finish(FinishRecord),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommentRecord {
-    pub comment: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HeaderRecord {
-    pub start_time: DateTime<FixedOffset>,
-    #[serde(default)]
-    pub description: String,
-}
-
-impl Default for HeaderRecord {
-    fn default() -> Self {
-        HeaderRecord {
-            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
-            description: "Error: Header record not found.".to_string(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LabelRecord {
-    #[serde(default)]
-    pub offset_ns: u64,
-    pub label: String,
-    #[serde(default)]
-    pub description: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FinishRecord {
-    #[serde(default)]
-    pub offset_ns: u64,
-    #[serde(default)]
-    pub description: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceChangeRecord {
-    #[serde(default)]
-    pub offset_ns: u64,
-    pub source_change_event: SourceChangeEvent,
-}
 
 pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path: PathBuf, script_root_path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
     log::info!("Generating test scripts for test ID: {}", args.test_id);
@@ -168,9 +71,15 @@ pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path:
     let script_begin_ns = script_begin_datetime.and_utc().timestamp_nanos_opt().unwrap_or_default() as u64;
     let mut lsn = 0;
 
-    for (timestamp, item_type, path) in change_script_source_files {
-        let script_file_name = format!("{}.json", timestamp.format("%Y-%m-%d_%H-%M-%SZ"));
+    let change_script_settings = ChangeScriptWriterSettings {
+        folder_path: change_script_path.clone(),
+        script_name: "change_log".to_string(),
+        max_size: Some(100)    
+    };
 
+    let mut script_writer = ChangeScriptWriter::new(change_script_settings)?;
+
+    for (timestamp, item_type, path) in change_script_source_files {
         // Read the revision from the file.
         let revision_file_str = fs::read_to_string(path).await?;
         let item_revision: ItemRevisionFileContent = serde_json::from_str(&revision_file_str)?;        
@@ -199,10 +108,7 @@ pub async fn generate_test_scripts(args: &MakeScriptCommandArgs, item_root_path:
             },
         });
 
-        let script_data = serde_json::to_string_pretty(&script_record)?;
-
-        let script_file_path = change_script_path.join(&script_file_name);
-        fs::write(&script_file_path, script_data).await?;
+        script_writer.write_record(&script_record)?;
 
         lsn += 1;
     }

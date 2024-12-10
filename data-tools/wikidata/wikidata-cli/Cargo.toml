@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+test-data-store = { path = "../../../e2e-test-framework/test-data-store" }
+
 anyhow = "1.0.86"
 async_zip = { version = "0.0.17", features = ["full"] }
 chrono = { version = "0.4.38", features = ["serde"] }

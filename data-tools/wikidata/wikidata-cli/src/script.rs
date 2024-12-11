@@ -120,12 +120,12 @@ pub async fn create_test_scripts(args: &MakeScriptCommandArgs, item_root_path: P
         log::trace!("Processing bootstrap script files for type: {:?}", item_type);
 
         // Create the Bootstrap Script Writer and write the header record.
-        let bootstrap_script_path = script_path.join("bootstrap_scripts").join(item_type.as_label());
+        let bootstrap_script_path = script_path.join("bootstrap_scripts");
         let mut bootstrap_script_writer = BootstrapScriptWriter::new(
             BootstrapScriptWriterSettings {
                 folder_path: bootstrap_script_path,
-                script_name: "init".to_string(),
-                max_size: Some(100),
+                script_name: item_type.as_label().to_string(),
+                max_size: Some(1000),
         })?;
         let header = BootstrapScriptRecord::Header(BootstrapHeaderRecord {
             start_time: FixedOffset::east_opt(0).unwrap().from_utc_datetime(&start_datetime),

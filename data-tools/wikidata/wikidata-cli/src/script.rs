@@ -135,7 +135,16 @@ pub async fn create_test_scripts(args: &MakeScriptCommandArgs, item_root_path: P
     
         for (_, path) in item_files {
             log::trace!("Processing bootstrap script file: {:?}", path);
-            bootstrap_script_writer.write_record(&create_bootstrap_data_record(item_type, path).await?)?;
+
+            let rec_create = create_bootstrap_data_record(item_type, path.clone()).await;
+            match rec_create {
+                Ok(record) => {
+                    bootstrap_script_writer.write_record(&record)?;
+                },
+                Err(e) => {
+                    log::error!("Error creating bootstrap data record from revision: {:?}, error: {:?}", path, e);
+                }
+            }
         }
     }
 

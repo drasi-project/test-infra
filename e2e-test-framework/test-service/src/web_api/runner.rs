@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use test_runner::{TestRunSourceConfig, TestRunner, TestRunnerStatus};
+use test_runner::{test_run_sources::TestRunSourceConfig, TestRunner, TestRunnerStatus};
 
 use super::TestServiceWebApiError;
 

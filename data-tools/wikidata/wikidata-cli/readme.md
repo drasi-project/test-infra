@@ -1,12 +1,17 @@
 # Demo
 
-Get Continent Data
+Continent Data
+cargo run -- get-types -o -t continent  -s 2010-01-01T00:00:00 -e 2024-12-10T01:00:00
+
+cargo run -- make-script -o -d geo-db -t continent -i allens-continent-test -s 2018-01-01T00:00:00 -e 2024-12-10T01:00:00
 
 Get Country Data
-cargo run -- get-types -o -t country -c 3 
+cargo run -- get-types -o -t country  -s 2010-01-01T00:00:00 -e 2024-12-10T01:00:00
 
 Get City Data
 
+
+cargo run -- make-script -d geo-db -t continent,country,city -i city_populations -s 2018-01-01T00:00:00 -e 2024-12-10T01:00:00
 
 # WikiData URLs
 

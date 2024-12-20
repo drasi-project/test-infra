@@ -283,3 +283,25 @@ impl TestRunner {
         Ok(TestRunnerStatus::Running)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use test_data_store::TestDataStore;
+
+    use crate::{TestRunner, TestRunnerConfig, TestRunnerStatus};
+
+    #[tokio::test]
+    async fn test_new_testrunner() -> anyhow::Result<()> {
+
+        let data_store = Arc::new(TestDataStore::new_temp(None).await?);    
+        
+        let test_runner_config = TestRunnerConfig::default();
+        let test_runner = TestRunner::new(test_runner_config, data_store.clone()).await.unwrap();
+
+        assert_eq!(test_runner.get_status().await?, TestRunnerStatus::Initialized);
+
+        Ok(())
+    }
+}

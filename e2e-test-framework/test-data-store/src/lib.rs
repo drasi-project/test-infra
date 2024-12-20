@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use serde::{Deserialize, Serialize};
+use tempfile::TempDir;
 use test_run_storage::{TestRunId, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
@@ -99,6 +100,41 @@ impl TestDataStore {
             data_collection_store,
             delete_on_stop: config.delete_on_stop.unwrap_or(false),
             root_path: root_path.clone(),
+            test_repo_store,
+            test_run_store,
+        };
+
+        Ok(test_data_store)
+    }
+
+    pub async fn new_temp(test_repos: Option<Vec<TestRepoConfig>>) -> anyhow::Result<Self> {
+        log::debug!("Creating temporary TestDataStore with repos: {:?}", &test_repos);
+
+        let root_path = TempDir::new().unwrap().into_path();
+
+        let data_collection_store = Arc::new(Mutex::new(
+            DataCollectionStore::new(
+                DEFAULT_DATA_COLLECTION_STORE_FOLDER.to_string(),
+                root_path.clone(), 
+                false).await?));
+
+        let test_repo_store = Arc::new(Mutex::new(
+            TestRepoStore::new(
+                DEFAULT_TEST_REPO_STORE_FOLDER.to_string(),
+                root_path.clone(), 
+                false, 
+                test_repos).await?));
+
+        let test_run_store = Arc::new(Mutex::new(
+            TestRunStore::new(
+                DEFAULT_TEST_RUN_STORE_FOLDER.to_string(),
+                root_path.clone(),
+                false).await?));
+    
+        let test_data_store = TestDataStore {
+            data_collection_store,
+            delete_on_stop: true,
+            root_path: root_path,
             test_repo_store,
             test_run_store,
         };
@@ -224,4 +260,69 @@ impl Drop for TestDataStore {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_repo_storage::repo_clients::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig, LocalStorageTestRepoConfig, TestRepoConfig};
+
+    use super::TestDataStore;
+    
+    #[tokio::test]
+    async fn test_temp_testdatastore() -> anyhow::Result<()>{
+        let data_store = TestDataStore::new_temp(None).await?;
+    
+        let temp_dir_path = data_store.root_path.clone();
+        assert_eq!(temp_dir_path.exists(), true);
+    
+        assert_eq!(data_store.get_data_collection_ids().await?.is_empty(), true);
+        assert_eq!(data_store.get_test_repo_ids().await?.is_empty(), true);
+        assert_eq!(data_store.get_test_run_ids().await?.is_empty(), true);
+    
+        drop(data_store);
+    
+        assert_eq!(temp_dir_path.exists(), false);
+    
+        Ok(())
+    }    
+
+    #[tokio::test]
+    async fn test_temp_testdatastore_initial_test_repos() -> anyhow::Result<()>{
+
+        let mut test_repos: Vec<TestRepoConfig> = Vec::new();
+
+        test_repos.push(TestRepoConfig::LocalStorage { 
+            common_config: CommonTestRepoConfig { id: "test_repo_1".to_string() },
+            unique_config: LocalStorageTestRepoConfig { source_path: None }
+        });
+
+        test_repos.push(TestRepoConfig::LocalStorage { 
+            common_config: CommonTestRepoConfig { id: "test_repo_2".to_string() },
+            unique_config: LocalStorageTestRepoConfig { source_path: Some("test_source_path".to_string()) }
+        });
+
+        test_repos.push(TestRepoConfig::AzureStorageBlob { 
+            common_config: CommonTestRepoConfig { id: "test_repo_3".to_string() },
+            unique_config: AzureStorageBlobTestRepoConfig {
+                account_name: "test_account_name".to_string(),
+                access_key: "test_access_key".to_string(),
+                container: "test_container".to_string(),
+                force_cache_refresh: false,
+                root_path: "test_root_path".to_string(),
+            }
+        });
+
+        let data_store = TestDataStore::new_temp(Some(test_repos)).await?;
+    
+        assert_eq!(data_store.get_data_collection_ids().await?.is_empty(), true);
+        assert_eq!(data_store.get_test_run_ids().await?.is_empty(), true);
+
+        let test_repo_ids = data_store.get_test_repo_ids().await?;
+        assert_eq!(test_repo_ids.len(), 3);
+        assert_eq!(test_repo_ids.contains(&"test_repo_1".to_string()), true);
+        assert_eq!(test_repo_ids.contains(&"test_repo_2".to_string()), true);
+        assert_eq!(test_repo_ids.contains(&"test_repo_3".to_string()), true);
+        
+        Ok(())
+    }   
 }

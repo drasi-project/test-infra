@@ -166,50 +166,50 @@ impl<'de> Deserialize<'de> for SpacingMode {
 //     }
 // }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum SourceChangeGeneratorKind {
-    None,
-    Script,
-}
+// #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// pub enum SourceChangeGeneratorKind {
+//     None,
+//     Script,
+// }
 
-impl Default for SourceChangeGeneratorKind {
-    fn default() -> Self {
-        Self::None
-    }
-}
+// impl Default for SourceChangeGeneratorKind {
+//     fn default() -> Self {
+//         Self::None
+//     }
+// }
 
-impl FromStr for SourceChangeGeneratorKind {
-    type Err = anyhow::Error;
+// impl FromStr for SourceChangeGeneratorKind {
+//     type Err = anyhow::Error;
 
-    fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s {
-            "None" => Ok(Self::None),
-            "Script" => Ok(Self::Script),
-            _ => {
-                anyhow::bail!("Invalid SourceChangeGeneratorKind: {}", s);
-            }
-        }
-    }
-}
+//     fn from_str(s: &str) -> anyhow::Result<Self> {
+//         match s {
+//             "None" => Ok(Self::None),
+//             "Script" => Ok(Self::Script),
+//             _ => {
+//                 anyhow::bail!("Invalid SourceChangeGeneratorKind: {}", s);
+//             }
+//         }
+//     }
+// }
 
-impl std::fmt::Display for SourceChangeGeneratorKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::None => write!(f, "None"),
-            Self::Script => write!(f, "Script"),
-        }
-    }
-}
+// impl std::fmt::Display for SourceChangeGeneratorKind {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             Self::None => write!(f, "None"),
+//             Self::Script => write!(f, "Script"),
+//         }
+//     }
+// }
 
-impl<'de> Deserialize<'de> for SourceChangeGeneratorKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value: String = Deserialize::deserialize(deserializer)?;
-        value.parse::<SourceChangeGeneratorKind>().map_err(de::Error::custom)
-    }
-}
+// impl<'de> Deserialize<'de> for SourceChangeGeneratorKind {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: Deserializer<'de>,
+//     {
+//         let value: String = Deserialize::deserialize(deserializer)?;
+//         value.parse::<SourceChangeGeneratorKind>().map_err(de::Error::custom)
+//     }
+// }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TestDefinition {

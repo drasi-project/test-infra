@@ -168,7 +168,7 @@ pub struct SourceChangeRecord {
 // sequence number and an offset_ns field. The sequence number is the order in which the record was read
 // from the script files. The offset_ns field the nanos since the start of the script starting time, 
 // which is the start_time field in the Header record.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SequencedChangeScriptRecord {
     pub seq: u64,
     pub offset_ns: u64,

@@ -202,7 +202,6 @@ mod tests {
 
     use config::{RedisSourceChangeQueueReaderConfig, SourceChangeQueueReaderConfig, SourceChangeRecorderConfig};
     use test_data_store::{TestDataStore, TestDataStoreConfig};
-    use tokio::fs::remove_dir_all;
 
     use super::*;
 
@@ -215,7 +214,8 @@ mod tests {
         let data_store_config = TestDataStoreConfig {
             data_collection_folder: None,
             data_store_path: Some(data_store_path),
-            delete_data_store: Some(true),
+            delete_on_start: Some(true),
+            delete_on_stop: Some(true),
             test_repos: None,
             test_repo_folder: None,
             test_run_folder: None,
@@ -230,8 +230,8 @@ mod tests {
         // Check that the DataCollector is in the Initialized state.
         assert_eq!(data_collector.get_status().await?, DataCollectorStatus::Initialized);
 
-        // Delete the data cache folder and test that the operation was successful;
-        assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
+        // Ensure the Data Store folder was removed.
+        assert_eq!(data_store_path_buf.exists(), false);
 
         Ok(())
     }
@@ -245,7 +245,8 @@ mod tests {
         let data_store_config = TestDataStoreConfig {
             data_collection_folder: None,
             data_store_path: Some(data_store_path),
-            delete_data_store: Some(true),
+            delete_on_start: Some(true),
+            delete_on_stop: Some(true),
             test_repos: None,
             test_repo_folder: None,
             test_run_folder: None,
@@ -286,8 +287,8 @@ mod tests {
         // Stop the Source, which will stop the SourceChangeRecorder
         // data_collector.stop_data_collection_source("hello-world", "beacon").await.unwrap();        
 
-        // Delete the data cache folder and test that the operation was successful;
-        assert_eq!(remove_dir_all(data_store_path_buf).await.is_ok(), true);
+        // Ensure the Data Store folder was removed.
+        assert_eq!(data_store_path_buf.exists(), false);
 
         Ok(())
     }

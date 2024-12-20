@@ -36,7 +36,7 @@ impl BootstrapDataGenerator for ScriptBootstrapDataGenerator {
 
         let mut bootstrap_data = BootstrapData::new();
 
-        let data = self.input_storage.get_dataset().await?;
+        let data = self.input_storage.get_script_files().await?;
 
         for (label, files) in data.bootstrap_data_script_files {
             if node_labels.contains(&label) {

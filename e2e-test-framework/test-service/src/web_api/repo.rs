@@ -4,7 +4,7 @@ use axum::{ extract::{Extension, Path}, response::IntoResponse, routing::get, Js
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use test_data_store::{test_repo_storage::{models::TestDefinition, repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestSourceDataset, TestSourceStorage, TestStorage}, TestDataStore};
+use test_data_store::{test_repo_storage::{models::TestDefinition, repo_clients::TestRepoConfig, TestRepoStorage, TestSourceScriptSet, TestSourceStorage, TestStorage}, TestDataStore};
 
 use super::TestServiceWebApiError;
 
@@ -62,7 +62,7 @@ pub struct TestSourcePostBody {
 pub struct TestSourceResponse {
     pub id: String,    
     pub path: String,
-    pub dataset: TestSourceDataset,
+    pub dataset: TestSourceScriptSet,
 }
 
 #[allow(dead_code)]
@@ -71,7 +71,7 @@ impl TestSourceResponse {
         Ok(TestSourceResponse {
             id: test_source.id.clone(),
             path: test_source.path.to_string_lossy().to_string(),
-            dataset: test_source.get_dataset().await?,
+            dataset: test_source.get_script_files().await?,
         })
     }
 }
@@ -101,7 +101,7 @@ pub async fn get_test_repo_test_list_handler(
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_list - repo_id:{}", repo_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
     let test_ids = repo.get_test_ids().await?;
     Ok(Json(test_ids).into_response())
 }
@@ -112,8 +112,8 @@ pub async fn get_test_repo_test_source_list_handler(
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_source_list - repo_id:{}, test_id:{}", repo_id, test_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
-    let test = repo.get_test(&test_id, false).await?;
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
+    let test = repo.get_test_storage(&test_id).await?;
     let source_ids = test.get_test_source_ids().await?;
     Ok(Json(source_ids).into_response())
 }
@@ -124,7 +124,7 @@ pub async fn get_test_repo_handler (
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo - repo_id:{}", repo_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
     Ok(Json(TestRepoResponse::new(&repo).await?).into_response())
 }
 
@@ -134,8 +134,8 @@ pub async fn get_test_repo_test_handler (
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test - repo_id:{}, test_id:{}", repo_id, test_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
-    let test = repo.get_test(&test_id, false).await?;
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
+    let test = repo.get_test_storage(&test_id).await?;
     Ok(Json(TestResponse::new(&test).await?).into_response())
 }
 
@@ -145,8 +145,8 @@ pub async fn get_test_repo_test_source_handler (
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_source - repo_id:{}, test_id:{}, source_id:{}", repo_id, test_id, source_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
-    let test = repo.get_test(&test_id, false).await?;
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
+    let test = repo.get_test_storage(&test_id).await?;
     let source = test.get_test_source(&source_id, false).await?;
     Ok(Json(TestSourceResponse::new(&source).await?).into_response())
 }
@@ -157,7 +157,7 @@ pub async fn post_test_repo_handler (
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_test_repo");
 
-    let repo_config: RemoteTestRepoConfig = serde_json::from_value(body.0)?;
+    let repo_config: TestRepoConfig = serde_json::from_value(body.0)?;
 
     let repo = test_data_store.test_repo_store.lock().await.add_test_repo(repo_config, false).await?;
     Ok(Json(TestRepoResponse::new(&repo).await?).into_response())
@@ -172,8 +172,8 @@ pub async fn post_test_repo_test_handler (
 
     let test_post_body: TestPostBody = serde_json::from_value(body.0)?;
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
-    let test = repo.get_test(&test_post_body.id, test_post_body.replace).await?;
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
+    let test = repo.add_test(&test_post_body.id, false).await?;
     Ok(Json(TestResponse::new(&test).await?).into_response())
 }
 
@@ -186,8 +186,8 @@ pub async fn post_test_repo_test_source_handler (
 
     let test_source_post_body: TestSourcePostBody = serde_json::from_value(body.0)?;
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo(&repo_id).await?;
-    let test = repo.get_test(&test_id, false).await?;
+    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
+    let test = repo.get_test_storage(&test_id ).await?;
     let source = test.get_test_source(&test_source_post_body.id, test_source_post_body.replace).await?;
     Ok(Json(TestSourceResponse::new(&source).await?).into_response())
 }

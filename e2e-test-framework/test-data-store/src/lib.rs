@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use test_run_storage::{TestRunId, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
-use test_repo_storage::{models::TestDefinition, repo_clients::RemoteTestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceDataset, TestSourceStorage};
+use test_repo_storage::{models::{TestDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage};
 use tokio::sync::Mutex;
 
 pub mod data_collection_storage;
@@ -20,8 +20,9 @@ const DEFAULT_TEST_RUN_STORE_FOLDER: &str = "test_runs";
 pub struct TestDataStoreConfig {
     pub data_collection_folder: Option<String>,
     pub data_store_path: Option<String>,
-    pub delete_data_store: Option<bool>,
-    pub test_repos: Option<Vec<RemoteTestRepoConfig>>,
+    pub delete_on_start: Option<bool>,
+    pub delete_on_stop: Option<bool>,
+    pub test_repos: Option<Vec<TestRepoConfig>>,
     pub test_repo_folder: Option<String>,
     pub test_run_folder: Option<String>,
 }
@@ -31,7 +32,8 @@ impl Default for TestDataStoreConfig {
         TestDataStoreConfig {
             data_collection_folder: None,
             data_store_path: None,
-            delete_data_store: None,
+            delete_on_start: None,
+            delete_on_stop: None,
             test_repos: None,
             test_repo_folder: None,
             test_run_folder: None,
@@ -50,6 +52,7 @@ pub struct TestDataStoreInfo {
 #[derive(Clone, Debug)]
 pub struct TestDataStore {
     pub data_collection_store: Arc<Mutex<DataCollectionStore>>,
+    pub delete_on_stop: bool,
     pub root_path: PathBuf,    
     pub test_repo_store: Arc<Mutex<TestRepoStore>>,
     pub test_run_store: Arc<Mutex<TestRunStore>>, 
@@ -61,8 +64,8 @@ impl TestDataStore {
 
         let root_path = PathBuf::from(config.data_store_path.unwrap_or(DEFAULT_ROOT_PATH.to_string()));
 
-        // Delete the data store folder if it exists and the delete_data_store flag is set.
-        if config.delete_data_store.unwrap_or(false) && root_path.exists() {
+        // Delete the data store folder if it exists and the delete_on_start flag is set.
+        if config.delete_on_start.unwrap_or(false) && root_path.exists() {
             log::info!("Deleting TestDataStore at - {:?}", &root_path);
             tokio::fs::remove_dir_all(&root_path).await?;
         }
@@ -73,11 +76,31 @@ impl TestDataStore {
             tokio::fs::create_dir_all(&root_path).await?
         }
 
+        let data_collection_store = Arc::new(Mutex::new(
+            DataCollectionStore::new(
+                config.data_collection_folder.unwrap_or(DEFAULT_DATA_COLLECTION_STORE_FOLDER.to_string()),
+                root_path.clone(), 
+                false).await?));
+
+        let test_repo_store = Arc::new(Mutex::new(
+            TestRepoStore::new(
+                config.test_repo_folder.unwrap_or(DEFAULT_TEST_REPO_STORE_FOLDER.to_string()),
+                root_path.clone(), 
+                false, 
+                config.test_repos).await?));
+
+        let test_run_store = Arc::new(Mutex::new(
+            TestRunStore::new(
+                config.test_run_folder.unwrap_or(DEFAULT_TEST_RUN_STORE_FOLDER.to_string()),
+                root_path.clone(),
+                false).await?));
+    
         let test_data_store = TestDataStore {
-            data_collection_store: Arc::new(Mutex::new(DataCollectionStore::new(config.data_collection_folder.unwrap_or(DEFAULT_DATA_COLLECTION_STORE_FOLDER.to_string()), root_path.clone(), false).await?)),
+            data_collection_store,
+            delete_on_stop: config.delete_on_stop.unwrap_or(false),
             root_path: root_path.clone(),
-            test_repo_store: Arc::new(Mutex::new(TestRepoStore::new(config.test_repo_folder.unwrap_or(DEFAULT_TEST_REPO_STORE_FOLDER.to_string()), root_path.clone(), false, config.test_repos).await?)),
-            test_run_store: Arc::new(Mutex::new(TestRunStore::new(config.test_run_folder.unwrap_or(DEFAULT_TEST_RUN_STORE_FOLDER.to_string()), root_path.clone(), false).await?)),
+            test_repo_store,
+            test_run_store,
         };
 
         Ok(test_data_store)
@@ -88,7 +111,7 @@ impl TestDataStore {
     }
 
     // Test Repo functions
-    pub async fn add_remote_test_repo(&self, config: RemoteTestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
+    pub async fn add_remote_test_repo(&self, config: TestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
         Ok(self.test_repo_store.lock().await.add_test_repo(config, false).await?)
     }
 
@@ -98,31 +121,30 @@ impl TestDataStore {
 
     pub async fn get_test_definition(&self, repo_id: &str, test_id: &str) -> anyhow::Result<TestDefinition> {
         Ok(self.test_repo_store.lock().await
-            .get_test_repo(repo_id).await?
-            .get_test(test_id, false).await?
-            .test_definition.clone())
+            .get_test_repo_storage(repo_id).await?
+            .get_test_definition(test_id).await?)
     }
 
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.test_repo_store.lock().await.get_test_repo_ids().await?)
     }
 
-    pub async fn get_test_source_dataset(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceDataset> {
+    pub async fn get_test_source_dataset(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceScriptSet> {
         Ok(self.test_repo_store.lock().await
-            .get_test_repo(repo_id).await?
-            .get_test(test_id, false).await?
+            .get_test_repo_storage(repo_id).await?
+            .get_test_storage(test_id).await?
             .get_test_source(source_id, false).await?
-            .get_dataset().await?)
+            .get_script_files().await?)
     }
     
     pub async fn get_test_source_storage(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceStorage> {
         Ok(self.test_repo_store.lock().await
-            .get_test_repo(repo_id).await?
-            .get_test(test_id, false).await?
+            .get_test_repo_storage(repo_id).await?
+            .get_test_storage(test_id).await?
             .get_test_source(source_id, false).await?)
     }
 
-    pub async fn get_test_source_dataset_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceDataset> {
+    pub async fn get_test_source_dataset_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceScriptSet> {
         self.get_test_source_dataset(
             &test_run_source_id.test_run_id.test_repo_id, 
             &test_run_source_id.test_run_id.test_id, 
@@ -135,6 +157,19 @@ impl TestDataStore {
             &test_run_source_id.test_run_id.test_repo_id, 
             &test_run_source_id.test_run_id.test_id
         ).await
+    }
+
+    pub async fn get_test_source_definition_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceDefinition> {
+        let test_definition = self.get_test_definition(
+            &test_run_source_id.test_run_id.test_repo_id, 
+            &test_run_source_id.test_run_id.test_id
+        ).await?;
+
+        match test_definition.sources.iter().find(|source| source.test_source_id == test_run_source_id.test_source_id)
+        {
+            Some(source_definition) => Ok(source_definition.clone()),
+            None => anyhow::bail!("SourceDefinition not found for TestRunSourceId: {:?}", &test_run_source_id)
+        }
     }
 
     pub async fn get_test_source_storage_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceStorage> {
@@ -175,5 +210,18 @@ impl TestDataStore {
 
     pub async fn get_data_collection_storage(&self, id: &str) -> anyhow::Result<DataCollectionStorage> {
         Ok(self.data_collection_store.lock().await.get_data_collection_storage(id, false).await?)
+    }
+}
+
+impl Drop for TestDataStore {
+    fn drop(&mut self) {
+        if self.delete_on_stop {
+            log::info!("Deleting TestDataStore at - {:?}", &self.root_path);
+            
+            match std::fs::remove_dir_all(&self.root_path) {
+                Ok(_) => log::info!("TestDataStore deleted successfully."),
+                Err(err) => log::error!("Error deleting TestDataStore: {:?}", err),
+            }
+        }
     }
 }

@@ -1,31 +1,29 @@
-use std::{collections::{HashMap, HashSet}, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
+use models::TestDefinition;
 use serde::Serialize;
 use tokio::fs;
 use walkdir::WalkDir;
 
-use repo_clients::{create_test_repo_client, RemoteTestRepoClient, RemoteTestRepoConfig};
+use repo_clients::{create_test_repo_client, RemoteTestRepoClient, TestRepoConfig};
 
 pub mod repo_clients;
 pub mod scripts;
 pub mod models;
 
-const TESTS_FOLDER_NAME: &str = "tests";
 const TEST_SOURCES_FOLDER_NAME: &str = "sources";
-const BOOTSTRAP_DATA_SCRIPTS_FOLDER_NAME: &str = "bootstrap_data_scripts";
-const SOURCE_CHANGE_SCRIPTS_FOLDER_NAME: &str = "source_change_scripts";
 
 #[derive(Clone, Debug)]
 pub struct TestRepoStore {
     pub path: PathBuf,
-    pub remote_test_repos: HashMap<String, RemoteTestRepoConfig>,
+    pub test_repos: HashMap<String, TestRepoConfig>,
 }
 
 impl TestRepoStore {
-    pub async fn new(folder_name: String, parent_path: PathBuf, replace: bool, initial_repos: Option<Vec<RemoteTestRepoConfig>>) -> anyhow::Result<Self> {
+    pub async fn new(folder_name: String, parent_path: PathBuf, replace: bool, initial_repos: Option<Vec<TestRepoConfig>>) -> anyhow::Result<Self> {
 
         let path = parent_path.join(&folder_name);
-        log::info!("Creating (replace = {}) TestRepoStore in folder: {:?}", replace, &path);
+        log::debug!("Creating (replace = {}) TestRepoStore in folder: {:?}", replace, &path);
 
         if replace && path.exists() {
             fs::remove_dir_all(&path).await?;
@@ -37,7 +35,7 @@ impl TestRepoStore {
 
         let mut store = Self {
             path,
-            remote_test_repos: HashMap::new(),
+            test_repos: HashMap::new(),
         };
 
         if !initial_repos.is_none() {
@@ -49,30 +47,25 @@ impl TestRepoStore {
         Ok(store)
     }
 
-    pub async fn add_test_repo(&mut self, repo_config: RemoteTestRepoConfig, replace: bool) -> anyhow::Result<TestRepoStorage> {
+    pub async fn add_test_repo(&mut self, repo_config: TestRepoConfig, replace: bool) -> anyhow::Result<TestRepoStorage> {
+        log::debug!("Adding (replace = {}) Test Repo: {:?}", replace, &repo_config);
 
         let id = repo_config.get_id();
-        log::info!("Adding (replace = {}) TestRepoStorage for Test Repo: {:?}", replace, &id);
-
         let repo_path = self.path.join(&id);
-        let tests_path = repo_path.join(TESTS_FOLDER_NAME);
 
         if replace && repo_path.exists() {
             fs::remove_dir_all(&repo_path).await?;
         }
 
         if !repo_path.exists() {
-            // fs::create_dir_all(&path).await?;
-            fs::create_dir_all(&tests_path).await?;
-
-            self.remote_test_repos.insert(id.clone(), repo_config.clone());
+            fs::create_dir_all(&repo_path).await?;
+            self.test_repos.insert(id.clone(), repo_config.clone());
         }
 
         Ok(TestRepoStorage {
             id: id.to_string(),
             path: repo_path,
             repo_config: repo_config,
-            tests_path,
         })
     }
 
@@ -80,13 +73,12 @@ impl TestRepoStore {
         Ok(self.path.join(&id).exists())
     }
 
-    pub async fn get_test_repo(&self, id: &str) -> anyhow::Result<TestRepoStorage> {
+    pub async fn get_test_repo_storage(&self, id: &str) -> anyhow::Result<TestRepoStorage> {
         if self.path.join(&id).exists() {
             Ok(TestRepoStorage {
                 id: id.to_string(),
                 path: self.path.join(&id),
-                repo_config: self.remote_test_repos.get(id).unwrap().clone(),
-                tests_path: self.path.join(&id).join(TESTS_FOLDER_NAME),
+                repo_config: self.test_repos.get(id).unwrap().clone()
             })
         } else {
             anyhow::bail!("Test Repo with ID {:?} not found", &id);
@@ -114,67 +106,61 @@ impl TestRepoStore {
 pub struct TestRepoStorage {
     pub id: String,
     pub path: PathBuf,
-    pub repo_config: RemoteTestRepoConfig,
-    pub tests_path: PathBuf,
+    pub repo_config: TestRepoConfig,
 }
 
 impl TestRepoStorage {
-    pub async fn contains_test(&self, id: &str) -> anyhow::Result<bool> {
-        Ok(self.tests_path.join(&id).exists())
-    }
+    pub async fn add_test(&self, id: &str, replace: bool) -> anyhow::Result<TestStorage> {
+        log::debug!("Adding ((replace = {}) ) Test ID {:?}", replace, &id);
 
-    pub async fn get_test(&self, id: &str, replace: bool) -> anyhow::Result<TestStorage> {
-        log::debug!("Getting ((replace = {}) ) TestStorage for ID {:?}", replace, &id);
+        let test_def_path = self.path.join(format!("{}.test", id));
+        let test_path = self.path.join(id);
 
-        let test_path = self.tests_path.join(&id);
-        let sources_path = test_path.join(TEST_SOURCES_FOLDER_NAME);
+        if replace {
+            if test_def_path.exists() {
+                fs::remove_file(&test_def_path).await?;
+            }
 
-        if replace && test_path.exists() {
-            fs::remove_dir_all(&test_path).await?;
+            if test_path.exists() {
+                fs::remove_dir_all(&test_path).await?;
+            }
         }
 
-        if !test_path.exists() {
-            // fs::create_dir_all(&path).await?;
-            fs::create_dir_all(&sources_path).await?;
-
+        if !test_def_path.exists() {
             // Download the test definition from the remote test repo.
             let test_repo_client = create_test_repo_client(self.repo_config.clone()).await?;
-            let test_definition_path = test_repo_client.get_test_definition(id.to_string(), test_path.clone()).await?;
+            test_repo_client.copy_test_definition(id.to_string(), test_def_path).await?;
 
-            // Read the test definition file into a string.
-            let json_content = fs::read_to_string(test_definition_path).await?;
-            let test_definition: models::TestDefinition = serde_json::from_str(&json_content)?;
-
-            Ok(TestStorage {
-                client_config: self.repo_config.clone(),
-                id: id.to_string(),
-                path: test_path,
-                repo_id: self.id.clone(),
-                sources_path,
-                test_definition,
-            })    
+            self.get_test_storage(id).await
         } else {
+            self.get_test_storage(id).await
+        }
+    }
 
+    pub async fn contains_test(&self, id: &str) -> anyhow::Result<bool> {
+        Ok(self.path.join(&id).exists())
+    }
+
+    pub async fn get_test_definition(&self, id: &str) -> anyhow::Result<TestDefinition> {
+        log::debug!("Getting Test Definition for ID {:?}", id);
+
+        let test_definition_path = self.path.join(&id).join(format!("{}.test", id));
+        log::error!("Looking in {:?}", test_definition_path);
+
+
+        if !test_definition_path.exists() {
+            anyhow::bail!("Test with ID {:?} not found", &id);
+        } else {
             // Read the test definition file into a string.
-            let test_definition_path = test_path.join(format!("{}.test", id));
             let json_content = fs::read_to_string(test_definition_path).await?;
-            let test_definition: models::TestDefinition = serde_json::from_str(&json_content)?;
-
-            Ok(TestStorage {                            
-                client_config: self.repo_config.clone(),    
-                id: id.to_string(),
-                path: test_path,
-                repo_id: self.id.clone(),
-                sources_path,
-                test_definition,
-            })    
+            Ok(serde_json::from_str(&json_content)?)
         }
     }
 
     pub async fn get_test_ids(&self) -> anyhow::Result<Vec<String>> {
         let mut tests = Vec::new();
 
-        let mut entries = fs::read_dir(&self.tests_path).await?;     
+        let mut entries = fs::read_dir(&self.path).await?;     
         while let Some(entry) = entries.next_entry().await? {
             let metadata = entry.metadata().await?;
             if metadata.is_dir() {
@@ -186,11 +172,35 @@ impl TestRepoStorage {
 
         Ok(tests)        
     }
+
+    pub async fn get_test_storage(&self, id: &str) -> anyhow::Result<TestStorage> {
+        log::debug!("Getting Test Storage for ID {:?}", id);
+
+        let test_path = self.path.join(&id);
+        let test_definition_path = self.path.join(format!("{}.test", id));
+
+        if !test_definition_path.exists() {
+            anyhow::bail!("Test with ID {:?} not found", &id);
+        } else {
+            // Read the test definition file into a string.
+            let json_content = fs::read_to_string(test_definition_path).await?;
+            let test_definition: models::TestDefinition = serde_json::from_str(&json_content)?;
+
+            Ok(TestStorage {                            
+                client_config: self.repo_config.clone(),    
+                id: id.to_string(),
+                path: test_path.clone(),
+                repo_id: self.id.clone(),
+                sources_path: test_path.join(TEST_SOURCES_FOLDER_NAME),
+                test_definition,
+            })    
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct TestStorage {
-    pub client_config: RemoteTestRepoConfig,
+    pub client_config: TestRepoConfig,
     pub id: String,
     pub path: PathBuf,
     pub repo_id: String,
@@ -206,36 +216,35 @@ impl TestStorage {
     pub async fn get_test_source(&self, id: &str, replace: bool) -> anyhow::Result<TestSourceStorage> {
         log::debug!("Getting (replace = {}) TestSourceStorage for ID {:?}", replace, &id);
 
-        let source_path = self.sources_path.join(&id);
-        let bootstrap_data_scripts_path = source_path.join(BOOTSTRAP_DATA_SCRIPTS_FOLDER_NAME);            
-        let source_change_scripts_path = source_path.join(SOURCE_CHANGE_SCRIPTS_FOLDER_NAME);
+        let test_source_definition = match self.test_definition.sources.iter().find(|source| source.test_source_id == id) {
+            Some(source) => source,
+            None => anyhow::bail!("Test Source with ID {:?} not found in Test ID {:?}", &id, &self.id),
+        };
 
-        if replace && source_path.exists() {
-            fs::remove_dir_all(&source_path).await?;
+        let test_source_data_path = self.sources_path.join(&id);
+
+        if replace && test_source_data_path.exists() {
+            fs::remove_dir_all(&test_source_data_path).await?;
         }
 
-        if !source_path.exists() {
-            // fs::create_dir_all(&path).await?;
-            fs::create_dir_all(&bootstrap_data_scripts_path).await?;
-            fs::create_dir_all(&source_change_scripts_path).await?;
-
+        if !test_source_data_path.exists() {
+            // fs::create_dir_all(&test_source_data_path).await?;
+            
             // Download the Test Source Content from the repo.
             create_test_repo_client(self.client_config.clone()).await?
-            .get_test_source_content_from_def(
-                &self.test_definition, 
-                id.to_string(), 
-                bootstrap_data_scripts_path.clone(),
-                source_change_scripts_path.clone()
-            ).await?;
+                .copy_test_source_content(
+                    self.id.clone(),
+                    test_source_definition, 
+                    test_source_data_path.clone(),
+                ).await?;
         }
 
         Ok(TestSourceStorage {
-            bootstrap_data_scripts_path,
-            source_change_scripts_path,
             id: id.to_string(),
-            path: source_path,
+            path: test_source_data_path,
             repo_id: self.repo_id.to_string(),
             test_id: self.id.to_string(),
+            test_source_definition: test_source_definition.to_owned(),
         })
     }
 
@@ -259,58 +268,71 @@ impl TestStorage {
 #[allow(unused)]
 #[derive(Clone, Debug, Serialize)]
 pub struct TestSourceStorage {
-    pub bootstrap_data_scripts_path: PathBuf,
-    pub source_change_scripts_path: PathBuf,
     pub id: String,
     pub path: PathBuf,
     pub repo_id: String,
     pub test_id: String,
+    pub test_source_definition: models::TestSourceDefinition,
 }
 
 impl TestSourceStorage {
-    pub async fn get_dataset(&self) -> anyhow::Result<TestSourceDataset> {
+    pub async fn get_script_files(&self) -> anyhow::Result<TestSourceScriptSet> {
 
         let mut bootstrap_data_script_files = HashMap::new();
         let mut source_change_script_files = Vec::new();
 
         // Read the bootstrap script files.
-        let file_path_list: Vec<PathBuf> = WalkDir::new(&self.bootstrap_data_scripts_path)
-            .into_iter()
-            .filter_map(|entry| {
-                let entry = entry.ok()?; // Skip over any errors
-                let path = entry.path().to_path_buf();
-                if path.is_file() {
-                    Some(path)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        match &self.test_source_definition.bootstrap_data_generator_def {
+            Some(models::BootstrapDataGeneratorDefinition::Script{common_config: _, unique_config}) => {
+                let bootstrap_data_scripts_repo_path = self.path.join(&unique_config.script_file_folder);
 
-        for file_path in file_path_list {
-            let data_type_name = file_path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string();
-            if !bootstrap_data_script_files.contains_key(&data_type_name) {
-                bootstrap_data_script_files.insert(data_type_name.clone(), vec![]);
-            }
-            bootstrap_data_script_files.get_mut(&data_type_name).unwrap().push(file_path);
+                let file_path_list: Vec<PathBuf> = WalkDir::new(&bootstrap_data_scripts_repo_path)
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let entry = entry.ok()?; // Skip over any errors
+                        let path = entry.path().to_path_buf();
+                        if path.is_file() {
+                            Some(path)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                for file_path in file_path_list {
+                    let data_type_name = file_path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string();
+                    if !bootstrap_data_script_files.contains_key(&data_type_name) {
+                        bootstrap_data_script_files.insert(data_type_name.clone(), vec![]);
+                    }
+                    bootstrap_data_script_files.get_mut(&data_type_name).unwrap().push(file_path);
+                }
+            },
+            _ => {}
         }
 
         // Read the change log script files.
-        let mut entries = fs::read_dir(&self.source_change_scripts_path).await?;
-    
-        while let Some(entry) = entries.next_entry().await? {
-            let file_path = entry.path();
-    
-            // Check if it's a file
-            if file_path.is_file() {
-                source_change_script_files.push(file_path);
-            }
+        match &self.test_source_definition.source_change_generator_def {
+            Some(models::SourceChangeGeneratorDefinition::Script{common_config: _, unique_config}) => {
+                let source_change_scripts_repo_path = self.path.join(&unique_config.script_file_folder);
+
+                let mut entries = fs::read_dir(&source_change_scripts_repo_path).await?;
+        
+                while let Some(entry) = entries.next_entry().await? {
+                    let file_path = entry.path();
+            
+                    // Check if it's a file
+                    if file_path.is_file() {
+                        source_change_script_files.push(file_path);
+                    }
+                }
+            },
+            _ => {}
         }
 
         // Sort the list of files by the file name to get them in the correct order for processing.
         source_change_script_files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
-        Ok(TestSourceDataset {
+        Ok(TestSourceScriptSet {
             bootstrap_data_script_files,
             source_change_script_files,
         })
@@ -318,21 +340,7 @@ impl TestSourceStorage {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TestSourceDataset {
+pub struct TestSourceScriptSet {
     pub bootstrap_data_script_files: HashMap<String, Vec<PathBuf>>,
     pub source_change_script_files: Vec<PathBuf>,
 }
-
-impl TestSourceDataset {
-    pub fn count_bootstrap_type_intersection(&self, requested_labels: &HashSet<String>) -> usize {
-        let mut match_count = 0;
-
-        // Iterate through the requested labels (data types) and count the number of matches.
-        self.bootstrap_data_script_files.keys().filter(|key| requested_labels.contains(*key)).for_each(|_| {
-            match_count += 1;
-        });
-
-        match_count
-    }
-}
-

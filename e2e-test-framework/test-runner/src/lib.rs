@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
-use test_run_sources::{TestRunSource, TestRunSourceConfig, TestRunSourceState};
+use test_run_sources::{TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState};
 use tokio::sync::RwLock;
 
 use bootstrap_data_generators::BootstrapData;
@@ -91,13 +91,19 @@ impl TestRunner {
             anyhow::bail!("TestRunner already contains TestRunSource with ID: {:?}", &id);
         }
 
-        // Get the SourceDefinition that the TestRunSource is associated with.
-        let test_definition = self.data_store.get_test_definition_for_test_run_source(&id).await?;
-        let source_definition = match test_definition.sources.iter().find(|source| source.id == test_run_config.test_source_id)
-        {
-            Some(source_definition) => source_definition.clone(),
-            None => anyhow::bail!("SourceDefinition not found for TestRunSource: {:?}", &id)
-        };
+        // Construct a TestRunSourceDefinition for the new TestRunSource.
+        let definition = match &test_run_config {
+            TestRunSourceConfig::Inline{..} => {
+                TestRunSourceDefinition::new(test_run_config, None)                
+            },
+            TestRunSourceConfig::Repo {..} => {
+                // Get the TestSourceDefinition that the TestRunSource is associated with.
+                let test_source_definition = self.data_store.get_test_source_definition_for_test_run_source(&id).await?;
+                TestRunSourceDefinition::new(test_run_config, Some(test_source_definition))
+            },
+        }?;
+
+        log::error!("TestRunSourceDefinition: {:#?}", &definition);
 
         // Get the INPUT Test Data storage for the TestRunSource.
         // This is where the TestRunSource will read the Test Data from.
@@ -108,7 +114,7 @@ impl TestRunner {
         let output_storage = self.data_store.get_test_run_source_storage(&id).await?;
 
         // Create the TestRunSource and add it to the TestRunner.
-        let test_run_source = TestRunSource::new(source_definition, test_run_config, input_storage, output_storage).await?;        
+        let test_run_source = TestRunSource::new(definition, input_storage, output_storage).await?;        
 
         let start_immediately = 
             self.get_status().await? == TestRunnerStatus::Running && test_run_source.start_immediately;

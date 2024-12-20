@@ -52,7 +52,6 @@ impl BootstrapDataGenerator for Box<dyn BootstrapDataGenerator + Send + Sync> {
 pub async fn create_bootstrap_data_generator(
     id: TestRunSourceId, 
     definition: Option<BootstrapDataGeneratorDefinition>,
-    _test_run_overrides: Option<BootstrapDataGeneratorDefinition>,
     input_storage: TestSourceStorage, 
     output_storage: TestRunSourceStorage
 ) -> anyhow::Result<Option<Box<dyn BootstrapDataGenerator + Send + Sync>>> {

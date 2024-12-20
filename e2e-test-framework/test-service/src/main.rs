@@ -96,7 +96,7 @@ async fn main() {
     };
 
     if host_params.prune_data_store {
-        test_service_config.data_store.delete_data_store = Some(true);
+        test_service_config.data_store.delete_on_start = Some(true);
     };
 
     // Create the TestDataStore.

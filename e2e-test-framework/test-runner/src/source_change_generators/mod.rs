@@ -136,7 +136,6 @@ impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
 pub async fn create_source_change_generator(
     id: TestRunSourceId, 
     definition: Option<SourceChangeGeneratorDefinition>,
-    _test_run_overrides: Option<SourceChangeGeneratorDefinition>,
     input_storage: TestSourceStorage, 
     output_storage: TestRunSourceStorage
 ) -> anyhow::Result<Option<Box<dyn SourceChangeGenerator + Send + Sync>>> {

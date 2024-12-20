@@ -273,7 +273,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ChangeScriptPlayerMes
     // Create a ChangeScriptReader to read the ChangeScript files.
     // Create a ChangeScriptPlayerState to hold the state of the ChangeScriptPlayer. The ChangeScriptPlayer always starts in a paused state.
     // Create a SourceChangeDispatcher to send SourceChangeEvents.
-    let script_files = match player_settings.input_storage.get_dataset().await {
+    let script_files = match player_settings.input_storage.get_script_files().await {
         Ok(ds) => ds.source_change_script_files,
         Err(e) => {
             log::error!("Error getting dataset: {:?}", e);

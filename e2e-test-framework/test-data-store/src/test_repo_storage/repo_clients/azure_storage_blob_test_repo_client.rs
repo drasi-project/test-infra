@@ -8,7 +8,7 @@ use azure_storage_blobs::container::operations::BlobItem;
 use futures::stream::StreamExt;
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::test_repo_storage::{models::{BootstrapDataGeneratorDefinition, SourceChangeGeneratorDefinition, TestDefinition}, TestSourceDataset};
+use crate::test_repo_storage::models::{BootstrapDataGeneratorDefinition, SourceChangeGeneratorDefinition, TestSourceDefinition};
 
 use super::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig, RemoteTestRepoClient};
 
@@ -29,7 +29,7 @@ impl AzureStorageBlobTestRepoClientSettings {
         let storage_credentials = StorageCredentials::access_key(unique_config.account_name.clone(), unique_config.access_key.clone());
 
         Ok(Self {
-            force_cache_refresh: common_config.force_cache_refresh,
+            force_cache_refresh: unique_config.force_cache_refresh,
             storage_account_name: unique_config.account_name.clone(),
             storage_container: unique_config.container.clone(),
             storage_credentials,
@@ -64,7 +64,7 @@ impl AzureStorageBlobTestRepoClient {
         Ok(container_client)
     }
 
-    async fn download_change_script_files(&self, local_folder: PathBuf, repo_folder: String) -> anyhow::Result<Vec<PathBuf>> {
+    async fn download_change_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
 
         let mut file_path_list = download_test_repo_folder(
             self.create_container_client()?,
@@ -79,7 +79,7 @@ impl AzureStorageBlobTestRepoClient {
         Ok(file_path_list)
     }
 
-    async fn download_bootstrap_script_files( &self, local_folder: PathBuf, repo_folder: String ) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
+    async fn download_bootstrap_script_files( &self, repo_folder: String , local_folder: PathBuf) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
         let mut file_path_list = download_test_repo_folder(
             self.create_container_client()?,
             local_folder,
@@ -108,11 +108,13 @@ impl AzureStorageBlobTestRepoClient {
 
 #[async_trait]
 impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
-    async fn get_test_definition(&self, test_id: String, test_store_path: PathBuf) -> anyhow::Result<PathBuf> {
-        log::trace!("Getting TestDefinition - {:?} to folder {:?}", test_id, test_store_path);
+    async fn copy_test_definition(&self, test_id: String, test_def_path: PathBuf) -> anyhow::Result<()> {
+        log::debug!("Copying TestDefinition - {:?} to folder {:?}", test_id, test_def_path);
 
-        // Formulate local path for test definition file
-        let local_file_path = test_store_path.join(format!("{}.test", test_id));
+        // If the TestDefinition already exists, return an error.
+        if test_def_path.exists() {
+            return Err(anyhow::anyhow!("Test Definition ID: {} already exists in location {:?}", test_id, test_def_path));
+        }   
         
         // Formulate the remote repo path for the test definition file
         let remote_path = format!("{}/{}.test", self.settings.storage_root_path, test_id);
@@ -120,63 +122,50 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
         // Download the test definition file
         download_test_repo_file(
             self.create_container_client()?.blob_client(&remote_path),
-            local_file_path.clone()
+            test_def_path
         ).await?;
 
-        Ok(local_file_path)
+        Ok(())
     }
 
-    async fn get_test_source_content_from_def(&self, test_def: &TestDefinition, source_id: String, bootstrap_data_store_path: PathBuf, source_change_store_path: PathBuf) -> anyhow::Result<TestSourceDataset> {
-        log::trace!("Downloading Test Source Content for {:?}", source_id);
+    async fn copy_test_source_content(&self, test_id: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
+        log::debug!("Copying Test Source Content for {:?} to {:?}", test_source_def.test_source_id, test_source_data_path);
 
         // Bootstrap Data Script Files
-        let bootstrap_script_files = match test_def.sources.iter().find(|s| s.id == source_id) {
-            Some(source) => {
-                match &source.bootstrap_data_generator {
-                    Some(BootstrapDataGeneratorDefinition::Script{common_config: _, unique_config}) => {
-                        // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
-                        let bootstrap_data_scripts_repo_path = format!(
-                            "{}/{}/sources/{}/{}/", 
-                            self.settings.storage_root_path, 
-                            test_def.id, 
-                            source_id, 
-                            &unique_config.script_file_folder
-                        );
-                        self.download_bootstrap_script_files(
-                            bootstrap_data_store_path, bootstrap_data_scripts_repo_path).await?
-                    },
-                    _ => HashMap::new()
-                }
+        match &test_source_def.bootstrap_data_generator_def {
+            Some(BootstrapDataGeneratorDefinition::Script{common_config: _, unique_config}) => {
+                // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
+                let repo_path = format!(
+                    "{}/{}/sources/{}/{}/", 
+                    self.settings.storage_root_path, 
+                    test_id, 
+                    test_source_def.test_source_id, 
+                    &unique_config.script_file_folder
+                );
+                let local_path = test_source_data_path.join(&unique_config.script_file_folder);
+                self.download_bootstrap_script_files(repo_path, local_path).await?
             },
-            None => HashMap::new()
+            _ => HashMap::new()
         };
 
         // Source Change Script Files
-        let source_change_script_files = match test_def.sources.iter().find(|s| s.id == source_id) {
-            Some(source) => {
-                match &source.source_change_generator {
-                    Some(SourceChangeGeneratorDefinition::Script{common_config: _, unique_config}) => {
-                        // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
-                        let source_change_scripts_repo_path = format!(
-                            "{}/{}/sources/{}/{}/", 
-                            self.settings.storage_root_path, 
-                            test_def.id, 
-                            source_id, 
-                            &unique_config.script_file_folder
-                        );
-                        self.download_change_script_files(
-                            source_change_store_path, source_change_scripts_repo_path).await?
-                    },
-                    _ => Vec::new()
-                }
+        match &test_source_def.source_change_generator_def {
+            Some(SourceChangeGeneratorDefinition::Script{common_config: _, unique_config}) => {
+                // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
+                let repo_path = format!(
+                    "{}/{}/sources/{}/{}/", 
+                    self.settings.storage_root_path, 
+                    test_id, 
+                    test_source_def.test_source_id, 
+                    &unique_config.script_file_folder
+                );
+                let local_path = test_source_data_path.join(&unique_config.script_file_folder);
+                self.download_change_script_files(repo_path, local_path).await?
             },
-            None => Vec::new()
+            _ => Vec::new()
         };
 
-        Ok(TestSourceDataset {
-            source_change_script_files: source_change_script_files,
-            bootstrap_data_script_files: bootstrap_script_files,
-        })
+        Ok(())
     }
 }
 

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::prelude::*;
 
-use test_data_store::test_repo_storage::{models::ConsoleSourceChangeDispatcherDefinition, scripts::SourceChangeEvent};
+use test_data_store::{scripts::SourceChangeEvent, test_repo_storage::models::ConsoleSourceChangeDispatcherDefinition};
 
 use super::SourceChangeDispatcher;
 

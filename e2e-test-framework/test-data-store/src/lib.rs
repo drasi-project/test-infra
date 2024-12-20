@@ -9,6 +9,7 @@ use test_repo_storage::{models::{TestDefinition, TestSourceDefinition}, repo_cli
 use tokio::sync::Mutex;
 
 pub mod data_collection_storage;
+pub mod scripts;
 pub mod test_repo_storage;
 pub mod test_run_storage;
 

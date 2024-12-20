@@ -8,7 +8,6 @@ use walkdir::WalkDir;
 use repo_clients::{create_test_repo_client, RemoteTestRepoClient, TestRepoConfig};
 
 pub mod repo_clients;
-pub mod scripts;
 pub mod models;
 
 const TEST_SOURCES_FOLDER_NAME: &str = "sources";

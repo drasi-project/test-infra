@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use drasi_comms_abstractions::comms::{Headers, Publisher};
 use drasi_comms_dapr::comms::DaprHttpPublisher;
 
-use test_data_store::test_repo_storage::{models::DaprSourceChangeDispatcherDefinition, scripts::SourceChangeEvent};
+use test_data_store::{scripts::SourceChangeEvent, test_repo_storage::models::DaprSourceChangeDispatcherDefinition};
 
 use super::SourceChangeDispatcher;
 

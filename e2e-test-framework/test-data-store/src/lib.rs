@@ -264,7 +264,9 @@ impl Drop for TestDataStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_repo_storage::repo_clients::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig, LocalStorageTestRepoConfig, TestRepoConfig};
+    use tempfile::TempDir;
+
+    use crate::{test_repo_storage::repo_clients::{AzureStorageBlobTestRepoConfig, CommonTestRepoConfig, LocalStorageTestRepoConfig, TestRepoConfig}, TestDataStoreConfig};
 
     use super::TestDataStore;
     
@@ -325,4 +327,114 @@ mod tests {
         
         Ok(())
     }   
+
+    #[tokio::test]
+    async fn test_testdatastore_create() -> anyhow::Result<()>{
+
+        let temp_dir = TempDir::new()?;   
+        let temp_dir_path = temp_dir.path();     
+
+        let data_store_config = TestDataStoreConfig {
+            data_store_path: Some(temp_dir_path.to_string_lossy().to_string()),
+            delete_on_stop: Some(false),
+            ..TestDataStoreConfig::default()
+        };
+
+        let data_store = TestDataStore::new(data_store_config).await?;
+        assert_eq!(temp_dir_path.exists(), true);
+    
+        assert_eq!(data_store.get_data_collection_ids().await?.is_empty(), true);
+        assert_eq!(data_store.get_test_repo_ids().await?.is_empty(), true);
+        assert_eq!(data_store.get_test_run_ids().await?.is_empty(), true);
+    
+        drop(data_store);
+    
+        // The TempDir should still exist because the TestDataStoreConfig.delete_on_stop flag is false.
+        assert_eq!(temp_dir_path.exists(), true);
+    
+        Ok(())
+    }    
+
+    #[tokio::test]
+    async fn test_testdatastore_delete_on_stop() -> anyhow::Result<()>{
+
+        let temp_dir = TempDir::new()?;   
+        let temp_dir_path = temp_dir.path();     
+
+        let data_store_config = TestDataStoreConfig {
+            data_store_path: Some(temp_dir_path.to_string_lossy().to_string()),
+            delete_on_stop: Some(true),
+            ..TestDataStoreConfig::default()
+        };
+
+        let data_store = TestDataStore::new(data_store_config).await?;
+        assert_eq!(temp_dir_path.exists(), true);
+    
+        assert_eq!(data_store.get_data_collection_ids().await?.is_empty(), true);
+        assert_eq!(data_store.get_test_repo_ids().await?.is_empty(), true);
+        assert_eq!(data_store.get_test_run_ids().await?.is_empty(), true);
+    
+        drop(data_store);
+    
+        // The TempDir should not exist because the TestDataStoreConfig.delete_on_stop flag is true.
+        assert_eq!(temp_dir_path.exists(), false);
+    
+        Ok(())
+    }    
+
+    #[tokio::test]
+    async fn test_testdatastore_create_initial_test_repos() -> anyhow::Result<()>{
+
+        let temp_dir = TempDir::new()?;   
+        let temp_dir_path = temp_dir.path();     
+
+        let mut test_repos: Vec<TestRepoConfig> = Vec::new();
+
+        test_repos.push(TestRepoConfig::LocalStorage { 
+            common_config: CommonTestRepoConfig { id: "test_repo_1".to_string() },
+            unique_config: LocalStorageTestRepoConfig { source_path: None }
+        });
+
+        test_repos.push(TestRepoConfig::LocalStorage { 
+            common_config: CommonTestRepoConfig { id: "test_repo_2".to_string() },
+            unique_config: LocalStorageTestRepoConfig { source_path: Some("test_source_path".to_string()) }
+        });
+
+        test_repos.push(TestRepoConfig::AzureStorageBlob { 
+            common_config: CommonTestRepoConfig { id: "test_repo_3".to_string() },
+            unique_config: AzureStorageBlobTestRepoConfig {
+                account_name: "test_account_name".to_string(),
+                access_key: "test_access_key".to_string(),
+                container: "test_container".to_string(),
+                force_cache_refresh: false,
+                root_path: "test_root_path".to_string(),
+            }
+        });
+
+        let data_store_config = TestDataStoreConfig {
+            data_store_path: Some(temp_dir_path.to_string_lossy().to_string()),
+            delete_on_stop: Some(true),
+            test_repos: Some(test_repos),
+            ..TestDataStoreConfig::default()
+        };
+
+        let data_store = TestDataStore::new(data_store_config).await?;
+    
+        assert_eq!(data_store.get_data_collection_ids().await?.is_empty(), true);
+        assert_eq!(data_store.get_test_run_ids().await?.is_empty(), true);
+
+        let test_repo_ids = data_store.get_test_repo_ids().await?;
+        assert_eq!(test_repo_ids.len(), 3);
+        assert_eq!(test_repo_ids.contains(&"test_repo_1".to_string()), true);
+        assert_eq!(test_repo_ids.contains(&"test_repo_2".to_string()), true);
+        assert_eq!(test_repo_ids.contains(&"test_repo_3".to_string()), true);
+        
+        drop(data_store);
+    
+        // The TempDir should not exist because the TestDataStoreConfig.delete_on_stop flag is true.
+        assert_eq!(temp_dir_path.exists(), false);
+    
+        Ok(())
+    }   
+
 }

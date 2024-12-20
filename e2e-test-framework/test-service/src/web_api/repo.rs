@@ -27,10 +27,18 @@ impl TestRepoResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct TestPostBody {
-    pub id: String,
-    #[serde(default)]
-    pub replace: bool,
+#[serde(tag = "type")]
+pub enum TestPostBody {
+    Local {
+        #[serde(default)]
+        replace: bool,
+        test_definition: TestDefinition,
+    },
+    Remote {
+        test_id: String,
+        #[serde(default)]
+        replace: bool,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -91,7 +99,7 @@ pub async fn get_test_repo_list_handler(
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_list");
 
-    let repo_ids = test_data_store.test_repo_store.lock().await.get_test_repo_ids().await?;
+    let repo_ids = test_data_store.get_test_repo_ids().await?;
     Ok(Json(repo_ids).into_response())
 }
 
@@ -101,8 +109,7 @@ pub async fn get_test_repo_test_list_handler(
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_list - repo_id:{}", repo_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
-    let test_ids = repo.get_test_ids().await?;
+    let test_ids = test_data_store.get_test_repo_test_ids(&repo_id).await?;
     Ok(Json(test_ids).into_response())
 }
 
@@ -112,9 +119,7 @@ pub async fn get_test_repo_test_source_list_handler(
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_source_list - repo_id:{}, test_id:{}", repo_id, test_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
-    let test = repo.get_test_storage(&test_id).await?;
-    let source_ids = test.get_test_source_ids().await?;
+    let source_ids = test_data_store.get_test_storage(&repo_id, &test_id).await?.get_test_source_ids().await?;
     Ok(Json(source_ids).into_response())
 }
 
@@ -124,7 +129,7 @@ pub async fn get_test_repo_handler (
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo - repo_id:{}", repo_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
+    let repo = test_data_store.get_test_repo_storage(&repo_id).await?;
     Ok(Json(TestRepoResponse::new(&repo).await?).into_response())
 }
 
@@ -134,8 +139,7 @@ pub async fn get_test_repo_test_handler (
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test - repo_id:{}, test_id:{}", repo_id, test_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
-    let test = repo.get_test_storage(&test_id).await?;
+    let test = test_data_store.get_test_storage(&repo_id, &test_id).await?;
     Ok(Json(TestResponse::new(&test).await?).into_response())
 }
 
@@ -145,9 +149,7 @@ pub async fn get_test_repo_test_source_handler (
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_test_repo_test_source - repo_id:{}, test_id:{}, source_id:{}", repo_id, test_id, source_id);
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
-    let test = repo.get_test_storage(&test_id).await?;
-    let source = test.get_test_source(&source_id, false).await?;
+    let source = test_data_store.get_test_source_storage(&repo_id, &test_id, &source_id).await?;
     Ok(Json(TestSourceResponse::new(&source).await?).into_response())
 }
 
@@ -159,7 +161,7 @@ pub async fn post_test_repo_handler (
 
     let repo_config: TestRepoConfig = serde_json::from_value(body.0)?;
 
-    let repo = test_data_store.test_repo_store.lock().await.add_test_repo(repo_config, false).await?;
+    let repo = test_data_store.add_test_repo(repo_config).await?;
     Ok(Json(TestRepoResponse::new(&repo).await?).into_response())
 }
 
@@ -172,9 +174,16 @@ pub async fn post_test_repo_test_handler (
 
     let test_post_body: TestPostBody = serde_json::from_value(body.0)?;
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
-    let test = repo.add_test(&test_post_body.id, false).await?;
-    Ok(Json(TestResponse::new(&test).await?).into_response())
+    match test_post_body {
+        TestPostBody::Local { test_definition, replace } => {
+            let test = test_data_store.add_local_test(&repo_id, test_definition, replace).await?;
+            Ok(Json(TestResponse::new(&test).await?).into_response())
+        },
+        TestPostBody::Remote { test_id, replace } => {
+            let test = test_data_store.add_remote_test(&repo_id, &test_id, replace).await?;
+            Ok(Json(TestResponse::new(&test).await?).into_response())
+        }
+    }
 }
 
 pub async fn post_test_repo_test_source_handler (
@@ -186,8 +195,7 @@ pub async fn post_test_repo_test_source_handler (
 
     let test_source_post_body: TestSourcePostBody = serde_json::from_value(body.0)?;
 
-    let repo = test_data_store.test_repo_store.lock().await.get_test_repo_storage(&repo_id).await?;
-    let test = repo.get_test_storage(&test_id ).await?;
+    let test = test_data_store.get_test_storage(&repo_id, &test_id ).await?;
     let source = test.get_test_source(&test_source_post_body.id, test_source_post_body.replace).await?;
     Ok(Json(TestSourceResponse::new(&source).await?).into_response())
 }

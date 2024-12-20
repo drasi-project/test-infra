@@ -5,7 +5,7 @@ use tempfile::TempDir;
 use test_run_storage::{TestRunId, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
-use test_repo_storage::{models::{TestDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage};
+use test_repo_storage::{models::{TestDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage, TestStorage};
 use tokio::sync::Mutex;
 
 pub mod data_collection_storage;
@@ -126,7 +126,19 @@ impl TestDataStore {
     }
 
     // Test Repo functions
-    pub async fn add_remote_test_repo(&self, config: TestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
+    pub async fn add_local_test(&self, repo_id: &str, test_def: TestDefinition, replace: bool) -> anyhow::Result<TestStorage> {
+        self.test_repo_store.lock().await
+            .get_test_repo_storage(repo_id).await?
+            .add_local_test(test_def, replace).await
+    }
+
+    pub async fn add_remote_test(&self, repo_id: &str, test_id: &str, replace: bool) -> anyhow::Result<TestStorage> {
+        self.test_repo_store.lock().await
+            .get_test_repo_storage(repo_id).await?
+            .add_remote_test(test_id, replace).await
+    }
+
+    pub async fn add_test_repo(&self, config: TestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
         Ok(self.test_repo_store.lock().await.add_test_repo(config, false).await?)
     }
 
@@ -140,8 +152,25 @@ impl TestDataStore {
             .get_test_definition(test_id).await?)
     }
 
+    pub async fn get_test_storage(&self, repo_id: &str, test_id: &str) -> anyhow::Result<TestStorage> {
+        Ok(self.test_repo_store.lock().await
+            .get_test_repo_storage(repo_id).await?
+            .get_test_storage(test_id).await?)
+    }
+
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.test_repo_store.lock().await.get_test_repo_ids().await?)
+    }
+
+    pub async fn get_test_repo_storage(&self, repo_id: &str) -> anyhow::Result<TestRepoStorage> {
+        Ok(self.test_repo_store.lock().await
+            .get_test_repo_storage(repo_id).await?)
+    }
+
+    pub async fn get_test_repo_test_ids(&self, repo_id: &str) -> anyhow::Result<Vec<String>> {
+        self.test_repo_store.lock().await
+            .get_test_repo_storage(repo_id).await?
+            .get_test_ids().await
     }
 
     pub async fn get_test_source_dataset(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceScriptSet> {

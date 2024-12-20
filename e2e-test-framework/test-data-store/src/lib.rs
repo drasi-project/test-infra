@@ -111,36 +111,14 @@ impl TestDataStore {
     pub async fn new_temp(test_repos: Option<Vec<TestRepoConfig>>) -> anyhow::Result<Self> {
         log::debug!("Creating temporary TestDataStore with repos: {:?}", &test_repos);
 
-        let root_path = TempDir::new().unwrap().into_path();
-
-        let data_collection_store = Arc::new(Mutex::new(
-            DataCollectionStore::new(
-                DEFAULT_DATA_COLLECTION_STORE_FOLDER.to_string(),
-                root_path.clone(), 
-                false).await?));
-
-        let test_repo_store = Arc::new(Mutex::new(
-            TestRepoStore::new(
-                DEFAULT_TEST_REPO_STORE_FOLDER.to_string(),
-                root_path.clone(), 
-                false, 
-                test_repos).await?));
-
-        let test_run_store = Arc::new(Mutex::new(
-            TestRunStore::new(
-                DEFAULT_TEST_RUN_STORE_FOLDER.to_string(),
-                root_path.clone(),
-                false).await?));
-    
-        let test_data_store = TestDataStore {
-            data_collection_store,
-            delete_on_stop: true,
-            root_path: root_path,
-            test_repo_store,
-            test_run_store,
+        let config = TestDataStoreConfig {
+            data_store_path: Some(TempDir::new().unwrap().into_path().to_string_lossy().to_string()),
+            delete_on_stop: Some(true),
+            test_repos: test_repos,
+            ..TestDataStoreConfig::default()
         };
 
-        Ok(test_data_store)
+        TestDataStore::new(config).await
     }
 
     pub async fn get_data_store_path(&self) -> anyhow::Result<PathBuf> {

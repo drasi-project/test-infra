@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::prelude::*;
 
-use test_data_store::{scripts::SourceChangeEvent, test_repo_storage::models::ConsoleSourceChangeDispatcherDefinition};
+use test_data_store::{scripts::SourceChangeEvent, test_repo_storage::models::ConsoleSourceChangeDispatcherDefinition, test_run_storage::TestRunSourceStorage};
 
 use super::SourceChangeDispatcher;
 
@@ -12,9 +12,9 @@ pub struct ConsoleSourceChangeDispatcherSettings {
 }
 
 impl ConsoleSourceChangeDispatcherSettings {
-    pub fn new(config: &ConsoleSourceChangeDispatcherDefinition) -> anyhow::Result<Self> {
+    pub fn new(def: &ConsoleSourceChangeDispatcherDefinition) -> anyhow::Result<Self> {
         return Ok(Self {
-            date_time_format: config.date_time_format.clone().unwrap_or("%Y-%m-%d %H:%M:%S%.f".to_string()),
+            date_time_format: def.date_time_format.clone().unwrap_or("%Y-%m-%d %H:%M:%S%.f".to_string()),
         });
     }
 }
@@ -24,9 +24,11 @@ pub struct ConsoleSourceChangeDispatcher {
 }
 
 impl ConsoleSourceChangeDispatcher {
-    pub fn new(settings: ConsoleSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+    pub fn new(def: &ConsoleSourceChangeDispatcherDefinition, _output_storage: &TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+        log::debug!("Creating ConsoleSourceChangeDispatcher from {:?}, ", def);
 
-        log::debug!("Initializing from {:?}", settings);
+        let settings = ConsoleSourceChangeDispatcherSettings::new(&def)?;
+        log::trace!("Creating ConsoleSourceChangeDispatcher with settings {:?}, ", settings);
 
         Ok(Box::new(Self { settings }))
     }

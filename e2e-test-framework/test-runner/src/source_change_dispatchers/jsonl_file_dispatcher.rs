@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use test_data_store::test_repo_storage::models::JsonlFileSourceChangeDispatcherDefinition;
+use test_data_store::test_run_storage::TestRunSourceStorage;
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -28,9 +29,12 @@ pub struct JsonlFileSourceChangeDispatcher {
 }
 
 impl JsonlFileSourceChangeDispatcher {
-    pub fn new(settings: JsonlFileSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+    pub fn new(def:&JsonlFileSourceChangeDispatcherDefinition, output_storage: &TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+        log::debug!("Creating JsonlFileSourceChangeDispatcher from {:?}, ", def);
 
-        log::debug!("Initializing from {:?}", settings);
+        let folder_path = output_storage.path.join("jsonl_file_dispatcher");
+        let settings = JsonlFileSourceChangeDispatcherSettings::new(&def, folder_path)?;
+        log::trace!("Creating JsonlFileSourceChangeDispatcher with settings {:?}, ", settings);
 
         // Make sure the local change_data_folder exists, if not, create it.
         // If the folder cannot be created, return an error.

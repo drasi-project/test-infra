@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use drasi_comms_abstractions::comms::{Headers, Publisher};
 use drasi_comms_dapr::comms::DaprHttpPublisher;
 
-use test_data_store::{scripts::SourceChangeEvent, test_repo_storage::models::DaprSourceChangeDispatcherDefinition};
+use test_data_store::{scripts::SourceChangeEvent, test_repo_storage::models::DaprSourceChangeDispatcherDefinition, test_run_storage::TestRunSourceStorage};
 
 use super::SourceChangeDispatcher;
 
@@ -16,12 +16,12 @@ pub struct DaprSourceChangeDispatcherSettings {
 }
 
 impl DaprSourceChangeDispatcherSettings {
-    pub fn new(config: &DaprSourceChangeDispatcherDefinition, source_id: String) -> anyhow::Result<Self> {
+    pub fn new(def: &DaprSourceChangeDispatcherDefinition, source_id: String) -> anyhow::Result<Self> {
         Ok(Self {
-            host: config.host.clone().unwrap_or("127.0.0.1".to_string()),
-            port: config.port.unwrap_or(3500),
-            pubsub_name: config.pubsub_name.clone().unwrap_or("drasi-pubsub".to_string()),
-            pubsub_topic: config.pubsub_topic.clone().unwrap_or(format!("{}-change", source_id)),
+            host: def.host.clone().unwrap_or("127.0.0.1".to_string()),
+            port: def.port.unwrap_or(3500),
+            pubsub_name: def.pubsub_name.clone().unwrap_or("drasi-pubsub".to_string()),
+            pubsub_topic: def.pubsub_topic.clone().unwrap_or(format!("{}-change", source_id)),
         })
     }
 }
@@ -32,9 +32,12 @@ pub struct DaprSourceChangeDispatcher {
 }
 
 impl DaprSourceChangeDispatcher {
-    pub fn new(settings: DaprSourceChangeDispatcherSettings) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+    pub fn new(def: &DaprSourceChangeDispatcherDefinition, output_storage: &TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+        log::debug!("Creating DaprSourceChangeDispatcher from {:?}, ", def);
 
-        log::debug!("Initializing from {:?}", settings);
+        let source_id = output_storage.id.test_source_id.clone();
+        let settings = DaprSourceChangeDispatcherSettings::new(&def, source_id)?;
+        log::trace!("Creating DaprSourceChangeDispatcher with settings {:?}, ", settings);
 
         let publisher = DaprHttpPublisher::new(
             settings.host.clone(),

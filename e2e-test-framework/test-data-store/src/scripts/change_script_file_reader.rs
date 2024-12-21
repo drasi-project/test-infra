@@ -1,4 +1,6 @@
-use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf};
+use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf, pin::Pin, task::{Context, Poll}};
+
+use futures::Stream;
 
 use super::{ChangeScriptRecord, ChangeFinishRecord, ChangeHeaderRecord, SequencedChangeScriptRecord};
 
@@ -219,6 +221,18 @@ impl Iterator for ChangeScriptReader {
             None
         } else {
             Some(self.get_next_record())
+        }
+    }
+}
+
+impl Stream for ChangeScriptReader {
+    type Item = anyhow::Result<SequencedChangeScriptRecord>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(item) = self.next() {
+            Poll::Ready(Some(item))
+        } else {
+            Poll::Ready(None)
         }
     }
 }

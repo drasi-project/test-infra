@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use change_script_player::ChangeScriptPlayer;
+use change_script_player::ScriptSourceChangeGenerator;
 use serde::Serialize;
 use test_data_store::{test_repo_storage::{models::SourceChangeGeneratorDefinition, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 use tokio::sync::oneshot;
@@ -142,7 +142,7 @@ pub async fn create_source_change_generator(
     match definition {
         None => Ok(None),
         Some(SourceChangeGeneratorDefinition::Script{common_config, unique_config}) => {
-            Ok(Some(Box::new(ChangeScriptPlayer::new(
+            Ok(Some(Box::new(ScriptSourceChangeGenerator::new(
                 id, 
                 common_config, 
                 unique_config, 

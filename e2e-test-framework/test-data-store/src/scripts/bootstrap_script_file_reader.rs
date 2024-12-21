@@ -1,5 +1,6 @@
-use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf};
+use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf, pin::Pin, task::{Context, Poll}};
 
+use futures::Stream;
 use serde::Serialize;
 
 use super::{BootstrapScriptRecord, BootstrapFinishRecord, BootstrapHeaderRecord};
@@ -177,6 +178,18 @@ impl Iterator for BootstrapScriptReader {
             None
         } else {
             Some(self.get_next_record())
+        }
+    }
+}
+
+impl Stream for BootstrapScriptReader {
+    type Item = anyhow::Result<SequencedBootstrapScriptRecord>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(item) = self.next() {
+            Poll::Ready(Some(item))
+        } else {
+            Poll::Ready(None)
         }
     }
 }

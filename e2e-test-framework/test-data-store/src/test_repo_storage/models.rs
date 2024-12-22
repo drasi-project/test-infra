@@ -320,7 +320,7 @@ pub struct DaprSourceChangeDispatcherDefinition {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlFileSourceChangeDispatcherDefinition {
-    pub folder_path: Option<String>,
+    pub single_file: Option<bool>,
 }
 
 #[derive(Debug, thiserror::Error)]

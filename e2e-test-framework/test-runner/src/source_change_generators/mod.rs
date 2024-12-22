@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 
-use change_script_player::ScriptSourceChangeGenerator;
+use script_source_change_generator::ScriptSourceChangeGenerator;
 use serde::Serialize;
 use test_data_store::{test_repo_storage::{models::SourceChangeGeneratorDefinition, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 use tokio::sync::oneshot;
 
-pub mod change_script_player;
+pub mod script_source_change_generator;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeGeneratorError {

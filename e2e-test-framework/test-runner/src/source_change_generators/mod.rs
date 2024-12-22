@@ -54,6 +54,17 @@ pub enum SourceChangeGeneratorStatus {
     Error
 }
 
+impl SourceChangeGeneratorStatus {
+    pub fn is_active(&self) -> bool {
+        match self {
+            SourceChangeGeneratorStatus::Running => true,
+            SourceChangeGeneratorStatus::Skipping => true,
+            SourceChangeGeneratorStatus::Stepping => true,
+            _ => false,
+        }
+    }
+}
+
 impl Serialize for SourceChangeGeneratorStatus {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {

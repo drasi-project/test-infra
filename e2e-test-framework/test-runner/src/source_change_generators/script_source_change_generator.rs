@@ -281,6 +281,8 @@ impl SourceChangeGenerator for ScriptSourceChangeGenerator {
     }
 }
 
+type ChangeStream = Pin<Box<dyn Stream<Item = anyhow::Result<SequencedChangeScriptRecord>> + Send>>;
+
 // Function that defines the operation of the ScriptSourceChangeGenerator thread.
 // The ScriptSourceChangeGenerator thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
 // The Web API function communicate via a channel and provide oneshot channels for the ScriptSourceChangeGenerator to send responses back.
@@ -327,8 +329,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
             };
             player_state.virtual_time_ns_current = player_state.virtual_time_ns_start;
             
-            let change_stream = Box::pin(reader) as Pin<Box<dyn Stream<Item = anyhow::Result<SequencedChangeScriptRecord>> + Send>>;
-            Some(change_stream)
+            Some(Box::pin(reader) as ChangeStream)
         }
         Err(e) => {
             log::error!("Error creating ChangeScriptReader: {:?}", e);
@@ -390,23 +391,8 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
                 match channel_message {
                     Some(change_stream_message) => {
                         log::trace!("Received DelayedChangeScriptRecordMessage: {:?}", change_stream_message);
-                        match player_state.status {
-                            SourceChangeGeneratorStatus::Running => {
-                                replay_next_change_stream_record(&mut player_state, change_stream_message, &mut dispatchers).await
-                                    .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling replay_next_change_stream_record: {:?}", Some(e))).ok();
-                            },
-                            SourceChangeGeneratorStatus::Stepping => {
-                                step_next_change_stream_record(&mut player_state, change_stream_message, &mut dispatchers).await
-                                    .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling step_next_change_stream_record: {:?}", Some(e))).ok();
-                            },
-                            SourceChangeGeneratorStatus::Skipping => {
-                                skip_next_change_stream_record(&mut player_state, change_stream_message, &mut dispatchers).await
-                                    .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling skip_next_change_stream_record: {:?}", Some(e))).ok();
-                            },
-                            _ => {
-                                log::debug!("Ignoring DelayedChangeScriptRecordMessage because player is not Running, Stepping, or Skipping.");
-                            }
-                        }
+                        process_next_change_stream_record(&mut player_state, change_stream_message, &mut dispatchers).await
+                            .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling process_next_change_stream_record.", Some(e))).ok();
                     },
                     None => {
                         log::info!("SourceChangeQueueReader channel closed.");
@@ -483,7 +469,7 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
 
 async fn get_next_change_stream_record(
     player_state: &mut ScriptSourceChangeGeneratorState, 
-    change_stream: Option<&mut Pin<Box<dyn Stream<Item = anyhow::Result<SequencedChangeScriptRecord>> + Send>>>,
+    change_stream: Option<&mut ChangeStream>,
 ) -> anyhow::Result<()> {
 
     // Do nothing if the SourceChangeGenerator is already in an error state.
@@ -582,7 +568,7 @@ async fn _push_next_change_stream_record(
     Ok(())
 }
 
-async fn replay_next_change_stream_record(
+async fn process_next_change_stream_record(
     player_state: &mut ScriptSourceChangeGeneratorState, 
     delay_message: DelayedChangeScriptRecordMessage, 
     dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>
@@ -677,22 +663,6 @@ async fn replay_next_change_stream_record(
         },
     };
 
-    Ok(())
-}
-
-async fn step_next_change_stream_record(
-    _player_state: &mut ScriptSourceChangeGeneratorState, 
-    _delay_message: DelayedChangeScriptRecordMessage, 
-    _dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>
-) -> anyhow::Result<()> {
-    Ok(())
-}
-
-async fn skip_next_change_stream_record(
-    _player_state: &mut ScriptSourceChangeGeneratorState, 
-    _delay_message: DelayedChangeScriptRecordMessage, 
-    _dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>
-) -> anyhow::Result<()> {
     Ok(())
 }
 

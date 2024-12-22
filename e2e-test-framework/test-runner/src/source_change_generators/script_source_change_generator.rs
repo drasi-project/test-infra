@@ -3,16 +3,21 @@ use std::{pin::Pin, sync::Arc, time::SystemTime};
 use async_trait::async_trait;
 use futures::{future::join_all, Stream};
 use serde::Serialize;
-use tokio::sync::{mpsc::{Receiver, Sender}, oneshot, Mutex};
-use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
+use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle, time::{sleep, Duration}};
 use tokio_stream::StreamExt;
 
 use test_data_store::{
     scripts::{
         change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent
     }, 
-    test_repo_storage::{models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+    test_repo_storage::{
+        models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode}, 
+        TestSourceStorage
+    }, 
+    test_run_storage::{
+        TestRunSourceId, TestRunSourceStorage
+    }
+};
 
 use crate::{ source_change_dispatchers::create_source_change_dispatcher, TimeMode };
 use crate::source_change_dispatchers::SourceChangeDispatcher;
@@ -182,21 +187,14 @@ pub struct ScriptSourceChangeGenerator {
     settings: ScriptSourceChangeGeneratorSettings,
     #[serde(skip_serializing)]
     player_tx_channel: Sender<ScriptSourceChangeGeneratorMessage>,
-    // #[serde(skip_serializing)]
-    // _delayer_tx_channel: Sender<DelayChangeScriptRecordMessage>,
     #[serde(skip_serializing)]
     _player_thread_handle: Arc<Mutex<JoinHandle<()>>>,
-    // #[serde(skip_serializing)]
-    // _delayer_thread_handle: Arc<Mutex<JoinHandle<()>>>,
 }
 
 impl ScriptSourceChangeGenerator {
     pub async fn new(test_run_source_id: TestRunSourceId, common_config: CommonSourceChangeGeneratorDefinition, unique_config: ScriptSourceChangeGeneratorDefinition, input_storage: TestSourceStorage, output_storage: TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeGenerator + Send + Sync>> {
         let settings = ScriptSourceChangeGeneratorSettings::new(test_run_source_id, common_config, unique_config, input_storage, output_storage.clone()).await?;
         log::debug!("Creating ScriptSourceChangeGenerator from {:#?}", &settings);
-
-        let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
-        // let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
 
         let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
 
@@ -209,16 +207,13 @@ impl ScriptSourceChangeGenerator {
             }
         }
 
-        // let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, delayer_tx_channel.clone(), settings.clone()));
+        let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
         let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, settings.clone(), dispatchers));
-        // let delayer_thread_handle = tokio::spawn(delayer_thread(delayer_rx_channel, player_tx_channel.clone(), settings.clone()));
 
         Ok(Box::new(Self {
             settings,
             player_tx_channel,
-            // _delayer_tx_channel: delayer_tx_channel,
             _player_thread_handle: Arc::new(Mutex::new(player_thread_handle)),
-            // _delayer_thread_handle: Arc::new(Mutex::new(delayer_thread_handle)),
         }))
     }
 
@@ -301,10 +296,12 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
     let (change_tx_channel, mut change_rx_channel) = tokio::sync::mpsc::channel(100);
     let _ = tokio::spawn(delayer_thread(player_settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
 
-    let mut player_state = ScriptSourceChangeGeneratorState::default();
-    player_state.ignore_scripted_pause_commands = player_settings.ignore_scripted_pause_commands;
-    player_state.time_mode = player_settings.time_mode;
-    player_state.spacing_mode = player_settings.spacing_mode;
+    let mut player_state = ScriptSourceChangeGeneratorState {
+        ignore_scripted_pause_commands: player_settings.ignore_scripted_pause_commands,
+        spacing_mode: player_settings.spacing_mode,
+        time_mode: player_settings.time_mode,
+        ..ScriptSourceChangeGeneratorState::default()
+    };
 
     let mut change_stream = match ChangeScriptReader::new(script_files) {
         Ok(reader) => {
@@ -342,13 +339,12 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
 
     // The ScriptSourceChangeGenerator always starts Paused.
 
-    // Loop to process messages sent to the ScriptSourceChangeGenerator or read from the ChangeScriptRecord Stream.
-    // Always process all messages in the command channel and act on them first.
+    // Loop to process messages sent to the ScriptSourceChangeGenerator or read from the Change Stream.
     loop {
         log_test_script_player_state(&player_state, "Top of ScriptSourceChangeGenerator loop");
 
         tokio::select! {
-            // Process the branch in sequence to prioritize processing of control messages.
+            // Always process all messages in the command channel and act on them first.
             biased;
 
             // Process messages from the command channel.
@@ -407,65 +403,6 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
 
     log::debug!("ScriptSourceChangeGenerator thread exiting...");    
 }
-
-// fn read_next_sequenced_test_script_record(player_state: &mut ScriptSourceChangeGeneratorState, test_script_reader: &mut ChangeScriptReader) {
-
-//     // Do nothing if the player is already in an error state.
-//     if let SourceChangeGeneratorStatus::Error = player_state.status {
-//         log_test_script_player_state("Ignoring read_next_sequenced_test_script_record call due to error state", &player_state);
-//         return;
-//     }
-
-//     // Do nothing if the ScriptSourceChangeGenerator has finished processing all records.
-//     if let SourceChangeGeneratorStatus::Finished = player_state.status {
-//         log_test_script_player_state("Ignoring read_next_sequenced_test_script_record call because script is already Finished", &player_state);
-//         return;
-//     }
-    
-//     match test_script_reader.next() {
-//         Some(Ok(seq_record)) => {
-//             // Assign the next record to the player state.
-//             player_state.next_record = Some(seq_record);
-//         },
-//         Some(Err(e)) => {
-//             transition_to_error_state(format!("Error reading ChangeScriptRecord: {:?}", e).as_str(), player_state);
-//         },
-//         None => {
-//             log_test_script_player_state("ChangeScriptReader.next() returned None, shouldn't be seeing this.", &player_state);
-//         }
-//     };
-// }
-
-// async fn read_next_sequenced_test_script_record<S>(player_state: &mut ScriptSourceChangeGeneratorState, test_script_reader: &mut S) 
-// where
-//     S: Stream<Item = anyhow::Result<SequencedChangeScriptRecord>> + Unpin,
-// {
-//     // Do nothing if the player is already in an error state.
-//     if let SourceChangeGeneratorStatus::Error = player_state.status {
-//         log_test_script_player_state("Ignoring read_next_sequenced_test_script_record call due to error state", &player_state);
-//         return;
-//     }
-
-//     // Do nothing if the ScriptSourceChangeGenerator has finished processing all records.
-//     if let SourceChangeGeneratorStatus::Finished = player_state.status {
-//         log_test_script_player_state("Ignoring read_next_sequenced_test_script_record call because script is already Finished", &player_state);
-//         return;
-//     }
-    
-//     match test_script_reader.next().await {
-//         Some(Ok(seq_record)) => {
-//             // Update the previous / next record in the player state.
-//             player_state.previous_record = player_state.next_record.clone();
-//             player_state.next_record = Some(seq_record);
-//         },
-//         Some(Err(e)) => {
-//             transition_to_error_state(format!("Error reading ChangeScriptRecord: {:?}", e).as_str(), player_state);
-//         },
-//         None => {
-//             log_test_script_player_state("ChangeScriptReader.next() returned None, shouldn't be seeing this.", &player_state);
-//         }
-//     };
-// }
 
 async fn get_next_change_stream_record(
     player_state: &mut ScriptSourceChangeGeneratorState, 

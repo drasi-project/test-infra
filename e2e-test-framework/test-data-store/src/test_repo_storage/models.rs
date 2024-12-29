@@ -228,6 +228,19 @@ pub struct TestDefinition {
 }
 
 impl TestDefinition {
+    pub fn new_local_test(test_id: &str, source: TestSourceDefinition) -> Self {
+        Self {
+            test_id: test_id.to_string(),
+            version: 0,
+            description: format!("A local test definition to hold source: {}", source.test_source_id).into(),
+            test_folder: None,
+            sources: vec![source],
+            queries: Vec::new(),
+            reactions: Vec::new(),
+            clients: Vec::new(),
+        }
+    }
+
     pub fn get_source(&self, source_id: &str) -> Option<TestSourceDefinition> {
         self.sources.iter().find(|source| source.test_source_id == source_id).cloned()
     }
@@ -238,7 +251,7 @@ pub struct TestSourceDefinition {
     pub test_source_id: String,
     #[serde(alias = "bootstrap_data_generator")]
     pub bootstrap_data_generator_def: Option<BootstrapDataGeneratorDefinition>,
-    #[serde(alias = "source_data_generator")]
+    #[serde(alias = "source_change_generator")]
     pub source_change_generator_def: Option<SourceChangeGeneratorDefinition>,
     #[serde(default)]
     pub subscribers: Vec<QueryId>,

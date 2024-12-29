@@ -174,8 +174,8 @@ impl TestRepoStorage {
     pub async fn get_test_definition(&self, id: &str) -> anyhow::Result<TestDefinition> {
         log::debug!("Getting Test Definition for ID {:?}", id);
 
-        let test_definition_path = self.path.join(&id).join(format!("{}.test", id));
-        log::error!("Looking in {:?}", test_definition_path);
+        let test_definition_path = self.path.join(format!("{}.test", id));
+        log::trace!("Looking in {:?}", test_definition_path);
 
 
         if !test_definition_path.exists() {

@@ -10,20 +10,20 @@ use crate::{bootstrap_data_generators::{create_bootstrap_data_generator, Bootstr
 #[serde(tag = "kind")]
 pub enum TestRunSourceConfig {
     Inline {
-        test_repo_id: String,
-        test_id: String,
-        test_run_id: Option<String>,
         start_immediately: Option<bool>,    
+        test_id: String,
+        test_repo_id: String,
+        test_run_id: Option<String>,
         #[serde(flatten)]
         test_source_definition: TestSourceDefinition,
     },
     Repo {
-        test_repo_id: String,
-        test_id: String,
-        test_source_id: String,
-        test_run_id: Option<String>,
         start_immediately: Option<bool>,    
+        test_id: String,
+        test_repo_id: String,
+        test_run_id: Option<String>,
         test_run_overrides: Option<TestSourceDefinition>,
+        test_source_id: String,
     },
 }
 

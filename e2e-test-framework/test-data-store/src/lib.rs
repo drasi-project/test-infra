@@ -152,12 +152,6 @@ impl TestDataStore {
             .get_test_definition(test_id).await?)
     }
 
-    pub async fn get_test_storage(&self, repo_id: &str, test_id: &str) -> anyhow::Result<TestStorage> {
-        Ok(self.test_repo_store.lock().await
-            .get_test_repo_storage(repo_id).await?
-            .get_test_storage(test_id).await?)
-    }
-
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
         Ok(self.test_repo_store.lock().await.get_test_repo_ids().await?)
     }
@@ -173,7 +167,7 @@ impl TestDataStore {
             .get_test_ids().await
     }
 
-    pub async fn get_test_source_dataset(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceScriptSet> {
+    pub async fn get_test_source_scripts(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceScriptSet> {
         Ok(self.test_repo_store.lock().await
             .get_test_repo_storage(repo_id).await?
             .get_test_storage(test_id).await?
@@ -188,12 +182,15 @@ impl TestDataStore {
             .get_test_source(source_id, false).await?)
     }
 
-    pub async fn get_test_source_dataset_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceScriptSet> {
-        self.get_test_source_dataset(
-            &test_run_source_id.test_run_id.test_repo_id, 
-            &test_run_source_id.test_run_id.test_id, 
-            &test_run_source_id.test_source_id
-        ).await
+    pub async fn get_test_storage(&self, repo_id: &str, test_id: &str) -> anyhow::Result<TestStorage> {
+        Ok(self.test_repo_store.lock().await
+            .get_test_repo_storage(repo_id).await?
+            .get_test_storage(test_id).await?)
+    }
+
+    // Test Run functions
+    pub async fn contains_test_run(&self, id: &TestRunId) -> anyhow::Result<bool> {
+        Ok(self.test_run_store.lock().await.contains_test_run(id).await?)
     }
 
     pub async fn get_test_definition_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestDefinition> {
@@ -216,17 +213,20 @@ impl TestDataStore {
         }
     }
 
-    pub async fn get_test_source_storage_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceStorage> {
-        self.get_test_source_storage(
+    pub async fn get_test_source_scripts_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceScriptSet> {
+        self.get_test_source_scripts(
             &test_run_source_id.test_run_id.test_repo_id, 
             &test_run_source_id.test_run_id.test_id, 
             &test_run_source_id.test_source_id
         ).await
     }
 
-    // Test Run functions
-    pub async fn contains_test_run(&self, id: &TestRunId) -> anyhow::Result<bool> {
-        Ok(self.test_run_store.lock().await.contains_test_run(id).await?)
+    pub async fn get_test_source_storage_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceStorage> {
+        self.get_test_source_storage(
+            &test_run_source_id.test_run_id.test_repo_id, 
+            &test_run_source_id.test_run_id.test_id, 
+            &test_run_source_id.test_source_id
+        ).await
     }
 
     pub async fn get_test_run_ids(&self) -> anyhow::Result<Vec<TestRunId>> {

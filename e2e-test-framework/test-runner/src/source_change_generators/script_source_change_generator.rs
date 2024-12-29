@@ -181,7 +181,7 @@ pub struct ScriptSourceChangeGenerator {
 impl ScriptSourceChangeGenerator {
     pub async fn new(test_run_source_id: TestRunSourceId, common_config: CommonSourceChangeGeneratorDefinition, unique_config: ScriptSourceChangeGeneratorDefinition, input_storage: TestSourceStorage, output_storage: TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeGenerator + Send + Sync>> {
         let settings = ScriptSourceChangeGeneratorSettings::new(test_run_source_id, common_config, unique_config, input_storage, output_storage.clone()).await?;
-        log::debug!("Creating ScriptSourceChangeGenerator from {:#?}", &settings);
+        log::debug!("Creating ScriptSourceChangeGenerator from {:?}", &settings);
 
         let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
 
@@ -388,12 +388,10 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
 
     log::debug!("ScriptSourceChangeGenerator thread exiting...");    
 }
-
 async fn get_next_change_stream_record(
     player_state: &mut ScriptSourceChangeGeneratorState, 
     change_stream: Option<&mut ChangeStream>,
 ) -> anyhow::Result<()> {
-
     // Do nothing if the SourceChangeGenerator is already in an error state.
     if let SourceChangeGeneratorStatus::Error = player_state.status {
         anyhow::bail!("Ignoring get_next_change_stream_record call due to error state");
@@ -510,19 +508,6 @@ async fn process_next_change_stream_record(
     if delayed_message.record_seq_num != next_record.seq {
         anyhow::bail!("Received DelayedChangeScriptRecordMessage with incorrect seq");
     } 
-
-    // Adjust the time in the SequencedChangeScriptRecord if the player is in Live Time Mode.
-    // This will make sure the times are as accurate as possible.
-    // if player_state.time_mode == TimeMode::Live {
-    //     // Live Time Mode means we just use the current time as the record's Replay Time regardless of offset.
-    //     let replay_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-
-    //     next_record.virtual_time_ns_replay = replay_time_ns;
-    //     player_state.virtual_time_ns_current = replay_time_ns;
-    //     log_test_script_player_state(
-    //         format!("Shifted Player Current Replay Time to delayed record scheduled time: {}", replay_time_ns).as_str(),
-    //         &player_state);
-    // };
     
     // Process the delayed record.
     match &next_record.record {
@@ -607,25 +592,6 @@ async fn dispatch_source_change_events(
     // TODO - Handle errors properly.
     let _ = join_all(futures).await;
 }
-
-// fn time_shift_change_script_record(player_state: &mut ScriptSourceChangeGeneratorState, seq_record: &mut SequencedChangeScriptRecord) -> ScheduledChangeScriptRecord {
-
-//     let virtual_time_ns_replay = match player_state.time_mode {
-//         TimeMode::Live => {
-//             // Live Time Mode means we just use the current time as the record's Replay Time regardless of offset.
-//             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64
-//         },
-//         TimeMode::Recorded | TimeMode::Rebased(_) => {
-//             // Recorded or Rebased Time Mode means we have to adjust the record's Replay Time based on the offset from
-//             // the start time. The player_state.start_replay_time has the base time regardless of the time mode.
-//             player_state.virtual_time_ns_start + seq_record.offset_ns
-//         },
-//     };
-
-//     // TODO: Also need to adjust the time values in the data based on the time mode settings.
-
-//     ScheduledChangeScriptRecord::new(seq_record, replay_time_ns)
-// }
 
 fn transition_from_paused_state(player_state: &mut ScriptSourceChangeGeneratorState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
@@ -747,13 +713,14 @@ fn transition_from_error_state(player_state: &mut ScriptSourceChangeGeneratorSta
 }
 
 fn transition_to_finished_state(player_state: &mut ScriptSourceChangeGeneratorState) {
+    log::debug!("Transitioning to Finished state from: {:?}", player_state.status);
+
     player_state.status = SourceChangeGeneratorStatus::Finished;
     player_state.skips_remaining = 0;
     player_state.steps_remaining = 0;
 }
 
-fn transition_to_error_state(player_state: &mut ScriptSourceChangeGeneratorState, error_message: &str, error: Option<&anyhow::Error>) {
-    
+fn transition_to_error_state(player_state: &mut ScriptSourceChangeGeneratorState, error_message: &str, error: Option<&anyhow::Error>) {    
     player_state.status = SourceChangeGeneratorStatus::Error;
 
     let msg = match error {
@@ -802,37 +769,13 @@ pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receive
     }
 }
 
-// pub async fn script_reader_thread<S>(mut change_stream: S, _change_tx_channel: Sender<DelayChangeScriptRecordMessage>, player_settings: ScriptSourceChangeGeneratorSettings, player_state: &mut ScriptSourceChangeGeneratorState) 
-// where
-//     S: Stream<Item = SequencedChangeScriptRecord> + Unpin,
-// {
-//     log::info!("ScriptSourceChangeGenerator {} script reader thread started...", player_settings.id);
-
-//     while let Some(seq_record) = change_stream.next().await {
-//         log::trace!("Processing SequencedChangeScriptRecord: {:?}", seq_record);
-
-//         player_state.next_record = Some(seq_record);
-
-//         _process_next_test_script_record(player_state, dispatchers, delayer_tx_channel)
-//     }
-// }
-
-// Function to log the current Next ChangeScriptRecord at varying levels of detail.
-fn _log_sequenced_test_script_record(msg: &str, record: &SequencedChangeScriptRecord) {
-    match log::max_level() {
-        log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, record),
-        log::LevelFilter::Debug => log::debug!("{} - seq:{:?}, offset_ns:{:?}", msg, record.seq, record.offset_ns),
-        _ => {}
-    }
-}
-
 // Function to log the Player State at varying levels of detail.
 fn log_test_script_player_state(player_state: &ScriptSourceChangeGeneratorState, msg: &str) {
     match log::max_level() {
         log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, player_state),
         log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, player_state),
-        // log::LevelFilter::Info => log::info!("{} - status:{:?}, error_message:{:?}, start_replay_time:{:?}, current_replay_time:{:?}, skips_remaining:{:?}, steps_remaining:{:?}",
-        //     msg, state.status, state.error_message, state.start_replay_time, state.current_replay_time, state.skips_remaining, state.steps_remaining),
+        log::LevelFilter::Info => log::info!("{} - status:{:?}, error_message:{:?}, virtual_time_ns_start:{:?}, virtual_time_ns_current:{:?}, skips_remaining:{:?}, steps_remaining:{:?}",
+            msg, player_state.status, player_state.error_messages, player_state.virtual_time_ns_start, player_state.virtual_time_ns_current, player_state.skips_remaining, player_state.steps_remaining),
         _ => {}
     }
 }

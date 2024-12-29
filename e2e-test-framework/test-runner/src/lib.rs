@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 
 use bootstrap_data_generators::BootstrapData;
 use source_change_generators::SourceChangeGeneratorCommandResponse;
-use test_data_store::{test_repo_storage::models::TimeMode, test_run_storage::TestRunSourceId, TestDataStore};
+use test_data_store::{test_repo_storage::models::{TestDefinition, TimeMode}, test_run_storage::TestRunSourceId, TestDataStore};
 
 pub mod bootstrap_data_generators;
 pub mod source_change_generators;
@@ -52,7 +52,7 @@ pub struct TestRunner {
 
 impl TestRunner {
     pub async fn new(config: TestRunnerConfig, data_store: Arc<TestDataStore>) -> anyhow::Result<Self> {   
-        log::debug!("Creating TestRunner from {:#?}", config);
+        log::debug!("Creating TestRunner from {:?}", config);
 
         let test_runner = TestRunner {
             data_store,
@@ -75,7 +75,7 @@ impl TestRunner {
     }
     
     pub async fn add_test_source(&self, test_run_config: TestRunSourceConfig) -> anyhow::Result<TestRunSourceId> {
-        log::trace!("Adding TestRunSource from {:#?}", test_run_config);
+        log::trace!("Adding TestRunSource from {:?}", test_run_config);
 
         // If the TestRunner is in an Error state, return an error.
         if let TestRunnerStatus::Error(msg) = &self.get_status().await? {
@@ -91,19 +91,28 @@ impl TestRunner {
             anyhow::bail!("TestRunner already contains TestRunSource with ID: {:?}", &id);
         }
 
-        // Construct a TestRunSourceDefinition for the new TestRunSource.
-        let definition = match &test_run_config {
-            TestRunSourceConfig::Inline{..} => {
-                TestRunSourceDefinition::new(test_run_config, None)                
-            },
-            TestRunSourceConfig::Repo {..} => {
-                // Get the TestSourceDefinition that the TestRunSource is associated with.
-                let test_source_definition = self.data_store.get_test_source_definition_for_test_run_source(&id).await?;
-                TestRunSourceDefinition::new(test_run_config, Some(test_source_definition))
-            },
-        }?;
+        let test_source_definition = match &test_run_config {
+            TestRunSourceConfig::Inline{ test_id, test_repo_id, test_source_definition, ..} => {
+                // Get the TestRepoStorage that is associated with the Inline TestRunSource
+                let repo = self.data_store.get_test_repo_storage(test_repo_id).await?;
 
-        log::error!("TestRunSourceDefinition: {:#?}", &definition);
+                // Create a new TestDefinition from the TestRunSourceConfig and create a new local Test.
+                let test_def = TestDefinition::new_local_test(test_id, test_source_definition.clone());
+                repo.add_local_test(test_def, false).await?;
+
+                self.data_store.get_test_source_definition_for_test_run_source(&id).await?
+            },
+            TestRunSourceConfig::Repo {test_id, test_repo_id, ..} => {
+                // Get the TestRepoStorage that is associated with the Repo TestRunSource
+                let repo = self.data_store.get_test_repo_storage(test_repo_id).await?;
+
+                repo.add_remote_test(&test_id, false).await?;
+                self.data_store.get_test_source_definition_for_test_run_source(&id).await?
+            },
+        };
+
+        let definition = TestRunSourceDefinition::new(test_run_config, Some(test_source_definition))?;
+        log::trace!("TestRunSourceDefinition: {:?}", &definition);
 
         // Get the INPUT Test Data storage for the TestRunSource.
         // This is where the TestRunSource will read the Test Data from.

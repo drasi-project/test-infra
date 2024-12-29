@@ -64,22 +64,9 @@ impl AzureStorageBlobTestRepoClient {
         Ok(container_client)
     }
 
-    async fn download_change_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
-
-        let mut file_path_list = download_test_repo_folder(
-            self.create_container_client()?,
-            local_folder,
-            repo_folder,
-        ).await?;
-        log::trace!("Change Scripts Files: {:?}", file_path_list);
-
-        // Sort the list of files by the file name to get them in the correct order for processing.
-        file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-
-        Ok(file_path_list)
-    }
-
     async fn download_bootstrap_script_files( &self, repo_folder: String , local_folder: PathBuf) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
+        log::debug!("Downloading Bootstrap Script Files from {:?} to {:?}", repo_folder, local_folder);
+
         let mut file_path_list = download_test_repo_folder(
             self.create_container_client()?,
             local_folder,
@@ -103,6 +90,22 @@ impl AzureStorageBlobTestRepoClient {
         log::trace!("Bootstrap Script Map: {:?}", file_path_map);
 
         Ok(file_path_map)
+    }
+
+    async fn download_change_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+        log::debug!("Downloading Source Change Script Files from {:?} to {:?}", repo_folder, local_folder);
+
+        let mut file_path_list = download_test_repo_folder(
+            self.create_container_client()?,
+            local_folder,
+            repo_folder,
+        ).await?;
+        log::trace!("Change Scripts Files: {:?}", file_path_list);
+
+        // Sort the list of files by the file name to get them in the correct order for processing.
+        file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+        Ok(file_path_list)
     }
 }
 
@@ -129,7 +132,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
     }
 
     async fn copy_test_source_content(&self, test_id: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
-        log::debug!("Copying Test Source Content for {:?} to {:?}", test_source_def.test_source_id, test_source_data_path);
+        log::error!("Copying Test Source Content for {:?} to {:?}", test_source_def.test_source_id, test_source_data_path);
 
         // Bootstrap Data Script Files
         match &test_source_def.bootstrap_data_generator_def {
@@ -180,6 +183,11 @@ async fn download_test_repo_folder(
             .prefix(remote_repo_folder.clone())
             .into_stream();
     
+    // Create the local folder if it doesn't exist.
+    if !local_repo_folder.exists() {
+        tokio::fs::create_dir_all(&local_repo_folder).await?;
+    }
+
     // Vector of tasks to download the files.
     // Each task will download a single file.
     // All downloads must be complete before returning.

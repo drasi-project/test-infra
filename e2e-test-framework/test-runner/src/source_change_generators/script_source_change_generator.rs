@@ -208,6 +208,7 @@ pub struct ScheduledChangeScriptRecordMessage {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ProcessedChangeScriptRecord {
+    pub dispatch_status: SourceChangeGeneratorStatus,
     pub scripted: SequencedChangeScriptRecord,
     // pub dispatched: ChangeScriptRecord,
 }
@@ -391,22 +392,6 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::R
     };
     log::info!("Loaded ChangeScript - Header: {:?}", header);
 
-    // Set the virtual_time_ns_start based on the time mode and the script start time from the header.
-    // let virtual_time_ns_start = match settings.time_mode {
-    //     TimeMode::Live => {
-    //         // Use the current system time.
-    //         SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64
-    //     },
-    //     TimeMode::Recorded => {
-    //         // Use the start time as provided in the Header.
-    //         header.start_time.timestamp_nanos_opt().unwrap() as u64
-    //     },
-    //     TimeMode::Rebased(nanos) => {
-    //         // Use the rebased time as provided in the AppConfig.
-    //         nanos
-    //     },
-    // };
-
     // Create the set of dispatchers.
     let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
     for def in settings.dispatchers.iter() {
@@ -505,18 +490,22 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
     // Time Shift.
     time_shift(state, &next_record);
 
-    // Process the delayed record.
+    // Process the scheduled record.
     match &next_record.record {
         ChangeScriptRecord::SourceChange(change_record) => {
             match state.status {
                 SourceChangeGeneratorStatus::Running => {
                     // Dispatch the SourceChangeEvent.
                     dispatch_source_change_events(state, vec!(&change_record.source_change_event)).await;
+                    load_next_change_stream_record(state).await?;  
+                    schedule_next_change_stream_record(state).await?;
                 },
                 SourceChangeGeneratorStatus::Stepping => {
                     if state.steps_remaining > 0 {
                         // Dispatch the SourceChangeEvent.
                         dispatch_source_change_events(state, vec!(&change_record.source_change_event)).await;
+                        load_next_change_stream_record(state).await?;  
+                        schedule_next_change_stream_record(state).await?;
 
                         state.steps_remaining -= 1;
                         if state.steps_remaining == 0 {
@@ -531,6 +520,8 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
                     if state.skips_remaining > 0 {
                         // Skip the SourceChangeEvent.
                         log::debug!("Skipping ChangeScriptRecord: {:?}", change_record);
+                        load_next_change_stream_record(state).await?;  
+                        schedule_next_change_stream_record(state).await?;
 
                         state.skips_remaining -= 1;
                         if state.skips_remaining == 0 {
@@ -571,51 +562,29 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
         },
     };
 
-    // if player_state.status.is_active() {
-    //     load_next_change_stream_record(&mut player_state, change_stream.as_mut()).await
-    //         .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling load_next_change_stream_record.", Some(e))).ok();
-    // };
-
     Ok(())
 }
 
-// async fn _load_next_change_stream_record(
-//     state: &mut ScriptSourceChangeGeneratorInternalState, 
-//     change_stream: Option<&mut ChangeStream>,
-// ) -> anyhow::Result<()> {
-//     // Do nothing if the SourceChangeGenerator is already in an error state.
-//     if let SourceChangeGeneratorStatus::Error = state.status {
-//         anyhow::bail!("Ignoring load_next_change_stream_record call due to error state");
-//     }
+async fn load_next_change_stream_record(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
+    match state.change_stream.next().await {
+        Some(Ok(seq_record)) => {
+            state.previous_record = Some(ProcessedChangeScriptRecord {
+                dispatch_status: state.status,
+                scripted: state.next_record.clone().unwrap(),
+            });
 
-//     match change_stream {
-//         Some(stream) => {
-//             match stream.next().await {
-//                 Some(Ok(seq_record)) => {
-//                     if state.next_record.is_some() {
-//                         // Assign the current next record to the previous record.
-//                         state.previous_record = Some(ProcessedChangeScriptRecord {
-//                             scripted: state.next_record.clone().unwrap(),
-//                         });
-//                     }
-                
-//                     state.next_record = Some(seq_record);
-//                 },
-//                 Some(Err(e)) => {
-//                     anyhow::bail!(format!("Error reading ChangeScriptRecord: {:?}", e));
-//                 },
-//                 None => {
-//                     anyhow::bail!("ChangeScriptReader.next() returned None, shouldn't be seeing this.");
-//                 }
-//             };
-//         },
-//         None => {
-//             anyhow::bail!("ChangeScriptReader is None, can't read script.");
-//         }
-//     };
+            state.next_record = Some(seq_record);
+        },
+        Some(Err(e)) => {
+            anyhow::bail!(format!("Error reading ChangeScriptRecord: {:?}", e));
+        },
+        None => {
+            anyhow::bail!("ChangeScriptReader.next() returned None, shouldn't be seeing this.");
+        }
+    };
 
-//     Ok(())
-// }
+    Ok(())
+}
 
 async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
     log_test_script_player_state(state, "schedule_next_change_stream_record");

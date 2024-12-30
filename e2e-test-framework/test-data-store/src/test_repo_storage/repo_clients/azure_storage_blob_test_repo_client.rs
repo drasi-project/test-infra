@@ -120,7 +120,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
         }   
         
         // Formulate the remote repo path for the test definition file
-        let remote_path = format!("{}/{}.test", self.settings.storage_root_path, test_id);
+        let remote_path = format!("{}/{}.test.json", self.settings.storage_root_path, test_id);
     
         // Download the test definition file
         download_test_repo_file(

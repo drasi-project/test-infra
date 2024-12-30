@@ -112,7 +112,7 @@ impl TestRepoStorage {
     pub async fn add_local_test(&self, test_def: TestDefinition, replace: bool) -> anyhow::Result<TestStorage> {
         log::debug!("Adding Local ((replace = {}) ) Test {:?}", replace, &test_def);
 
-        let test_def_path = self.path.join(format!("{}.test", &test_def.test_id));
+        let test_def_path = self.path.join(format!("{}.test.json", &test_def.test_id));
         let test_path = self.path.join(&test_def.test_id);
 
         if replace {
@@ -143,7 +143,7 @@ impl TestRepoStorage {
     pub async fn add_remote_test(&self, id: &str, replace: bool) -> anyhow::Result<TestStorage> {
         log::debug!("Adding Remote ((replace = {}) ) Test ID {:?}", replace, &id);
 
-        let test_def_path = self.path.join(format!("{}.test", id));
+        let test_def_path = self.path.join(format!("{}.test.json", id));
         let test_path = self.path.join(id);
 
         if replace {
@@ -174,7 +174,7 @@ impl TestRepoStorage {
     pub async fn get_test_definition(&self, id: &str) -> anyhow::Result<TestDefinition> {
         log::debug!("Getting Test Definition for ID {:?}", id);
 
-        let test_definition_path = self.path.join(format!("{}.test", id));
+        let test_definition_path = self.path.join(format!("{}.test.json", id));
         log::trace!("Looking in {:?}", test_definition_path);
 
 
@@ -207,7 +207,7 @@ impl TestRepoStorage {
         log::debug!("Getting Test Storage for ID {:?}", id);
 
         let test_path = self.path.join(&id);
-        let test_definition_path = self.path.join(format!("{}.test", id));
+        let test_definition_path = self.path.join(format!("{}.test.json", id));
 
         if !test_definition_path.exists() {
             anyhow::bail!("Test with ID {:?} not found", &id);

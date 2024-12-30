@@ -393,7 +393,7 @@ mod tests {
 
     fn create_test_file(content: &str) -> File {
         let dir = tempdir().unwrap();
-        let file_path = dir.path().join("unit_test.test");
+        let file_path = dir.path().join("unit_test.test.json");
         let mut file = File::create(&file_path).unwrap();
         writeln!(file, "{}", content).unwrap();
         file.sync_all().unwrap();

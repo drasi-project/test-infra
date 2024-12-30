@@ -146,32 +146,6 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub virtual_time_ns_start: u64,
 }
 
-// impl Default for ScriptSourceChangeGeneratorInternalState {
-//     fn default() -> Self {
-//         Self {
-//             actual_time_ns_start: 0,
-//             change_tx_channel: None,
-//             delayer_tx_channel: None,
-//             dispatchers: Vec::new(),
-//             error_messages: Vec::new(),
-//             ignore_scripted_pause_commands: false,
-//             header_record: None,
-//             next_record: None,
-//             previous_record: None,
-//             skips_remaining: 0,
-//             spacing_mode: SpacingMode::None,
-//             status: SourceChangeGeneratorStatus::Paused,
-//             steps_remaining: 0,
-//             test_run_source_id: TestRunSourceId::new(),
-//             time_mode: TimeMode::Live,
-//             virtual_time_ns_current: 0,
-//             virtual_time_ns_offset: 0,
-//             virtual_time_ns_start: 0,
-//         }
-//     }
-// }
-
-
 impl Debug for ScriptSourceChangeGeneratorInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ScriptSourceChangeGeneratorInternalState")
@@ -331,9 +305,15 @@ impl SourceChangeGenerator for ScriptSourceChangeGenerator {
 pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSourceChangeGeneratorMessage>, settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<()>{
     log::info!("Script processor thread started for TestRunSource {} ...", settings.id);
 
-    // The ScriptSourceChangeGenerator always starts Paused.
-    let (change_tx_channel, mut change_rx_channel) = tokio::sync::mpsc::channel(100);
-    let mut state = initialize(settings, change_tx_channel).await?;
+    // The ScriptSourceChangeGenerator always starts with the first script record loaded and Paused.
+    let (mut state, mut change_rx_channel) = match initialize(settings).await {
+        Ok((state, change_rx_channel)) => (state, change_rx_channel),
+        Err(e) => {
+            let msg = format!("Error initializing ScriptSourceChangeGenerator: {:?}", e);
+            log::error!("{}", msg);
+            anyhow::bail!(msg);
+        }
+    };
 
     // Loop to process commands sent to the ScriptSourceChangeGenerator or read from the Change Stream.
     loop {
@@ -375,18 +355,10 @@ pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSour
     Ok(())
 }
 
-async fn initialize(settings: ScriptSourceChangeGeneratorSettings, change_tx_channel: Sender<DelayedChangeScriptRecordMessage>)  -> anyhow::Result<ScriptSourceChangeGeneratorInternalState> {
+async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::Result<(ScriptSourceChangeGeneratorInternalState, Receiver<DelayedChangeScriptRecordMessage>)> {
 
-    let script_files = match settings.input_storage.get_script_files().await {
-        Ok(ds) => ds.source_change_script_files,
-        Err(e) => {
-            log::error!("Error getting dataset: {:?}", e);
-            Vec::new()
-        }
-    };
-
+    // Create the set of dispatchers.
     let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
-
     for def in settings.dispatchers.iter() {
         match create_source_change_dispatcher(def, &settings.output_storage).await {
             Ok(dispatcher) => dispatchers.push(dispatcher),
@@ -396,6 +368,16 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings, change_tx_cha
         }
     }
 
+    // Get the list of script files from the input storage.
+    let script_files = match settings.input_storage.get_script_files().await {
+        Ok(ds) => ds.source_change_script_files,
+        Err(e) => {
+            log::error!("Error getting dataset: {:?}", e);
+            Vec::new()
+        }
+    };
+
+    let (change_tx_channel, change_rx_channel) = tokio::sync::mpsc::channel(100);
     let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
     let _ = tokio::spawn(delayer_thread(settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
 
@@ -456,7 +438,7 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings, change_tx_cha
     load_next_change_stream_record(&mut player_state, change_stream.as_mut()).await
         .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling load_next_change_stream_record: {:?}", Some(e))).ok();
 
-    Ok(player_state)
+    Ok((player_state, change_rx_channel))
 }
 
 async fn process_command_message(state: &mut ScriptSourceChangeGeneratorInternalState, message: ScriptSourceChangeGeneratorMessage) -> anyhow::Result<()> {

@@ -156,16 +156,17 @@ impl TestRunSourceDefinition {
 pub struct TestRunSourceState {
     pub id: TestRunSourceId,
     pub source_change_generator: SourceChangeGeneratorState,
+    pub start_immediately: bool,
 }
 
 #[derive(Debug)]
 pub struct TestRunSource {
-    pub id: TestRunSourceId,
-    pub start_immediately: bool,
     #[debug(skip)]
     pub bootstrap_data_generator: Option<Box<dyn BootstrapDataGenerator + Send + Sync>>,
+    pub id: TestRunSourceId,
     #[debug(skip)]
     pub source_change_generator: Option<Box<dyn SourceChangeGenerator + Send + Sync>>,    
+    pub start_immediately: bool,
     pub subscribers: Vec<QueryId>
 }
 
@@ -215,6 +216,7 @@ impl TestRunSource {
         Ok(TestRunSourceState {
             id: self.id.clone(),
             source_change_generator: self.get_source_change_generator_state().await?,
+            start_immediately: self.start_immediately,
         })
     }
 

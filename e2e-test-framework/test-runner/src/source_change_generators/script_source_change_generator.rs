@@ -1,4 +1,4 @@
-use std::{pin::Pin, sync::Arc, time::SystemTime};
+use std::{fmt::{self, Debug, Formatter}, pin::Pin, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use futures::{future::join_all, Stream};
@@ -8,7 +8,7 @@ use tokio_stream::StreamExt;
 
 use test_data_store::{
     scripts::{
-        change_script_file_reader::ChangeScriptReader, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent
+        change_script_file_reader::ChangeScriptReader, ChangeHeaderRecord, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent
     }, 
     test_repo_storage::{
         models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode}, 
@@ -84,40 +84,112 @@ impl ScriptSourceChangeGeneratorSettings {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct ScriptSourceChangeGeneratorState {
+#[derive(Debug, Serialize)]
+pub struct ScriptSourceChangeGeneratorExternalState {
     pub actual_time_ns_start: u64,
     pub error_messages: Vec<String>,
     pub ignore_scripted_pause_commands: bool,
+    pub header_record: Option<ChangeHeaderRecord>,
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
     pub skips_remaining: u64,
     pub spacing_mode: SpacingMode,
     pub status: SourceChangeGeneratorStatus,
     pub steps_remaining: u64,
+    pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
     pub virtual_time_ns_current: u64,
     pub virtual_time_ns_offset: u64,
     pub virtual_time_ns_start: u64,
 }
 
-impl Default for ScriptSourceChangeGeneratorState {
-    fn default() -> Self {
+impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeGeneratorExternalState {
+    fn from(state: &mut ScriptSourceChangeGeneratorInternalState) -> Self {
         Self {
-            actual_time_ns_start: 0,
-            error_messages: Vec::new(),
-            ignore_scripted_pause_commands: false,
-            next_record: None,
-            previous_record: None,
-            skips_remaining: 0,
-            spacing_mode: SpacingMode::None,
-            status: SourceChangeGeneratorStatus::Paused,
-            steps_remaining: 0,
-            time_mode: TimeMode::Live,
-            virtual_time_ns_current: 0,
-            virtual_time_ns_offset: 0,
-            virtual_time_ns_start: 0,
+            actual_time_ns_start: state.actual_time_ns_start,
+            error_messages: state.error_messages.clone(),
+            ignore_scripted_pause_commands: state.ignore_scripted_pause_commands,
+            header_record: state.header_record.clone(),
+            next_record: state.next_record.clone(),
+            previous_record: state.previous_record.clone(),
+            skips_remaining: state.skips_remaining,
+            spacing_mode: state.spacing_mode.clone(),
+            status: state.status,
+            steps_remaining: state.steps_remaining,
+            test_run_source_id: state.test_run_source_id.clone(),
+            time_mode: state.time_mode.clone(),
+            virtual_time_ns_current: state.virtual_time_ns_current,
+            virtual_time_ns_offset: state.virtual_time_ns_offset,
+            virtual_time_ns_start: state.virtual_time_ns_start,
         }
+    }
+}
+
+pub struct ScriptSourceChangeGeneratorInternalState {
+    pub actual_time_ns_start: u64,
+    pub change_tx_channel: Sender<DelayedChangeScriptRecordMessage>,
+    pub delayer_tx_channel: Sender<DelayedChangeScriptRecordMessage>,
+    pub dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>>,
+    pub error_messages: Vec<String>,
+    pub ignore_scripted_pause_commands: bool,
+    pub header_record: Option<ChangeHeaderRecord>,
+    pub next_record: Option<SequencedChangeScriptRecord>,
+    pub previous_record: Option<ProcessedChangeScriptRecord>,
+    pub skips_remaining: u64,
+    pub spacing_mode: SpacingMode,
+    pub status: SourceChangeGeneratorStatus,
+    pub steps_remaining: u64,
+    pub test_run_source_id: TestRunSourceId,
+    pub time_mode: TimeMode,
+    pub virtual_time_ns_current: u64,
+    pub virtual_time_ns_offset: u64,
+    pub virtual_time_ns_start: u64,
+}
+
+// impl Default for ScriptSourceChangeGeneratorInternalState {
+//     fn default() -> Self {
+//         Self {
+//             actual_time_ns_start: 0,
+//             change_tx_channel: None,
+//             delayer_tx_channel: None,
+//             dispatchers: Vec::new(),
+//             error_messages: Vec::new(),
+//             ignore_scripted_pause_commands: false,
+//             header_record: None,
+//             next_record: None,
+//             previous_record: None,
+//             skips_remaining: 0,
+//             spacing_mode: SpacingMode::None,
+//             status: SourceChangeGeneratorStatus::Paused,
+//             steps_remaining: 0,
+//             test_run_source_id: TestRunSourceId::new(),
+//             time_mode: TimeMode::Live,
+//             virtual_time_ns_current: 0,
+//             virtual_time_ns_offset: 0,
+//             virtual_time_ns_start: 0,
+//         }
+//     }
+// }
+
+
+impl Debug for ScriptSourceChangeGeneratorInternalState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ScriptSourceChangeGeneratorInternalState")
+            .field("actual_time_ns_start", &self.actual_time_ns_start)
+            .field("error_messages", &self.error_messages)
+            .field("ignore_scripted_pause_commands", &self.ignore_scripted_pause_commands)
+            .field("header_record", &self.header_record)
+            .field("next_record", &self.next_record)
+            .field("previous_record", &self.previous_record)
+            .field("skips_remaining", &self.skips_remaining)
+            .field("spacing_mode", &self.spacing_mode)
+            .field("status", &self.status)
+            .field("steps_remaining", &self.steps_remaining)
+            .field("time_mode", &self.time_mode)
+            .field("virtual_time_ns_current", &self.virtual_time_ns_current)
+            .field("virtual_time_ns_offset", &self.virtual_time_ns_offset)
+            .field("virtual_time_ns_start", &self.virtual_time_ns_start)
+            .finish()
     }
 }
 
@@ -153,7 +225,7 @@ pub struct ScriptSourceChangeGeneratorMessageResponse {
     // Result of the command.
     pub result: anyhow::Result<()>,
     // State of the ScriptSourceChangeGenerator after the command.
-    pub state: ScriptSourceChangeGeneratorState,
+    pub state: ScriptSourceChangeGeneratorExternalState,
 }
 
 #[derive(Clone, Debug)]
@@ -173,9 +245,9 @@ pub struct ProcessedChangeScriptRecord {
 pub struct ScriptSourceChangeGenerator {
     settings: ScriptSourceChangeGeneratorSettings,
     #[serde(skip_serializing)]
-    player_tx_channel: Sender<ScriptSourceChangeGeneratorMessage>,
+    script_processor_tx_channel: Sender<ScriptSourceChangeGeneratorMessage>,
     #[serde(skip_serializing)]
-    _player_thread_handle: Arc<Mutex<JoinHandle<()>>>,
+    _script_processor_thread_handle: Arc<Mutex<JoinHandle<anyhow::Result<()>>>>,
 }
 
 impl ScriptSourceChangeGenerator {
@@ -183,24 +255,13 @@ impl ScriptSourceChangeGenerator {
         let settings = ScriptSourceChangeGeneratorSettings::new(test_run_source_id, common_config, unique_config, input_storage, output_storage.clone()).await?;
         log::debug!("Creating ScriptSourceChangeGenerator from {:?}", &settings);
 
-        let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
-
-        for def in settings.dispatchers.iter() {
-            match create_source_change_dispatcher(def, &output_storage).await {
-                Ok(dispatcher) => dispatchers.push(dispatcher),
-                Err(e) => {
-                    anyhow::bail!("Error creating SourceChangeDispatcher: {:?}; Error: {:?}", def, e);
-                }
-            }
-        }
-
-        let (player_tx_channel, player_rx_channel) = tokio::sync::mpsc::channel(100);
-        let player_thread_handle = tokio::spawn(player_thread(player_rx_channel, settings.clone(), dispatchers));
+        let (script_processor_tx_channel, script_processor_rx_channel) = tokio::sync::mpsc::channel(100);
+        let script_processor_thread_handle = tokio::spawn(script_processor_thread(script_processor_rx_channel, settings.clone()));
 
         Ok(Box::new(Self {
             settings,
-            player_tx_channel,
-            _player_thread_handle: Arc::new(Mutex::new(player_thread_handle)),
+            script_processor_tx_channel,
+            _script_processor_thread_handle: Arc::new(Mutex::new(script_processor_thread_handle)),
         }))
     }
 
@@ -215,7 +276,7 @@ impl ScriptSourceChangeGenerator {
     async fn send_command(&self, command: ScriptSourceChangeGeneratorCommand) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        let r = self.player_tx_channel.send(ScriptSourceChangeGeneratorMessage {
+        let r = self.script_processor_tx_channel.send(ScriptSourceChangeGeneratorMessage {
             command,
             response_tx: Some(response_tx),
         }).await;
@@ -228,6 +289,7 @@ impl ScriptSourceChangeGenerator {
                     result: player_response.result,
                     state: super::SourceChangeGeneratorState {
                         status: player_response.state.status,
+                        state: serde_json::to_value(player_response.state).unwrap(),
                     },
                 })
             },
@@ -266,10 +328,55 @@ impl SourceChangeGenerator for ScriptSourceChangeGenerator {
 // Function that defines the operation of the ScriptSourceChangeGenerator thread.
 // The ScriptSourceChangeGenerator thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
 // The Web API function communicate via a channel and provide oneshot channels for the ScriptSourceChangeGenerator to send responses back.
-pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGeneratorMessage>, player_settings: ScriptSourceChangeGeneratorSettings, mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>>) {
-    log::info!("ScriptSourceChangeGenerator {} player thread started...", player_settings.id);
+pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSourceChangeGeneratorMessage>, settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<()>{
+    log::info!("ScriptSourceChangeGenerator {} script processor thread started...", settings.id);
 
-    let script_files = match player_settings.input_storage.get_script_files().await {
+    let (change_tx_channel, mut change_rx_channel) = tokio::sync::mpsc::channel(100);
+
+    // The ScriptSourceChangeGenerator always starts Paused.
+    let mut state = initialize(settings, change_tx_channel).await?;
+
+    // Loop to process messages sent to the ScriptSourceChangeGenerator or read from the Change Stream.
+    loop {
+        log_test_script_player_state(&state, "Top of ScriptSourceChangeGenerator loop");
+
+        tokio::select! {
+            // Always process all messages in the command channel and act on them first.
+            biased;
+
+            // Process messages from the command channel.
+            command_message = command_rx_channel.recv() => {
+                match command_message {
+                    Some(command_message) => process_command_message(&mut state, command_message).await?,
+                    None => {
+                        transition_to_error_state(&mut state, "Command channel closed.", None);
+                        break;
+                    }
+                }
+            },
+            // Process messages from the Change Stream.
+            change_stream_message = change_rx_channel.recv(), if state.status.is_processing() => {
+                match change_stream_message {
+                    Some(change_stream_message) => process_change_stream_message(&mut state, change_stream_message).await?,
+                    None => {
+                        transition_to_error_state(&mut state, "Change stream channel closed.", None);
+                        break;
+                    }
+                }
+            },
+            else => {
+                log::trace!("loop activated but has no message to process.");
+            }
+        }
+    }
+
+    log::info!("Script processor thread exiting...");    
+    Ok(())
+}
+
+async fn initialize(settings: ScriptSourceChangeGeneratorSettings, change_tx_channel: Sender<DelayedChangeScriptRecordMessage>)  -> anyhow::Result<ScriptSourceChangeGeneratorInternalState> {
+
+    let script_files = match settings.input_storage.get_script_files().await {
         Ok(ds) => ds.source_change_script_files,
         Err(e) => {
             log::error!("Error getting dataset: {:?}", e);
@@ -277,15 +384,39 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
         }
     };
 
-    let (_delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
-    let (change_tx_channel, mut change_rx_channel) = tokio::sync::mpsc::channel(100);
-    let _ = tokio::spawn(delayer_thread(player_settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
+    let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
 
-    let mut player_state = ScriptSourceChangeGeneratorState {
-        ignore_scripted_pause_commands: player_settings.ignore_scripted_pause_commands,
-        spacing_mode: player_settings.spacing_mode,
-        time_mode: player_settings.time_mode,
-        ..ScriptSourceChangeGeneratorState::default()
+    for def in settings.dispatchers.iter() {
+        match create_source_change_dispatcher(def, &settings.output_storage).await {
+            Ok(dispatcher) => dispatchers.push(dispatcher),
+            Err(e) => {
+                anyhow::bail!("Error creating SourceChangeDispatcher: {:?}; Error: {:?}", def, e);
+            }
+        }
+    }
+
+    let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
+    let _ = tokio::spawn(delayer_thread(settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
+
+    let mut player_state = ScriptSourceChangeGeneratorInternalState {
+        actual_time_ns_start: 0,
+        change_tx_channel,
+        delayer_tx_channel,
+        dispatchers,
+        error_messages: Vec::new(),
+        ignore_scripted_pause_commands: settings.ignore_scripted_pause_commands,
+        header_record: None,
+        next_record: None,
+        previous_record: None,
+        skips_remaining: 0,
+        spacing_mode: settings.spacing_mode,
+        status: SourceChangeGeneratorStatus::Paused,
+        steps_remaining: 0,
+        test_run_source_id: settings.id.clone(),
+        time_mode: settings.time_mode,
+        virtual_time_ns_current: 0,
+        virtual_time_ns_offset: 0,
+        virtual_time_ns_start: 0,
     };
 
     let mut change_stream = match ChangeScriptReader::new(script_files) {
@@ -293,6 +424,8 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
 
             let header = reader.get_header();
             log::debug!("Loaded ChangeScript - Header: {:?}", header);
+
+            player_state.header_record = Some(header.clone());
 
             // Set the start_replay_time based on the time mode and the script start time from the header.
             player_state.virtual_time_ns_start = match player_state.time_mode {
@@ -319,93 +452,171 @@ pub async fn player_thread(mut player_rx_channel: Receiver<ScriptSourceChangeGen
         }
     };
 
-    get_next_change_stream_record(&mut player_state, change_stream.as_mut()).await
-        .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling get_next_change_stream_record: {:?}", Some(e))).ok();
+    load_next_change_stream_record(&mut player_state, change_stream.as_mut()).await
+        .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling load_next_change_stream_record: {:?}", Some(e))).ok();
 
-    // The ScriptSourceChangeGenerator always starts Paused.
+    Ok(player_state)
+}
 
-    // Loop to process messages sent to the ScriptSourceChangeGenerator or read from the Change Stream.
-    loop {
-        log_test_script_player_state(&player_state, "Top of ScriptSourceChangeGenerator loop");
+async fn process_command_message(state: &mut ScriptSourceChangeGeneratorInternalState, message: ScriptSourceChangeGeneratorMessage) -> anyhow::Result<()> {
+    log::debug!("Received {:?} command message.", message.command);
 
-        tokio::select! {
-            // Always process all messages in the command channel and act on them first.
-            biased;
+    if let ScriptSourceChangeGeneratorCommand::GetState = message.command {
+        let message_response = ScriptSourceChangeGeneratorMessageResponse {
+            result: Ok(()),
+            state: state.into(),
+        };
 
-            // Process messages from the command channel.
-            cmd = player_rx_channel.recv() => {
-                match cmd {
-                    Some(message) => {
-                        log::debug!("Received {:?} command message.", message.command);
-
-                        let transition_response = match player_state.status {
-                            SourceChangeGeneratorStatus::Running => transition_from_running_state(&mut player_state, &message.command),
-                            SourceChangeGeneratorStatus::Stepping => transition_from_stepping_state(&mut player_state, &message.command),
-                            SourceChangeGeneratorStatus::Skipping => transition_from_skipping_state(&mut player_state, &message.command),
-                            SourceChangeGeneratorStatus::Paused => transition_from_paused_state(&mut player_state, &message.command),
-                            SourceChangeGeneratorStatus::Stopped => transition_from_stopped_state(&mut player_state, &message.command),
-                            SourceChangeGeneratorStatus::Finished => transition_from_finished_state(&mut player_state, &message.command),
-                            SourceChangeGeneratorStatus::Error => transition_from_error_state(&mut player_state, &message.command),
-                        };
-
-                        if message.response_tx.is_some() {
-                            let message_response = ScriptSourceChangeGeneratorMessageResponse {
-                                result: transition_response,
-                                state: player_state.clone(),
-                            };
-                
-                            let r = message.response_tx.unwrap().send(message_response);
-                            if let Err(e) = r {
-                                log::error!("Error in ScriptSourceChangeGenerator sending message response back to caller: {:?}", e);
-                            }
-                        }
-                
-                        log_test_script_player_state(&player_state, format!("Post {:?} command", message.command).as_str());
-                    },
-                    None => {
-                        log::error!("ScriptSourceChangeGenerator command channel closed.");
-                        break;
-                    }
-                }
-            },
-            channel_message = change_rx_channel.recv(), if player_state.status.is_active() => {
-                match channel_message {
-                    Some(change_stream_message) => {
-                        log::trace!("Received DelayedChangeScriptRecordMessage: {:?}", change_stream_message);
-                        process_next_change_stream_record(&mut player_state, change_stream_message, &mut dispatchers).await
-                            .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling process_next_change_stream_record.", Some(e))).ok();
-                    },
-                    None => {
-                        log::info!("SourceChangeQueueReader channel closed.");
-                    }
-                }
-            },
-            else => {
-                log::debug!("ScriptSourceChangeGenerator loop - no messages to process.");
-            }
+        let r = message.response_tx.unwrap().send(message_response);
+        if let Err(e) = r {
+            log::error!("Error in ScriptSourceChangeGenerator sending message response back to caller: {:?}", e);
         }
+    } else {
+        let transition_response = match state.status {
+            SourceChangeGeneratorStatus::Running => transition_from_running_state(state, &message.command),
+            SourceChangeGeneratorStatus::Stepping => transition_from_stepping_state(state, &message.command),
+            SourceChangeGeneratorStatus::Skipping => transition_from_skipping_state(state, &message.command),
+            SourceChangeGeneratorStatus::Paused => transition_from_paused_state(state, &message.command),
+            SourceChangeGeneratorStatus::Stopped => transition_from_stopped_state(state, &message.command),
+            SourceChangeGeneratorStatus::Finished => transition_from_finished_state(state, &message.command),
+            SourceChangeGeneratorStatus::Error => transition_from_error_state(state, &message.command),
+        };
+
+        if message.response_tx.is_some() {
+            let message_response = ScriptSourceChangeGeneratorMessageResponse {
+                result: transition_response,
+                state: state.into(),
+            };
+
+            let r = message.response_tx.unwrap().send(message_response);
+            if let Err(e) = r {
+                log::error!("Error in ScriptSourceChangeGenerator sending message response back to caller: {:?}", e);
+            }
+        }    
     }
 
-    log::debug!("ScriptSourceChangeGenerator thread exiting...");    
+    log_test_script_player_state(&state, format!("Post {:?} command", message.command).as_str());
+
+    Ok(())
 }
-async fn get_next_change_stream_record(
-    player_state: &mut ScriptSourceChangeGeneratorState, 
+
+async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorInternalState, message: DelayedChangeScriptRecordMessage) -> anyhow::Result<()> {
+    log::trace!("Received: {:?}", message);
+
+    // Do nothing if the SourceChangeGenerator is already in an error state.
+    if let SourceChangeGeneratorStatus::Error = state.status {
+        anyhow::bail!("Ignoring load_next_change_stream_record call due to error state");
+    }
+    
+    // Get the next record from the player state. Error if it is None.
+    let next_record = match state.next_record.as_ref() {
+        Some(record) => record.clone(),
+        None => anyhow::bail!("player_state.next_record is None"),
+    };
+
+    // Transition to an error state if the channel message does not match the next record.
+    if message.record_seq_num != next_record.seq {
+        anyhow::bail!("Received DelayedChangeScriptRecordMessage with incorrect seq");
+    } 
+
+    // Time Shift.
+    time_shift(state, &next_record);
+
+    // Process the delayed record.
+    match &next_record.record {
+        ChangeScriptRecord::SourceChange(change_record) => {
+            match state.status {
+                SourceChangeGeneratorStatus::Running => {
+                    // Dispatch the SourceChangeEvent.
+                    dispatch_source_change_events(state, vec!(&change_record.source_change_event)).await;
+                },
+                SourceChangeGeneratorStatus::Stepping => {
+                    if state.steps_remaining > 0 {
+                        // Dispatch the SourceChangeEvent.
+                        dispatch_source_change_events(state, vec!(&change_record.source_change_event)).await;
+
+                        state.steps_remaining -= 1;
+                        if state.steps_remaining == 0 {
+                            transition_to_paused_state(state)?;
+                        }
+                    } else {
+                        // Transition to an error state.
+                        transition_to_error_state(state, "Stepping with no steps remaining", None);
+                    }
+                },
+                SourceChangeGeneratorStatus::Skipping => {
+                    if state.skips_remaining > 0 {
+                        // Skip the SourceChangeEvent.
+                        log::debug!("Skipping ChangeScriptRecord: {:?}", change_record);
+
+                        state.skips_remaining -= 1;
+                        if state.skips_remaining == 0 {
+                            transition_to_paused_state(state)?;
+                        }
+                    } else {
+                        // Transition to an error state.
+                        transition_to_error_state(state, "Skipping with no skips remaining", None);
+                    }
+                },
+                _ => {
+                    // Transition to an error state.
+                    transition_to_error_state(state, "Unexpected status for SourceChange processing", None);
+                },
+            }
+        },
+        ChangeScriptRecord::PauseCommand(_) => {
+            // Process the PauseCommand only if the Player is not configured to ignore them.
+            if state.ignore_scripted_pause_commands {
+                log::debug!("Ignoring Change Script Pause Command: {:?}", next_record);
+            } else {
+                transition_to_paused_state(state).ok();
+            }
+        },
+        ChangeScriptRecord::Label(label_record) => {
+            log::debug!("Reached Source Change Script Label: {:?}", label_record);
+        },
+        ChangeScriptRecord::Finish(_) => {
+            transition_to_finished_state(state);
+        },
+        ChangeScriptRecord::Header(header_record) => {
+            // Transition to an error state.
+            transition_to_error_state(state, &format!("Unexpected Change Script Header: {:?}", header_record), None);
+        },
+        ChangeScriptRecord::Comment(comment_record) => {
+            // Transition to an error state.
+            transition_to_error_state(state, &format!("Unexpected Change Script Comment: {:?}", comment_record), None);
+        },
+    };
+
+    // if player_state.status.is_active() {
+    //     load_next_change_stream_record(&mut player_state, change_stream.as_mut()).await
+    //         .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling load_next_change_stream_record.", Some(e))).ok();
+    // };
+
+    Ok(())
+}
+
+async fn load_next_change_stream_record(
+    state: &mut ScriptSourceChangeGeneratorInternalState, 
     change_stream: Option<&mut ChangeStream>,
 ) -> anyhow::Result<()> {
     // Do nothing if the SourceChangeGenerator is already in an error state.
-    if let SourceChangeGeneratorStatus::Error = player_state.status {
-        anyhow::bail!("Ignoring get_next_change_stream_record call due to error state");
+    if let SourceChangeGeneratorStatus::Error = state.status {
+        anyhow::bail!("Ignoring load_next_change_stream_record call due to error state");
     }
 
     match change_stream {
         Some(stream) => {
             match stream.next().await {
                 Some(Ok(seq_record)) => {
-                    // Assign the next record to the player state.
-                    player_state.previous_record = Some(ProcessedChangeScriptRecord {
-                        scripted: player_state.next_record.clone().unwrap(),
-                    });
-                    player_state.next_record = Some(seq_record);
+                    if state.next_record.is_some() {
+                        // Assign the current next record to the previous record.
+                        state.previous_record = Some(ProcessedChangeScriptRecord {
+                            scripted: state.next_record.clone().unwrap(),
+                        });
+                    }
+                
+                    state.next_record = Some(seq_record);
                 },
                 Some(Err(e)) => {
                     anyhow::bail!(format!("Error reading ChangeScriptRecord: {:?}", e));
@@ -423,18 +634,18 @@ async fn get_next_change_stream_record(
     Ok(())
 }
 
-async fn _push_next_change_stream_record(
-    player_state: &mut ScriptSourceChangeGeneratorState,
+async fn _schedule_next_change_stream_record(
+    state: &mut ScriptSourceChangeGeneratorInternalState,
     change_tx_channel: Sender<DelayedChangeScriptRecordMessage>,
     delayer_tx_channel: Sender<DelayedChangeScriptRecordMessage>,
 ) -> anyhow::Result<()> {
     // Do nothing if the SourceChangeGenerator is already in an error state.
-    if let SourceChangeGeneratorStatus::Error = player_state.status {
-        anyhow::bail!("Ignoring get_next_change_stream_record call due to error state");
+    if let SourceChangeGeneratorStatus::Error = state.status {
+        anyhow::bail!("Ignoring load_next_change_stream_record call due to error state");
     }
 
     // Get the next record from the player state. Error if it is None.
-    let next_record = match player_state.next_record.as_ref() {
+    let next_record = match state.next_record.as_ref() {
         Some(record) => record.clone(),
         None => {
             anyhow::bail!("Received DelayedChangeScriptRecordMessage when player_state.next_record is None");
@@ -442,7 +653,7 @@ async fn _push_next_change_stream_record(
     };
     
     // Processing of ChangeScriptRecord depends on the spacing mode settings.
-    let delay_ns = match player_state.spacing_mode {
+    let delay_ns = match state.spacing_mode {
         SpacingMode::None => {
             // Process the record without introducing a delay.
             0
@@ -454,14 +665,14 @@ async fn _push_next_change_stream_record(
         SpacingMode::Recorded => {
             // Delay the record based on the difference between the record's offset and the generators current virtual time offset.
             // Ensure the delay is not negative.
-            std::cmp::max(0, next_record.offset_ns - player_state.virtual_time_ns_offset) as u64
+            std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64
         },
     };
 
     let delay_msg = DelayedChangeScriptRecordMessage {
         delay_ns,
         record_seq_num: next_record.seq,
-        virtual_time_ns_replay: player_state.virtual_time_ns_current + delay_ns,
+        virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
     };    
 
     // Take action based on size of the delay.
@@ -488,95 +699,105 @@ async fn _push_next_change_stream_record(
     Ok(())
 }
 
-async fn process_next_change_stream_record(
-    player_state: &mut ScriptSourceChangeGeneratorState, 
-    delayed_message: DelayedChangeScriptRecordMessage, 
-    dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>
-) -> anyhow::Result<()> {
-    // Do nothing if the SourceChangeGenerator is already in an error state.
-    if let SourceChangeGeneratorStatus::Error = player_state.status {
-        anyhow::bail!("Ignoring get_next_change_stream_record call due to error state");
-    }
+// async fn process_next_change_stream_record(
+//     player_state: &mut ScriptSourceChangeGeneratorState, 
+//     channel_message: DelayedChangeScriptRecordMessage, 
+//     dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>
+// ) -> anyhow::Result<()> {
+//     // Do nothing if the SourceChangeGenerator is already in an error state.
+//     if let SourceChangeGeneratorStatus::Error = player_state.status {
+//         anyhow::bail!("Ignoring load_next_change_stream_record call due to error state");
+//     }
     
-    // Get the next record from the player state. Error if it is None.
-    let next_record = match player_state.next_record.as_ref() {
-        Some(record) => record.clone(),
-        None => anyhow::bail!("Received DelayedChangeScriptRecordMessage when player_state.next_record is None"),
-    };
+//     // Get the next record from the player state. Error if it is None.
+//     let next_record = match player_state.next_record.as_ref() {
+//         Some(record) => record.clone(),
+//         None => anyhow::bail!("player_state.next_record is None"),
+//     };
 
-    // Transition to an error state if the delay message does not match the next record.
-    if delayed_message.record_seq_num != next_record.seq {
-        anyhow::bail!("Received DelayedChangeScriptRecordMessage with incorrect seq");
-    } 
-    
-    // Process the delayed record.
-    match &next_record.record {
-        ChangeScriptRecord::SourceChange(change_record) => {
-            match player_state.status {
-                SourceChangeGeneratorStatus::Running => {
-                    // Dispatch the SourceChangeEvent.
-                    dispatch_source_change_events(dispatchers, vec!(&change_record.source_change_event)).await;
-                    // let _ = dispatcher.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
-                },
-                SourceChangeGeneratorStatus::Stepping => {
-                    // Dispatch the SourceChangeEvent.
-                    if player_state.steps_remaining > 0 {
-                        dispatch_source_change_events(dispatchers, vec!(&change_record.source_change_event)).await;
-                        // let _ = dispatcher.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
+//     // Transition to an error state if the channel message does not match the next record.
+//     if channel_message.record_seq_num != next_record.seq {
+//         anyhow::bail!("Received DelayedChangeScriptRecordMessage with incorrect seq");
+//     } 
 
-                        player_state.steps_remaining -= 1;
-                        if player_state.steps_remaining == 0 {
-                            let _ = transition_from_stepping_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause);
-                        }
-                    }
-                },
-                SourceChangeGeneratorStatus::Skipping => {
-                    // Skip the SourceChangeEvent.
-                    if player_state.skips_remaining > 0 {
-                        log::debug!("Skipping ChangeScriptRecord: {:?}", change_record);
+//     // Time Shift.
+//     time_shift(player_state, &next_record);
 
-                        player_state.skips_remaining -= 1;
-                        if player_state.skips_remaining == 0 {
-                            let _ = transition_from_skipping_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause);
-                        }
-                    }
-                },
-                _ => {
-                    log::warn!("Should not be processing ChangeScriptRecord when in state {:?}", player_state.status);
-                },
-            }
-        },
-        ChangeScriptRecord::PauseCommand(_) => {
-            // Process the PauseCommand only if the Player is not configured to ignore them.
-            if player_state.ignore_scripted_pause_commands {
-                log::debug!("Ignoring Change Script Pause Command: {:?}", next_record);
-            } else {
-                transition_to_paused_state(player_state).ok();
-            }
-        },
-        ChangeScriptRecord::Label(label_record) => {
-            log::debug!("Reached Change Script Label: {:?}", label_record);
-        },
-        ChangeScriptRecord::Finish(_) => {
-            transition_to_finished_state(player_state);
-        },
-        ChangeScriptRecord::Header(header_record) => {
-            // Only the first record should be a Header record, and this is handled in the ChangeScriptReader.
-            log::warn!("Ignoring unexpected Change Script Header: {:?}", header_record);
-        },
-        ChangeScriptRecord::Comment(comment_record) => {
-            // The ChangeScriptReader should not return Comment records.
-            log::warn!("Ignoring unexpected Change Script Comment: {:?}", comment_record);
-        },
-    };
+//     // Process the delayed record.
+//     match &next_record.record {
+//         ChangeScriptRecord::SourceChange(change_record) => {
+//             match player_state.status {
+//                 SourceChangeGeneratorStatus::Running => {
+//                     // Dispatch the SourceChangeEvent.
+//                     dispatch_source_change_events(dispatchers, vec!(&change_record.source_change_event)).await;
+//                 },
+//                 SourceChangeGeneratorStatus::Stepping => {
+//                     if player_state.steps_remaining > 0 {
+//                         // Dispatch the SourceChangeEvent.
+//                         dispatch_source_change_events(dispatchers, vec!(&change_record.source_change_event)).await;
 
-    Ok(())
-}
+//                         player_state.steps_remaining -= 1;
+//                         if player_state.steps_remaining == 0 {
+//                             transition_to_paused_state(player_state)?;
+//                         }
+//                     } else {
+//                         // Transition to an error state.
+//                         transition_to_error_state(player_state, "Stepping with no steps remaining", None);
+//                     }
+//                 },
+//                 SourceChangeGeneratorStatus::Skipping => {
+//                     if player_state.skips_remaining > 0 {
+//                         // Skip the SourceChangeEvent.
+//                         log::debug!("Skipping ChangeScriptRecord: {:?}", change_record);
+
+//                         player_state.skips_remaining -= 1;
+//                         if player_state.skips_remaining == 0 {
+//                             transition_to_paused_state(player_state)?;
+//                         }
+//                     } else {
+//                         // Transition to an error state.
+//                         transition_to_error_state(player_state, "Skipping with no skips remaining", None);
+//                     }
+//                 },
+//                 _ => {
+//                     // Transition to an error state.
+//                     transition_to_error_state(player_state, "Unexpected status for SourceChange processing", None);
+//                 },
+//             }
+//         },
+//         ChangeScriptRecord::PauseCommand(_) => {
+//             // Process the PauseCommand only if the Player is not configured to ignore them.
+//             if player_state.ignore_scripted_pause_commands {
+//                 log::debug!("Ignoring Change Script Pause Command: {:?}", next_record);
+//             } else {
+//                 transition_to_paused_state(player_state).ok();
+//             }
+//         },
+//         ChangeScriptRecord::Label(label_record) => {
+//             log::debug!("Reached Source Change Script Label: {:?}", label_record);
+//         },
+//         ChangeScriptRecord::Finish(_) => {
+//             transition_to_finished_state(player_state);
+//         },
+//         ChangeScriptRecord::Header(header_record) => {
+//             // Transition to an error state.
+//             transition_to_error_state(player_state, &format!("Unexpected Change Script Header: {:?}", header_record), None);
+//         },
+//         ChangeScriptRecord::Comment(comment_record) => {
+//             // Transition to an error state.
+//             transition_to_error_state(player_state, &format!("Unexpected Change Script Comment: {:?}", comment_record), None);
+//         },
+//     };
+
+//     Ok(())
+// }
 
 async fn dispatch_source_change_events(
-    dispatchers: &mut Vec<Box<dyn SourceChangeDispatcher + Send>>, 
+    state: &mut ScriptSourceChangeGeneratorInternalState,
     events: Vec<&SourceChangeEvent>
 ) {
+    let dispatchers = &mut state.dispatchers;
+
     log::debug!("Dispatching SourceChangeEvents - #dispatchers:{}, #events:{}", dispatchers.len(), events.len());
 
     let futures: Vec<_> = dispatchers.iter_mut()
@@ -593,30 +814,34 @@ async fn dispatch_source_change_events(
     let _ = join_all(futures).await;
 }
 
-fn transition_from_paused_state(player_state: &mut ScriptSourceChangeGeneratorState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn time_shift(_state: &mut ScriptSourceChangeGeneratorInternalState, seq_record: &SequencedChangeScriptRecord) -> ChangeScriptRecord {
+    let shifted_event = seq_record.record.clone();
+    shifted_event
+}
+
+fn transition_from_paused_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     match command {
         ScriptSourceChangeGeneratorCommand::Start => {
-            player_state.status = SourceChangeGeneratorStatus::Running;
-            // process_next_test_script_record(player_state, dispatchers, delayer_tx_channel);
+            state.status = SourceChangeGeneratorStatus::Running;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Step(steps) => {
-            player_state.status = SourceChangeGeneratorStatus::Stepping;
-            player_state.steps_remaining = *steps;
+            state.status = SourceChangeGeneratorStatus::Stepping;
+            state.steps_remaining = *steps;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Skip(skips) => {
-            player_state.status = SourceChangeGeneratorStatus::Skipping;
-            player_state.skips_remaining = *skips;
+            state.status = SourceChangeGeneratorStatus::Skipping;
+            state.skips_remaining = *skips;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Pause => {
             Err(ScriptSourceChangeGeneratorError::AlreadyPaused.into())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
-            player_state.status = SourceChangeGeneratorStatus::Stopped;
+            state.status = SourceChangeGeneratorStatus::Stopped;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::GetState => {
@@ -625,8 +850,8 @@ fn transition_from_paused_state(player_state: &mut ScriptSourceChangeGeneratorSt
     }
 }
 
-fn transition_from_running_state(player_state: &mut ScriptSourceChangeGeneratorState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_running_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     match command {
         ScriptSourceChangeGeneratorCommand::Start => {
@@ -639,11 +864,11 @@ fn transition_from_running_state(player_state: &mut ScriptSourceChangeGeneratorS
             Err(ScriptSourceChangeGeneratorError::PauseToSkip.into())
         },
         ScriptSourceChangeGeneratorCommand::Pause => {
-            player_state.status = SourceChangeGeneratorStatus::Paused;
+            state.status = SourceChangeGeneratorStatus::Paused;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
-            player_state.status = SourceChangeGeneratorStatus::Stopped;
+            state.status = SourceChangeGeneratorStatus::Stopped;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::GetState => {
@@ -652,96 +877,96 @@ fn transition_from_running_state(player_state: &mut ScriptSourceChangeGeneratorS
     }
 }
 
-fn transition_from_stepping_state(player_state: &mut ScriptSourceChangeGeneratorState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_stepping_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     match command {
         ScriptSourceChangeGeneratorCommand::Pause => {
-            player_state.status = SourceChangeGeneratorStatus::Paused;
-            player_state.steps_remaining = 0;
+            state.status = SourceChangeGeneratorStatus::Paused;
+            state.steps_remaining = 0;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
-            player_state.status = SourceChangeGeneratorStatus::Stopped;
-            player_state.steps_remaining = 0;
+            state.status = SourceChangeGeneratorStatus::Stopped;
+            state.steps_remaining = 0;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::GetState => {
             Ok(())
         },
-        _ => Err(ScriptSourceChangeGeneratorError::CurrentlyStepping(player_state.steps_remaining).into())
+        _ => Err(ScriptSourceChangeGeneratorError::CurrentlyStepping(state.steps_remaining).into())
     }
 }
 
-fn transition_from_skipping_state(player_state: &mut ScriptSourceChangeGeneratorState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_skipping_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     match command {
         ScriptSourceChangeGeneratorCommand::Pause => {
-            player_state.status = SourceChangeGeneratorStatus::Paused;
-            player_state.skips_remaining = 0;
+            state.status = SourceChangeGeneratorStatus::Paused;
+            state.skips_remaining = 0;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
-            player_state.status = SourceChangeGeneratorStatus::Stopped;
-            player_state.skips_remaining = 0;
+            state.status = SourceChangeGeneratorStatus::Stopped;
+            state.skips_remaining = 0;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::GetState => {
             Ok(())
         },
-        _ => Err(ScriptSourceChangeGeneratorError::CurrentlySkipping(player_state.skips_remaining).into())
+        _ => Err(ScriptSourceChangeGeneratorError::CurrentlySkipping(state.skips_remaining).into())
     }
 }
 
-fn transition_from_stopped_state(player_state: &mut ScriptSourceChangeGeneratorState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_stopped_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     Err(ScriptSourceChangeGeneratorError::AlreadyStopped.into())
 }
 
-fn transition_from_finished_state(player_state: &mut ScriptSourceChangeGeneratorState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_finished_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     Err(ScriptSourceChangeGeneratorError::AlreadyFinished.into())
 }
 
-fn transition_from_error_state(player_state: &mut ScriptSourceChangeGeneratorState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
-    log::debug!("Transitioning from {:?} state via command: {:?}", player_state.status, command);
+fn transition_from_error_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
-    Err(ScriptSourceChangeGeneratorError::Error(player_state.status).into())
+    Err(ScriptSourceChangeGeneratorError::Error(state.status).into())
 }
 
-fn transition_to_finished_state(player_state: &mut ScriptSourceChangeGeneratorState) {
-    log::debug!("Transitioning to Finished state from: {:?}", player_state.status);
+fn transition_to_finished_state(state: &mut ScriptSourceChangeGeneratorInternalState) {
+    log::debug!("Transitioning to Finished state from: {:?}", state.status);
 
-    player_state.status = SourceChangeGeneratorStatus::Finished;
-    player_state.skips_remaining = 0;
-    player_state.steps_remaining = 0;
+    state.status = SourceChangeGeneratorStatus::Finished;
+    state.skips_remaining = 0;
+    state.steps_remaining = 0;
 }
 
-fn transition_to_error_state(player_state: &mut ScriptSourceChangeGeneratorState, error_message: &str, error: Option<&anyhow::Error>) {    
-    player_state.status = SourceChangeGeneratorStatus::Error;
+fn transition_to_error_state(state: &mut ScriptSourceChangeGeneratorInternalState, error_message: &str, error: Option<&anyhow::Error>) {    
+    state.status = SourceChangeGeneratorStatus::Error;
 
     let msg = match error {
         Some(e) => format!("{}: {:?}", error_message, e),
         None => error_message.to_string(),
     };
 
-    log_test_script_player_state(&player_state, &msg);
+    log_test_script_player_state(&state, &msg);
 
-    player_state.error_messages.push(msg);
+    state.error_messages.push(msg);
 }
 
-fn transition_to_paused_state(player_state: &mut ScriptSourceChangeGeneratorState) -> anyhow::Result<()>{
-    match player_state.status {
-        SourceChangeGeneratorStatus::Running => transition_from_running_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause),
-        SourceChangeGeneratorStatus::Stepping => transition_from_stepping_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause),
-        SourceChangeGeneratorStatus::Skipping => transition_from_skipping_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause),
-        SourceChangeGeneratorStatus::Paused => transition_from_paused_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause),
-        SourceChangeGeneratorStatus::Stopped => transition_from_stopped_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause),
-        SourceChangeGeneratorStatus::Finished => transition_from_finished_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause),
-        SourceChangeGeneratorStatus::Error => transition_from_error_state(player_state,&ScriptSourceChangeGeneratorCommand::Pause),
+fn transition_to_paused_state(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()>{
+    match state.status {
+        SourceChangeGeneratorStatus::Running => transition_from_running_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
+        SourceChangeGeneratorStatus::Stepping => transition_from_stepping_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
+        SourceChangeGeneratorStatus::Skipping => transition_from_skipping_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
+        SourceChangeGeneratorStatus::Paused => transition_from_paused_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
+        SourceChangeGeneratorStatus::Stopped => transition_from_stopped_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
+        SourceChangeGeneratorStatus::Finished => transition_from_finished_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
+        SourceChangeGeneratorStatus::Error => transition_from_error_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
     }
 }
 
@@ -770,12 +995,12 @@ pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receive
 }
 
 // Function to log the Player State at varying levels of detail.
-fn log_test_script_player_state(player_state: &ScriptSourceChangeGeneratorState, msg: &str) {
+fn log_test_script_player_state(state: &ScriptSourceChangeGeneratorInternalState, msg: &str) {
     match log::max_level() {
-        log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, player_state),
-        log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, player_state),
+        log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, state),
+        log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, state),
         log::LevelFilter::Info => log::info!("{} - status:{:?}, error_message:{:?}, virtual_time_ns_start:{:?}, virtual_time_ns_current:{:?}, skips_remaining:{:?}, steps_remaining:{:?}",
-            msg, player_state.status, player_state.error_messages, player_state.virtual_time_ns_start, player_state.virtual_time_ns_current, player_state.skips_remaining, player_state.steps_remaining),
+            msg, state.status, state.error_messages, state.virtual_time_ns_start, state.virtual_time_ns_current, state.skips_remaining, state.steps_remaining),
         _ => {}
     }
 }

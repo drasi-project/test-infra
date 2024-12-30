@@ -132,7 +132,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
     }
 
     async fn copy_test_source_content(&self, test_id: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
-        log::error!("Copying Test Source Content for {:?} to {:?}", test_source_def.test_source_id, test_source_data_path);
+        log::debug!("Copying Test Source Content for {:?} to {:?}", test_source_def.test_source_id, test_source_data_path);
 
         // Bootstrap Data Script Files
         match &test_source_def.bootstrap_data_generator_def {

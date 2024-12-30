@@ -45,15 +45,18 @@ pub async fn get_source_handler(
         return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
     }
 
-    let response = test_runner.get_test_source_state(&id).await;
-    match response {
-        Ok(source) => {
-            Ok(Json(source).into_response())
-        },
-        Err(_) => {
-            Err(TestServiceWebApiError::NotFound("TestRunSource".to_string(), id))
-        }
-    }
+    let source_state = test_runner.get_test_source_state(&id).await?;
+    Ok(Json(source_state).into_response())
+
+    // let response = test_runner.get_test_source_state(&id).await;
+    // match response {
+    //     Ok(source) => {
+    //         Ok(Json(source).into_response())
+    //     },
+    //     Err(_) => {
+    //         Err(TestServiceWebApiError::NotFound("TestRunSource".to_string(), id))
+    //     }
+    // }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

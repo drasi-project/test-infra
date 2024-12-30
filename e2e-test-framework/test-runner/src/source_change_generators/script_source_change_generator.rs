@@ -329,16 +329,15 @@ impl SourceChangeGenerator for ScriptSourceChangeGenerator {
 // The ScriptSourceChangeGenerator thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
 // The Web API function communicate via a channel and provide oneshot channels for the ScriptSourceChangeGenerator to send responses back.
 pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSourceChangeGeneratorMessage>, settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<()>{
-    log::info!("ScriptSourceChangeGenerator {} script processor thread started...", settings.id);
-
-    let (change_tx_channel, mut change_rx_channel) = tokio::sync::mpsc::channel(100);
+    log::info!("Script processor thread started for TestRunSource {} ...", settings.id);
 
     // The ScriptSourceChangeGenerator always starts Paused.
+    let (change_tx_channel, mut change_rx_channel) = tokio::sync::mpsc::channel(100);
     let mut state = initialize(settings, change_tx_channel).await?;
 
-    // Loop to process messages sent to the ScriptSourceChangeGenerator or read from the Change Stream.
+    // Loop to process commands sent to the ScriptSourceChangeGenerator or read from the Change Stream.
     loop {
-        log_test_script_player_state(&state, "Top of ScriptSourceChangeGenerator loop");
+        log_test_script_player_state(&state, "Top of script processor loop");
 
         tokio::select! {
             // Always process all messages in the command channel and act on them first.
@@ -354,6 +353,7 @@ pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSour
                     }
                 }
             },
+
             // Process messages from the Change Stream.
             change_stream_message = change_rx_channel.recv(), if state.status.is_processing() => {
                 match change_stream_message {
@@ -364,13 +364,14 @@ pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSour
                     }
                 }
             },
+
             else => {
-                log::trace!("loop activated but has no message to process.");
+                log::error!("Script processor loop activated for {} but no command or change to process.", state.test_run_source_id);
             }
         }
     }
 
-    log::info!("Script processor thread exiting...");    
+    log::info!("Script processor thread exiting for TestRunSource {} ...", state.test_run_source_id);    
     Ok(())
 }
 

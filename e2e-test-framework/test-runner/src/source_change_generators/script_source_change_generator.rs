@@ -127,6 +127,7 @@ impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeG
 
 pub struct ScriptSourceChangeGeneratorInternalState {
     pub actual_time_ns_start: u64,
+    pub change_stream: Pin<Box<dyn Stream<Item = Result<SequencedChangeScriptRecord, anyhow::Error>> + Send>>,
     pub change_tx_channel: Sender<DelayedChangeScriptRecordMessage>,
     pub delayer_tx_channel: Sender<DelayedChangeScriptRecordMessage>,
     pub dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>>,
@@ -357,6 +358,51 @@ pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSour
 
 async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::Result<(ScriptSourceChangeGeneratorInternalState, Receiver<DelayedChangeScriptRecordMessage>)> {
 
+    // Get the list of script files from the input storage.
+    let script_files = match settings.input_storage.get_script_files().await {
+        Ok(ds) => ds.source_change_script_files,
+        Err(e) => {
+            anyhow::bail!("Error getting script files from input storage: {:?}", e);
+        }
+    };
+
+    // Create the ChangeStream from the script files; get the header and first record.
+    let (change_stream, header, first_record) = match ChangeScriptReader::new(script_files) {
+        Ok(reader) => {
+            let header = reader.get_header();
+            let mut change_stream = Box::pin(reader) as ChangeStream;
+            let first_record = match change_stream.next().await {
+                Some(Ok(seq_record)) => Some(seq_record),
+                Some(Err(e)) => {
+                    anyhow::bail!(format!("Error reading first ChangeStream record: {:?}", e));
+                },
+                None => None,
+            };
+
+            (change_stream, header, first_record)
+        }
+        Err(e) => {
+            anyhow::bail!("Error creating ChangeStream: {:?}", e);
+        }
+    };
+    log::info!("Loaded ChangeScript - Header: {:?}", header);
+
+    // Set the virtual_time_ns_start based on the time mode and the script start time from the header.
+    let virtual_time_ns_start = match settings.time_mode {
+        TimeMode::Live => {
+            // Use the current system time.
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64
+        },
+        TimeMode::Recorded => {
+            // Use the start time as provided in the Header.
+            header.start_time.timestamp_nanos_opt().unwrap() as u64
+        },
+        TimeMode::Rebased(nanos) => {
+            // Use the rebased time as provided in the AppConfig.
+            nanos
+        },
+    };
+
     // Create the set of dispatchers.
     let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
     for def in settings.dispatchers.iter() {
@@ -368,28 +414,21 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::R
         }
     }
 
-    // Get the list of script files from the input storage.
-    let script_files = match settings.input_storage.get_script_files().await {
-        Ok(ds) => ds.source_change_script_files,
-        Err(e) => {
-            log::error!("Error getting dataset: {:?}", e);
-            Vec::new()
-        }
-    };
-
+    // Create the channels used for message passing.
     let (change_tx_channel, change_rx_channel) = tokio::sync::mpsc::channel(100);
     let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
     let _ = tokio::spawn(delayer_thread(settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
 
-    let mut player_state = ScriptSourceChangeGeneratorInternalState {
+    let player_state = ScriptSourceChangeGeneratorInternalState {
         actual_time_ns_start: 0,
+        change_stream: change_stream,
         change_tx_channel,
         delayer_tx_channel,
         dispatchers,
         error_messages: Vec::new(),
         ignore_scripted_pause_commands: settings.ignore_scripted_pause_commands,
-        header_record: None,
-        next_record: None,
+        header_record: Some(header),
+        next_record: first_record,
         previous_record: None,
         skips_remaining: 0,
         spacing_mode: settings.spacing_mode,
@@ -399,44 +438,8 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::R
         time_mode: settings.time_mode,
         virtual_time_ns_current: 0,
         virtual_time_ns_offset: 0,
-        virtual_time_ns_start: 0,
+        virtual_time_ns_start,
     };
-
-    let mut change_stream = match ChangeScriptReader::new(script_files) {
-        Ok(reader) => {
-
-            let header = reader.get_header();
-            log::debug!("Loaded ChangeScript - Header: {:?}", header);
-
-            player_state.header_record = Some(header.clone());
-
-            // Set the start_replay_time based on the time mode and the script start time from the header.
-            player_state.virtual_time_ns_start = match player_state.time_mode {
-                TimeMode::Live => {
-                    // Use the current system time.
-                    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64
-                },
-                TimeMode::Recorded => {
-                    // Use the start time as provided in the Header.
-                    header.start_time.timestamp_nanos_opt().unwrap() as u64
-                },
-                TimeMode::Rebased(nanos) => {
-                    // Use the rebased time as provided in the AppConfig.
-                    nanos
-                },
-            };
-            player_state.virtual_time_ns_current = player_state.virtual_time_ns_start;
-            
-            Some(Box::pin(reader) as ChangeStream)
-        }
-        Err(e) => {
-            log::error!("Error creating ChangeScriptReader: {:?}", e);
-            None
-        }
-    };
-
-    load_next_change_stream_record(&mut player_state, change_stream.as_mut()).await
-        .inspect_err(|e| transition_to_error_state(&mut player_state, "Error calling load_next_change_stream_record: {:?}", Some(e))).ok();
 
     Ok((player_state, change_rx_channel))
 }
@@ -579,7 +582,7 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
     Ok(())
 }
 
-async fn load_next_change_stream_record(
+async fn _load_next_change_stream_record(
     state: &mut ScriptSourceChangeGeneratorInternalState, 
     change_stream: Option<&mut ChangeStream>,
 ) -> anyhow::Result<()> {

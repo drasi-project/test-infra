@@ -656,7 +656,7 @@ async fn schedule_next_change_stream_record_for_skip(state: &mut ScriptSourceCha
         let delay_ns = match state.skips_spacing_mode {
             Some(SpacingMode::None) => 0,
             Some(SpacingMode::Fixed(nanos)) => nanos,
-            Some(SpacingMode::Recorded) => std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64,
+            Some(SpacingMode::Recorded) => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset },
             None => 0,
         };
     
@@ -706,11 +706,11 @@ async fn schedule_next_change_stream_record_for_step(state: &mut ScriptSourceCha
         let delay_ns = match state.steps_spacing_mode {
             Some(SpacingMode::None) => 0,
             Some(SpacingMode::Fixed(nanos)) => nanos,
-            Some(SpacingMode::Recorded) => std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64,
+            Some(SpacingMode::Recorded) => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
             None => match state.spacing_mode {
                 SpacingMode::None => 0,
                 SpacingMode::Fixed(nanos) => nanos,
-                SpacingMode::Recorded => std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64,
+                SpacingMode::Recorded => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
             },
         };
 
@@ -756,7 +756,7 @@ async fn schedule_next_change_stream_record_for_run(state: &mut ScriptSourceChan
     let delay_ns = match state.spacing_mode {
         SpacingMode::None => 0,
         SpacingMode::Fixed(nanos) => nanos,
-        SpacingMode::Recorded => std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64,
+        SpacingMode::Recorded => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
     };
 
     let sch_msg = ScheduledChangeScriptRecordMessage {

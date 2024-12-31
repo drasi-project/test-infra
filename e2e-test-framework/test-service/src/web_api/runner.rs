@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use test_data_store::test_repo_storage::models::SpacingMode;
 use test_runner::{test_run_sources::TestRunSourceConfig, TestRunner, TestRunnerStatus};
 
 use super::TestServiceWebApiError;
@@ -63,12 +64,14 @@ pub async fn get_source_handler(
 pub struct TestSkipConfig {
     #[serde(default)]
     pub num_skips: u64,
+    pub spacing_mode: Option<SpacingMode>,
 }
 
 impl Default for TestSkipConfig {
     fn default() -> Self {
         TestSkipConfig {
             num_skips: 1,
+            spacing_mode: None,
         }
     }
 }
@@ -107,9 +110,10 @@ pub async fn source_change_generator_skip_handler (
         return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
     }
 
-    let num_skips = body.0.unwrap_or_default().num_skips;
+    let skips_body = body.0.unwrap_or_default();
 
-    let response = test_runner.test_source_skip(&id, num_skips).await;
+    let response = 
+        test_runner.test_source_skip(&id, skips_body.num_skips, skips_body.spacing_mode).await;
     match response {
         Ok(source) => {
             Ok(Json(source.state).into_response())
@@ -146,12 +150,14 @@ pub async fn source_change_generator_start_handler (
 pub struct TestStepConfig {
     #[serde(default)]
     pub num_steps: u64,
+    pub spacing_mode: Option<SpacingMode>,
 }
 
 impl Default for TestStepConfig {
     fn default() -> Self {
         TestStepConfig {
             num_steps: 1,
+            spacing_mode: None,
         }
     }
 }
@@ -168,9 +174,10 @@ pub async fn source_change_generator_step_handler (
         return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
     }
 
-    let num_steps = body.0.unwrap_or_default().num_steps;
+    let steps_body = body.0.unwrap_or_default();
 
-    let response = test_runner.test_source_step(&id, num_steps).await;
+    let response = 
+        test_runner.test_source_step(&id, steps_body.num_steps, steps_body.spacing_mode).await;
     match response {
         Ok(source) => {
             Ok(Json(source.state).into_response())

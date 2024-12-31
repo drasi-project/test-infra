@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 
 use bootstrap_data_generators::BootstrapData;
 use source_change_generators::SourceChangeGeneratorCommandResponse;
-use test_data_store::{test_repo_storage::models::{TestDefinition, TimeMode}, test_run_storage::TestRunSourceId, TestDataStore};
+use test_data_store::{test_repo_storage::models::{SpacingMode, TestDefinition, TimeMode}, test_run_storage::TestRunSourceId, TestDataStore};
 
 pub mod bootstrap_data_generators;
 pub mod source_change_generators;
@@ -194,11 +194,11 @@ impl TestRunner {
         }
     }
 
-    pub async fn test_source_skip(&self, test_run_source_id: &str, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    pub async fn test_source_skip(&self, test_run_source_id: &str, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
         match self.sources.read().await.get(&test_run_source_id) {
             Some(source) => {
-                source.skip_source_change_generator(skips).await
+                source.skip_source_change_generator(skips, spacing_mode).await
             },
             None => {
                 anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
@@ -218,11 +218,11 @@ impl TestRunner {
         }
     }
 
-    pub async fn test_source_step(&self, test_run_source_id: &str, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    pub async fn test_source_step(&self, test_run_source_id: &str, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
         match self.sources.read().await.get(&test_run_source_id) {
             Some(source) => {
-                source.step_source_change_generator(steps).await
+                source.step_source_change_generator(steps, spacing_mode).await
             },
             None => {
                 anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);

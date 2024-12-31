@@ -2,7 +2,7 @@ use std::{collections::HashSet, fmt};
 
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
-use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinition, QueryId, SourceChangeGeneratorDefinition, TestSourceDefinition}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinition, QueryId, SourceChangeGeneratorDefinition, SpacingMode, TestSourceDefinition}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
 
 use crate::{bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator}, source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState}};
 
@@ -244,10 +244,10 @@ impl TestRunSource {
         }
     }
 
-    pub async fn skip_source_change_generator(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    pub async fn skip_source_change_generator(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.source_change_generator {
             Some(generator) => {
-                let response = generator.skip(skips).await?;
+                let response = generator.skip(skips, spacing_mode).await?;
                 Ok(response)
             },
             None => {
@@ -268,10 +268,10 @@ impl TestRunSource {
         }
     }
 
-    pub async fn step_source_change_generator(&self, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    pub async fn step_source_change_generator(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.source_change_generator {
             Some(generator) => {
-                let response = generator.step(steps).await?;
+                let response = generator.step(steps, spacing_mode).await?;
                 Ok(response)
             },
             None => {

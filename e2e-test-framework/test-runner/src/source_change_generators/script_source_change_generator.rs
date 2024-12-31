@@ -89,9 +89,11 @@ pub struct ScriptSourceChangeGeneratorExternalState {
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
     pub skips_remaining: u64,
+    pub skips_spacing_mode: Option<SpacingMode>,
     pub spacing_mode: SpacingMode,
     pub status: SourceChangeGeneratorStatus,
     pub steps_remaining: u64,
+    pub steps_spacing_mode: Option<SpacingMode>,
     pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
     pub virtual_time_ns_current: u64,
@@ -109,9 +111,11 @@ impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeG
             next_record: state.next_record.clone(),
             previous_record: state.previous_record.clone(),
             skips_remaining: state.skips_remaining,
+            skips_spacing_mode: state.skips_spacing_mode.clone(),
             spacing_mode: state.spacing_mode.clone(),
             status: state.status,
             steps_remaining: state.steps_remaining,
+            steps_spacing_mode: state.steps_spacing_mode.clone(),
             test_run_source_id: state.test_run_source_id.clone(),
             time_mode: state.time_mode.clone(),
             virtual_time_ns_current: state.virtual_time_ns_current,
@@ -133,9 +137,11 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
     pub skips_remaining: u64,
+    pub skips_spacing_mode: Option<SpacingMode>,
     pub spacing_mode: SpacingMode,
     pub status: SourceChangeGeneratorStatus,
     pub steps_remaining: u64,
+    pub steps_spacing_mode: Option<SpacingMode>,
     pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
     pub virtual_time_ns_current: u64,
@@ -153,9 +159,11 @@ impl Debug for ScriptSourceChangeGeneratorInternalState {
             .field("next_record", &self.next_record)
             .field("previous_record", &self.previous_record)
             .field("skips_remaining", &self.skips_remaining)
+            .field("skips_spacing_mode", &self.skips_spacing_mode)
             .field("spacing_mode", &self.spacing_mode)
             .field("status", &self.status)
             .field("steps_remaining", &self.steps_remaining)
+            .field("steps_spacing_mode", &self.steps_spacing_mode)
             .field("time_mode", &self.time_mode)
             .field("virtual_time_ns_current", &self.virtual_time_ns_current)
             .field("virtual_time_ns_offset", &self.virtual_time_ns_offset)
@@ -172,11 +180,11 @@ pub enum ScriptSourceChangeGeneratorCommand {
     // Command to pause the ScriptSourceChangeGenerator.
     Pause,
     // Command to skip the ScriptSourceChangeGenerator forward a specified number of ChangeScriptRecords.
-    Skip(u64),
+    Skip{skips: u64, spacing_mode: Option<SpacingMode>},
     // Command to start the ScriptSourceChangeGenerator.
     Start,
     // Command to step the ScriptSourceChangeGenerator forward a specified number of ChangeScriptRecords.
-    Step(u64),
+    Step{steps: u64, spacing_mode: Option<SpacingMode>},
     // Command to stop the ScriptSourceChangeGenerator.
     Stop,
 }
@@ -276,20 +284,20 @@ impl SourceChangeGenerator for ScriptSourceChangeGenerator {
         self.send_command(ScriptSourceChangeGeneratorCommand::GetState).await
     }
 
+    async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
+        self.send_command(ScriptSourceChangeGeneratorCommand::Pause).await
+    }
+
+    async fn skip(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
+        self.send_command(ScriptSourceChangeGeneratorCommand::Skip{skips, spacing_mode}).await
+    }
+
     async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         self.send_command(ScriptSourceChangeGeneratorCommand::Start).await
     }
 
-    async fn step(&self, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Step(steps)).await
-    }
-
-    async fn skip(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Skip(skips)).await
-    }
-
-    async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Pause).await
+    async fn step(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
+        self.send_command(ScriptSourceChangeGeneratorCommand::Step{steps, spacing_mode}).await
     }
 
     async fn stop(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
@@ -420,9 +428,11 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::R
         next_record: first_record,
         previous_record: None,
         skips_remaining: 0,
+        skips_spacing_mode: None,
         spacing_mode: settings.spacing_mode,
         status: SourceChangeGeneratorStatus::Paused,
         steps_remaining: 0,
+        steps_spacing_mode: None,
         test_run_source_id: settings.id.clone(),
         time_mode: settings.time_mode,
         virtual_time_ns_current: 0,
@@ -476,6 +486,12 @@ async fn process_command_message(state: &mut ScriptSourceChangeGeneratorInternal
 async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorInternalState, message: ScheduledChangeScriptRecordMessage) -> anyhow::Result<()> {
     log::trace!("Received change stream message: {:?}", message);
     
+    // We could receive a message that was delayed after transitioning to an inactive state, so ignore it.
+    if !state.status.is_processing() {
+        log::warn!("Ignoring change stream message in non-processing state: {:?}", message);
+        return Ok(());
+    }
+
     // Get the next record from the player state. Error if it is None.
     let next_record = match state.next_record.as_ref() {
         Some(record) => record.clone(),
@@ -608,93 +624,10 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
                 state.virtual_time_ns_offset = 0;
             };
 
-            // Get the next record from the player state. Error if it is None.
-            let next_record = match state.next_record.as_ref() {
-                Some(record) => record.clone(),
-                None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
-            };
-
             match state.status {
-                SourceChangeGeneratorStatus::Running => {
-                    let delay_ns = match state.spacing_mode {
-                        SpacingMode::None => {
-                            // Process the record without introducing a delay.
-                            0
-                        },
-                        SpacingMode::Fixed(nanos) => {
-                            // Use the specified delay.
-                            nanos
-                        },
-                        SpacingMode::Recorded => {
-                            // Delay the record based on the difference between the record's offset and the generators current virtual time offset.
-                            // Ensure the delay is not negative.
-                            std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64
-                        },
-                    };
-                
-                    let delay_msg = ScheduledChangeScriptRecordMessage {
-                        delay_ns,
-                        record_seq_num: next_record.seq,
-                        virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
-                    };    
-                
-                    // Take action based on size of the delay.
-                    // It doesn't make sense to delay for trivially small amounts of time, nor does it make sense to send 
-                    // a message to the delayer thread for relatively small delays. 
-                    // TODO: This figures might need to be adjusted, or made configurable.
-                    if delay_ns < 1_000 {
-                        // Process the record immediately.
-                        if let Err(e) = state.change_tx_channel.send(delay_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-                        }
-                    } else if delay_ns < 10_000_000 {
-                        // Sleep inproc, then process the record.
-                        sleep(Duration::from_nanos(delay_ns)).await;
-                        if let Err(e) = state.change_tx_channel.send(delay_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-                        }
-                    } else {
-                        if let Err(e) = state.delayer_tx_channel.send(delay_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-                        }
-                    };
-                },
-                SourceChangeGeneratorStatus::Stepping => {
-                    if state.steps_remaining > 0 {
-                        // Decrement the steps_remaining.
-                        state.steps_remaining -= 1;
-
-                        let sch_msg = ScheduledChangeScriptRecordMessage {
-                            delay_ns: 0,
-                            record_seq_num: next_record.seq,
-                            virtual_time_ns_replay: 0,
-                        };   
-                        
-                        if let Err(e) = state.change_tx_channel.send(sch_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-                        }
-                    } else {
-                        state.status = SourceChangeGeneratorStatus::Paused;
-                    }
-                },
-                SourceChangeGeneratorStatus::Skipping => {
-                    if state.skips_remaining > 0 {
-                        // Decrement the skips_remaining.
-                        state.skips_remaining -= 1;
-
-                        let sch_msg = ScheduledChangeScriptRecordMessage {
-                            delay_ns: 0,
-                            record_seq_num: next_record.seq,
-                            virtual_time_ns_replay: 0,
-                        };   
-                        
-                        if let Err(e) = state.change_tx_channel.send(sch_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-                        }
-                    } else {
-                        state.status = SourceChangeGeneratorStatus::Paused;
-                    }
-                },
+                SourceChangeGeneratorStatus::Running => schedule_next_change_stream_record_for_run(state, current_time_ns).await?,
+                SourceChangeGeneratorStatus::Stepping => schedule_next_change_stream_record_for_step(state, current_time_ns).await?,
+                SourceChangeGeneratorStatus::Skipping => schedule_next_change_stream_record_for_skip(state, current_time_ns).await?,
                 _ => {
                     // Transition to an error state.
                     transition_to_error_state(state, "Can't schedule next change stream record in this state.", None);
@@ -705,6 +638,154 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
             transition_to_error_state(state, "Can't schedule next change stream record in this state.", None);
         }
     }
+
+    Ok(())
+}
+
+async fn schedule_next_change_stream_record_for_skip(state: &mut ScriptSourceChangeGeneratorInternalState, _current_time_ns: u64) -> anyhow::Result<()> {
+
+    // Get the next record from the player state. Error if it is None.
+    let next_record = match state.next_record.as_ref() {
+        Some(record) => record.clone(),
+        None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
+    };
+
+    if state.skips_remaining > 0 {
+        // Decrement the skips_remaining.
+        state.skips_remaining -= 1;
+
+        let delay_ns = match state.skips_spacing_mode {
+            Some(SpacingMode::None) => 0,
+            Some(SpacingMode::Fixed(nanos)) => nanos,
+            Some(SpacingMode::Recorded) => std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64,
+            None => 0,
+        };
+    
+        let sch_msg = ScheduledChangeScriptRecordMessage {
+            delay_ns,
+            record_seq_num: next_record.seq,
+            virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
+        };   
+        
+        if delay_ns < 1_000 {
+            // Process the record immediately.
+            if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+            }
+        } else if delay_ns < 10_000_000 {
+            // Sleep inproc, then process the record.
+            sleep(Duration::from_nanos(delay_ns)).await;
+            if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+            }
+        } else {
+            if let Err(e) = state.delayer_tx_channel.send(sch_msg).await {
+                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+            }
+        };
+    } else {
+        state.status = SourceChangeGeneratorStatus::Paused;
+        state.skips_remaining = 0;
+        state.skips_spacing_mode = None;
+    }
+
+    Ok(())
+}
+
+async fn schedule_next_change_stream_record_for_step(state: &mut ScriptSourceChangeGeneratorInternalState, _current_time_ns: u64) -> anyhow::Result<()> {
+
+    // Get the next record from the player state. Error if it is None.
+    let next_record = match state.next_record.as_ref() {
+        Some(record) => record.clone(),
+        None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
+    };
+
+    if state.steps_remaining > 0 {
+        // Decrement the steps_remaining.
+        state.steps_remaining -= 1;
+
+        let delay_ns = match state.steps_spacing_mode {
+            Some(SpacingMode::None) => 0,
+            Some(SpacingMode::Fixed(nanos)) => nanos,
+            Some(SpacingMode::Recorded) => std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64,
+            None => match state.spacing_mode {
+                SpacingMode::None => 0,
+                SpacingMode::Fixed(nanos) => nanos,
+                SpacingMode::Recorded => std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64,
+            },
+        };
+
+        let sch_msg = ScheduledChangeScriptRecordMessage {
+            delay_ns,
+            record_seq_num: next_record.seq,
+            virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
+        };   
+        
+        if delay_ns < 1_000 {
+            // Process the record immediately.
+            if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+            }
+        } else if delay_ns < 10_000_000 {
+            // Sleep inproc, then process the record.
+            sleep(Duration::from_nanos(delay_ns)).await;
+            if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+            }
+        } else {
+            if let Err(e) = state.delayer_tx_channel.send(sch_msg).await {
+                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+            }
+        };
+    } else {
+        state.status = SourceChangeGeneratorStatus::Paused;
+        state.steps_remaining = 0;
+        state.steps_spacing_mode = None;
+    }
+
+    Ok(())
+}
+
+async fn schedule_next_change_stream_record_for_run(state: &mut ScriptSourceChangeGeneratorInternalState, _current_time_ns: u64) -> anyhow::Result<()> {
+
+    // Get the next record from the player state. Error if it is None.
+    let next_record = match state.next_record.as_ref() {
+        Some(record) => record.clone(),
+        None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
+    };
+
+    let delay_ns = match state.spacing_mode {
+        SpacingMode::None => 0,
+        SpacingMode::Fixed(nanos) => nanos,
+        SpacingMode::Recorded => std::cmp::max(0, next_record.offset_ns - state.virtual_time_ns_offset) as u64,
+    };
+
+    let sch_msg = ScheduledChangeScriptRecordMessage {
+        delay_ns,
+        record_seq_num: next_record.seq,
+        virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
+    };    
+
+    // Take action based on size of the delay.
+    // It doesn't make sense to delay for trivially small amounts of time, nor does it make sense to send 
+    // a message to the delayer thread for relatively small delays. 
+    // TODO: This figures might need to be adjusted, or made configurable.
+    if delay_ns < 1_000 {
+        // Process the record immediately.
+        if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
+    } else if delay_ns < 10_000_000 {
+        // Sleep inproc, then process the record.
+        sleep(Duration::from_nanos(delay_ns)).await;
+        if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
+    } else {
+        if let Err(e) = state.delayer_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
+    };
 
     Ok(())
 }
@@ -776,19 +857,21 @@ async fn transition_from_paused_state(state: &mut ScriptSourceChangeGeneratorInt
             schedule_next_change_stream_record(state).await?;
             Ok(())
         },
-        ScriptSourceChangeGeneratorCommand::Step(steps) => {
+        ScriptSourceChangeGeneratorCommand::Step{steps, spacing_mode} => {
             log::info!("Script Stepping for TestRunSource {}", state.test_run_source_id);
 
             state.status = SourceChangeGeneratorStatus::Stepping;
             state.steps_remaining = *steps;
+            state.steps_spacing_mode = spacing_mode.clone();
             schedule_next_change_stream_record(state).await?;
             Ok(())
         },
-        ScriptSourceChangeGeneratorCommand::Skip(skips) => {
+        ScriptSourceChangeGeneratorCommand::Skip{skips, spacing_mode} => {
             log::info!("Script Skipping for TestRunSource {}", state.test_run_source_id);
 
             state.status = SourceChangeGeneratorStatus::Skipping;
             state.skips_remaining = *skips;
+            state.skips_spacing_mode = spacing_mode.clone();
             schedule_next_change_stream_record(state).await?;
             Ok(())
         },
@@ -811,10 +894,10 @@ async fn transition_from_running_state(state: &mut ScriptSourceChangeGeneratorIn
         ScriptSourceChangeGeneratorCommand::Start => {
             Ok(())
         },
-        ScriptSourceChangeGeneratorCommand::Step(_) => {
+        ScriptSourceChangeGeneratorCommand::Step{..} => {
             Err(ScriptSourceChangeGeneratorError::PauseToStep.into())
         },
-        ScriptSourceChangeGeneratorCommand::Skip(_) => {
+        ScriptSourceChangeGeneratorCommand::Skip{..} => {
             Err(ScriptSourceChangeGeneratorError::PauseToSkip.into())
         },
         ScriptSourceChangeGeneratorCommand::Pause => {
@@ -837,6 +920,7 @@ async fn transition_from_stepping_state(state: &mut ScriptSourceChangeGeneratorI
         ScriptSourceChangeGeneratorCommand::Pause => {
             state.status = SourceChangeGeneratorStatus::Paused;
             state.steps_remaining = 0;
+            state.steps_spacing_mode = None;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
@@ -856,6 +940,7 @@ async fn transition_from_skipping_state(state: &mut ScriptSourceChangeGeneratorI
         ScriptSourceChangeGeneratorCommand::Pause => {
             state.status = SourceChangeGeneratorStatus::Paused;
             state.skips_remaining = 0;
+            state.skips_spacing_mode = None;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
@@ -891,7 +976,9 @@ async fn transition_to_finished_state(state: &mut ScriptSourceChangeGeneratorInt
 
     state.status = SourceChangeGeneratorStatus::Finished;
     state.skips_remaining = 0;
+    state.skips_spacing_mode = None;
     state.steps_remaining = 0;
+    state.steps_spacing_mode = None;
     close_dispatchers(state).await;
 }
 
@@ -900,7 +987,9 @@ async fn transition_to_stopped_state(state: &mut ScriptSourceChangeGeneratorInte
 
     state.status = SourceChangeGeneratorStatus::Stopped;
     state.skips_remaining = 0;
+    state.skips_spacing_mode = None;
     state.steps_remaining = 0;
+    state.steps_spacing_mode = None;
     close_dispatchers(state).await;
 }
 

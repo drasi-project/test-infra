@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use script_source_change_generator::ScriptSourceChangeGenerator;
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{models::SourceChangeGeneratorDefinition, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::{SourceChangeGeneratorDefinition, SpacingMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 use tokio::sync::oneshot;
 
 pub mod script_source_change_generator;
@@ -96,9 +96,9 @@ impl Serialize for SourceChangeGeneratorStatus {
 pub enum SourceChangeGeneratorAction {
     GetState,
     Pause,
-    Skip(u64),
+    Skip{skips: u64, spacing_mode: Option<SpacingMode>},
     Start,
-    Step(u64),
+    Step{steps: u64, spacing_mode: Option<SpacingMode>},
     Stop,
 }
 
@@ -124,9 +124,9 @@ pub struct SourceChangeGeneratorState {
 pub trait SourceChangeGenerator : Send + Sync {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
-    async fn skip(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
+    async fn skip(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
-    async fn step(&self, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
+    async fn step(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn stop(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
 }
 
@@ -140,16 +140,16 @@ impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
         (**self).pause().await
     }
 
-    async fn skip(&self, skips: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        (**self).skip(skips).await
+    async fn skip(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        (**self).skip(skips, spacing_mode).await
     }
 
     async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         (**self).start().await
     }
 
-    async fn step(&self, steps: u64) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        (**self).step(steps).await
+    async fn step(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        (**self).step(steps, spacing_mode).await
     }
 
     async fn stop(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {

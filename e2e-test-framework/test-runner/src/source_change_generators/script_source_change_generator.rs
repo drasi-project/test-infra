@@ -496,21 +496,21 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
     // Get the next record from the player state. Error if it is None.
     let next_record = match state.next_record.as_ref() {
         Some(record) => record.clone(),
-        None => anyhow::bail!("player_state.next_record is None"),
-    };    
+        None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
+    };
 
-    // Transition to an error state if the scheduled record does not match the next record.
+    // Return an error state if the scheduled record does not match the next record.
     if message.record_seq_num != next_record.seq {
-        anyhow::bail!("Received ScheduledChangeScriptRecordMessage with incorrect seq");
-    } 
+       anyhow::bail!("Scheduled record does not match next record.");
+    }
 
     // Time Shift.
-    time_shift(state, &next_record);
+    let shifted_record = time_shift(state, next_record)?;
 
     // Process the scheduled record.
-    match &next_record.record {
+    match &shifted_record.record {
         ChangeScriptRecord::SourceChange(change_record) => {
-            match state.status {
+            match &state.status {
                 SourceChangeGeneratorStatus::Running => {
                     // Dispatch the SourceChangeEvent.
                     dispatch_source_change_events(state, vec!(&change_record.source_change_event)).await;
@@ -558,7 +558,7 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
         ChangeScriptRecord::PauseCommand(_) => {
             // Process the PauseCommand only if the Player is not configured to ignore them.
             if state.ignore_scripted_pause_commands {
-                log::debug!("Ignoring Change Script Pause Command: {:?}", next_record);
+                log::debug!("Ignoring Change Script Pause Command: {:?}", shifted_record);
             } else {
                 transition_to_paused_state(state).await.ok();
             }
@@ -840,9 +840,56 @@ fn log_test_script_player_state(state: &ScriptSourceChangeGeneratorInternalState
     }
 }
 
-fn time_shift(_state: &mut ScriptSourceChangeGeneratorInternalState, seq_record: &SequencedChangeScriptRecord) -> ChangeScriptRecord {
-    let shifted_event = seq_record.record.clone();
-    shifted_event
+fn time_shift(state: &mut ScriptSourceChangeGeneratorInternalState, next_record: SequencedChangeScriptRecord) -> anyhow::Result<SequencedChangeScriptRecord> {
+    
+    let current_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+
+    // Time Mode controls how the updated virtual time is calculated.
+    match state.time_mode {
+        TimeMode::Live => {
+            // Live - Use the actual current time.
+            state.virtual_time_ns_current = current_time_ns;
+            state.virtual_time_ns_offset = current_time_ns - state.virtual_time_ns_start;
+        },
+        TimeMode::Recorded => {
+            // Recorded - Use the recorded time from the script.
+            state.virtual_time_ns_current = state.virtual_time_ns_start + next_record.offset_ns;
+            state.virtual_time_ns_offset = next_record.offset_ns;
+        },
+        TimeMode::Rebased(nanos) => {
+            // Rebased - Use the rebased time provided in the config.
+            state.virtual_time_ns_current = nanos + next_record.offset_ns;
+            state.virtual_time_ns_offset = next_record.offset_ns;
+        },
+    };
+
+    let shifted_change_record = match &next_record.record {
+        ChangeScriptRecord::SourceChange(change_record) => {
+            let mut shifted_change_record = change_record.clone();
+
+            shifted_change_record.source_change_event.ts_ms = state.virtual_time_ns_current / 1_000_000;
+            shifted_change_record.source_change_event.payload.source.ts_ms = state.virtual_time_ns_current / 1_000_000;
+            shifted_change_record.source_change_event.payload.source.ts_sec = state.virtual_time_ns_current / 1_000_000_000;
+
+            // TODO: Modify internal date times.
+
+            ChangeScriptRecord::SourceChange(shifted_change_record)
+        },
+        ChangeScriptRecord::Label(_)
+        | ChangeScriptRecord::PauseCommand(_) 
+        | ChangeScriptRecord::Finish(_) => next_record.record.clone(),
+        _ => anyhow::bail!("Unexpected ChangeScriptRecord type: {:?}", next_record.record),
+    };
+
+    let shifted_record = SequencedChangeScriptRecord {
+        seq: next_record.seq,
+        offset_ns: state.virtual_time_ns_current,
+        record: shifted_change_record
+    };
+
+    state.next_record = Some(shifted_record.clone());
+
+    Ok(shifted_record)
 }
 
 async fn transition_from_paused_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {

@@ -260,15 +260,24 @@ impl TestRunner {
             },
         };
 
+        // Set the TestRunnerStatus to Running.
+        log::info!("Test Runner started successfully !!!\n\n");            
+        self.set_status(TestRunnerStatus::Running).await;
+
         // Iterate over the TestRunSources and start each one if it is configured to start immediately.
         // If any of the TestSources fail to start, set the TestRunnerStatus to Error and return an error.
+        log::info!("Test Runner starting auto-start TestRunSources...");            
+        let mut auto_start_sources_count: u32 = 0;
+
         let sources_lock = self.sources.read().await;
         for (_, source) in &*sources_lock {
             if source.start_immediately {
+                log::info!("Starting TestRunSource: {}", source.id);
+
                 match source.start_source_change_generator().await {
                     Ok(response) => {
                         match response.result {
-                            Ok(_) => {},
+                            Ok(_) => { auto_start_sources_count += 1; },
                             Err(e) => {
                                 let error = TestRunnerStatus::Error(format!("Error starting TestRunSources: {}", e));
                                 self.set_status(error.clone()).await;
@@ -285,10 +294,7 @@ impl TestRunner {
             }
         }
         
-        // Set the TestRunnerStatus to Running.
-        log::info!("Test Runner started successfully");            
-        self.set_status(TestRunnerStatus::Running).await;
-
+        log::info!("Test Runner auto started {} of {} TestRunSources.", auto_start_sources_count, sources_lock.len());            
         Ok(TestRunnerStatus::Running)
     }
 }

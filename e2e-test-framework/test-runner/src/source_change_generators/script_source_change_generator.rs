@@ -486,7 +486,8 @@ async fn process_command_message(state: &mut ScriptSourceChangeGeneratorInternal
 async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorInternalState, message: ScheduledChangeScriptRecordMessage) -> anyhow::Result<()> {
     log::trace!("Received change stream message: {:?}", message);
     
-    // We could receive a message that was delayed after transitioning to an inactive state, so ignore it.
+    // We could receive a message that was delayed before transitioning to an inactive state, so ignore it.
+    // It will remain as the next record and be scheduled if the player is unpaused again.
     if !state.status.is_processing() {
         log::warn!("Ignoring change stream message in non-processing state: {:?}", message);
         return Ok(());

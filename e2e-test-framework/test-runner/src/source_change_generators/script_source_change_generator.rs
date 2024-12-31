@@ -606,17 +606,15 @@ async fn load_next_change_stream_record(state: &mut ScriptSourceChangeGeneratorI
 async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
     log_test_script_player_state(state, "schedule_next_change_stream_record");
 
-    let current_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-
     // Can only schedule next change stream record if Running, Stepping, or Skipping
     match state.status {
         SourceChangeGeneratorStatus::Running | SourceChangeGeneratorStatus::Stepping | SourceChangeGeneratorStatus::Skipping => {
             if state.previous_record.is_none() {
                 // This is the first record, so initialize the start times based on time_mode config.
-                state.actual_time_ns_start = current_time_ns;
+                state.actual_time_ns_start = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     
                 state.virtual_time_ns_start = match state.time_mode {
-                    TimeMode::Live => current_time_ns,
+                    TimeMode::Live => state.actual_time_ns_start,
                     TimeMode::Recorded => state.header_record.start_time.timestamp_nanos_opt().unwrap() as u64,
                     TimeMode::Rebased(nanos) => nanos,
                 };
@@ -626,9 +624,9 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
             };
 
             match state.status {
-                SourceChangeGeneratorStatus::Running => schedule_next_change_stream_record_for_run(state, current_time_ns).await?,
-                SourceChangeGeneratorStatus::Stepping => schedule_next_change_stream_record_for_step(state, current_time_ns).await?,
-                SourceChangeGeneratorStatus::Skipping => schedule_next_change_stream_record_for_skip(state, current_time_ns).await?,
+                SourceChangeGeneratorStatus::Running => schedule_next_change_stream_record_for_run(state).await?,
+                SourceChangeGeneratorStatus::Stepping => schedule_next_change_stream_record_for_step(state).await?,
+                SourceChangeGeneratorStatus::Skipping => schedule_next_change_stream_record_for_skip(state).await?,
                 _ => {
                     // Transition to an error state.
                     transition_to_error_state(state, "Can't schedule next change stream record in this state.", None);
@@ -643,7 +641,7 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
     Ok(())
 }
 
-async fn schedule_next_change_stream_record_for_skip(state: &mut ScriptSourceChangeGeneratorInternalState, _current_time_ns: u64) -> anyhow::Result<()> {
+async fn schedule_next_change_stream_record_for_skip(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
 
     // Get the next record from the player state. Error if it is None.
     let next_record = match state.next_record.as_ref() {
@@ -693,7 +691,7 @@ async fn schedule_next_change_stream_record_for_skip(state: &mut ScriptSourceCha
     Ok(())
 }
 
-async fn schedule_next_change_stream_record_for_step(state: &mut ScriptSourceChangeGeneratorInternalState, _current_time_ns: u64) -> anyhow::Result<()> {
+async fn schedule_next_change_stream_record_for_step(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
 
     // Get the next record from the player state. Error if it is None.
     let next_record = match state.next_record.as_ref() {
@@ -747,7 +745,7 @@ async fn schedule_next_change_stream_record_for_step(state: &mut ScriptSourceCha
     Ok(())
 }
 
-async fn schedule_next_change_stream_record_for_run(state: &mut ScriptSourceChangeGeneratorInternalState, _current_time_ns: u64) -> anyhow::Result<()> {
+async fn schedule_next_change_stream_record_for_run(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
 
     // Get the next record from the player state. Error if it is None.
     let next_record = match state.next_record.as_ref() {

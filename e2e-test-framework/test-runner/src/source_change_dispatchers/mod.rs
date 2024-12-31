@@ -23,11 +23,15 @@ impl std::fmt::Display for SourceChangeDispatcherError {
 
 #[async_trait]
 pub trait SourceChangeDispatcher : Send + Sync {
+    async fn close(&mut self) -> anyhow::Result<()>;
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()>;
 }
 
 #[async_trait]
 impl SourceChangeDispatcher for Box<dyn SourceChangeDispatcher + Send + Sync> {
+    async fn close(&mut self) -> anyhow::Result<()> {
+        (**self).close().await
+    }
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
         (**self).dispatch_source_change_events(events).await
     }

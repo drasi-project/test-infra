@@ -72,6 +72,16 @@ impl JsonlFileSourceChangeDispatcher {
 
 #[async_trait]
 impl SourceChangeDispatcher for JsonlFileSourceChangeDispatcher {
+    async fn close(&mut self) -> anyhow::Result<()> {
+        match &mut self.writer {
+            Some(w) => {
+                w.flush()?;
+            },
+            None => {},
+        }
+        Ok(())
+    }
+    
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
         log::trace!("Dispatch source change events");
@@ -102,44 +112,6 @@ impl SourceChangeDispatcher for JsonlFileSourceChangeDispatcher {
                 }
             }
         }
-
-
-        // let json_events = match serde_json::to_string(&events) {
-        //     Ok(e) => e,
-        //     Err(e) => return Err(SourceChangeDispatcherError::Serde(e).into()),
-        // };
-
-        // match &mut self.writer {
-        //     Some(w) => {
-        //         // match w.write_all(json_events.as_bytes()) {
-        //         //     Ok(_) => { w.flush()?; },
-        //         //     Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
-        //         // }
-
-        //         for event in events {
-        //             let json = serde_json::to_string(&events)?;
-        //             writeln!(writer, "{}", json)?; // Write the JSON string with a newline
-        //         }
-        //     },
-        //     None => {
-        //         // Create a file name based on the current Utc date and time.
-        //         let file_name = Utc::now().format("source_change_events_%Y-%m-%d_%H-%M-%S%.f.json");
-        //         let file_path = &self.settings.folder_path.clone().join(file_name.to_string());
-                
-        //         let mut w = match OpenOptions::new()
-        //             .create(true)
-        //             .append(true)
-        //             .open(file_path) {
-        //                 Ok(f) => BufWriter::new(f),
-        //                 Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
-        //             };
-        //         match w.write_all(json_events.as_bytes()) {
-        //             Ok(_) => { w.flush()?; },
-        //             Err(e) => return Err(SourceChangeDispatcherError::Io(e).into()),
-        //         }
-        //     }
-        // }
-
         Ok(())
     }
 }

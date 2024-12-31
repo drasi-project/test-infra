@@ -55,6 +55,10 @@ impl DaprSourceChangeDispatcher {
 
 #[async_trait]
 impl SourceChangeDispatcher for DaprSourceChangeDispatcher {
+    async fn close(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
         log::trace!("Dispatch source change events");

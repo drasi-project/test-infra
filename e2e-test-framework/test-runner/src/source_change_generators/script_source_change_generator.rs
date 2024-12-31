@@ -448,9 +448,9 @@ async fn process_command_message(state: &mut ScriptSourceChangeGeneratorInternal
         }
     } else {
         let transition_response = match state.status {
-            SourceChangeGeneratorStatus::Running => transition_from_running_state(state, &message.command),
-            SourceChangeGeneratorStatus::Stepping => transition_from_stepping_state(state, &message.command),
-            SourceChangeGeneratorStatus::Skipping => transition_from_skipping_state(state, &message.command),
+            SourceChangeGeneratorStatus::Running => transition_from_running_state(state, &message.command).await,
+            SourceChangeGeneratorStatus::Stepping => transition_from_stepping_state(state, &message.command).await,
+            SourceChangeGeneratorStatus::Skipping => transition_from_skipping_state(state, &message.command).await,
             SourceChangeGeneratorStatus::Paused => transition_from_paused_state(state, &message.command).await,
             SourceChangeGeneratorStatus::Stopped => transition_from_stopped_state(state, &message.command),
             SourceChangeGeneratorStatus::Finished => transition_from_finished_state(state, &message.command),
@@ -550,7 +550,7 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
             log::debug!("Reached Source Change Script Label: {:?}", label_record);
         },
         ChangeScriptRecord::Finish(_) => {
-            transition_to_finished_state(state);
+            transition_to_finished_state(state).await;
         },
         ChangeScriptRecord::Header(header_record) => {
             // Transition to an error state.
@@ -595,7 +595,7 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
     match state.status {
         SourceChangeGeneratorStatus::Running | SourceChangeGeneratorStatus::Stepping | SourceChangeGeneratorStatus::Skipping => {
             if state.previous_record.is_none() {
-                // This is the first record, so initialize the start times.
+                // This is the first record, so initialize the start times based on time_mode config.
                 state.actual_time_ns_start = current_time_ns;
     
                 state.virtual_time_ns_start = match state.time_mode {
@@ -607,6 +607,8 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
                 state.virtual_time_ns_current = state.virtual_time_ns_start;
                 state.virtual_time_ns_offset = 0;
             };
+
+            log::error!("Scheduling first change stream record: {:?}", state);
 
             // Get the next record from the player state. Error if it is None.
             let next_record = match state.next_record.as_ref() {
@@ -802,6 +804,24 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
 //     Ok(())
 // }
 
+async fn close_dispatchers(state: &mut ScriptSourceChangeGeneratorInternalState) {
+    let dispatchers = &mut state.dispatchers;
+
+    log::debug!("Closing dispatchers - #dispatchers:{}", dispatchers.len());
+
+    let futures: Vec<_> = dispatchers.iter_mut()
+        .map(|dispatcher| {
+            async move {
+                let _ = dispatcher.close().await;
+            }
+        })
+        .collect();
+
+    // Wait for all of them to complete
+    // TODO - Handle errors properly.
+    let _ = join_all(futures).await;
+}
+
 async fn dispatch_source_change_events(
     state: &mut ScriptSourceChangeGeneratorInternalState,
     events: Vec<&SourceChangeEvent>
@@ -865,8 +885,7 @@ async fn transition_from_paused_state(state: &mut ScriptSourceChangeGeneratorInt
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
-            state.status = SourceChangeGeneratorStatus::Stopped;
-            Ok(())
+            Ok(transition_to_stopped_state(state).await)
         },
         ScriptSourceChangeGeneratorCommand::GetState => {
             Ok(())
@@ -874,7 +893,7 @@ async fn transition_from_paused_state(state: &mut ScriptSourceChangeGeneratorInt
     }
 }
 
-fn transition_from_running_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+async fn transition_from_running_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     match command {
@@ -892,8 +911,7 @@ fn transition_from_running_state(state: &mut ScriptSourceChangeGeneratorInternal
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
-            state.status = SourceChangeGeneratorStatus::Stopped;
-            Ok(())
+            Ok(transition_to_stopped_state(state).await)
         },
         ScriptSourceChangeGeneratorCommand::GetState => {
             Ok(())
@@ -901,7 +919,7 @@ fn transition_from_running_state(state: &mut ScriptSourceChangeGeneratorInternal
     }
 }
 
-fn transition_from_stepping_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+async fn transition_from_stepping_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     match command {
@@ -911,9 +929,7 @@ fn transition_from_stepping_state(state: &mut ScriptSourceChangeGeneratorInterna
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
-            state.status = SourceChangeGeneratorStatus::Stopped;
-            state.steps_remaining = 0;
-            Ok(())
+            Ok(transition_to_stopped_state(state).await)
         },
         ScriptSourceChangeGeneratorCommand::GetState => {
             Ok(())
@@ -922,7 +938,7 @@ fn transition_from_stepping_state(state: &mut ScriptSourceChangeGeneratorInterna
     }
 }
 
-fn transition_from_skipping_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+async fn transition_from_skipping_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     match command {
@@ -932,9 +948,7 @@ fn transition_from_skipping_state(state: &mut ScriptSourceChangeGeneratorInterna
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
-            state.status = SourceChangeGeneratorStatus::Stopped;
-            state.skips_remaining = 0;
-            Ok(())
+            Ok(transition_to_stopped_state(state).await)
         },
         ScriptSourceChangeGeneratorCommand::GetState => {
             Ok(())
@@ -961,12 +975,22 @@ fn transition_from_error_state(state: &mut ScriptSourceChangeGeneratorInternalSt
     Err(ScriptSourceChangeGeneratorError::Error(state.status).into())
 }
 
-fn transition_to_finished_state(state: &mut ScriptSourceChangeGeneratorInternalState) {
+async fn transition_to_finished_state(state: &mut ScriptSourceChangeGeneratorInternalState) {
     log::debug!("Transitioning to Finished state from: {:?}", state.status);
 
     state.status = SourceChangeGeneratorStatus::Finished;
     state.skips_remaining = 0;
     state.steps_remaining = 0;
+    close_dispatchers(state).await;
+}
+
+async fn transition_to_stopped_state(state: &mut ScriptSourceChangeGeneratorInternalState) {
+    log::debug!("Transitioning to Stopped state from: {:?}", state.status);
+
+    state.status = SourceChangeGeneratorStatus::Stopped;
+    state.skips_remaining = 0;
+    state.steps_remaining = 0;
+    close_dispatchers(state).await;
 }
 
 fn transition_to_error_state(state: &mut ScriptSourceChangeGeneratorInternalState, error_message: &str, error: Option<&anyhow::Error>) {    
@@ -984,9 +1008,9 @@ fn transition_to_error_state(state: &mut ScriptSourceChangeGeneratorInternalStat
 
 async fn transition_to_paused_state(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()>{
     match state.status {
-        SourceChangeGeneratorStatus::Running => transition_from_running_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
-        SourceChangeGeneratorStatus::Stepping => transition_from_stepping_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
-        SourceChangeGeneratorStatus::Skipping => transition_from_skipping_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
+        SourceChangeGeneratorStatus::Running => transition_from_running_state(state,&ScriptSourceChangeGeneratorCommand::Pause).await,
+        SourceChangeGeneratorStatus::Stepping => transition_from_stepping_state(state,&ScriptSourceChangeGeneratorCommand::Pause).await,
+        SourceChangeGeneratorStatus::Skipping => transition_from_skipping_state(state,&ScriptSourceChangeGeneratorCommand::Pause).await,
         SourceChangeGeneratorStatus::Paused => transition_from_paused_state(state,&ScriptSourceChangeGeneratorCommand::Pause).await,
         SourceChangeGeneratorStatus::Stopped => transition_from_stopped_state(state,&ScriptSourceChangeGeneratorCommand::Pause),
         SourceChangeGeneratorStatus::Finished => transition_from_finished_state(state,&ScriptSourceChangeGeneratorCommand::Pause),

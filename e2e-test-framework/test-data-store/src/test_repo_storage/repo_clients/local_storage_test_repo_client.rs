@@ -82,6 +82,11 @@ impl RemoteTestRepoClient for LocalStorageTestRepoClient {
         match self.settings.source_path {
             Some(ref source_path) => {
                 let source = source_path.join(format!("{}/sources/{}", test_id, test_source_def.test_source_id));
+
+                if !source.exists() {
+                    return Err(anyhow::anyhow!("Content for Test Source ID: {} not found in source location {:?}", test_source_def.test_source_id, source));
+                }
+
                 copy_dir_tree(source, test_source_data_path.clone()).await?;
             },
             None => {}

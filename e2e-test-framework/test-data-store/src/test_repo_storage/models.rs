@@ -333,7 +333,7 @@ pub struct DaprSourceChangeDispatcherDefinition {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlFileSourceChangeDispatcherDefinition {
-    pub single_file: Option<bool>,
+    pub max_events_per_file: Option<u64>,
 }
 
 #[derive(Debug, thiserror::Error)]

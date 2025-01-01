@@ -41,6 +41,6 @@ pub async fn create_source_change_dispatcher(def: &SourceChangeDispatcherDefinit
     match def {
         SourceChangeDispatcherDefinition::Console(def) => console_dispatcher::ConsoleSourceChangeDispatcher::new(def, output_storage),
         SourceChangeDispatcherDefinition::Dapr(def) => dapr_dispatcher::DaprSourceChangeDispatcher::new(def, output_storage),
-        SourceChangeDispatcherDefinition::JsonlFile(def) => jsonl_file_dispatcher::JsonlFileSourceChangeDispatcher::new(def, output_storage),
+        SourceChangeDispatcherDefinition::JsonlFile(def) => jsonl_file_dispatcher::JsonlFileSourceChangeDispatcher::new(def, output_storage).await,
     }
 }

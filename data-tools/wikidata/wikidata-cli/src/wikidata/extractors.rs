@@ -1,5 +1,5 @@
 use serde_json::{json, Value, Map};
-use test_data_store::test_repo_storage::scripts::{BootstrapScriptRecord, NodeRecord, RelationRecord};
+use test_data_store::scripts::{BootstrapScriptRecord, NodeRecord, RelationRecord};
 
 use super::{ItemRevisionFileContent, ItemType};
 

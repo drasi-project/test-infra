@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use chrono::{FixedOffset, NaiveDateTime, ParseError, TimeZone};
 use serde::Serialize;
 use strum::IntoEnumIterator;
-use test_data_store::test_repo_storage::scripts::bootstrap_script_file_writer::{BootstrapScriptWriter, BootstrapScriptWriterSettings};
-use test_data_store::test_repo_storage::scripts::change_script_file_writer::{ChangeScriptWriter, ChangeScriptWriterSettings};
-use test_data_store::test_repo_storage::scripts::{BootstrapHeaderRecord, BootstrapScriptRecord, ChangeHeaderRecord, ChangeScriptRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo, SourceChangeRecord};
+use test_data_store::scripts::bootstrap_script_file_writer::{BootstrapScriptWriter, BootstrapScriptWriterSettings};
+use test_data_store::scripts::change_script_file_writer::{ChangeScriptWriter, ChangeScriptWriterSettings};
+use test_data_store::scripts::{BootstrapHeaderRecord, BootstrapScriptRecord, ChangeHeaderRecord, ChangeScriptRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo, SourceChangeRecord};
 use tokio::fs;
 
 use crate::wikidata::extractors::item_revision_to_bootstrap_data_record;

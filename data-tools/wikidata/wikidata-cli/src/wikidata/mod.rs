@@ -219,7 +219,7 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
         .header("User-Agent", "DrasiWikiDataCli/0.1 (info@drasi.io)")
         .build()?;
 
-    log::error!("Download Item Type URL: {}", request.url().as_str());
+    log::debug!("Download Item Type URL: {}", request.url().as_str());
 
     let response: ItemListResponse = client.execute(request).await?.json().await?;
 
@@ -269,7 +269,7 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
         .header("User-Agent", "DrasiWikiDataCli/0.1 (info@drasi.io)")
         .build()?;
 
-    log::error!("Download Item List URL: {}", request.url().as_str());
+    log::debug!("Download Item List URL: {}", request.url().as_str());
 
     let response: ItemListResponse = client.execute(request).await?.json().await?;
 
@@ -297,7 +297,6 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
     Ok(())
 }
 
-
 async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Result<()> {        
     log::info!("Download Item Revisions using {:?}", query_args);
 
@@ -315,11 +314,63 @@ async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Resu
     let client = Client::new();
     let mut continuation_token: Option<Continuation> = None;
 
+    // Build the list of revision IDs to fetch.
+    let mut total_revision_count = 0;
+    let mut revision_ids: Vec<String> = Vec::new();
     loop {
-        let request = create_item_revision_request(
+        let request = create_item_revision_list_request(
             &client, &query_args, continuation_token)?.build()?;
 
-        log::error!("Downloading Item Revisions URL: {}", request.url().as_str());
+        log::debug!("Downloading Item Revision List URL: {}", request.url().as_str());
+
+        let response: ApiResponse = client.execute(request).await?.json().await?;
+
+        if let Some(page) = response.query.pages.values().next() {
+            if let Some(revisions) = &page.revisions {
+                for revision in revisions {
+                    log::trace!(
+                        "Item ID {:?}, Revision ID: {}, Parent ID: {}, Timestamp: {}",
+                        &query_args.item_id, revision.revid, revision.parentid, revision.timestamp
+                    );
+
+                    total_revision_count += 1;
+
+                    // Create a file name and path from the Revision Timestamp
+                    let filename = revision.timestamp.replace(":", "-").replace("T", "_");
+                    let revision_file = query_args.folder_path.join(format!("{}.json", filename));
+                    
+                    // If the revision file already exists, dont rewrite it.
+                    // This will allow for incremental fetching of content over multiiple runs in case of failure
+                    if revision_file.exists() {
+                        log::trace!("Revision {:?} already exists in Item {:?}", revision.revid, &query_args.item_id);
+                    } else {
+                        revision_ids.push(revision.revid.to_string());
+                    }
+                }
+            }
+        }
+
+        // If we have reached the desired rev_count or there is no continuation token for pagination, break the loop;
+        if fetched_revision_count >= target_revision_count || response.continuation.is_none() {
+            break;
+        } else {
+            continuation_token = response.continuation;
+        }
+    }
+
+    log::error!("Item {:?} - downloading {} of {} available revisions.", &query_args.item_id, revision_ids.len(), total_revision_count);
+
+    // Fetch the revisions in batches of 20
+    let revision_id_chunks: Vec<Vec<String>> = revision_ids
+        .chunks(20) 
+        .map(|chunk| chunk.to_vec()) 
+        .collect();
+
+    for revision_id_chunk in revision_id_chunks {
+        let request = create_item_revisions_request(
+            &client, &revision_id_chunk)?.build()?;
+
+        log::debug!("Downloading Item Revisions URL: {}", request.url().as_str());
 
         let response: ApiResponse = client.execute(request).await?.json().await?;
 
@@ -376,19 +427,12 @@ async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Resu
                 }
             }
         }
-
-        // If we have reached the desired rev_count or there is no continuation token for pagination, break the loop;
-        if fetched_revision_count >= target_revision_count || response.continuation.is_none() {
-            break;
-        } else {
-            continuation_token = response.continuation;
-        }
     }
 
     Ok(())
 }
 
-fn create_item_revision_request(client: &Client, query_args: &ItemRevsQueryArgs, continuation: Option<Continuation>) -> anyhow::Result<RequestBuilder> {
+fn create_item_revision_list_request(client: &Client, query_args: &ItemRevsQueryArgs, continuation: Option<Continuation>) -> anyhow::Result<RequestBuilder> {
 
     let rvlimit: usize = 50;
 
@@ -398,8 +442,7 @@ fn create_item_revision_request(client: &Client, query_args: &ItemRevsQueryArgs,
         .query(&[("format", "json")])
         .query(&[("prop", "revisions")])
         .query(&[("titles", query_args.item_id.clone())])
-        .query(&[("rvprop", "ids|timestamp|user|userid|comment|content")])
-        .query(&[("rvslots", "main")])
+        .query(&[("rvprop", "ids|timestamp")])
         .header("User-Agent", "DrasiWikiDataCli/0.1 (info@drasi.io)");
 
     request = match (query_args.rev_start, query_args.rev_end) {
@@ -450,6 +493,19 @@ fn create_item_revision_request(client: &Client, query_args: &ItemRevsQueryArgs,
     } else {
         request
     })
+}
+
+fn create_item_revisions_request(client: &Client, revision_ids: &Vec<String>) -> anyhow::Result<RequestBuilder> {
+
+    Ok(client
+        .get("https://www.wikidata.org/w/api.php")
+        .query(&[("action", "query")])
+        .query(&[("format", "json")])
+        .query(&[("revids", revision_ids.join("|"))])
+        .query(&[("prop", "revisions")])
+        .query(&[("rvprop", "ids|timestamp|user|userid|comment|content")])
+        .query(&[("rvslots", "main")])
+        .header("User-Agent", "DrasiWikiDataCli/0.1 (info@drasi.io)"))
 }
 
 #[derive(Deserialize, Debug)]

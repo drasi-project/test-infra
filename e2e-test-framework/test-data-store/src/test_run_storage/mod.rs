@@ -1,6 +1,7 @@
 use std::{fmt, path::PathBuf};
 
 use serde::Serialize;
+use serde_json::Value;
 use tokio::fs;
 
 const SOURCES_FOLDER_NAME: &str = "sources";
@@ -224,4 +225,12 @@ pub struct TestRunSourceStorage {
     pub id: TestRunSourceId,
     pub path: PathBuf,
     pub source_change_path: PathBuf,
+}
+
+impl TestRunSourceStorage {
+    pub async fn write_result_summary(&self, summary: &Value) -> anyhow::Result<()> {
+        let summary_path = self.path.join("result_summary.json");
+        fs::write(summary_path, serde_json::to_string_pretty(summary)?).await?;
+        Ok(())
+    }
 }

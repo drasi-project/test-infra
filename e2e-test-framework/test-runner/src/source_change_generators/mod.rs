@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-
-use script_source_change_generator::ScriptSourceChangeGenerator;
 use serde::Serialize;
 use test_data_store::{test_repo_storage::{models::{SourceChangeGeneratorDefinition, SpacingMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 use tokio::sync::oneshot;
+
+use script_source_change_generator::ScriptSourceChangeGenerator;
 
 pub mod script_source_change_generator;
 
@@ -102,7 +102,7 @@ pub enum SourceChangeGeneratorAction {
     Stop,
 }
 
-#[derive(Debug,)]
+#[derive(Debug)]
 pub struct SourceChangeGeneratorCommand {
     pub action: SourceChangeGeneratorAction,
     pub response_tx: Option<oneshot::Sender<SourceChangeGeneratorCommandResponse>>,

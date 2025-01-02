@@ -3,6 +3,7 @@ use std::{fmt::{self, Debug, Formatter}, pin::Pin, sync::Arc, time::SystemTime};
 use async_trait::async_trait;
 use futures::{future::join_all, Stream};
 use serde::Serialize;
+use time::{OffsetDateTime, format_description};
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle, time::{sleep, Duration}};
 use tokio_stream::StreamExt;
 
@@ -80,9 +81,31 @@ impl ScriptSourceChangeGeneratorSettings {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct ScriptSourceChangeGeneratorStats {
+    pub actual_start_time_ns: u64,
+    pub actual_end_time_ns: u64,
+    pub num_source_change_records: u64,
+    pub num_skipped_source_change_records: u64,
+    pub num_label_records: u64,
+    pub num_pause_records: u64,
+}
+
+impl Default for ScriptSourceChangeGeneratorStats {
+    fn default() -> Self {
+        Self {
+            actual_start_time_ns: 0,
+            actual_end_time_ns: 0,
+            num_source_change_records: 0,
+            num_skipped_source_change_records: 0,
+            num_label_records: 0,
+            num_pause_records: 0,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ScriptSourceChangeGeneratorExternalState {
-    pub actual_time_ns_start: u64,
     pub error_messages: Vec<String>,
     pub ignore_scripted_pause_commands: bool,
     pub header_record: ChangeHeaderRecord,
@@ -104,7 +127,6 @@ pub struct ScriptSourceChangeGeneratorExternalState {
 impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeGeneratorExternalState {
     fn from(state: &mut ScriptSourceChangeGeneratorInternalState) -> Self {
         Self {
-            actual_time_ns_start: state.actual_time_ns_start,
             error_messages: state.error_messages.clone(),
             ignore_scripted_pause_commands: state.ignore_scripted_pause_commands,
             header_record: state.header_record.clone(),
@@ -126,7 +148,6 @@ impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeG
 }
 
 pub struct ScriptSourceChangeGeneratorInternalState {
-    pub actual_time_ns_start: u64,
     pub change_stream: Pin<Box<dyn Stream<Item = Result<SequencedChangeScriptRecord, anyhow::Error>> + Send>>,
     pub change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
     pub delayer_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
@@ -135,11 +156,13 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub ignore_scripted_pause_commands: bool,
     pub header_record: ChangeHeaderRecord,
     pub next_record: Option<SequencedChangeScriptRecord>,
+    pub output_storage: TestRunSourceStorage,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
     pub skips_remaining: u64,
     pub skips_spacing_mode: Option<SpacingMode>,
     pub spacing_mode: SpacingMode,
     pub status: SourceChangeGeneratorStatus,
+    pub stats: ScriptSourceChangeGeneratorStats,
     pub steps_remaining: u64,
     pub steps_spacing_mode: Option<SpacingMode>,
     pub test_run_source_id: TestRunSourceId,
@@ -152,7 +175,6 @@ pub struct ScriptSourceChangeGeneratorInternalState {
 impl Debug for ScriptSourceChangeGeneratorInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ScriptSourceChangeGeneratorInternalState")
-            .field("actual_time_ns_start", &self.actual_time_ns_start)
             .field("error_messages", &self.error_messages)
             .field("ignore_scripted_pause_commands", &self.ignore_scripted_pause_commands)
             .field("header_record", &self.header_record)
@@ -162,12 +184,73 @@ impl Debug for ScriptSourceChangeGeneratorInternalState {
             .field("skips_spacing_mode", &self.skips_spacing_mode)
             .field("spacing_mode", &self.spacing_mode)
             .field("status", &self.status)
+            .field("stats", &self.stats)
             .field("steps_remaining", &self.steps_remaining)
             .field("steps_spacing_mode", &self.steps_spacing_mode)
             .field("time_mode", &self.time_mode)
             .field("virtual_time_ns_current", &self.virtual_time_ns_current)
             .field("virtual_time_ns_offset", &self.virtual_time_ns_offset)
             .field("virtual_time_ns_start", &self.virtual_time_ns_start)
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize)]
+pub struct ScriptSourceChangeGeneratorResultSummary {
+    pub actual_start_time: String,
+    pub actual_start_time_ns: u64,
+    pub actual_end_time: String,
+    pub actual_end_time_ns: u64,
+    pub run_duration_ns: u64,
+    pub run_duration_sec: f64,
+    pub num_source_change_records: u64,
+    pub num_skipped_source_change: u64,
+    pub num_label_records: u64,
+    pub num_pause_records: u64,
+    pub processing_rate: f64,
+    pub test_run_source_id: String,
+}
+
+impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeGeneratorResultSummary {
+    fn from(state: &mut ScriptSourceChangeGeneratorInternalState) -> Self {
+        let run_duration_ns = state.stats.actual_end_time_ns - state.stats.actual_start_time_ns;
+        let run_duration_sec = run_duration_ns as f64 / 1_000_000_000.0;
+
+        Self {
+            actual_start_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.actual_start_time_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap(),
+            actual_start_time_ns: state.stats.actual_start_time_ns,
+            actual_end_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.actual_end_time_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap(),
+            actual_end_time_ns: state.stats.actual_end_time_ns,
+            run_duration_ns,
+            run_duration_sec,
+            num_source_change_records: state.stats.num_source_change_records,
+            num_skipped_source_change: state.stats.num_skipped_source_change_records,
+            num_label_records: state.stats.num_label_records,
+            num_pause_records: state.stats.num_pause_records,
+            processing_rate: state.stats.num_source_change_records as f64 / run_duration_sec,
+            test_run_source_id: state.test_run_source_id.to_string(),
+        }
+    }
+}
+
+impl Debug for ScriptSourceChangeGeneratorResultSummary {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let start_time = format!("{} ({} ns)", self.actual_start_time, self.actual_start_time_ns);
+        let end_time = format!("{} ({} ns)", self.actual_end_time, self.actual_end_time_ns);
+        let run_duration = format!("{} sec ({} ns)", self.run_duration_sec, self.run_duration_ns, );
+        let source_change_records = format!("{} (skipped:{}, label:{}, pause:{})", 
+            self.num_source_change_records, self.num_skipped_source_change, self.num_label_records, self.num_pause_records);
+        let processing_rate = format!("{:.2} changes / sec", self.processing_rate);
+
+        f.debug_struct("ScriptSourceChangeGeneratorResultSummary")
+            .field("test_run_source_id", &self.test_run_source_id)
+            .field("start_time", &start_time)
+            .field("end_time", &end_time)
+            .field("run_duration", &run_duration)
+            .field("source_change_records", &source_change_records)
+            .field("processing_rate", &processing_rate)
             .finish()
     }
 }
@@ -218,7 +301,6 @@ pub struct ScheduledChangeScriptRecordMessage {
 pub struct ProcessedChangeScriptRecord {
     pub dispatch_status: SourceChangeGeneratorStatus,
     pub scripted: SequencedChangeScriptRecord,
-    // pub dispatched: ChangeScriptRecord,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -417,7 +499,6 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::R
     let _ = tokio::spawn(delayer_thread(settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
 
     let player_state = ScriptSourceChangeGeneratorInternalState {
-        actual_time_ns_start: 0,
         change_stream: change_stream,
         change_tx_channel,
         delayer_tx_channel,
@@ -426,11 +507,13 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::R
         ignore_scripted_pause_commands: settings.ignore_scripted_pause_commands,
         header_record: header,
         next_record: first_record,
+        output_storage: settings.output_storage,
         previous_record: None,
         skips_remaining: 0,
         skips_spacing_mode: None,
         spacing_mode: settings.spacing_mode,
         status: SourceChangeGeneratorStatus::Paused,
+        stats: ScriptSourceChangeGeneratorStats::default(),
         steps_remaining: 0,
         steps_spacing_mode: None,
         test_run_source_id: settings.id.clone(),
@@ -510,6 +593,8 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
     // Process the scheduled record.
     match &shifted_record.record {
         ChangeScriptRecord::SourceChange(change_record) => {
+            state.stats.num_source_change_records += 1;
+
             match &state.status {
                 SourceChangeGeneratorStatus::Running => {
                     // Dispatch the SourceChangeEvent.
@@ -537,6 +622,8 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
                     if state.skips_remaining > 0 {
                         // Skip the SourceChangeEvent.
                         log::debug!("Skipping ChangeScriptRecord: {:?}", change_record);
+                        state.stats.num_skipped_source_change_records += 1;
+
                         load_next_change_stream_record(state).await?;  
                         schedule_next_change_stream_record(state).await?;
 
@@ -556,6 +643,8 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
             }
         },
         ChangeScriptRecord::PauseCommand(_) => {
+            state.stats.num_pause_records += 1;
+
             // Process the PauseCommand only if the Player is not configured to ignore them.
             if state.ignore_scripted_pause_commands {
                 log::debug!("Ignoring Change Script Pause Command: {:?}", shifted_record);
@@ -564,6 +653,8 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
             }
         },
         ChangeScriptRecord::Label(label_record) => {
+            state.stats.num_label_records += 1;
+
             log::debug!("Reached Source Change Script Label: {:?}", label_record);
         },
         ChangeScriptRecord::Finish(_) => {
@@ -611,10 +702,10 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
         SourceChangeGeneratorStatus::Running | SourceChangeGeneratorStatus::Stepping | SourceChangeGeneratorStatus::Skipping => {
             if state.previous_record.is_none() {
                 // This is the first record, so initialize the start times based on time_mode config.
-                state.actual_time_ns_start = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+                state.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     
                 state.virtual_time_ns_start = match state.time_mode {
-                    TimeMode::Live => state.actual_time_ns_start,
+                    TimeMode::Live => state.stats.actual_start_time_ns,
                     TimeMode::Recorded => state.header_record.start_time.timestamp_nanos_opt().unwrap() as u64,
                     TimeMode::Rebased(nanos) => nanos,
                 };
@@ -898,7 +989,7 @@ async fn transition_from_paused_state(state: &mut ScriptSourceChangeGeneratorInt
     match command {
         ScriptSourceChangeGeneratorCommand::Start => {
             log::info!("Script Started for TestRunSource {}", state.test_run_source_id);
-
+            
             state.status = SourceChangeGeneratorStatus::Running;
             schedule_next_change_stream_record(state).await?;
             Ok(())
@@ -1021,22 +1112,26 @@ async fn transition_to_finished_state(state: &mut ScriptSourceChangeGeneratorInt
     log::info!("Script Finished for TestRunSource {}", state.test_run_source_id);
 
     state.status = SourceChangeGeneratorStatus::Finished;
+    state.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     state.skips_remaining = 0;
     state.skips_spacing_mode = None;
     state.steps_remaining = 0;
     state.steps_spacing_mode = None;
     close_dispatchers(state).await;
+    write_result_summary(state).await.ok();
 }
 
 async fn transition_to_stopped_state(state: &mut ScriptSourceChangeGeneratorInternalState) {
     log::info!("Script Stopped for TestRunSource {}", state.test_run_source_id);
 
     state.status = SourceChangeGeneratorStatus::Stopped;
+    state.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     state.skips_remaining = 0;
     state.skips_spacing_mode = None;
     state.steps_remaining = 0;
     state.steps_spacing_mode = None;
     close_dispatchers(state).await;
+    write_result_summary(state).await.ok();
 }
 
 fn transition_to_error_state(state: &mut ScriptSourceChangeGeneratorInternalState, error_message: &str, error: Option<&anyhow::Error>) {    
@@ -1095,6 +1190,21 @@ pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receive
                 log::error!("ChangeScriptRecord delayer channel closed.");
                 break;
             }
+        }
+    }
+}
+
+pub async fn write_result_summary(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
+
+    let result_summary: ScriptSourceChangeGeneratorResultSummary = state.into();
+    log::info!("Stats for TestRunSource:\n{:#?}", &result_summary);
+
+    let result_summary_value = serde_json::to_value(result_summary).unwrap();
+    match state.output_storage.write_result_summary(&result_summary_value).await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            log::error!("Error writing result summary to output storage: {:?}", e);
+            Err(e)
         }
     }
 }

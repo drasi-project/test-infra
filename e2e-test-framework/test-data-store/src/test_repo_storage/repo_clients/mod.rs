@@ -67,7 +67,7 @@ pub struct LocalStorageTestRepoConfig {
 #[async_trait]
 pub trait RemoteTestRepoClient : Send + Sync {
     async fn copy_test_definition(&self, test_id: String, test_def_path: PathBuf) -> anyhow::Result<()>;
-    async fn copy_test_source_content(&self, test_id: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()>;
+    async fn copy_test_source_content(&self, test_data_folder: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()>;
 }
 
 #[async_trait]
@@ -76,8 +76,8 @@ impl RemoteTestRepoClient for Box<dyn RemoteTestRepoClient + Send + Sync> {
         (**self).copy_test_definition(test_id, test_def_path).await
     }
 
-    async fn copy_test_source_content(&self, test_id: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
-        (**self).copy_test_source_content(test_id, test_source_def, test_source_data_path ).await
+    async fn copy_test_source_content(&self, test_data_folder: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
+        (**self).copy_test_source_content(test_data_folder, test_source_def, test_source_data_path ).await
     }
 }
 

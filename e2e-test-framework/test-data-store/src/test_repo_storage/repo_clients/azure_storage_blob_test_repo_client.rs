@@ -131,7 +131,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
         Ok(())
     }
 
-    async fn copy_test_source_content(&self, test_id: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
+    async fn copy_test_source_content(&self, test_data_folder: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
         log::debug!("Copying Test Source Content for {:?} to {:?}", test_source_def.test_source_id, test_source_data_path);
 
         // Bootstrap Data Script Files
@@ -141,7 +141,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
                 let repo_path = format!(
                     "{}/{}/sources/{}/{}/", 
                     self.settings.storage_root_path, 
-                    test_id, 
+                    test_data_folder, 
                     test_source_def.test_source_id, 
                     &unique_config.script_file_folder
                 );
@@ -158,7 +158,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
                 let repo_path = format!(
                     "{}/{}/sources/{}/{}/", 
                     self.settings.storage_root_path, 
-                    test_id, 
+                    test_data_folder, 
                     test_source_def.test_source_id, 
                     &unique_config.script_file_folder
                 );

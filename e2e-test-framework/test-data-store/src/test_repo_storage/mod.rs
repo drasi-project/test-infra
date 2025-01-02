@@ -206,7 +206,6 @@ impl TestRepoStorage {
     pub async fn get_test_storage(&self, id: &str) -> anyhow::Result<TestStorage> {
         log::debug!("Getting Test Storage for ID {:?}", id);
 
-        let test_path = self.path.join(&id);
         let test_definition_path = self.path.join(format!("{}.test.json", id));
 
         if !test_definition_path.exists() {
@@ -215,6 +214,13 @@ impl TestRepoStorage {
             // Read the test definition file into a string.
             let json_content = fs::read_to_string(test_definition_path).await?;
             let test_definition: models::TestDefinition = serde_json::from_str(&json_content)?;
+
+            // The path to the test data is defined in test_definition.test_folder.
+            // If not provided, use the test_id.            
+            let test_path = match &test_definition.test_folder {
+                Some(folder) => self.path.join(&folder),
+                None => self.path.join(id),
+            };
 
             Ok(TestStorage {                            
                 client_config: self.repo_config.clone(),    
@@ -258,12 +264,12 @@ impl TestStorage {
         }
 
         if !test_source_data_path.exists() {
-            // fs::create_dir_all(&test_source_data_path).await?;
-            
             // Download the Test Source Content from the repo.
+            let test_data_folder = self.test_definition.test_folder.clone().unwrap_or(self.id.clone());
+            
             create_test_repo_client(self.client_config.clone()).await?
                 .copy_test_source_content(
-                    self.id.clone(),
+                    test_data_folder,
                     test_source_definition, 
                     test_source_data_path.clone(),
                 ).await?;

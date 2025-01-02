@@ -74,14 +74,14 @@ impl RemoteTestRepoClient for LocalStorageTestRepoClient {
         }
     }
 
-    async fn copy_test_source_content(&self, test_id: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
+    async fn copy_test_source_content(&self, test_data_folder: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
         log::debug!("Copying Test Source Content for {:?} to {:?}", test_source_def.test_source_id, test_source_data_path);
 
         // If there is no source_path configured for the repo client, use a existing files.
         // Otherwise, copy the files from the source path to the repo location.
         match self.settings.source_path {
             Some(ref source_path) => {
-                let source = source_path.join(format!("{}/sources/{}", test_id, test_source_def.test_source_id));
+                let source = source_path.join(format!("{}/sources/{}", test_data_folder, test_source_def.test_source_id));
 
                 if !source.exists() {
                     return Err(anyhow::anyhow!("Content for Test Source ID: {} not found in source location {:?}", test_source_def.test_source_id, source));

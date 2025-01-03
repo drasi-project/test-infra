@@ -66,7 +66,7 @@ enum Commands {
 #[derive(Args, Debug)]
 struct GetTypeCommandArgs {
     /// Size of Revision download batches
-    #[arg(short = 'b', long, default_value_t = 20)]
+    #[arg(short = 'b', long, default_value_t = 10)]
     batch_size: usize,
 
     /// The types of WikiData Items to get
@@ -119,7 +119,7 @@ impl GetTypeCommandArgs {
 #[derive(Args, Debug)]
 struct GetItemCommandArgs {
     /// Size of Revision download batches
-    #[arg(short = 'b', long, default_value_t = 20)]
+    #[arg(short = 'b', long, default_value_t = 10)]
     batch_size: usize,
 
     /// The Item Ids to get
@@ -226,6 +226,7 @@ async fn handle_get_types_command(args: GetTypeCommandArgs, cache_folder_path: P
 
     // Display a summary of what the command is going to do.
     println!("Getting WikiData Types:");
+    println!("  - batch size: {}", args.batch_size);
     println!("  - date range: {:?} to {:?}", &args.rev_start, &args.rev_end);
     println!("  - item types: {:?}", args.item_types);
     println!("  - cache folder: {:?}", cache_folder_path);
@@ -248,6 +249,7 @@ async fn handle_get_items_command(args: GetItemCommandArgs, cache_folder_path: P
 
     // Display a summary of what the command is going to do.
     println!("Getting WikiData Items:");
+    println!("  - batch size: {}", args.batch_size);
     println!("  - date range: {:?} to {:?}", &args.rev_start, &args.rev_end);
     println!("  - item type: {:?}", args.item_type);
     println!("  - item ids: {:?}", args.item_ids);

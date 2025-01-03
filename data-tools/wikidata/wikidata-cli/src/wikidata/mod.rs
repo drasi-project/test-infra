@@ -12,14 +12,6 @@ use tokio::{fs, io::AsyncWriteExt, sync::Semaphore};
 
 pub mod extractors;
 
-// #[derive(Debug, thiserror::Error)]
-// pub enum WikidataError {
-//     #[error("Error downloading Item:{1}, Revision IDs:{2}. Error {0}")]
-//     RevisionDownload(String, String, String),
-//     #[error("ReqwestError: {0}")]
-//     ReqwestError(reqwest::Error),
-// }
-
 /// Enum representing the different types of WikiData Item that can be downloaded
 #[derive(Copy, Clone, Debug, PartialEq, EnumIter, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
 pub enum ItemType {
@@ -130,10 +122,11 @@ pub struct Revision {
 
 #[derive(Deserialize, Debug, Serialize)]
 pub struct Slot {
-    pub contentmodel: String,
-    pub contentformat: String,
+    pub contentmodel: Option<String>,
+    pub contentformat: Option<String>,
     #[serde(rename = "*")]
-    pub content: String,
+    pub content: Option<String>,
+    pub texthidden: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Serialize)]
@@ -165,7 +158,10 @@ impl ItemRevisionFileContent {
 
         if let Some(slots) = &revision.slots {
             if let Some(slot) = slots.get("main") {
-                irfc.content = Some(serde_json::from_str(&slot.content)?);
+                if let Some(content) = &slot.content {
+                    // Parse the content as JSON
+                    irfc.content = Some(serde_json::from_str(&content)?);
+                }
             }
         }
 
@@ -440,8 +436,9 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
                 
                 match download_item_revisions_chunk(client, query_args, revision_id_chunk.clone()).await {
                     Ok(_) => {},
-                    Err(err) => log::error!("Chunk download failed - Item ID: {:?}. Revision IDs: {:?}. Error: {:?}.", 
-                        item_id, revision_ids, err),
+                    Err(err) => {
+                        log::error!("Chunk download failed - Item ID: {:?}. Revision IDs: {:?}. Error: {:?}.", item_id, revision_ids, err);
+                    },
                 }
             })
         })
@@ -470,7 +467,7 @@ async fn download_item_revisions_chunk(client: Client, query_args: ItemRevsQuery
     let request = create_item_revisions_request(
         &client, &revision_id_chunk)?.build()?;
 
-    log::trace!("Downloading Item Revisions URL: {:?}", &request.url());
+    log::trace!("Downloading Item Revisions URL: {:?}", &request.url().as_str());
 
     let response: ApiResponse = client.execute(request).await?.json().await?;
 

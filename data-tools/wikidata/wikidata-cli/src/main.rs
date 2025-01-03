@@ -65,6 +65,10 @@ enum Commands {
 
 #[derive(Args, Debug)]
 struct GetTypeCommandArgs {
+    /// Size of Revision download batches
+    #[arg(short = 'b', long, default_value_t = 20)]
+    batch_size: usize,
+
     /// The types of WikiData Items to get
     #[arg(short = 't', long, value_enum, default_value = "", value_delimiter=',')]
     item_types: Vec<ItemType>,
@@ -99,6 +103,7 @@ impl GetTypeCommandArgs {
 
         for item_type in &self.item_types {
             queries.push(ItemTypeQueryArgs {
+                batch_size: self.batch_size,
                 folder_path: parent_path.join(item_type.to_string()),
                 item_type: item_type.clone(),
                 overwrite,
@@ -113,6 +118,10 @@ impl GetTypeCommandArgs {
 
 #[derive(Args, Debug)]
 struct GetItemCommandArgs {
+    /// Size of Revision download batches
+    #[arg(short = 'b', long, default_value_t = 20)]
+    batch_size: usize,
+
     /// The Item Ids to get
     #[arg(short = 'i', long, value_enum, default_value = "Q84", value_delimiter=',')]
     item_ids: Vec<String>,
@@ -148,6 +157,7 @@ impl GetItemCommandArgs {
         };
 
         Ok(ItemListQueryArgs {
+            batch_size: self.batch_size,
             folder_path: parent_path.join(self.item_type.to_string()),
             item_type: self.item_type,
             item_ids: self.item_ids.clone(),

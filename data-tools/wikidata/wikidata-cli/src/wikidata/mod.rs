@@ -3,6 +3,7 @@ use std::{cmp, fmt::Display, hash::{Hash, Hasher}, path::PathBuf, str::FromStr, 
 use anyhow::Error;
 use chrono::NaiveDateTime;
 use clap::ValueEnum;
+use futures::future;
 use reqwest::{Client, RequestBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -10,6 +11,14 @@ use strum_macros::EnumIter;
 use tokio::{fs, io::AsyncWriteExt, sync::Semaphore};
 
 pub mod extractors;
+
+// #[derive(Debug, thiserror::Error)]
+// pub enum WikidataError {
+//     #[error("Error downloading Item:{1}, Revision IDs:{2}. Error {0}")]
+//     RevisionDownload(String, String, String),
+//     #[error("ReqwestError: {0}")]
+//     ReqwestError(reqwest::Error),
+// }
 
 /// Enum representing the different types of WikiData Item that can be downloaded
 #[derive(Copy, Clone, Debug, PartialEq, EnumIter, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
@@ -166,6 +175,7 @@ impl ItemRevisionFileContent {
 
 #[derive(Debug)]
 pub struct ItemTypeQueryArgs {
+    pub batch_size: usize,
     pub folder_path: PathBuf,
     pub item_type: ItemType,
     pub overwrite: bool,
@@ -176,6 +186,7 @@ pub struct ItemTypeQueryArgs {
 
 #[derive(Debug)]
 pub struct ItemListQueryArgs {
+    pub batch_size: usize,
     pub folder_path: PathBuf,
     pub item_type: ItemType,
     pub item_ids: Vec<String>,
@@ -187,6 +198,7 @@ pub struct ItemListQueryArgs {
 
 #[derive(Clone, Debug)]
 struct ItemRevsQueryArgs {
+    pub batch_size: usize,
     pub folder_path: PathBuf,
     pub item_type: ItemType,
     pub item_id: String,
@@ -233,6 +245,7 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
         let item_id = uri.rsplit('/').next().unwrap();
 
         item_rev_queries.push(ItemRevsQueryArgs {
+            batch_size: query_args.batch_size,
             item_type: query_args.item_type,
             item_id: item_id.to_string(),
             folder_path: query_args.folder_path.join(item_id),
@@ -304,6 +317,7 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
         let item_id = uri.rsplit('/').next().unwrap();
 
         item_rev_queries.push(ItemRevsQueryArgs {
+            batch_size: query_args.batch_size,
             item_type: query_args.item_type,
             item_id: item_id.to_string(),
             folder_path: query_args.folder_path.join(item_id),
@@ -401,9 +415,9 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
     println!("  Item {:?} - downloading {} of {} available revisions.", 
         &query_args.item_id, revision_ids.len(), total_revision_count);
 
-    // Fetch the revisions in batches of 20
+    // Fetch the revisions in batches
     let revision_id_chunks: Vec<Vec<String>> = revision_ids
-        .chunks(20) 
+        .chunks(query_args.batch_size) 
         .map(|chunk| chunk.to_vec()) 
         .collect();
 
@@ -420,17 +434,32 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
             tokio::spawn(async move {
                 // Acquire a permit (await ensures semaphore limit)
                 let _permit = permit.await.unwrap();
+
+                let item_id = &query_args.item_id.clone();
+                let revision_ids = revision_id_chunk.join("|");
                 
-                download_item_revisions_chunk(client, query_args, revision_id_chunk).await?;
-                Ok::<_, Error>(())
+                match download_item_revisions_chunk(client, query_args, revision_id_chunk.clone()).await {
+                    Ok(_) => {},
+                    Err(err) => log::error!("Chunk download failed - Item ID: {:?}. Revision IDs: {:?}. Error: {:?}.", 
+                        item_id, revision_ids, err),
+                }
             })
         })
         .collect();
 
-    // Await all tasks
-    for task in tasks {
-        task.await??;
+    let results: Vec<_> = future::join_all(tasks).await;
+
+    // Handle results    
+    for result in results.into_iter() {
+        match result {
+            Ok(_) => {},
+            Err(err) => log::error!("Task failed: {:?}", err),
+        }
     }
+    // // Await all tasks
+    // for task in tasks {
+    //     task.await??;
+    // }
     
     Ok(())
 }
@@ -441,15 +470,9 @@ async fn download_item_revisions_chunk(client: Client, query_args: ItemRevsQuery
     let request = create_item_revisions_request(
         &client, &revision_id_chunk)?.build()?;
 
-    let url = &request.url().clone();
-    log::trace!("Downloading Item Revisions URL: {:?}", url);
+    log::trace!("Downloading Item Revisions URL: {:?}", &request.url());
 
-    let response: ApiResponse = match client.execute(request).await?.json().await {
-        Ok(response) => response,
-        Err(e) => {
-            anyhow::bail!("Error {:?} downloading Item Revisions with URL: {:?}", e, url);
-        }
-    };
+    let response: ApiResponse = client.execute(request).await?.json().await?;
 
     if let Some(page) = response.query.pages.values().next() {
         if let Some(revisions) = &page.revisions {

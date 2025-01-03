@@ -225,6 +225,8 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
 
     let mut item_rev_queries: Vec<ItemRevsQueryArgs> = Vec::new();
 
+    println!("Downloading {} Items of type {}:", response.results.bindings.len(), query_args.item_type.as_label());
+
     for binding in response.results.bindings {
         let uri = binding.item.value;
         let item_id = uri.rsplit('/').next().unwrap();
@@ -240,8 +242,8 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
         });
     };
 
-    for ref item_rev_query in item_rev_queries {
-        download_item_revisions(item_rev_query).await?;
+    for (i, item_rev_query) in item_rev_queries.iter().enumerate() {
+        download_item_revisions(i, item_rev_query).await?;
     }
 
     Ok(())
@@ -273,6 +275,8 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
 
     let response: ItemListResponse = client.execute(request).await?.json().await?;
 
+    println!("Downloading {} Items of type {}:", response.results.bindings.len(), query_args.item_type.as_label());
+
     let mut item_rev_queries: Vec<ItemRevsQueryArgs> = Vec::new();
 
     for binding in response.results.bindings {
@@ -290,14 +294,14 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
         });
     };
 
-    for ref item_rev_query in item_rev_queries {
-        download_item_revisions(item_rev_query).await?;
+    for (i, item_rev_query) in item_rev_queries.iter().enumerate() {
+        download_item_revisions(i, item_rev_query).await?;
     }
 
     Ok(())
 }
 
-async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Result<()> {        
+async fn download_item_revisions(item_index: usize, query_args: &ItemRevsQueryArgs) -> anyhow::Result<()> {        
     log::info!("Download Item Revisions using {:?}", query_args);
 
     if query_args.overwrite && query_args.folder_path.exists() {
@@ -358,7 +362,8 @@ async fn download_item_revisions(query_args: &ItemRevsQueryArgs) -> anyhow::Resu
         }
     }
 
-    log::error!("Item {:?} - downloading {} of {} available revisions.", &query_args.item_id, revision_ids.len(), total_revision_count);
+    println!("  {}. Item {:?} - downloading {} of {} available revisions.", 
+        item_index, &query_args.item_id, revision_ids.len(), total_revision_count);
 
     // Fetch the revisions in batches of 20
     let revision_id_chunks: Vec<Vec<String>> = revision_ids

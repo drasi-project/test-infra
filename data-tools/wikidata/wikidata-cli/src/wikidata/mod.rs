@@ -441,9 +441,15 @@ async fn download_item_revisions_chunk(client: Client, query_args: ItemRevsQuery
     let request = create_item_revisions_request(
         &client, &revision_id_chunk)?.build()?;
 
-    log::debug!("Downloading Item Revisions URL: {}", request.url().as_str());
+    let url = &request.url().clone();
+    log::trace!("Downloading Item Revisions URL: {:?}", url);
 
-    let response: ApiResponse = client.execute(request).await?.json().await?;
+    let response: ApiResponse = match client.execute(request).await?.json().await {
+        Ok(response) => response,
+        Err(e) => {
+            anyhow::bail!("Error {:?} downloading Item Revisions with URL: {:?}", e, url);
+        }
+    };
 
     if let Some(page) = response.query.pages.values().next() {
         if let Some(revisions) = &page.revisions {

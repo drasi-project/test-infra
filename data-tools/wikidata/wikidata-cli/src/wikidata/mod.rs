@@ -1,12 +1,13 @@
-use std::{cmp, fmt::Display, hash::{Hash, Hasher}, path::PathBuf, str::FromStr};
+use std::{cmp, fmt::Display, hash::{Hash, Hasher}, path::PathBuf, str::FromStr, sync::Arc};
 
+use anyhow::Error;
 use chrono::NaiveDateTime;
 use clap::ValueEnum;
 use reqwest::{Client, RequestBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum_macros::EnumIter;
-use tokio::{fs, io::AsyncWriteExt};
+use tokio::{fs, io::AsyncWriteExt, sync::Semaphore};
 
 pub mod extractors;
 
@@ -184,7 +185,7 @@ pub struct ItemListQueryArgs {
     pub rev_start: Option<NaiveDateTime>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ItemRevsQueryArgs {
     pub folder_path: PathBuf,
     pub item_type: ItemType,
@@ -242,8 +243,27 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
         });
     };
 
-    for (i, item_rev_query) in item_rev_queries.iter().enumerate() {
-        download_item_revisions(i, item_rev_query).await?;
+    let semaphore = Arc::new(Semaphore::new(2));
+
+    let tasks: Vec<_> = item_rev_queries
+        .into_iter()
+        .map(|query| {
+            let permit = semaphore.clone().acquire_owned();
+
+            // Spawn a task for each item
+            tokio::spawn(async move {
+                // Acquire a permit (await ensures semaphore limit)
+                let _permit = permit.await.unwrap();
+                
+                download_item_revisions(query.clone()).await?;
+                Ok::<_, Error>(())
+            })
+        })
+        .collect();
+
+    // Await all tasks
+    for task in tasks {
+        task.await??;
     }
 
     Ok(())
@@ -294,14 +314,33 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
         });
     };
 
-    for (i, item_rev_query) in item_rev_queries.iter().enumerate() {
-        download_item_revisions(i, item_rev_query).await?;
+    let semaphore = Arc::new(Semaphore::new(2));
+
+    let tasks: Vec<_> = item_rev_queries
+        .into_iter()
+        .map(|query| {
+            let permit = semaphore.clone().acquire_owned();
+
+            // Spawn a task for each item
+            tokio::spawn(async move {
+                // Acquire a permit (await ensures semaphore limit)
+                let _permit = permit.await.unwrap();
+                
+                download_item_revisions(query.clone()).await?;
+                Ok::<_, Error>(())
+            })
+        })
+        .collect();
+
+    // Await all tasks
+    for task in tasks {
+        task.await??;
     }
 
     Ok(())
 }
 
-async fn download_item_revisions(item_index: usize, query_args: &ItemRevsQueryArgs) -> anyhow::Result<()> {        
+async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Result<()> {        
     log::info!("Download Item Revisions using {:?}", query_args);
 
     if query_args.overwrite && query_args.folder_path.exists() {
@@ -311,9 +350,6 @@ async fn download_item_revisions(item_index: usize, query_args: &ItemRevsQueryAr
     if !query_args.folder_path.exists() {
         fs::create_dir_all(&query_args.folder_path).await?;
     }
-
-    let target_revision_count = query_args.rev_count;
-    let mut fetched_revision_count = 0;
 
     let client = Client::new();
     let mut continuation_token: Option<Continuation> = None;
@@ -355,15 +391,15 @@ async fn download_item_revisions(item_index: usize, query_args: &ItemRevsQueryAr
         }
 
         // If we have reached the desired rev_count or there is no continuation token for pagination, break the loop;
-        if fetched_revision_count >= target_revision_count || response.continuation.is_none() {
+        if revision_ids.len() >= query_args.rev_count || response.continuation.is_none() {
             break;
         } else {
             continuation_token = response.continuation;
         }
     }
 
-    println!("  {}. Item {:?} - downloading {} of {} available revisions.", 
-        item_index, &query_args.item_id, revision_ids.len(), total_revision_count);
+    println!("  Item {:?} - downloading {} of {} available revisions.", 
+        &query_args.item_id, revision_ids.len(), total_revision_count);
 
     // Fetch the revisions in batches of 20
     let revision_id_chunks: Vec<Vec<String>> = revision_ids
@@ -371,64 +407,87 @@ async fn download_item_revisions(item_index: usize, query_args: &ItemRevsQueryAr
         .map(|chunk| chunk.to_vec()) 
         .collect();
 
-    for revision_id_chunk in revision_id_chunks {
-        let request = create_item_revisions_request(
-            &client, &revision_id_chunk)?.build()?;
+    let semaphore = Arc::new(Semaphore::new(5));
 
-        log::debug!("Downloading Item Revisions URL: {}", request.url().as_str());
+    let tasks: Vec<_> = revision_id_chunks
+        .into_iter()
+        .map(|revision_id_chunk| {
+            let permit = semaphore.clone().acquire_owned();
+            let client = client.clone();
+            let query_args = query_args.clone();
 
-        let response: ApiResponse = client.execute(request).await?.json().await?;
+            // Spawn a task for each chunk
+            tokio::spawn(async move {
+                // Acquire a permit (await ensures semaphore limit)
+                let _permit = permit.await.unwrap();
+                
+                download_item_revisions_chunk(client, query_args, revision_id_chunk).await?;
+                Ok::<_, Error>(())
+            })
+        })
+        .collect();
 
-        if let Some(page) = response.query.pages.values().next() {
-            if let Some(revisions) = &page.revisions {
-                for revision in revisions {
-                    log::trace!(
-                        "Item ID {:?}, Revision ID: {}, Timestamp: {}, User: {:?}, UserId: {:?}, Comment: {:?}",
-                        &query_args.item_id, revision.revid, revision.timestamp, revision.user, revision.userid, revision.comment
-                    );
+    // Await all tasks
+    for task in tasks {
+        task.await??;
+    }
+    
+    Ok(())
+}
 
-                    // Construct the revision
-                    let item_rev_content = ItemRevisionFileContent::new(query_args.item_id.clone(), query_args.item_type, revision)?;
+async fn download_item_revisions_chunk(client: Client, query_args: ItemRevsQueryArgs, revision_id_chunk: Vec<String>) -> anyhow::Result<()> {        
+    log::info!("Download Item Revisions Chunk using {:?}", query_args);
 
-                    // Create a file name and path from the Revision Timestamp
-                    let filename = item_rev_content.timestamp.replace(":", "-").replace("T", "_");
-                    let revision_file = query_args.folder_path.join(format!("{}.json", filename));
-                    
-                    // If the revision file already exists, dont rewrite it.
-                    // This will allow for incremental fetching of content over multiiple runs in case of failure
-                    if revision_file.exists() {
-                        log::warn!("Revision {:?} already exists in Item {:?}", revision.revid, &query_args.item_id);
+    let request = create_item_revisions_request(
+        &client, &revision_id_chunk)?.build()?;
+
+    log::debug!("Downloading Item Revisions URL: {}", request.url().as_str());
+
+    let response: ApiResponse = client.execute(request).await?.json().await?;
+
+    if let Some(page) = response.query.pages.values().next() {
+        if let Some(revisions) = &page.revisions {
+            for revision in revisions {
+                log::trace!(
+                    "Item ID {:?}, Revision ID: {}, Timestamp: {}, User: {:?}, UserId: {:?}, Comment: {:?}",
+                    &query_args.item_id, revision.revid, revision.timestamp, revision.user, revision.userid, revision.comment
+                );
+
+                // Construct the revision
+                let item_rev_content = ItemRevisionFileContent::new(query_args.item_id.clone(), query_args.item_type, revision)?;
+
+                // Create a file name and path from the Revision Timestamp
+                let filename = item_rev_content.timestamp.replace(":", "-").replace("T", "_");
+                let revision_file = query_args.folder_path.join(format!("{}.json", filename));
+                
+                // If the revision file already exists, dont rewrite it.
+                // This will allow for incremental fetching of content over multiiple runs in case of failure
+                if revision_file.exists() {
+                    log::warn!("Revision {:?} already exists in Item {:?}", revision.revid, &query_args.item_id);
+                    continue;
+                }
+
+                if item_rev_content.content.is_some() {
+                    // Skip the revision if its claims don't exist or are empty.
+                    let has_claims = item_rev_content.content
+                        .as_ref().unwrap()
+                        .get("claims")
+                        .map_or(true, |claims| !claims.is_array() || claims.as_array().unwrap().is_empty());
+
+                    if !has_claims {
+                        log::error!("No claims found in Item {:?} Revision {:?}", &query_args.item_id, revision.revid);
                         continue;
                     }
 
-                    if item_rev_content.content.is_some() {
-                        // Skip the revision if its claims don't exist or are empty.
-                        let has_claims = item_rev_content.content
-                            .as_ref().unwrap()
-                            .get("claims")
-                            .map_or(true, |claims| !claims.is_array() || claims.as_array().unwrap().is_empty());
-
-                        if !has_claims {
-                            log::error!("No claims found in Item {:?} Revision {:?}", &query_args.item_id, revision.revid);
-                            continue;
-                        }
-
-                        if !query_args.folder_path.exists() {
-                            fs::create_dir_all(&query_args.folder_path).await?;
-                        }
-
-                        // // Save the revision to a file in the item folder
-                        let mut file = fs::File::create(revision_file).await?;
-                        file.write_all(serde_json::to_string(&item_rev_content)?.as_bytes()).await?;
-
-                        fetched_revision_count += 1;
-
-                        if fetched_revision_count >= target_revision_count {
-                            break;
-                        };
-                    } else  {
-                        log::warn!("No slots found in Item {:?} Revision {:?}", &query_args.item_id, revision.revid);
+                    if !query_args.folder_path.exists() {
+                        fs::create_dir_all(&query_args.folder_path).await?;
                     }
+
+                    // Save the revision to a file in the item folder
+                    let mut file = fs::File::create(revision_file).await?;
+                    file.write_all(serde_json::to_string(&item_rev_content)?.as_bytes()).await?;
+                } else  {
+                    log::warn!("No slots found in Item {:?} Revision {:?}", &query_args.item_id, revision.revid);
                 }
             }
         }

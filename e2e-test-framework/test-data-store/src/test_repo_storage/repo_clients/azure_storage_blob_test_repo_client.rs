@@ -208,19 +208,23 @@ async fn download_test_repo_folder(
                     let local_file_path = local_repo_folder.clone().join(&stripped_blob_file_name);
 
                     // Process the blob as a directory if it doesn't have an extension.
-                    if local_file_path.extension().is_none() {
-                        log::trace!("Creating directory: {:?}", local_file_path);
-                        tokio::fs::create_dir_all(local_file_path).await?;
-                    } else {
-                        // Add the local file path to the list of files being downloaded.
-                        local_file_paths.push(local_file_path.clone());
+                    match local_file_path.extension() {                        
+                        Some(ext) if ext == "jsonl" => {
+                            // Add the local file path to the list of files being downloaded.
+                            local_file_paths.push(local_file_path.clone());
 
-                        let task = tokio::spawn(download_test_repo_file(
-                            container_client.blob_client(&blob_name), 
-                            local_file_path
-                        ));
-    
-                        tasks.push(task);
+                            let task = tokio::spawn(download_test_repo_file(
+                                container_client.blob_client(&blob_name), 
+                                local_file_path
+                            ));
+        
+                            tasks.push(task);
+                        },
+                        None => {
+                            log::trace!("Creating directory: {:?}", local_file_path);
+                            tokio::fs::create_dir_all(local_file_path).await?;    
+                        }
+                        _ => {}
                     }
                 },
                 BlobItem::BlobPrefix(prefix) => {

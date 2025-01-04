@@ -15,6 +15,8 @@ pub enum BootstrapScriptReaderError {
     FileReadError(String),
     #[error("Bad record format in file {0}: Error - {1}; Record - {2}")]
     BadRecordFormat(String, String, String),
+    #[error("Invalid script file; only JSONL files supported: {0}")]
+    InvalidScriptFile(String),
 }
 
 // The SequencedBootstrapScriptRecord struct wraps a BootstrapScriptRecord and ensures that each record has a 
@@ -38,6 +40,13 @@ pub struct BootstrapScriptReader {
 
 impl BootstrapScriptReader {
     pub fn new(files: Vec<PathBuf>) -> anyhow::Result<Self> {
+        // Only supports JSONL files. Return error if any of the files are not JSONL files.
+        for file in &files {
+            if file.extension().map(|ext| ext != "jsonl").unwrap_or(true) {
+                return Err(BootstrapScriptReaderError::InvalidScriptFile(file.to_string_lossy().into_owned()).into());
+            }
+        }
+
         let mut reader = BootstrapScriptReader {
             files,
             next_file_index: 0,

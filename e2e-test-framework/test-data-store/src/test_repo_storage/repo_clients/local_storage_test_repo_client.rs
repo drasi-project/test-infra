@@ -119,10 +119,14 @@ async fn copy_dir_tree(source: PathBuf, destination: PathBuf) -> io::Result<()> 
             // Add a new task for directory recursion
             tasks.push(tokio::spawn(copy_dir_tree_task(path, dest_path)));
         } else {
-            // Add a new task for file copying
-            tasks.push(tokio::spawn(async move {
-                fs::copy(path, dest_path).await.map(|_| ())
-            }));
+            // If the file is a jsonl file, add the copy task to the list.
+            let extension = path.extension().and_then(|ext| ext.to_str());
+
+            if let Some("jsonl") = extension {
+                tasks.push(tokio::spawn(async move {
+                    fs::copy(path, dest_path).await.map(|_| ())
+                }));
+            }
         }
     }
 

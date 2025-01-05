@@ -1,0 +1,5 @@
+drasi delete query continent-country-population
+drasi delete query country-city-population
+drasi delete query city-population
+
+drasi delete source geo-db

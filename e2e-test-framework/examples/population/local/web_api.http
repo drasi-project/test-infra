@@ -1,0 +1,41 @@
+### GET STATE of test source
+GET http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db
+
+
+
+### START test source
+POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/start
+Content-Type: application/json
+
+
+
+### STEP test source
+POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/step
+Content-Type: application/json
+
+{
+  "num_steps": 1
+}
+
+
+
+### SKIP test source
+POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/skip
+Content-Type: application/json
+
+{
+  "num_skips": 1
+}
+
+
+
+### PAUSE test source
+POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/pause
+Content-Type: application/json
+
+
+
+### STOP test source
+POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/stop
+Content-Type: application/json
+

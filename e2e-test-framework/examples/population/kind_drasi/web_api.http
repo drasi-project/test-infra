@@ -1,16 +1,16 @@
 ### GET STATE of test source
-GET http://localhost:63123/test_runner/sources/az_dev_repo.population.test_run_001.geo-db
+GET http://localhost:63123/test_runner/sources/az_dev_repo.population_example_to_queue.test_run_001.geo-db
 
 
 
 ### START test source
-POST http://localhost:63123/test_runner/sources/az_dev_repo.population.test_run_001.geo-db/start
+POST http://localhost:63123/test_runner/sources/az_dev_repo.population_example_to_queue.test_run_001.geo-db/start
 Content-Type: application/json
 
 
 
 ### STEP test source
-POST http://localhost:63123/test_runner/sources/az_dev_repo.population.test_run_001.geo-db/step
+POST http://localhost:63123/test_runner/sources/az_dev_repo.population_example_to_queue.test_run_001.geo-db/step
 Content-Type: application/json
 
 {
@@ -20,7 +20,7 @@ Content-Type: application/json
 
 
 ### SKIP test source
-POST http://localhost:63123/test_runner/sources/az_dev_repo.population.test_run_001.geo-db/skip
+POST http://localhost:63123/test_runner/sources/az_dev_repo.population_example_to_queue.test_run_001.geo-db/skip
 Content-Type: application/json
 
 {
@@ -30,12 +30,12 @@ Content-Type: application/json
 
 
 ### PAUSE test source
-POST http://localhost:63123/test_runner/sources/az_dev_repo.population.test_run_001.geo-db/pause
+POST http://localhost:63123/test_runner/sources/az_dev_repo.population_example_to_queue.test_run_001.geo-db/pause
 Content-Type: application/json
 
 
 
 ### STOP test source
-POST http://localhost:63123/test_runner/sources/az_dev_repo.population.test_run_001.geo-db/stop
+POST http://localhost:63123/test_runner/sources/az_dev_repo.population_example_to_queue.test_run_001.geo-db/stop
 Content-Type: application/json
 

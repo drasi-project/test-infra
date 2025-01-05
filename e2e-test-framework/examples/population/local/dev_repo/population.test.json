@@ -1,7 +1,7 @@
 {
   "test_id": "population",
   "version": 1,
-  "description": "A test using WikiData.",
+  "description": "An example of the E2E Test Framework using data from Wikidata.",
   "test_folder": "population",
   "sources": [
     {

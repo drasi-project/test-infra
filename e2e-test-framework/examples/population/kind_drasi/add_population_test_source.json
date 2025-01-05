@@ -1,6 +1,6 @@
 {
   "kind": "Repo",
-  "test_id": "population",
+  "test_id": "population_example_to_queue",
   "test_repo_id": "az_dev_repo",                
   "test_run_id": "test_run_001",
   "test_source_id": "geo-db",

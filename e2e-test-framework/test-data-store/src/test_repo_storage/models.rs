@@ -19,7 +19,7 @@ impl FromStr for TimeMode {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s {
+        match s.to_lowercase().as_str() {
             "live" => Ok(Self::Live),
             "recorded" => Ok(Self::Recorded),
             _ => {
@@ -75,7 +75,7 @@ impl FromStr for SpacingMode {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s {
+        match s.to_lowercase().as_str() {
             "none" => Ok(Self::None),
             "recorded" => Ok(Self::Recorded),
             _ => {

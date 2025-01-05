@@ -272,6 +272,19 @@ pub enum ScriptSourceChangeGeneratorCommand {
     Stop,
 }
 
+impl ScriptSourceChangeGeneratorCommand {
+    pub fn starts_stream_processing(&self) -> bool {
+        match self {
+            ScriptSourceChangeGeneratorCommand::GetState |
+            ScriptSourceChangeGeneratorCommand::Pause |
+            ScriptSourceChangeGeneratorCommand::Stop => false,
+            ScriptSourceChangeGeneratorCommand::Skip{..} |
+            ScriptSourceChangeGeneratorCommand::Start |
+            ScriptSourceChangeGeneratorCommand::Step{..} => true,
+        }
+    }
+}
+
 // Struct for messages sent to the ScriptSourceChangeGenerator from the functions in the Web API.
 #[derive(Debug,)]
 pub struct ScriptSourceChangeGeneratorMessage {
@@ -431,7 +444,7 @@ pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSour
                 match change_stream_message {
                     Some(change_stream_message) => {
                         process_change_stream_message(&mut state, change_stream_message).await
-                            .inspect_err(|e| transition_to_error_state(&mut state, "Error calling process_change_stream_message.", Some(e))).ok();
+                            .inspect_err(|e| transition_to_error_state(&mut state, "Error calling process_change_stream_message", Some(e))).ok();
                     }
                     None => {
                         transition_to_error_state(&mut state, "Change stream channel closed.", None);
@@ -572,7 +585,7 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
     // We could receive a message that was delayed before transitioning to an inactive state, so ignore it.
     // It will remain as the next record and be scheduled if the player is unpaused again.
     if !state.status.is_processing() {
-        log::warn!("Ignoring change stream message in non-processing state: {:?}", message);
+        log::error!("Ignoring change stream message in non-processing state: {:?}", message);
         return Ok(());
     }
 
@@ -584,13 +597,14 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
 
     // Return an error state if the scheduled record does not match the next record.
     if message.record_seq_num != next_record.seq {
-       anyhow::bail!("Scheduled record does not match next record.");
+       anyhow::bail!("Error processing change stream message - scheduled record (seq: {}) does not match next record (seq: {}).", 
+        message.record_seq_num, next_record.seq);
     }
 
     // Time Shift.
     let shifted_record = time_shift(state, next_record)?;
 
-    // Process the scheduled record.
+    // Process the record.
     match &shifted_record.record {
         ChangeScriptRecord::SourceChange(change_record) => {
             state.stats.num_source_change_records += 1;
@@ -600,18 +614,21 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
                     // Dispatch the SourceChangeEvent.
                     dispatch_source_change_events(state, vec!(&change_record.source_change_event)).await;
                     load_next_change_stream_record(state).await?;  
-                    schedule_next_change_stream_record(state).await?;
+                    schedule_next_change_stream_record_for_run(state).await?;
                 },
                 SourceChangeGeneratorStatus::Stepping => {
                     if state.steps_remaining > 0 {
                         // Dispatch the SourceChangeEvent.
                         dispatch_source_change_events(state, vec!(&change_record.source_change_event)).await;
+                        
                         load_next_change_stream_record(state).await?;  
-                        schedule_next_change_stream_record(state).await?;
 
                         state.steps_remaining -= 1;
                         if state.steps_remaining == 0 {
-                            transition_to_paused_state(state).await?;
+                            state.status = SourceChangeGeneratorStatus::Paused;
+                            state.steps_spacing_mode = None;
+                        } else {
+                            schedule_next_change_stream_record_for_step(state).await?;
                         }
                     } else {
                         // Transition to an error state.
@@ -620,16 +637,18 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
                 },
                 SourceChangeGeneratorStatus::Skipping => {
                     if state.skips_remaining > 0 {
-                        // Skip the SourceChangeEvent.
-                        log::debug!("Skipping ChangeScriptRecord: {:?}", change_record);
+                        // DON'T dispatch the SourceChangeEvent.
+                        log::trace!("Skipping ChangeScriptRecord: {:?}", change_record);
                         state.stats.num_skipped_source_change_records += 1;
 
                         load_next_change_stream_record(state).await?;  
-                        schedule_next_change_stream_record(state).await?;
 
                         state.skips_remaining -= 1;
                         if state.skips_remaining == 0 {
-                            transition_to_paused_state(state).await?;
+                            state.status = SourceChangeGeneratorStatus::Paused;
+                            state.skips_spacing_mode = None;
+                        } else {
+                            schedule_next_change_stream_record_for_skip(state).await?;
                         }
                     } else {
                         // Transition to an error state.
@@ -649,7 +668,7 @@ async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorIn
             if state.ignore_scripted_pause_commands {
                 log::debug!("Ignoring Change Script Pause Command: {:?}", shifted_record);
             } else {
-                transition_to_paused_state(state).await.ok();
+                state.status = SourceChangeGeneratorStatus::Paused;
             }
         },
         ChangeScriptRecord::Label(label_record) => {
@@ -694,44 +713,6 @@ async fn load_next_change_stream_record(state: &mut ScriptSourceChangeGeneratorI
     Ok(())
 }
 
-async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
-    log_test_script_player_state(state, "schedule_next_change_stream_record");
-
-    // Can only schedule next change stream record if Running, Stepping, or Skipping
-    match state.status {
-        SourceChangeGeneratorStatus::Running | SourceChangeGeneratorStatus::Stepping | SourceChangeGeneratorStatus::Skipping => {
-            if state.previous_record.is_none() {
-                // This is the first record, so initialize the start times based on time_mode config.
-                state.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-    
-                state.virtual_time_ns_start = match state.time_mode {
-                    TimeMode::Live => state.stats.actual_start_time_ns,
-                    TimeMode::Recorded => state.header_record.start_time.timestamp_nanos_opt().unwrap() as u64,
-                    TimeMode::Rebased(nanos) => nanos,
-                };
-    
-                state.virtual_time_ns_current = state.virtual_time_ns_start;
-                state.virtual_time_ns_offset = 0;
-            };
-
-            match state.status {
-                SourceChangeGeneratorStatus::Running => schedule_next_change_stream_record_for_run(state).await?,
-                SourceChangeGeneratorStatus::Stepping => schedule_next_change_stream_record_for_step(state).await?,
-                SourceChangeGeneratorStatus::Skipping => schedule_next_change_stream_record_for_skip(state).await?,
-                _ => {
-                    // Transition to an error state.
-                    transition_to_error_state(state, "Can't schedule next change stream record in this state.", None);
-                }
-            }
-        },
-        _ => {
-            transition_to_error_state(state, "Can't schedule next change stream record in this state.", None);
-        }
-    }
-
-    Ok(())
-}
-
 async fn schedule_next_change_stream_record_for_skip(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
 
     // Get the next record from the player state. Error if it is None.
@@ -740,44 +721,38 @@ async fn schedule_next_change_stream_record_for_skip(state: &mut ScriptSourceCha
         None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
     };
 
-    if state.skips_remaining > 0 {
-        // Decrement the skips_remaining.
-        state.skips_remaining -= 1;
+    // let delay_ns = match state.skips_spacing_mode {
+    //     Some(SpacingMode::None) => 0,
+    //     Some(SpacingMode::Fixed(nanos)) => nanos,
+    //     Some(SpacingMode::Recorded) => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset },
+    //     None => 0,
+    // };
 
-        let delay_ns = match state.skips_spacing_mode {
-            Some(SpacingMode::None) => 0,
-            Some(SpacingMode::Fixed(nanos)) => nanos,
-            Some(SpacingMode::Recorded) => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset },
-            None => 0,
-        };
+    let command = ScriptSourceChangeGeneratorCommand::Skip { skips: 1, spacing_mode: None };
+    let delay_ns = calculate_record_scheduling_delay(state, &command, &next_record)?;
+
+    let sch_msg = ScheduledChangeScriptRecordMessage {
+        delay_ns,
+        record_seq_num: next_record.seq,
+        virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
+    };   
     
-        let sch_msg = ScheduledChangeScriptRecordMessage {
-            delay_ns,
-            record_seq_num: next_record.seq,
-            virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
-        };   
-        
-        if delay_ns < 1_000 {
-            // Process the record immediately.
-            if let Err(e) = state.change_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
-        } else if delay_ns < 10_000_000 {
-            // Sleep inproc, then process the record.
-            sleep(Duration::from_nanos(delay_ns)).await;
-            if let Err(e) = state.change_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
-        } else {
-            if let Err(e) = state.delayer_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
-        };
+    if delay_ns < 1_000 {
+        // Process the record immediately.
+        if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
+    } else if delay_ns < 10_000_000 {
+        // Sleep inproc, then process the record.
+        sleep(Duration::from_nanos(delay_ns)).await;
+        if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
     } else {
-        state.status = SourceChangeGeneratorStatus::Paused;
-        state.skips_remaining = 0;
-        state.skips_spacing_mode = None;
-    }
+        if let Err(e) = state.delayer_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
+    };
 
     Ok(())
 }
@@ -790,52 +765,82 @@ async fn schedule_next_change_stream_record_for_step(state: &mut ScriptSourceCha
         None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
     };
 
-    if state.steps_remaining > 0 {
-        // Decrement the steps_remaining.
-        state.steps_remaining -= 1;
+    // let delay_ns = match state.steps_spacing_mode {
+    //     Some(SpacingMode::None) => 0,
+    //     Some(SpacingMode::Fixed(nanos)) => nanos,
+    //     Some(SpacingMode::Recorded) => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
+    //     None => match state.spacing_mode {
+    //         SpacingMode::None => 0,
+    //         SpacingMode::Fixed(nanos) => nanos,
+    //         SpacingMode::Recorded => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
+    //     },
+    // };
 
-        let delay_ns = match state.steps_spacing_mode {
-            Some(SpacingMode::None) => 0,
-            Some(SpacingMode::Fixed(nanos)) => nanos,
-            Some(SpacingMode::Recorded) => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
-            None => match state.spacing_mode {
-                SpacingMode::None => 0,
-                SpacingMode::Fixed(nanos) => nanos,
-                SpacingMode::Recorded => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
-            },
-        };
+    let command = ScriptSourceChangeGeneratorCommand::Step { steps: 1, spacing_mode: None };
+    let delay_ns = calculate_record_scheduling_delay(state, &command, &next_record)?;
 
-        let sch_msg = ScheduledChangeScriptRecordMessage {
-            delay_ns,
-            record_seq_num: next_record.seq,
-            virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
-        };   
-        
-        if delay_ns < 1_000 {
-            // Process the record immediately.
-            if let Err(e) = state.change_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
-        } else if delay_ns < 10_000_000 {
-            // Sleep inproc, then process the record.
-            sleep(Duration::from_nanos(delay_ns)).await;
-            if let Err(e) = state.change_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
-        } else {
-            if let Err(e) = state.delayer_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
-        };
+    let sch_msg = ScheduledChangeScriptRecordMessage {
+        delay_ns,
+        record_seq_num: next_record.seq,
+        virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
+    };   
+    
+    if delay_ns < 1_000 {
+        // Process the record immediately.
+        if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
+    } else if delay_ns < 10_000_000 {
+        // Sleep inproc, then process the record.
+        sleep(Duration::from_nanos(delay_ns)).await;
+        if let Err(e) = state.change_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
     } else {
-        state.status = SourceChangeGeneratorStatus::Paused;
-        state.steps_remaining = 0;
-        state.steps_spacing_mode = None;
-    }
+        if let Err(e) = state.delayer_tx_channel.send(sch_msg).await {
+            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+        }
+    };
 
     Ok(())
 }
 
+fn calculate_record_scheduling_delay(
+    state: &mut ScriptSourceChangeGeneratorInternalState, 
+    command: &ScriptSourceChangeGeneratorCommand,
+    next_record: &SequencedChangeScriptRecord
+) -> anyhow::Result<u64> {
+    let delay_ns = match command {
+        ScriptSourceChangeGeneratorCommand::Skip{..} => {
+            match state.skips_spacing_mode {
+                Some(SpacingMode::None) => 0,
+                Some(SpacingMode::Fixed(nanos)) => nanos,
+                Some(SpacingMode::Recorded) => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset },
+                None => 0,
+            }
+        },
+        ScriptSourceChangeGeneratorCommand::Step{..} => {
+            match state.steps_spacing_mode {
+                Some(SpacingMode::None) => 0,
+                Some(SpacingMode::Fixed(nanos)) => nanos,
+                Some(SpacingMode::Recorded) => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
+                None => match state.spacing_mode {
+                    SpacingMode::None => 0,
+                    SpacingMode::Fixed(nanos) => nanos,
+                    SpacingMode::Recorded => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
+                },
+            }
+        },
+        ScriptSourceChangeGeneratorCommand::Start => match state.spacing_mode {
+            SpacingMode::None => 0,
+            SpacingMode::Fixed(nanos) => nanos,
+            SpacingMode::Recorded => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
+        },
+        _ => anyhow::bail!("Unexpected command: {:?}", command),
+    };
+
+    Ok(delay_ns)
+}
 async fn schedule_next_change_stream_record_for_run(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()> {
 
     // Get the next record from the player state. Error if it is None.
@@ -844,11 +849,14 @@ async fn schedule_next_change_stream_record_for_run(state: &mut ScriptSourceChan
         None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
     };
 
-    let delay_ns = match state.spacing_mode {
-        SpacingMode::None => 0,
-        SpacingMode::Fixed(nanos) => nanos,
-        SpacingMode::Recorded => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
-    };
+    // let delay_ns = match state.spacing_mode {
+    //     SpacingMode::None => 0,
+    //     SpacingMode::Fixed(nanos) => nanos,
+    //     SpacingMode::Recorded => if state.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - state.virtual_time_ns_offset }
+    // };
+
+    let command = ScriptSourceChangeGeneratorCommand::Start;
+    let delay_ns = calculate_record_scheduling_delay(state, &command, &next_record)?;
 
     let sch_msg = ScheduledChangeScriptRecordMessage {
         delay_ns,
@@ -986,39 +994,51 @@ fn time_shift(state: &mut ScriptSourceChangeGeneratorInternalState, next_record:
 async fn transition_from_paused_state(state: &mut ScriptSourceChangeGeneratorInternalState, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
     log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
+    // If we are unpausing for the first time, need to initialize the start times based on time_mode config.
+    if state.previous_record.is_none() && command.starts_stream_processing() {
+        state.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+
+        state.virtual_time_ns_start = match state.time_mode {
+            TimeMode::Live => state.stats.actual_start_time_ns,
+            TimeMode::Recorded => state.header_record.start_time.timestamp_nanos_opt().unwrap() as u64,
+            TimeMode::Rebased(nanos) => nanos,
+        };
+
+        state.virtual_time_ns_current = state.virtual_time_ns_start;
+        state.virtual_time_ns_offset = 0;
+    }
+
     match command {
         ScriptSourceChangeGeneratorCommand::Start => {
             log::info!("Script Started for TestRunSource {}", state.test_run_source_id);
             
             state.status = SourceChangeGeneratorStatus::Running;
-            schedule_next_change_stream_record(state).await?;
+            schedule_next_change_stream_record_for_run(state).await?;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Step{steps, spacing_mode} => {
-            log::info!("Script Stepping for TestRunSource {}", state.test_run_source_id);
+            log::info!("Script Stepping {} steps for TestRunSource {}", steps, state.test_run_source_id);
 
             state.status = SourceChangeGeneratorStatus::Stepping;
             state.steps_remaining = *steps;
             state.steps_spacing_mode = spacing_mode.clone();
-            schedule_next_change_stream_record(state).await?;
+            schedule_next_change_stream_record_for_step(state).await?;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Skip{skips, spacing_mode} => {
-            log::info!("Script Skipping for TestRunSource {}", state.test_run_source_id);
+            log::info!("Script Skipping {} skips for TestRunSource {}", skips, state.test_run_source_id);
 
             state.status = SourceChangeGeneratorStatus::Skipping;
             state.skips_remaining = *skips;
             state.skips_spacing_mode = spacing_mode.clone();
-            schedule_next_change_stream_record(state).await?;
-            Ok(())
-        },
-        ScriptSourceChangeGeneratorCommand::Pause => {
+            schedule_next_change_stream_record_for_skip(state).await?;
             Ok(())
         },
         ScriptSourceChangeGeneratorCommand::Stop => {
             Ok(transition_to_stopped_state(state).await)
         },
-        ScriptSourceChangeGeneratorCommand::GetState => {
+        ScriptSourceChangeGeneratorCommand::GetState |
+        ScriptSourceChangeGeneratorCommand::Pause => {
             Ok(())
         }
     }
@@ -1028,9 +1048,6 @@ async fn transition_from_running_state(state: &mut ScriptSourceChangeGeneratorIn
     log::debug!("Transitioning from {:?} state via command: {:?}", state.status, command);
 
     match command {
-        ScriptSourceChangeGeneratorCommand::Start => {
-            Ok(())
-        },
         ScriptSourceChangeGeneratorCommand::Step{..} => {
             Err(ScriptSourceChangeGeneratorError::PauseToStep.into())
         },
@@ -1044,7 +1061,8 @@ async fn transition_from_running_state(state: &mut ScriptSourceChangeGeneratorIn
         ScriptSourceChangeGeneratorCommand::Stop => {
             Ok(transition_to_stopped_state(state).await)
         },
-        ScriptSourceChangeGeneratorCommand::GetState => {
+        ScriptSourceChangeGeneratorCommand::GetState |
+        ScriptSourceChangeGeneratorCommand::Start => {
             Ok(())
         }
     }
@@ -1066,7 +1084,10 @@ async fn transition_from_stepping_state(state: &mut ScriptSourceChangeGeneratorI
         ScriptSourceChangeGeneratorCommand::GetState => {
             Ok(())
         },
-        _ => Err(ScriptSourceChangeGeneratorError::CurrentlyStepping(state.steps_remaining).into())
+        ScriptSourceChangeGeneratorCommand::Skip {..} |
+        ScriptSourceChangeGeneratorCommand::Step {..} |
+        ScriptSourceChangeGeneratorCommand::Start
+            => Err(ScriptSourceChangeGeneratorError::CurrentlyStepping(state.steps_remaining).into())
     }
 }
 
@@ -1086,7 +1107,10 @@ async fn transition_from_skipping_state(state: &mut ScriptSourceChangeGeneratorI
         ScriptSourceChangeGeneratorCommand::GetState => {
             Ok(())
         },
-        _ => Err(ScriptSourceChangeGeneratorError::CurrentlySkipping(state.skips_remaining).into())
+        ScriptSourceChangeGeneratorCommand::Skip {..} |
+        ScriptSourceChangeGeneratorCommand::Step {..} |
+        ScriptSourceChangeGeneratorCommand::Start
+            => Err(ScriptSourceChangeGeneratorError::CurrentlySkipping(state.skips_remaining).into())
     }
 }
 
@@ -1145,32 +1169,6 @@ fn transition_to_error_state(state: &mut ScriptSourceChangeGeneratorInternalStat
     log_test_script_player_state(&state, &msg);
 
     state.error_messages.push(msg);
-}
-
-async fn transition_to_paused_state(state: &mut ScriptSourceChangeGeneratorInternalState) -> anyhow::Result<()>{
-    log::info!("Script Paused for TestRunSource {}", state.test_run_source_id);
-
-    match state.status {
-        SourceChangeGeneratorStatus::Running => {
-            state.status = SourceChangeGeneratorStatus::Paused;
-            Ok(())
-        },
-        SourceChangeGeneratorStatus::Stepping => {
-            state.status = SourceChangeGeneratorStatus::Paused;
-            state.steps_remaining = 0;
-            Ok(())
-        },
-        SourceChangeGeneratorStatus::Skipping => {
-            state.status = SourceChangeGeneratorStatus::Paused;
-            state.skips_remaining = 0;
-            Ok(())
-        },
-        SourceChangeGeneratorStatus::Paused => Ok(()),
-
-        SourceChangeGeneratorStatus::Stopped => Err(ScriptSourceChangeGeneratorError::AlreadyStopped.into()),
-        SourceChangeGeneratorStatus::Finished => Err(ScriptSourceChangeGeneratorError::AlreadyFinished.into()),
-        SourceChangeGeneratorStatus::Error => Err(ScriptSourceChangeGeneratorError::Error(state.status).into()),
-    }
 }
 
 pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receiver<ScheduledChangeScriptRecordMessage>, change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>) {

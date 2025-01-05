@@ -155,6 +155,7 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub error_messages: Vec<String>,
     pub ignore_scripted_pause_commands: bool,
     pub header_record: ChangeHeaderRecord,
+    pub message_seq_num: u64,
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub output_storage: TestRunSourceStorage,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
@@ -293,7 +294,7 @@ pub struct ScriptSourceChangeGeneratorMessageResponse {
 #[derive(Clone, Debug)]
 pub struct ScheduledChangeScriptRecordMessage {
     pub delay_ns: u64,
-    pub record_seq_num: u64,
+    pub seq_num: u64,
     pub virtual_time_ns_replay: u64,
 }
 
@@ -427,11 +428,15 @@ pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSour
             },
 
             // Process messages from the Change Stream.
-            change_stream_message = change_rx_channel.recv(), if state.status.is_processing() => {
+            change_stream_message = change_rx_channel.recv() => {
                 match change_stream_message {
                     Some(change_stream_message) => {
-                        process_change_stream_message(&mut state, change_stream_message).await
-                            .inspect_err(|e| transition_to_error_state(&mut state, "Error calling process_change_stream_message", Some(e))).ok();
+                        // Only process the message if the seq_num matches the expected one.
+                        // This avoids dealing with delayed messages from the delayer thread that are no longer relevant.
+                        if change_stream_message.seq_num == state.message_seq_num && state.status.is_processing() {
+                            process_change_stream_message(&mut state, change_stream_message).await
+                                .inspect_err(|e| transition_to_error_state(&mut state, "Error calling process_change_stream_message", Some(e))).ok();
+                        }
                     }
                     None => {
                         transition_to_error_state(&mut state, "Change stream channel closed.", None);
@@ -506,6 +511,7 @@ async fn initialize(settings: ScriptSourceChangeGeneratorSettings)  -> anyhow::R
         error_messages: Vec::new(),
         ignore_scripted_pause_commands: settings.ignore_scripted_pause_commands,
         header_record: header,
+        message_seq_num: 0,
         next_record: first_record,
         output_storage: settings.output_storage,
         previous_record: None,
@@ -568,25 +574,12 @@ async fn process_command_message(state: &mut ScriptSourceChangeGeneratorInternal
 
 async fn process_change_stream_message(state: &mut ScriptSourceChangeGeneratorInternalState, message: ScheduledChangeScriptRecordMessage) -> anyhow::Result<()> {
     log::trace!("Received change stream message: {:?}", message);
-    
-    // We could receive a message that was delayed before transitioning to an inactive state, so ignore it.
-    // It will remain as the next record and be scheduled if the player is unpaused again.
-    if !state.status.is_processing() {
-        log::error!("Ignoring change stream message in non-processing state: {:?}", message);
-        return Ok(());
-    }
 
     // Get the next record from the player state. Error if it is None.
     let next_record = match state.next_record.as_ref() {
         Some(record) => record.clone(),
         None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
     };
-
-    // Return an error state if the scheduled record does not match the next record.
-    if message.record_seq_num != next_record.seq {
-       anyhow::bail!("Error processing change stream message - scheduled record (seq: {}) does not match next record (seq: {}).", 
-        message.record_seq_num, next_record.seq);
-    }
 
     // Time Shift.
     let shifted_record = time_shift(state, next_record)?;
@@ -746,9 +739,11 @@ async fn schedule_next_change_stream_record(state: &mut ScriptSourceChangeGenera
 
     let delay_ns = calculate_record_scheduling_delay(state, &next_record)?;
 
+    state.message_seq_num += 1;
+
     let sch_msg = ScheduledChangeScriptRecordMessage {
         delay_ns,
-        record_seq_num: next_record.seq,
+        seq_num: state.message_seq_num,
         virtual_time_ns_replay: state.virtual_time_ns_current + delay_ns,
     };    
 

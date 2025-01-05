@@ -194,6 +194,18 @@ impl TestRunner {
         }
     }
 
+    pub async fn test_source_reset(&self, test_run_source_id: &str) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        match self.sources.read().await.get(&test_run_source_id) {
+            Some(source) => {
+                source.reset_source_change_generator().await
+            },
+            None => {
+                anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
+            }
+        }
+    }
+
     pub async fn test_source_skip(&self, test_run_source_id: &str, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
         match self.sources.read().await.get(&test_run_source_id) {

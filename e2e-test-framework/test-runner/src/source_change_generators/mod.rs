@@ -124,6 +124,7 @@ pub struct SourceChangeGeneratorState {
 pub trait SourceChangeGenerator : Send + Sync {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
+    async fn reset(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn skip(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn step(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
@@ -138,6 +139,10 @@ impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
 
     async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         (**self).pause().await
+    }
+
+    async fn reset(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        (**self).reset().await
     }
 
     async fn skip(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {

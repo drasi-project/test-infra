@@ -244,6 +244,18 @@ impl TestRunSource {
         }
     }
 
+    pub async fn reset_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+        match &self.source_change_generator {
+            Some(generator) => {
+                let response = generator.reset().await?;
+                Ok(response)
+            },
+            None => {
+                anyhow::bail!("SourceChangeGenerator not configured for TestRunSource: {:?}", &self.id);
+            }
+        }
+    }    
+
     pub async fn skip_source_change_generator(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.source_change_generator {
             Some(generator) => {

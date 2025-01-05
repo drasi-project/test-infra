@@ -30,7 +30,7 @@ pub struct HostParams {
 
     // The port number the Web API will listen on.
     // If not provided, the default_value is used.
-    #[arg(short = 'p', long = "port", env = "DRASI_PORT", default_value_t = 4000)]
+    #[arg(short = 'p', long = "port", env = "DRASI_PORT", default_value_t = 63123)]
     pub port: u16
 }
 

@@ -98,7 +98,7 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_runner));
 
-    log::info!("Listening on {}", addr);
+    println!("\n\nTest Service Web API listening on http://{}", addr);
 
     let server = axum::Server::bind(&addr)
         .serve(app.into_make_service());

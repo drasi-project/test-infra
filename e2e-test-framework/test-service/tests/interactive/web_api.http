@@ -45,3 +45,15 @@ Content-Type: application/json
 ### RESET test run source
 POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/reset
 Content-Type: application/json
+
+### BOOTSTRAP Data
+POST http://{{hostname}}:{{port}}/acquire
+Content-Type: application/json
+
+{
+    "queryId": "continent-country-population",
+    "queryNodeId": "default",
+    "nodeLabels": ["Continent"],
+    "nodeLabels_all": ["Continent", "Country", "City"],
+    "relLabels": []
+}

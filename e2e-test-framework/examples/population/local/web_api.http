@@ -1,41 +1,44 @@
-### GET STATE of test source
-GET http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db
+@hostname = localhost
+@port = 63123
+@repo_id = local_dev_repo
+@test_id = population_example_to_file
+@test_run_id = test_run_001
+@source_id = geo-db
 
+### GET STATE of test run source
+GET http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}
 
-
-### START test source
-POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/start
+### START test run source
+POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/start
 Content-Type: application/json
 
-
-
-### STEP test source
-POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/step
+### PAUSE test run source
+POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/pause
 Content-Type: application/json
 
-{
-  "num_steps": 1
-}
-
-
-
-### SKIP test source
-POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/skip
+### STEP test run source
+POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/step
 Content-Type: application/json
 
 {
-  "num_skips": 1
+  "num_steps": 5000,
+  "spacing_mode": "None"
 }
 
+### SKIP test run source
+POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/skip
+Content-Type: application/json
 
+{
+  "num_skips": 10000,
+  "spacing_mode": "none" 
+}
 
-### PAUSE test source
-POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/pause
+### STOP test run source
+POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/stop
 Content-Type: application/json
 
 
-
-### STOP test source
-POST http://localhost:63123/test_runner/sources/local_dev_repo.population.test_run_001.geo-db/stop
+### RESET test run source
+POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/reset
 Content-Type: application/json
-

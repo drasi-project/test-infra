@@ -4,14 +4,13 @@
 
 @hostname = localhost
 @port = 63123
-@repo_id = az_dev_repo
-@test_id = population_example_to_queue
+@repo_id = local_dev_repo
+@test_id = population_example_to_file
 @test_run_id = test_run_001
 @source_id = geo-db
 
 ### GET STATE of test run source
 GET http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}
-
 
 ### START test run source
 POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/start
@@ -42,7 +41,6 @@ Content-Type: application/json
 ### STOP test run source
 POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/stop
 Content-Type: application/json
-
 
 ### RESET test run source
 POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/reset

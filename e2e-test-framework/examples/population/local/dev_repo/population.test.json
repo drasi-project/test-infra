@@ -2,7 +2,7 @@
   "test_id": "population",
   "version": 1,
   "description": "An example of the E2E Test Framework using data from Wikidata.",
-  "test_folder": "population",
+  "test_folder": "population_2024-01-01_small",
   "sources": [
     {
       "test_source_id": "geo-db",

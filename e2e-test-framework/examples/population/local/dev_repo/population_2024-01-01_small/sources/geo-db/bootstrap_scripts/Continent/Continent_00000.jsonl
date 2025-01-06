@@ -1,0 +1,10 @@
+{"kind":"Header","start_time":"2024-01-01T00:00:00Z","description":"Drasi Bootstrap Data Script for TestID city_populations_allen, SourceID: geo-db"}
+{"kind":"Node","id":"Q3960","labels":["Continent"],"properties":{"area":7688094.938,"coordinate_location":"-26,141","name":"Australian continent","population":25422788}}
+{"kind":"Node","id":"Q7856408","labels":["Continent"],"properties":{"name":"Turtle Island"}}
+{"kind":"Node","id":"Q49","labels":["Continent"],"properties":{"area":24930000.0,"coordinate_location":"47,-105","name":"North America","population":579000000}}
+{"kind":"Node","id":"Q46","labels":["Continent"],"properties":{"area":10186000.0,"coordinate_location":"48.690959,9.14062","name":"Europe","population":747636045}}
+{"kind":"Node","id":"Q48","labels":["Continent"],"properties":{"area":44614500.0,"coordinate_location":"43.681111111111115,87.33111111111111","name":"Asia","population":4164252000}}
+{"kind":"Node","id":"Q15","labels":["Continent"],"properties":{"area":30271000.0,"coordinate_location":"21.09375,7.1881","name":"Africa","population":1275920972}}
+{"kind":"Node","id":"Q51","labels":["Continent"],"properties":{"area":14000000.0,"coordinate_location":"-90,0","name":"Antarctica","population":4400}}
+{"kind":"Node","id":"Q828","labels":["Continent"],"properties":{"area":42549000.0,"coordinate_location":"19,-96","name":"Americas"}}
+{"kind":"Node","id":"Q18","labels":["Continent"],"properties":{"area":17843000.0,"coordinate_location":"-21,-59","name":"South America","population":385742554}}

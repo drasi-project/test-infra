@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{models::{SourceChangeGeneratorDefinition, SpacingMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::{SourceChangeDispatcherDefinition, SourceChangeGeneratorDefinition, SpacingMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 use tokio::sync::oneshot;
 
 use script_source_change_generator::ScriptSourceChangeGenerator;
@@ -166,7 +166,8 @@ pub async fn create_source_change_generator(
     id: TestRunSourceId, 
     definition: Option<SourceChangeGeneratorDefinition>,
     input_storage: TestSourceStorage, 
-    output_storage: TestRunSourceStorage
+    output_storage: TestRunSourceStorage,
+    dispatchers: Vec<SourceChangeDispatcherDefinition>,
 ) -> anyhow::Result<Option<Box<dyn SourceChangeGenerator + Send + Sync>>> {
     match definition {
         None => Ok(None),
@@ -176,7 +177,9 @@ pub async fn create_source_change_generator(
                 common_config, 
                 unique_config, 
                 input_storage, 
-                output_storage).await?)))
+                output_storage,
+                dispatchers,
+            ).await?)))
         }
     }
 }

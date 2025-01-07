@@ -49,10 +49,10 @@ pub enum ScriptSourceChangeGeneratorError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ScriptSourceChangeGeneratorSettings {
+    pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub id: TestRunSourceId,
     pub ignore_scripted_pause_commands: bool,
     pub input_storage: TestSourceStorage,
-    pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub output_storage: TestRunSourceStorage,
     pub spacing_mode: SpacingMode,
     pub time_mode: TimeMode,
@@ -64,14 +64,15 @@ impl ScriptSourceChangeGeneratorSettings {
         common_config: CommonSourceChangeGeneratorDefinition, 
         unique_config: ScriptSourceChangeGeneratorDefinition, 
         input_storage: TestSourceStorage, 
-        output_storage: TestRunSourceStorage
+        output_storage: TestRunSourceStorage,
+        dispatchers: Vec<SourceChangeDispatcherDefinition>,
     ) -> anyhow::Result<Self> {
 
         Ok(ScriptSourceChangeGeneratorSettings {
+            dispatchers,
             id: test_run_source_id,
             ignore_scripted_pause_commands: unique_config.ignore_scripted_pause_commands,
             input_storage,
-            dispatchers: common_config.dispatchers,
             output_storage,
             spacing_mode: common_config.spacing_mode,
             time_mode: common_config.time_mode,
@@ -143,8 +144,16 @@ pub struct ScriptSourceChangeGenerator {
 }
 
 impl ScriptSourceChangeGenerator {
-    pub async fn new(test_run_source_id: TestRunSourceId, common_config: CommonSourceChangeGeneratorDefinition, unique_config: ScriptSourceChangeGeneratorDefinition, input_storage: TestSourceStorage, output_storage: TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeGenerator + Send + Sync>> {
-        let settings = ScriptSourceChangeGeneratorSettings::new(test_run_source_id, common_config, unique_config, input_storage, output_storage.clone()).await?;
+    pub async fn new(
+        test_run_source_id: TestRunSourceId, 
+        common_config: CommonSourceChangeGeneratorDefinition, 
+        unique_config: ScriptSourceChangeGeneratorDefinition, 
+        input_storage: TestSourceStorage, 
+        output_storage: TestRunSourceStorage,
+        dispatchers: Vec<SourceChangeDispatcherDefinition>,
+    ) -> anyhow::Result<Box<dyn SourceChangeGenerator + Send + Sync>> {
+        let settings = ScriptSourceChangeGeneratorSettings::new(
+            test_run_source_id, common_config, unique_config, input_storage, output_storage.clone(), dispatchers).await?;
         log::debug!("Creating ScriptSourceChangeGenerator from {:?}", &settings);
 
         let (script_processor_tx_channel, script_processor_rx_channel) = tokio::sync::mpsc::channel(100);

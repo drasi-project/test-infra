@@ -11,15 +11,11 @@
         "script_file_folder": "bootstrap_scripts",
         "time_mode": "recorded"
       },
+      "source_change_dispatchers": [   
+        { "kind": "Console" },
+        { "kind": "JsonlFile" }
+      ],
       "source_change_generator": {
-        "dispatchers": [   
-          {
-            "kind": "Console"
-          },
-          {
-            "kind": "JsonlFile"
-          }
-        ],
         "kind": "Script",
         "script_file_folder": "source_change_scripts",
         "spacing_mode": "none",

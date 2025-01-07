@@ -2,7 +2,7 @@ use std::{collections::HashSet, fmt};
 
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
-use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinition, QueryId, SourceChangeGeneratorDefinition, SpacingMode, TestSourceDefinition}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinition, QueryId, SourceChangeDispatcherDefinition, SourceChangeGeneratorDefinition, SpacingMode, TestSourceDefinition}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
 
 use crate::{bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator}, source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState}};
 
@@ -90,6 +90,7 @@ impl fmt::Display for TestRunSourceConfig {
 pub struct TestRunSourceDefinition {
     pub bootstrap_data_generator_def: Option<BootstrapDataGeneratorDefinition>,
     pub id: TestRunSourceId,
+    pub source_change_dispatcher_defs: Vec<SourceChangeDispatcherDefinition>,
     pub source_change_generator_def: Option<SourceChangeGeneratorDefinition>,
     pub start_immediately: bool,    
     pub subscribers: Vec<QueryId>,
@@ -104,6 +105,7 @@ impl TestRunSourceDefinition {
                 Ok(Self {
                     bootstrap_data_generator_def: test_source_definition.bootstrap_data_generator_def.clone(),
                     id,
+                    source_change_dispatcher_defs: test_source_definition.source_change_dispatcher_defs.clone(),
                     source_change_generator_def: test_source_definition.source_change_generator_def.clone(),
                     start_immediately: start_immediately.unwrap_or(false), 
                     subscribers: test_source_definition.subscribers.clone(),
@@ -121,12 +123,20 @@ impl TestRunSourceDefinition {
                     None => test_source_definition.bootstrap_data_generator_def.clone(),
                 };
 
-                let source_change_dispatchers_def = match test_run_overrides {
+                let source_change_generator_def = match test_run_overrides {
                     Some(overrides) => match &overrides.source_change_generator_def {
                         Some(definition) => Some(definition.clone()),
                         None => test_source_definition.source_change_generator_def.clone(),
                     },
                     None => test_source_definition.source_change_generator_def.clone(),
+                };
+
+                let source_change_dispatchers_def = match test_run_overrides {
+                    Some(overrides) => match &overrides.source_change_dispatcher_defs.len() {
+                        0 => test_source_definition.source_change_dispatcher_defs.clone(),
+                        _ => overrides.source_change_dispatcher_defs.clone(),
+                    },
+                    None => test_source_definition.source_change_dispatcher_defs.clone(),
                 };
 
                 let subscribers = match test_run_overrides {
@@ -140,7 +150,8 @@ impl TestRunSourceDefinition {
                 Ok(Self {
                     bootstrap_data_generator_def,
                     id,
-                    source_change_generator_def: source_change_dispatchers_def,
+                    source_change_dispatcher_defs: source_change_dispatchers_def,
+                    source_change_generator_def,
                     start_immediately: start_immediately.unwrap_or(false),
                     subscribers,
                 })
@@ -188,7 +199,8 @@ impl TestRunSource {
             definition.id.clone(),
             definition.source_change_generator_def,
             input_storage,
-            output_storage
+            output_storage,
+            definition.source_change_dispatcher_defs
         ).await?;
     
         Ok(Self { 

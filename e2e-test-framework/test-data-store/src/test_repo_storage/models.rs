@@ -161,6 +161,8 @@ pub struct TestSourceDefinition {
     pub test_source_id: String,
     #[serde(alias = "bootstrap_data_generator")]
     pub bootstrap_data_generator_def: Option<BootstrapDataGeneratorDefinition>,
+    #[serde(default, alias = "source_change_dispatchers")]
+    pub source_change_dispatcher_defs: Vec<SourceChangeDispatcherDefinition>,
     #[serde(alias = "source_change_generator")]
     pub source_change_generator_def: Option<SourceChangeGeneratorDefinition>,
     #[serde(default)]
@@ -203,8 +205,6 @@ pub enum SourceChangeGeneratorDefinition {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonSourceChangeGeneratorDefinition {
-    #[serde(default)]
-    pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     #[serde(default)]
     pub spacing_mode: SpacingMode,
     #[serde(default)]

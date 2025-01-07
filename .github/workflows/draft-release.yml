@@ -57,6 +57,7 @@ jobs:
      
       - name: Build and Push to GHCR
         run: |
+          cd e2e-test-framework
           DOCKER_TAG_VERSION=${{ inputs.tag }} \
           IMAGE_PREFIX=${{ inputs.image_prefix }} \
           DOCKERX_OPTS="--push --platform linux/amd64,linux/arm64 --cache-to type=local,dest=/tmp/.buildx-cache,mode=max --cache-from type=local,src=/tmp/.buildx-cache" \

@@ -6,7 +6,7 @@ WORKDIR /usr/src
 COPY ./infrastructure ./infrastructure
 COPY ./test-data-store ./test-data-store
 COPY ./data-collector ./data-collector
-COPY ./test-runner ./test-runner
+COPY ./test-run-source ./test-run-source
 
 RUN cargo new test-service
 WORKDIR /usr/src/test-service

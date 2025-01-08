@@ -52,9 +52,7 @@
                 "test_run_id": "test_run_001",
                 "test_source_id": "geo-db",
                 "start_immediately": false,
-                "test_run_overrides" : {
-                    "source_change_dispatchers": [ { "kind": "Console" }]
-                }
+                "test_run_overrides" : {}
             }
         ]        
     }

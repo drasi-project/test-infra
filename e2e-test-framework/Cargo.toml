@@ -1,0 +1,14 @@
+[workspace]
+
+members = [
+  "data-collector",
+  "test-data-store",
+  "test-run-source",
+  "test-service",
+  
+  # Internal
+  "infrastructure/comms-abstractions",
+  "infrastructure/comms-dapr",
+]
+
+resolver = "2"

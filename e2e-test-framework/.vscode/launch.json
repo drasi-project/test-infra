@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'test-runner'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=test-runner",
+                    "--package=test-runner"
+                ],
+                "filter": {
+                    "name": "test-runner",
+                    "kind": "bin"
+                }
+            },
+            "args": ["-c", "./tests/config/config_full.json", "-x"],
+            "cwd": "${workspaceFolder}/test-runner"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'test-runner'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=test-runner",
+                    "--package=test-runner"
+                ],
+                "filter": {
+                    "name": "test-runner",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

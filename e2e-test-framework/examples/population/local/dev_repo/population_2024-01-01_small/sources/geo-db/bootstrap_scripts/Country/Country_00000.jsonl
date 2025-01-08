@@ -1,0 +1,191 @@
+{"kind":"Header","start_time":"2024-01-01T00:00:00Z","description":"Drasi Bootstrap Data Script for TestID city_populations_allen, SourceID: geo-db"}
+{"kind":"Node","id":"Q813","labels":["Country"],"properties":{"area":199951.0,"continent_id":"Q48","coordinate_location":"41,75","name":"Kyrgyzstan","population":6694200}}
+{"kind":"Node","id":"Q37","labels":["Country"],"properties":{"area":65300.0,"continent_id":"Q46","coordinate_location":"55.2,24","name":"Lithuania","population":2860002}}
+{"kind":"Node","id":"Q222","labels":["Country"],"properties":{"area":28748.0,"continent_id":"Q46","coordinate_location":"41,20","name":"Albania","population":2793592}}
+{"kind":"Node","id":"Q19716180","labels":["Country"],"properties":{"name":"Pays Catalan"}}
+{"kind":"Node","id":"Q30","labels":["Country"],"properties":{"area":9826675.0,"continent_id":"Q49","coordinate_location":"39.828175,-98.5795","name":"United States of America","population":331449281}}
+{"kind":"Node","id":"Q225","labels":["Country"],"properties":{"area":51197.0,"continent_id":"Q46","coordinate_location":"44,18","name":"Bosnia and Herzegovina","population":3816459}}
+{"kind":"Node","id":"Q39","labels":["Country"],"properties":{"area":41285.0,"continent_id":"Q46","coordinate_location":"46.798562,8.231973","name":"Switzerland","population":8902308}}
+{"kind":"Node","id":"Q822","labels":["Country"],"properties":{"area":10452.0,"continent_id":"Q48","coordinate_location":"33.833333,35.766667","name":"Lebanon","population":5261372}}
+{"kind":"Node","id":"Q213","labels":["Country"],"properties":{"area":78866.0,"continent_id":"Q46","coordinate_location":"50,15","name":"Czech Republic","population":2000000}}
+{"kind":"Node","id":"Q683","labels":["Country"],"properties":{"area":2842.0,"continent_id":"Q538","coordinate_location":"-13.745,-172.2175","name":"Samoa","population":198410}}
+{"kind":"Node","id":"Q44826","labels":["Country"],"properties":{"name":"Tarshish"}}
+{"kind":"Node","id":"Q214","labels":["Country"],"properties":{"area":49035.0,"continent_id":"Q46","coordinate_location":"49,20","name":"Slovakia","population":5449270}}
+{"kind":"Node","id":"Q55","labels":["Country"],"properties":{"area":41543.0,"continent_id":"Q46","coordinate_location":"52.316666666667,5.55","name":"Netherlands","population":17590672}}
+{"kind":"Node","id":"Q878","labels":["Country"],"properties":{"area":83600.0,"continent_id":"Q48","coordinate_location":"24.4,54.3","name":"United Arab Emirates","population":9890400}}
+{"kind":"Node","id":"Q215","labels":["Country"],"properties":{"area":20271.0,"continent_id":"Q46","coordinate_location":"46,15","name":"Slovenia","population":1913355}}
+{"kind":"Node","id":"Q685","labels":["Country"],"properties":{"area":28400.0,"continent_id":"Q538","coordinate_location":"-9.4666666666667,159.81666666667","name":"Solomon Islands","population":611343}}
+{"kind":"Node","id":"Q38","labels":["Country"],"properties":{"area":302068.0,"continent_id":"Q46","coordinate_location":"42.5,12.5","name":"Italy","population":58850717}}
+{"kind":"Node","id":"Q224","labels":["Country"],"properties":{"area":56594.0,"continent_id":"Q46","coordinate_location":"45.25,15.466667","name":"Croatia","population":4784265}}
+{"kind":"Node","id":"Q31","labels":["Country"],"properties":{"area":30528.0,"continent_id":"Q46","coordinate_location":"50.641111111111,4.6680555555556","name":"Belgium","population":11584008}}
+{"kind":"Node","id":"Q36","labels":["Country"],"properties":{"area":312683.0,"continent_id":"Q46","coordinate_location":"52,19","name":"Poland","population":38036118}}
+{"kind":"Node","id":"Q96","labels":["Country"],"properties":{"area":1972550.0,"continent_id":"Q49","coordinate_location":"23,-102","name":"Mexico","population":131135337}}
+{"kind":"Node","id":"Q846","labels":["Country"],"properties":{"area":11437.0,"continent_id":"Q48","coordinate_location":"25.269535,51.212767","name":"Qatar","population":2639211}}
+{"kind":"Node","id":"Q241","labels":["Country"],"properties":{"area":109884.0,"continent_id":"Q49","coordinate_location":"22,-79.5","name":"Cuba","population":10985974}}
+{"kind":"Node","id":"Q28406119","labels":["Country"],"properties":{"name":"Free Republic of the Congo"}}
+{"kind":"Node","id":"Q884","labels":["Country"],"properties":{"area":100295.0,"continent_id":"Q48","coordinate_location":"36,128","name":"South Korea","population":51466201}}
+{"kind":"Node","id":"Q1039","labels":["Country"],"properties":{"area":1001.0,"continent_id":"Q15","coordinate_location":"0.316667,6.6","name":"São Tomé and Príncipe","population":204327}}
+{"kind":"Node","id":"Q902","labels":["Country"],"properties":{"area":147570.0,"continent_id":"Q48","coordinate_location":"24.016667,89.866667","name":"Bangladesh","population":169356251}}
+{"kind":"Node","id":"Q1006","labels":["Country"],"properties":{"area":245857.0,"continent_id":"Q15","coordinate_location":"10,-11","name":"Guinea","population":11628972}}
+{"kind":"Node","id":"Q757","labels":["Country"],"properties":{"area":389.0,"continent_id":"Q49","coordinate_location":"13.0139,-61.2296","name":"Saint Vincent and the Grenadines","population":100804}}
+{"kind":"Node","id":"Q750","labels":["Country"],"properties":{"area":1098581.0,"continent_id":"Q18","coordinate_location":"-17.056869611111,-64.991228611111","name":"Bolivia","population":11051600}}
+{"kind":"Node","id":"Q334","labels":["Country"],"properties":{"area":719.1,"continent_id":"Q48","coordinate_location":"1.3,103.8","name":"Singapore","population":1022100}}
+{"kind":"Node","id":"Q1008","labels":["Country"],"properties":{"area":322463.0,"continent_id":"Q15","coordinate_location":"8,-6","name":"Ivory Coast","population":24294750}}
+{"kind":"Node","id":"Q766","labels":["Country"],"properties":{"area":10991.90954,"continent_id":"Q49","coordinate_location":"18.18,-77.4","name":"Jamaica","population":2734093}}
+{"kind":"Node","id":"Q1037","labels":["Country"],"properties":{"area":26338.0,"continent_id":"Q15","coordinate_location":"-2,30","name":"Rwanda","population":13246394}}
+{"kind":"Node","id":"Q792","labels":["Country"],"properties":{"area":20742.0,"continent_id":"Q49","coordinate_location":"13.668889,-88.866111","name":"El Salvador","population":6377853}}
+{"kind":"Node","id":"Q1030","labels":["Country"],"properties":{"area":825615.0,"continent_id":"Q15","coordinate_location":"-23,17","name":"Namibia","population":2533794}}
+{"kind":"Node","id":"Q958","labels":["Country"],"properties":{"area":619745.304981,"continent_id":"Q15","coordinate_location":"7,30","name":"South Sudan","population":8260490}}
+{"kind":"Node","id":"Q854850","labels":["Country"],"properties":{"coordinate_location":"27.22,77.48","name":"Bharatpur State"}}
+{"kind":"Node","id":"Q967","labels":["Country"],"properties":{"area":27834.0,"continent_id":"Q15","coordinate_location":"-3.666667,29.816667","name":"Burundi","population":11530580}}
+{"kind":"Node","id":"Q155","labels":["Country"],"properties":{"area":8515767.0,"continent_id":"Q18","coordinate_location":"-14,-53","name":"Brazil","population":203062512}}
+{"kind":"Node","id":"Q760","labels":["Country"],"properties":{"area":617.012867,"continent_id":"Q49","coordinate_location":"13.883333333333333,-60.96666666666667","name":"Saint Lucia","population":167591}}
+{"kind":"Node","id":"Q794","labels":["Country"],"properties":{"area":1648195.0,"continent_id":"Q48","coordinate_location":"32,53","name":"Iran","population":86758304}}
+{"kind":"Node","id":"Q1009","labels":["Country"],"properties":{"area":475442.0,"continent_id":"Q15","coordinate_location":"5.133333333333334,12.65","name":"Cameroon","population":24053727}}
+{"kind":"Node","id":"Q1036","labels":["Country"],"properties":{"area":241038.0,"continent_id":"Q15","coordinate_location":"1.28,32.39","name":"Uganda","population":47123531}}
+{"kind":"Node","id":"Q1000","labels":["Country"],"properties":{"area":267667.0,"continent_id":"Q15","coordinate_location":"-0.68333055555556,11.5","name":"Gabon","population":2300000}}
+{"kind":"Node","id":"Q769","labels":["Country"],"properties":{"area":348.5,"continent_id":"Q49","coordinate_location":"12.116667,-61.666667","name":"Grenada","population":114299}}
+{"kind":"Node","id":"Q1007","labels":["Country"],"properties":{"area":36125.0,"continent_id":"Q15","coordinate_location":"12,-15","name":"Guinea-Bissau","population":1861283}}
+{"kind":"Node","id":"Q702","labels":["Country"],"properties":{"area":702.0,"continent_id":"Q538","coordinate_location":"6.9166666666667,158.18333333333","name":"Federated States of Micronesia","population":105544}}
+{"kind":"Node","id":"Q26988","labels":["Country"],"properties":{"area":240.0,"continent_id":"Q538","coordinate_location":"-21.233333333333334,-159.78333333333333","name":"Cook Islands","population":17583}}
+{"kind":"Node","id":"Q191","labels":["Country"],"properties":{"area":45339.0,"continent_id":"Q46","coordinate_location":"59,26","name":"Estonia","population":1365884}}
+{"kind":"Node","id":"Q733","labels":["Country"],"properties":{"area":406756.0,"continent_id":"Q18","coordinate_location":"-23.5,-58","name":"Paraguay","population":6811297}}
+{"kind":"Node","id":"Q734","labels":["Country"],"properties":{"area":214970.0,"continent_id":"Q18","coordinate_location":"5.733333,-59.316667","name":"Guyana","population":777859}}
+{"kind":"Node","id":"Q711","labels":["Country"],"properties":{"area":1566000.0,"continent_id":"Q48","coordinate_location":"46,105","name":"Mongolia","population":3409939}}
+{"kind":"Node","id":"Q986","labels":["Country"],"properties":{"area":117600.0,"continent_id":"Q15","coordinate_location":"15.483333,38.25","name":"Eritrea","population":3497000}}
+{"kind":"Node","id":"Q1049","labels":["Country"],"properties":{"area":1886068.0,"continent_id":"Q15","coordinate_location":"15,32","name":"Sudan","population":30894000}}
+{"kind":"Node","id":"Q774","labels":["Country"],"properties":{"area":108889.0,"continent_id":"Q49","coordinate_location":"15.5,-90.25","name":"Guatemala","population":17263239}}
+{"kind":"Node","id":"Q1025","labels":["Country"],"properties":{"area":1030700.0,"continent_id":"Q15","coordinate_location":"21,-11","name":"Mauritania","population":4614974}}
+{"kind":"Node","id":"Q921","labels":["Country"],"properties":{"area":5765.313533,"continent_id":"Q48","coordinate_location":"4.4,114.566667","name":"Brunei","population":428697}}
+{"kind":"Node","id":"Q1014","labels":["Country"],"properties":{"area":111369.0,"continent_id":"Q15","coordinate_location":"6.533333,-9.75","name":"Liberia","population":5214030}}
+{"kind":"Node","id":"Q928","labels":["Country"],"properties":{"area":343448.0,"continent_id":"Q48","coordinate_location":"12,123","name":"Philippines","population":109035343}}
+{"kind":"Node","id":"Q114","labels":["Country"],"properties":{"area":581309.0,"continent_id":"Q15","coordinate_location":"0.1,38","name":"Kenya","population":47564296}}
+{"kind":"Node","id":"Q1013","labels":["Country"],"properties":{"area":32962.8,"continent_id":"Q15","coordinate_location":"-29.55,28.25","name":"Lesotho","population":2007201}}
+{"kind":"Node","id":"Q917","labels":["Country"],"properties":{"area":38394.0,"continent_id":"Q48","coordinate_location":"27.45,90.5","name":"Bhutan","population":807610}}
+{"kind":"Node","id":"Q974","labels":["Country"],"properties":{"area":2344858.0,"continent_id":"Q15","coordinate_location":"-2.88,23.656111111111112","name":"Democratic Republic of the Congo","population":86790567}}
+{"kind":"Node","id":"Q183","labels":["Country"],"properties":{"area":357587.77,"continent_id":"Q46","coordinate_location":"51,10","name":"Germany","population":83149300}}
+{"kind":"Node","id":"Q184","labels":["Country"],"properties":{"area":207600.496983,"continent_id":"Q46","coordinate_location":"53.528333333333,28.046666666667","name":"Belarus","population":9200617}}
+{"kind":"Node","id":"Q945","labels":["Country"],"properties":{"area":56785.0,"continent_id":"Q15","coordinate_location":"8.25,1.183333","name":"Togo","population":7797694}}
+{"kind":"Node","id":"Q1041","labels":["Country"],"properties":{"area":196722.0,"continent_id":"Q15","coordinate_location":"14.366667,-14.283333","name":"Senegal","population":16876720}}
+{"kind":"Node","id":"Q717","labels":["Country"],"properties":{"area":912050.0,"continent_id":"Q18","coordinate_location":"8,-67","name":"Venezuela","population":28515829}}
+{"kind":"Node","id":"Q115","labels":["Country"],"properties":{"area":1104300.0,"continent_id":"Q15","coordinate_location":"9,40","name":"Ethiopia","population":120283026}}
+{"kind":"Node","id":"Q929","labels":["Country"],"properties":{"area":622984.0,"continent_id":"Q15","coordinate_location":"6.7,20.9","name":"Central African Republic","population":4659080}}
+{"kind":"Node","id":"Q916","labels":["Country"],"properties":{"area":1246700.0,"continent_id":"Q15","coordinate_location":"-12.35,17.35","name":"Angola","population":32866270}}
+{"kind":"Node","id":"Q786","labels":["Country"],"properties":{"area":48670.82,"continent_id":"Q49","coordinate_location":"18.8,-70.2","name":"Dominican Republic","population":10403761}}
+{"kind":"Node","id":"Q781","labels":["Country"],"properties":{"area":440.29,"continent_id":"Q49","coordinate_location":"17.116666666667,-61.85","name":"Antigua and Barbuda","population":101489}}
+{"kind":"Node","id":"Q863","labels":["Country"],"properties":{"area":143100.0,"continent_id":"Q48","coordinate_location":"38.583333,71.366667","name":"Tajikistan","population":9504000}}
+{"kind":"Node","id":"Q252","labels":["Country"],"properties":{"area":1904570.0,"continent_id":"Q48","coordinate_location":"-2,118","name":"Indonesia","population":270203917}}
+{"kind":"Node","id":"Q691","labels":["Country"],"properties":{"area":462840.0,"continent_id":"Q538","coordinate_location":"-6.3,147","name":"Papua New Guinea","population":8935000}}
+{"kind":"Node","id":"Q837","labels":["Country"],"properties":{"area":147181.254346,"continent_id":"Q48","coordinate_location":"28,84","name":"Nepal","population":29164578}}
+{"kind":"Node","id":"Q801","labels":["Country"],"properties":{"area":20770.0,"continent_id":"Q48","coordinate_location":"31,35","name":"Israel","population":9797120}}
+{"kind":"Node","id":"Q237","labels":["Country"],"properties":{"area":0.49,"continent_id":"Q46","coordinate_location":"41.904,12.453","name":"Vatican City","population":711}}
+{"kind":"Node","id":"Q865","labels":["Country"],"properties":{"area":36193.0,"continent_id":"Q48","coordinate_location":"24,121","name":"Taiwan","population":23593794}}
+{"kind":"Node","id":"Q41","labels":["Country"],"properties":{"area":131957.0,"continent_id":"Q46","coordinate_location":"38.5,23","name":"Greece","population":10566531}}
+{"kind":"Node","id":"Q79","labels":["Country"],"properties":{"area":1010407.87,"continent_id":"Q15","coordinate_location":"27,29","name":"Egypt","population":107476864}}
+{"kind":"Node","id":"Q14905932","labels":["Country"],"properties":{"continent_id":"Q49","name":"Republic of Cuba"}}
+{"kind":"Node","id":"Q298","labels":["Country"],"properties":{"area":756102.0,"continent_id":"Q18","coordinate_location":"-33,-71","name":"Chile","population":19458000}}
+{"kind":"Node","id":"Q854","labels":["Country"],"properties":{"area":65610.0,"continent_id":"Q48","coordinate_location":"7,81","name":"Sri Lanka","population":21444000}}
+{"kind":"Node","id":"Q265","labels":["Country"],"properties":{"area":448978.0,"continent_id":"Q48","coordinate_location":"41,66","name":"Uzbekistan","population":34915100}}
+{"kind":"Node","id":"Q756617","labels":["Country"],"properties":{"area":2220930.0,"continent_id":"Q46","coordinate_location":"61.97,-6.8444444444444","name":"Kingdom of Denmark","population":5930987}}
+{"kind":"Node","id":"Q262","labels":["Country"],"properties":{"area":2381741.0,"continent_id":"Q15","coordinate_location":"28,1","name":"Algeria","population":43900000}}
+{"kind":"Node","id":"Q77","labels":["Country"],"properties":{"area":176215.0,"continent_id":"Q18","coordinate_location":"-33,-56","name":"Uruguay","population":3456750}}
+{"kind":"Node","id":"Q236","labels":["Country"],"properties":{"area":13812.0,"continent_id":"Q46","coordinate_location":"42.766667,19.216667","name":"Montenegro","population":612267}}
+{"kind":"Node","id":"Q800","labels":["Country"],"properties":{"area":51100.0,"continent_id":"Q49","coordinate_location":"10,-84","name":"Costa Rica","population":5044197}}
+{"kind":"Node","id":"Q219060","labels":["Country"],"properties":{"area":6020.0,"continent_id":"Q48","coordinate_location":"32,35.25","name":"State of Palestine","population":5227193}}
+{"kind":"Node","id":"Q697","labels":["Country"],"properties":{"area":21.0,"continent_id":"Q538","coordinate_location":"-0.5275,166.935","name":"Nauru","population":13650}}
+{"kind":"Node","id":"Q836","labels":["Country"],"properties":{"area":676577.2,"continent_id":"Q48","coordinate_location":"22,96","name":"Myanmar","population":53370609}}
+{"kind":"Node","id":"Q21203","labels":["Country"],"properties":{"area":178.916378,"continent_id":"Q18","coordinate_location":"12.51106253,-69.97422388","name":"Aruba","population":106739}}
+{"kind":"Node","id":"Q664","labels":["Country"],"properties":{"area":268021.0,"continent_id":"Q538","coordinate_location":"-41.2,174","name":"New Zealand","population":5118700}}
+{"kind":"Node","id":"Q881","labels":["Country"],"properties":{"area":331690.0,"continent_id":"Q48","coordinate_location":"16,108","name":"Vietnam","population":96208984}}
+{"kind":"Node","id":"Q423","labels":["Country"],"properties":{"area":120540.0,"continent_id":"Q48","coordinate_location":"40,127","name":"North Korea","population":25490965}}
+{"kind":"Node","id":"Q424","labels":["Country"],"properties":{"area":181035.0,"continent_id":"Q48","coordinate_location":"12.5,105","name":"Cambodia","population":16005373}}
+{"kind":"Node","id":"Q843","labels":["Country"],"properties":{"area":881913.0,"continent_id":"Q48","coordinate_location":"30,71","name":"Pakistan","population":223773700}}
+{"kind":"Node","id":"Q219","labels":["Country"],"properties":{"area":110993.6,"continent_id":"Q46","coordinate_location":"42.75,25.5","name":"Bulgaria","population":6447710}}
+{"kind":"Node","id":"Q33","labels":["Country"],"properties":{"area":305396.0,"continent_id":"Q46","coordinate_location":"65,27","name":"Finland","population":5563970}}
+{"kind":"Node","id":"Q810","labels":["Country"],"properties":{"area":89341.0,"continent_id":"Q48","coordinate_location":"31.2,36.5","name":"Jordan","population":9531712}}
+{"kind":"Node","id":"Q34","labels":["Country"],"properties":{"area":447425.16,"continent_id":"Q46","coordinate_location":"61,15","name":"Sweden","population":10548336}}
+{"kind":"Node","id":"Q221","labels":["Country"],"properties":{"area":25713.0,"continent_id":"Q46","coordinate_location":"41.65,21.716667","name":"North Macedonia","population":1836713}}
+{"kind":"Node","id":"Q228","labels":["Country"],"properties":{"area":468.0,"continent_id":"Q46","coordinate_location":"42.558333333333,1.5552777777778","name":"Andorra","population":81588}}
+{"kind":"Node","id":"Q826","labels":["Country"],"properties":{"area":298.0,"continent_id":"Q48","coordinate_location":"4.18,73.51","name":"Maldives","population":436330}}
+{"kind":"Node","id":"Q819","labels":["Country"],"properties":{"area":236800.0,"continent_id":"Q48","coordinate_location":"18.2,104.1","name":"Laos","population":6858160}}
+{"kind":"Node","id":"Q889","labels":["Country"],"properties":{"area":652230.0,"continent_id":"Q48","coordinate_location":"33,66","name":"Afghanistan","population":15500000}}
+{"kind":"Node","id":"Q842","labels":["Country"],"properties":{"area":309500.0,"continent_id":"Q48","coordinate_location":"21,57","name":"Oman","population":4829480}}
+{"kind":"Node","id":"Q414","labels":["Country"],"properties":{"area":2780400.0,"continent_id":"Q18","coordinate_location":"-34,-64","name":"Argentina","population":47327407}}
+{"kind":"Node","id":"Q874","labels":["Country"],"properties":{"area":491210.0,"continent_id":"Q48","coordinate_location":"39,60","name":"Turkmenistan","population":6117933}}
+{"kind":"Node","id":"Q211","labels":["Country"],"properties":{"area":64589.0,"continent_id":"Q46","coordinate_location":"57,25","name":"Latvia","population":1883008}}
+{"kind":"Node","id":"Q229","labels":["Country"],"properties":{"area":9242.45,"continent_id":"Q48","coordinate_location":"35,33","name":"Cyprus","population":1141166}}
+{"kind":"Node","id":"Q672","labels":["Country"],"properties":{"area":26.0,"continent_id":"Q538","coordinate_location":"-7.475,178.005556","name":"Tuvalu","population":11792}}
+{"kind":"Node","id":"Q686","labels":["Country"],"properties":{"area":12190.0,"continent_id":"Q538","coordinate_location":"-16.633330555556,168.01666944444","name":"Vanuatu","population":300019}}
+{"kind":"Node","id":"Q811","labels":["Country"],"properties":{"area":130375.0,"continent_id":"Q49","coordinate_location":"13,-85","name":"Nicaragua","population":1049611}}
+{"kind":"Node","id":"Q35","labels":["Country"],"properties":{"area":42925.46,"continent_id":"Q46","coordinate_location":"56,10","name":"Denmark","population":5822863}}
+{"kind":"Node","id":"Q218","labels":["Country"],"properties":{"area":238397.0,"continent_id":"Q46","coordinate_location":"46,25","name":"Romania","population":19053815}}
+{"kind":"Node","id":"Q227","labels":["Country"],"properties":{"area":86600.0,"continent_id":"Q48","coordinate_location":"40.3,47.7","name":"Azerbaijan","population":10145212}}
+{"kind":"Node","id":"Q32","labels":["Country"],"properties":{"area":2586.36,"continent_id":"Q46","coordinate_location":"49.77,6.13","name":"Luxembourg","population":660809}}
+{"kind":"Node","id":"Q736","labels":["Country"],"properties":{"area":255586.91,"continent_id":"Q18","coordinate_location":"-1,-78","name":"Ecuador","population":16938986}}
+{"kind":"Node","id":"Q399","labels":["Country"],"properties":{"area":29743.423459,"continent_id":"Q48","coordinate_location":"40.383333,44.95","name":"Armenia","population":2930450}}
+{"kind":"Node","id":"Q963","labels":["Country"],"properties":{"area":581737.0,"continent_id":"Q15","coordinate_location":"-22.2,23.7","name":"Botswana","population":2291661}}
+{"kind":"Node","id":"Q1005","labels":["Country"],"properties":{"area":11300.0,"continent_id":"Q15","coordinate_location":"13.5,-15.5","name":"The Gambia","population":2639916}}
+{"kind":"Node","id":"Q754","labels":["Country"],"properties":{"area":5128.0,"continent_id":"Q49","coordinate_location":"10.666666666667,-61.516666666667","name":"Trinidad and Tobago","population":1369125}}
+{"kind":"Node","id":"Q1033","labels":["Country"],"properties":{"area":923768.0,"continent_id":"Q15","coordinate_location":"9,8","name":"Nigeria","population":211400708}}
+{"kind":"Node","id":"Q796","labels":["Country"],"properties":{"area":437072.0,"continent_id":"Q48","coordinate_location":"33,43","name":"Iraq","population":38274618}}
+{"kind":"Node","id":"Q953","labels":["Country"],"properties":{"area":752618.0,"continent_id":"Q15","coordinate_location":"-14,28","name":"Zambia","population":19610769}}
+{"kind":"Node","id":"Q739","labels":["Country"],"properties":{"area":1141748.0,"continent_id":"Q18","coordinate_location":"4,-73.25","name":"Colombia","population":49065615}}
+{"kind":"Node","id":"Q954","labels":["Country"],"properties":{"area":390757.0,"continent_id":"Q15","coordinate_location":"-19,30","name":"Zimbabwe","population":15178979}}
+{"kind":"Node","id":"Q962","labels":["Country"],"properties":{"area":114763.0,"continent_id":"Q15","coordinate_location":"8.8333333333333,2.1833333333333","name":"Benin","population":11175692}}
+{"kind":"Node","id":"Q398","labels":["Country"],"properties":{"area":785.08,"continent_id":"Q48","coordinate_location":"26.0675,50.551111","name":"Bahrain","population":1492584}}
+{"kind":"Node","id":"Q34020","labels":["Country"],"properties":{"area":260.0,"continent_id":"Q538","coordinate_location":"-19.05,-169.91666666667","name":"Niue","population":1612}}
+{"kind":"Node","id":"Q159","labels":["Country"],"properties":{"area":17075400.0,"continent_id":"Q46","coordinate_location":"66.41666666666667,94.25","name":"Russia","population":137550949}}
+{"kind":"Node","id":"Q965","labels":["Country"],"properties":{"area":274200.0,"continent_id":"Q15","coordinate_location":"12.266667,-2.066667","name":"Burkina Faso","population":20903278}}
+{"kind":"Node","id":"Q763","labels":["Country"],"properties":{"area":269.358763,"continent_id":"Q49","coordinate_location":"17.27166666666667,-62.666669444444445","name":"Saint Kitts and Nevis","population":55345}}
+{"kind":"Node","id":"Q29999","labels":["Country"],"properties":{"area":42201.0,"continent_id":"Q48","coordinate_location":"52.366666666667,4.8833333333333","name":"Kingdom of the Netherlands","population":17100715}}
+{"kind":"Node","id":"Q1032","labels":["Country"],"properties":{"area":1267000.0,"continent_id":"Q15","coordinate_location":"17,10","name":"Niger","population":21477348}}
+{"kind":"Node","id":"Q784","labels":["Country"],"properties":{"area":751.096551,"continent_id":"Q49","coordinate_location":"15.416667,-61.333333","name":"Dominica","population":74656}}
+{"kind":"Node","id":"Q783","labels":["Country"],"properties":{"area":112492.0,"continent_id":"Q49","coordinate_location":"14.633333,-86.816667","name":"Honduras","population":10062994}}
+{"kind":"Node","id":"Q1019","labels":["Country"],"properties":{"area":587295.0,"continent_id":"Q15","coordinate_location":"-20,47","name":"Madagascar","population":25570895}}
+{"kind":"Node","id":"Q117","labels":["Country"],"properties":{"area":238535.0,"continent_id":"Q15","coordinate_location":"8.03,-1.08","name":"Ghana","population":32833031}}
+{"kind":"Node","id":"Q574","labels":["Country"],"properties":{"area":14918.72,"continent_id":"Q48","coordinate_location":"-8.966667,125.75","name":"East Timor","population":1224562}}
+{"kind":"Node","id":"Q1028","labels":["Country"],"properties":{"area":446550.0,"continent_id":"Q15","coordinate_location":"32,-6","name":"Morocco","population":37076584}}
+{"kind":"Node","id":"Q712","labels":["Country"],"properties":{"area":18274.0,"continent_id":"Q538","coordinate_location":"-18,178","name":"Fiji","population":926276}}
+{"kind":"Node","id":"Q1044","labels":["Country"],"properties":{"area":71740.0,"continent_id":"Q15","coordinate_location":"8.5,-12.1","name":"Sierra Leone","population":7557212}}
+{"kind":"Node","id":"Q347","labels":["Country"],"properties":{"area":160.0,"continent_id":"Q46","coordinate_location":"47.145,9.553889","name":"Liechtenstein","population":38020}}
+{"kind":"Node","id":"Q6744020","labels":["Country"],"properties":{"name":"Mallabhum"}}
+{"kind":"Node","id":"Q971","labels":["Country"],"properties":{"area":342000.0,"continent_id":"Q15","coordinate_location":"-0.75,15.383330555556","name":"Republic of the Congo","population":5260750}}
+{"kind":"Node","id":"Q1016","labels":["Country"],"properties":{"area":1759541.0,"continent_id":"Q15","coordinate_location":"27,17","name":"Libya","population":6678567}}
+{"kind":"Node","id":"Q912","labels":["Country"],"properties":{"area":1240192.0,"continent_id":"Q15","coordinate_location":"17,-4","name":"Mali","population":19329841}}
+{"kind":"Node","id":"Q778","labels":["Country"],"properties":{"area":13878.0,"continent_id":"Q49","coordinate_location":"25,-77.4","name":"The Bahamas","population":395361}}
+{"kind":"Node","id":"Q1029","labels":["Country"],"properties":{"area":801590.0,"continent_id":"Q15","coordinate_location":"-19,35","name":"Mozambique","population":29668834}}
+{"kind":"Node","id":"Q1011","labels":["Country"],"properties":{"area":4033.0,"continent_id":"Q15","coordinate_location":"15.3,-23.7","name":"Cape Verde","population":555988}}
+{"kind":"Node","id":"Q1027","labels":["Country"],"properties":{"area":2040.0,"continent_id":"Q15","coordinate_location":"-20.2,57.5","name":"Mauritius","population":1264613}}
+{"kind":"Node","id":"Q29520","labels":["Country"],"properties":{"continent_id":"Q48","coordinate_location":"35,105","name":"China"}}
+{"kind":"Node","id":"Q1020","labels":["Country"],"properties":{"area":118484.0,"continent_id":"Q15","coordinate_location":"-13,34","name":"Malawi","population":18622104}}
+{"kind":"Node","id":"Q924","labels":["Country"],"properties":{"area":947303.0,"continent_id":"Q15","coordinate_location":"-6.3069444444444445,34.85388888888889","name":"Tanzania","population":61741120}}
+{"kind":"Node","id":"Q970","labels":["Country"],"properties":{"area":2034.0,"continent_id":"Q15","coordinate_location":"-12.3,43.7","name":"Comoros","population":902348}}
+{"kind":"Node","id":"Q1246","labels":["Country"],"properties":{"area":10909.02992,"continent_id":"Q46","coordinate_location":"42.55,20.833333333333","name":"Kosovo","population":1883018}}
+{"kind":"Node","id":"Q977","labels":["Country"],"properties":{"area":23200.0,"continent_id":"Q15","coordinate_location":"11.8,42.433333","name":"Djibouti","population":956985}}
+{"kind":"Node","id":"Q948","labels":["Country"],"properties":{"area":163610.0,"continent_id":"Q15","coordinate_location":"34,10","name":"Tunisia","population":11565204}}
+{"kind":"Node","id":"Q189","labels":["Country"],"properties":{"area":103004.0,"continent_id":"Q46","coordinate_location":"65,-19","name":"Iceland","population":376248}}
+{"kind":"Node","id":"Q1045","labels":["Country"],"properties":{"area":637657.0,"continent_id":"Q15","coordinate_location":"6,47","name":"Somalia","population":11031386}}
+{"kind":"Node","id":"Q142","labels":["Country"],"properties":{"area":643801.0,"continent_id":"Q46","coordinate_location":"47,2","name":"France","population":67749632}}
+{"kind":"Node","id":"Q145","labels":["Country"],"properties":{"area":242495.0,"continent_id":"Q46","coordinate_location":"54.6,-2","name":"United Kingdom","population":27368800}}
+{"kind":"Node","id":"Q1042","labels":["Country"],"properties":{"area":459.0,"continent_id":"Q15","coordinate_location":"-7.1,52.766667","name":"Seychelles","population":82858}}
+{"kind":"Node","id":"Q695","labels":["Country"],"properties":{"area":465.550362,"continent_id":"Q538","coordinate_location":"7.466667,134.55","name":"Palau","population":21729}}
+{"kind":"Node","id":"Q17","labels":["Country"],"properties":{"area":377972.28,"continent_id":"Q48","coordinate_location":"35,136","name":"Japan","population":124631000}}
+{"kind":"Node","id":"Q28","labels":["Country"],"properties":{"area":93036.0,"continent_id":"Q46","coordinate_location":"47,19","name":"Hungary","population":9603634}}
+{"kind":"Node","id":"Q833","labels":["Country"],"properties":{"area":330803.0,"continent_id":"Q48","coordinate_location":"3.7805111,102.31436166666668","name":"Malaysia","population":32447385}}
+{"kind":"Node","id":"Q805","labels":["Country"],"properties":{"area":555000.0,"continent_id":"Q48","coordinate_location":"15.5,48","name":"Yemen","population":28250420}}
+{"kind":"Node","id":"Q657","labels":["Country"],"properties":{"area":1284000.0,"continent_id":"Q15","coordinate_location":"15.466667,19.4","name":"Chad","population":15477751}}
+{"kind":"Node","id":"Q233","labels":["Country"],"properties":{"area":316.0,"continent_id":"Q46","coordinate_location":"35.88333333333333,14.5","name":"Malta","population":465292}}
+{"kind":"Node","id":"Q668","labels":["Country"],"properties":{"area":3287263.0,"continent_id":"Q48","coordinate_location":"22.8,83","name":"India","population":1326093247}}
+{"kind":"Node","id":"Q258","labels":["Country"],"properties":{"area":1221037.0,"continent_id":"Q15","coordinate_location":"-29,24","name":"South Africa","population":62027503}}
+{"kind":"Node","id":"Q869","labels":["Country"],"properties":{"area":513119.5,"continent_id":"Q48","coordinate_location":"14,101","name":"Thailand","population":66188503}}
+{"kind":"Node","id":"Q851","labels":["Country"],"properties":{"area":2250000.0,"continent_id":"Q48","coordinate_location":"23.716667,44.116667","name":"Saudi Arabia","population":791105}}
+{"kind":"Node","id":"Q26273","labels":["Country"],"properties":{"area":34.0,"continent_id":"Q49","coordinate_location":"18.031944444444,-63.067777777778","name":"Sint Maarten","population":43847}}
+{"kind":"Node","id":"Q43","labels":["Country"],"properties":{"area":783562.05296,"continent_id":"Q48","coordinate_location":"39,36","name":"Turkey","population":85279553}}
+{"kind":"Node","id":"Q858","labels":["Country"],"properties":{"area":185180.0,"continent_id":"Q48","coordinate_location":"35.216667,38.583333","name":"Syria","population":18499181}}
+{"kind":"Node","id":"Q27","labels":["Country"],"properties":{"area":69797.0,"continent_id":"Q46","coordinate_location":"53,-8","name":"Republic of Ireland","population":4813608}}
+{"kind":"Node","id":"Q232","labels":["Country"],"properties":{"area":2724900.0,"continent_id":"Q46","coordinate_location":"48,68","name":"Kazakhstan","population":19002586}}
+{"kind":"Node","id":"Q20","labels":["Country"],"properties":{"area":385207.0,"continent_id":"Q46","coordinate_location":"65,11","name":"Norway","population":5504329}}
+{"kind":"Node","id":"Q16","labels":["Country"],"properties":{"area":9984670.0,"continent_id":"Q49","coordinate_location":"56,-109","name":"Canada","population":40000000}}
+{"kind":"Node","id":"Q29","labels":["Country"],"properties":{"area":505990.0,"continent_id":"Q46","coordinate_location":"40.2,-3.5","name":"Spain","population":47415750}}
+{"kind":"Node","id":"Q45","labels":["Country"],"properties":{"area":92225.0,"continent_id":"Q46","coordinate_location":"38.7,-9.183333333333334","name":"Portugal","population":8857716}}
+{"kind":"Node","id":"Q408","labels":["Country"],"properties":{"area":7692024.0,"continent_id":"Q55643","coordinate_location":"-25,133","name":"Australia","population":26473055}}

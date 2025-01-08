@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: SourceProvider
+name: E2ETestService
+spec:
+  services:
+    proxy:
+      image: e2e-test-proxy
+      dapr:
+        app-port: "4002"
+    reactivator:
+      image: e2e-test-service
+      dapr:
+        app-port: "63123"
+      endpoints:
+        api:
+          setting: internal
+          target: $DRASI_PORT
+      config_schema:
+        type: object
+        properties:
+          DRASI_PORT:
+            type: number
+#            default: 63123
+          DRASI_DATA_STORE_PATH:
+            type: string
+#            default: "./drasi_data"
+          DRASI_CONFIG_FILE:
+            type: string
+#            default: "./config.json"

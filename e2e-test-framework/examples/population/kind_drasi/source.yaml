@@ -1,0 +1,12 @@
+kind: Source
+apiVersion: v1
+name: geo-db
+spec:
+  kind: E2ETestService
+  services:
+    reactivator:
+      properties:
+          DRASI_PORT: 63123
+#          DRASI_DATA_CACHE: "./data_cache"
+#          DRASI_CONFIG_FILE: "./config.json"
+

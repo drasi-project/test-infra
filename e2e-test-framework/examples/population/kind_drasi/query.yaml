@@ -1,0 +1,78 @@
+kind: ContinuousQuery
+apiVersion: v1
+name: continent-country-population
+spec:
+  mode: query
+  sources:
+    subscriptions:
+      - id: geo-db
+        nodes:
+          - sourceLabel: Continent
+          - sourceLabel: Country
+    joins:
+      - id: PART_OF_CONTINENT
+        keys:
+          - label: Country
+            property: continent_id
+          - label: Continent
+            property: id
+  query: >
+    MATCH
+      (country:Country)-[:PART_OF_CONTINENT]->(continent:Continent)
+    WITH
+      continent,
+      sum(country.population) AS ContinentCountryPopulation
+    RETURN
+      elementId(continent) AS ContinentId,
+      continent.name AS ContinentName,
+      country.population AS ContinentPopulation,
+      ContinentCountryPopulation
+---
+kind: ContinuousQuery
+apiVersion: v1
+name: country-city-population
+spec:
+  mode: query
+  sources:
+    subscriptions:
+      - id: geo-db
+        nodes:
+          - sourceLabel: Country
+          - sourceLabel: City
+    joins:
+      - id: PART_OF_COUNTRY
+        keys:
+          - label: City
+            property: country_id
+          - label: Country
+            property: id
+  query: >
+    MATCH
+      (city:City)-[:PART_OF_COUNTRY]->(country:Country)
+    WITH
+      country,
+      sum(city.population) AS CountryCityPopulation
+    RETURN
+      elementId(country) AS CountryId,
+      country.name AS CountryName,
+      country.population AS CountryPopulation,
+      CountryCityPopulation
+---
+kind: ContinuousQuery
+apiVersion: v1
+name: city-population
+spec:
+  mode: query
+  sources:
+    subscriptions:
+      - id: geo-db
+        nodes:
+          - sourceLabel: City
+  query: >
+    MATCH
+      (city:City)
+    RETURN
+      elementId(city) AS CityId,
+      city.name AS Name,
+      city.population AS Population,
+      city.country_id AS CountryId

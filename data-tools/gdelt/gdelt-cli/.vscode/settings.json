@@ -1,0 +1,27 @@
+{
+    "cSpell.words": [
+        "chrono",
+        "datetime",
+        "datname",
+        "dbinfo",
+        "dbname",
+        "fileinfo",
+        "gcam",
+        "gdelt",
+        "goldstein",
+        "Hasher",
+        "initdb",
+        "reqwest",
+        "Timelike"
+    ],
+    "cSpell.ignorePaths": [
+        "Cargo.toml",
+        "package-lock.json",
+        "node_modules",
+        "vscode-extension",
+        ".git/objects",
+        ".vscode",
+        ".vscode-insiders",
+        "**/.cargo/registry/**"
+    ]
+}

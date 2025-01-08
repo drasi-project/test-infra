@@ -3,7 +3,7 @@
 members = [
   "data-collector",
   "test-data-store",
-  "test-runner",
+  "test-run-source",
   "test-service",
   
   # Internal

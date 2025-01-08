@@ -18,7 +18,7 @@ The Test Runner requires the following configuration parameters:
 
 - `config_file_path`: The path of the Test Run Config file. If not provided, the service will start in an uninitialized state and wait to be initialized through the Web API.
 - `data_cache_path`: The path where data used and generated in the Test Run gets stored. Default is `./source_data_cache`.
-- `port`: The port number the Web API will listen on. Default is `4000`.
+- `port`: The port number the Web API will listen on. Default is `63123`.
 - `event_output`: The output type for Source Change Events. Default is `none`.
 - `telemetry_output`: The output type for Test Run Telemetry data. Default is `none`.
 - `log_output`: The output type for Test Run Log data. Default is `none`.
@@ -62,7 +62,7 @@ The Test Runner requires a config file to be provided for proper initialization.
 
 - `config_file_path`: The path of the Test Run Config file. If not provided, the service will start in an uninitialized state and wait to be initialized through the Web API.
 - `data_cache_path`: The path where data used and generated in the Test Run gets stored. The default value is `./source_data_cache`.
-- `port`: The port number the Web API will listen on. The default value is `4000`.
+- `port`: The port number the Web API will listen on. The default value is `63123`.
 - `event_output`: The output type for Source Change Events. The default value is `none`.
 - `telemetry_output`: The output type for Test Run Telemetry data. The default value is `none`.
 - `log_output`: The output type for Test Run Log data. The default value is `none`.

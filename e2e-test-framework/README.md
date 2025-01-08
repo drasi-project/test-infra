@@ -1,46 +1,33 @@
-# OPTIONAL: Build and Install Drasi CLI
+# Running the Examples
+The E2E Test Framework (ETF) includes examples in the ```examples``` folder that show how to use it:
 
-To build CLI, from drasi-platform/cli, run:
+The ```population``` example uses population data from wikidata and demonstrates 2 different test configurations:
 
-```
-make
-```
+1. Running the Test Service as a local process and using a local test repo
+1. Running the Test Service in Drasi and using an Azure Storage hosted test repo
 
-To install drasi cli, run:
+Both of these are fully scripted for ease of execution.
 
-```
-sudo make install
-```
+## Running the Population example in a local process
 
-# Build and Install Drasi 
-
-To build Drasi images, from drasi-platform, run:
+From a terminal, change to the ```test-infra/e2e-test-framework``` folder, and run:
 
 ```
-make
+./examples/population/run_local
 ```
 
-To install drasi images on kind, run:
+## Running the Population example in Drasi
+From a terminal, change to the ```test-infra/e2e-test-framework``` folder, and run:
 
 ```
-make kind-load
+./examples/population/run_kind_drasi
 ```
 
-Install drasi, run:
+# Building the E2E Test Framework (ETF)
 
-```
-drasi init --local --version latest
-```
+Do the following steps from the ```test-infra/e2e-test-framework``` folder ...
 
-View the images on kind:
-
-```
-docker exec -it $(kind get clusters | head -1)-control-plane crictl image
-```
-
-# Building E2E
-
-To create the docker images for the ETF, from the e2e-test-framework folder, run make:
+To create the docker images for the ETF:
 
 ```
 make
@@ -56,128 +43,70 @@ To see that the images are in the local repo, run:
 docker image list
 ```
 
-Then if developing locally using Kind, need to add the images to the kind cluster:
+To push the images to a local Kind cluster:
 
 ```
 make kind-load
 ```
 
-To check that the images are on the Kind cluster run:
+Publish to GHCR:
 
 ```
-docker exec -it $(kind get clusters | head -1)-control-plane crictl images
+docker tag drasi-project/e2e-test-service:latest ghcr.io/drasi-project/e2e-test-service:0.1.6
+
+docker push ghcr.io/drasi-project/e2e-test-service:0.1.6
+
+docker tag drasi-project/e2e-test-proxy:latest ghcr.io/drasi-project/e2e-test-proxy:0.1.6
+
+docker push ghcr.io/drasi-project/e2e-test-proxy:0.1.6
 ```
 
-You will see them listed as:
-- docker.io/drasi-project/e2e-test-runner:latest
-- docker.io/drasi-project/e2e-test-proxy:latest
+# Running E2E Test Framework on Kind
 
+## Install Drasi on Kind Cluster
+https://drasi.io/how-to-guides/installation/install-on-kind/
 
-Install the E2ETestSource SourceProvider definition to Drasi:
+Create Kind cluster:
+
+```
+kind create cluster
+```
+
+Install Drasi CLI:
+
+```
+curl -fsSL https://raw.githubusercontent.com/drasi-project/drasi-platform/main/cli/installers/install-drasi-cli.sh | /bin/bash
+```
+
+Install Drasi:
+
+```
+drasi init
+```
+
+## Register E2ETestService SourceProvider
+
+From the ```test-infra/e2e-test-framework``` folder, run:
 
 ```
 make drasi-apply
 ```
 
-To check, run:
+View the registered SourceProvider:
 
 ```
 drasi list sourceprovider
 ```
 
-You will see output like the following:
+See the following output:
 
 ```
-       ID
------------------
+        ID
+------------------
   PostgreSQL
   SQLServer
   CosmosGremlin
-  E2ETestSource
+  Dataverse
+  EventHub
+  E2ETestService
 ```
-
-# Using ETF
-You can now create instances of E2ETestSource to use for testing.
-
-
-Create a E2ETestSource Source definition file. See test-source/facilities-test-source.yaml as an example.
-
-Apply the E2ETestSource Source definition to Drasi:
-
-```
-drasi apply -f test-source/e2e-test-source-facilities.yaml
-```
-
-To check, run:
-
-```
-drasi list source
-```
-
-You will see output like this:
-
-```
-              ID             | AVAILABLE
------------------------------+------------
-  e2e-test-source-facilities | true
-```
-
-# Connecting
-
-## test-runner
-
-Forward the api port of the test-runner, which is filling the slot of the reactivator:
-
-```
-kubectl port-forward -n drasi-system services/e2e-test-source-facilities-api 5000:5000
-```
-
-Browse to the following address:
-
-```
-http://localhost:5000/
-```
-
-You will see:
-
-```
-{
-    "service_status": "Ready",
-    "local_test_repo": {
-        "data_cache_path": "./source_data_cache",
-        "data_sets": []
-    },
-    "reactivators": []
-}
-```
-
-
-## test-proxy
-
-
-# Cleanup
-
-Stop forwarded ports.
-
-Delete the E2ETestSource
-
-```
-drasi delete source e2e-test-source-facilities
-```
-
-Delete the E2ETestSourceProvider
-
-```
-drasi delete sourceprovider E2ETestSource
-```
-
-
-
-kind load docker-image drasi-project/e2e-test-service:0.1.5 --name kind
-kind load docker-image drasi-project/e2e-test-proxy:0.1.5 --name kind
-
-docker tag drasi-project/e2e-test-service:0.1.5 ghcr.io/drasi-project/e2e-test-proxy:0.1.5
-docker tag drasi-project/e2e-test-proxy:0.1.5 ghcr.io/drasi-project/e2e-test-proxy:0.1.5
-
-kind load docker-image ghcr.io/drasi-project/e2e-test-service:0.1.5 --name kind
-kind load docker-image ghcr.io/drasi-project/e2e-test-proxy:0.1.5 --name kind

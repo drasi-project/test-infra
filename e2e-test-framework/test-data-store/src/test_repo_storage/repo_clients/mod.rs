@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use azure_storage_blob_test_repo_client::AzureStorageBlobTestRepoClient;
 
-use super::models::TestSourceDefinition;
+use super::models::{LocalTestDefinition, TestSourceDefinition};
 
 pub mod azure_storage_blob_test_repo_client;
 pub mod local_storage_test_repo_client;
@@ -34,11 +34,20 @@ impl TestRepoConfig {
             TestRepoConfig::LocalStorage { common_config, .. } => common_config.id.clone(),
         }
     }
+
+    pub fn get_local_tests(&self) -> Vec<LocalTestDefinition> {
+        match self {
+            TestRepoConfig::AzureStorageBlob { common_config, .. } => common_config.local_tests.clone(),
+            TestRepoConfig::LocalStorage { common_config, .. } => common_config.local_tests.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonTestRepoConfig {
     pub id: String,
+    #[serde(default)]
+    pub local_tests: Vec<LocalTestDefinition>
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

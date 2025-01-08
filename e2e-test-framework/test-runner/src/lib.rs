@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 
 use bootstrap_data_generators::BootstrapData;
 use source_change_generators::SourceChangeGeneratorCommandResponse;
-use test_data_store::{test_repo_storage::models::{SpacingMode, TestDefinition, TimeMode}, test_run_storage::TestRunSourceId, TestDataStore};
+use test_data_store::{test_repo_storage::models::{SpacingMode, TimeMode}, test_run_storage::TestRunSourceId, TestDataStore};
 
 pub mod bootstrap_data_generators;
 pub mod source_change_generators;
@@ -91,27 +91,12 @@ impl TestRunner {
             anyhow::bail!("TestRunner already contains TestRunSource with ID: {:?}", &id);
         }
 
-        let test_source_definition = match &test_run_config {
-            TestRunSourceConfig::Inline{ test_id, test_repo_id, test_source_definition, ..} => {
-                // Get the TestRepoStorage that is associated with the Inline TestRunSource
-                let repo = self.data_store.get_test_repo_storage(test_repo_id).await?;
+        // Get the TestRepoStorage that is associated with the Repo for the TestRunSource
+        let repo = self.data_store.get_test_repo_storage(&test_run_config.test_repo_id).await?;
+        repo.add_remote_test(&test_run_config.test_id, false).await?;
+        let test_source_definition = self.data_store.get_test_source_definition_for_test_run_source(&id).await?;
 
-                // Create a new TestDefinition from the TestRunSourceConfig and create a new local Test.
-                let test_def = TestDefinition::new_local_test(test_id, test_source_definition.clone());
-                repo.add_local_test(test_def, false).await?;
-
-                self.data_store.get_test_source_definition_for_test_run_source(&id).await?
-            },
-            TestRunSourceConfig::Repo {test_id, test_repo_id, ..} => {
-                // Get the TestRepoStorage that is associated with the Repo TestRunSource
-                let repo = self.data_store.get_test_repo_storage(test_repo_id).await?;
-
-                repo.add_remote_test(&test_id, false).await?;
-                self.data_store.get_test_source_definition_for_test_run_source(&id).await?
-            },
-        };
-
-        let definition = TestRunSourceDefinition::new(test_run_config, Some(test_source_definition))?;
+        let definition = TestRunSourceDefinition::new(test_run_config, test_source_definition)?;
         log::trace!("TestRunSourceDefinition: {:?}", &definition);
 
         // Get the INPUT Test Data storage for the TestRunSource.

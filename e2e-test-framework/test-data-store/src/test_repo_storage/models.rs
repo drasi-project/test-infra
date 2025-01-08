@@ -122,7 +122,19 @@ impl<'de> Deserialize<'de> for SpacingMode {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LocalTestDefinition {
+    pub test_id: String,
+    pub version: u32,
+    pub description: Option<String>,
+    pub test_folder: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<TestSourceDefinition>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TestDefinition {
+    #[serde(skip_deserializing)]
+    #[serde(default)]
     pub test_id: String,
     pub version: u32,
     pub description: Option<String>,
@@ -138,7 +150,7 @@ pub struct TestDefinition {
 }
 
 impl TestDefinition {
-    pub fn new_local_test(test_id: &str, source: TestSourceDefinition) -> Self {
+    pub fn new(test_id: &str, source: TestSourceDefinition) -> Self {
         Self {
             test_id: test_id.to_string(),
             version: 0,

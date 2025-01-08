@@ -4,7 +4,7 @@ use axum::{ extract::{Extension, Path}, response::IntoResponse, routing::get, Js
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use test_data_store::{test_repo_storage::{models::TestDefinition, repo_clients::TestRepoConfig, TestRepoStorage, TestSourceScriptSet, TestSourceStorage, TestStorage}, TestDataStore};
+use test_data_store::{test_repo_storage::{models::{LocalTestDefinition, TestDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestSourceScriptSet, TestSourceStorage, TestStorage}, TestDataStore};
 
 use super::TestServiceWebApiError;
 
@@ -32,7 +32,7 @@ pub enum TestPostBody {
     Local {
         #[serde(default)]
         replace: bool,
-        test_definition: TestDefinition,
+        test_definition: LocalTestDefinition,
     },
     Remote {
         test_id: String,

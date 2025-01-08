@@ -2,53 +2,50 @@ use std::{collections::HashSet, fmt};
 
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
-use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinition, QueryId, SourceChangeDispatcherDefinition, SourceChangeGeneratorDefinition, SpacingMode, TestSourceDefinition}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinition, QueryId, SourceChangeDispatcherDefinition, SourceChangeGeneratorDefinition, SpacingMode, TestSourceDefinition, TimeMode}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
 
 use crate::{bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator}, source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState}};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum TestRunSourceConfig {
-    Inline {
-        start_immediately: Option<bool>,    
-        test_id: String,
-        test_repo_id: String,
-        test_run_id: Option<String>,
-        #[serde(flatten)]
-        test_source_definition: TestSourceDefinition,
-    },
-    Repo {
-        start_immediately: Option<bool>,    
-        test_id: String,
-        test_repo_id: String,
-        test_run_id: Option<String>,
-        test_run_overrides: Option<TestSourceDefinition>,
-        test_source_id: String,
-    },
+pub struct TestRunSourceOverrides {
+    pub bootstrap_data_generator: Option<TestRunBootstrapDataGeneratorOverrides>,
+    pub source_change_dispatchers: Option<Vec<SourceChangeDispatcherDefinition>>,
+    pub source_change_generator: Option<TestRunSourceChangeGeneratorOverrides>,
+    pub subscribers: Option<Vec<QueryId>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TestRunBootstrapDataGeneratorOverrides {
+    #[serde(default)]
+    pub time_mode: Option<TimeMode>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TestRunSourceChangeGeneratorOverrides {
+    pub spacing_mode: Option<SpacingMode>,
+    pub time_mode: Option<TimeMode>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TestRunSourceConfig {
+    pub start_immediately: Option<bool>,    
+    pub test_id: String,
+    pub test_repo_id: String,
+    pub test_run_id: Option<String>,
+    pub test_run_overrides: Option<TestRunSourceOverrides>,
+    pub test_source_id: String,
 }
 
 impl TryFrom<&TestRunSourceConfig> for TestRunId {
     type Error = ParseTestRunIdError;
 
     fn try_from(value: &TestRunSourceConfig) -> Result<Self, Self::Error> {
-        match value {
-            TestRunSourceConfig::Inline { test_id, test_run_id, .. } => {
-                Ok(TestRunId::new(
-                    "local", 
-                    test_id, 
-                    test_run_id
-                        .as_deref()
-                        .unwrap_or(&chrono::Utc::now().format("%Y%m%d%H%M%S").to_string())))
-            },
-            TestRunSourceConfig::Repo { test_repo_id, test_id, test_run_id, .. } => {
-                Ok(TestRunId::new(
-                    test_repo_id, 
-                    test_id, 
-                    test_run_id
-                        .as_deref()
-                        .unwrap_or(&chrono::Utc::now().format("%Y%m%d%H%M%S").to_string())))
-            }
-        }
+        Ok(TestRunId::new(
+            &value.test_repo_id, 
+            &value.test_id, 
+            value.test_run_id
+                .as_deref()
+                .unwrap_or(&chrono::Utc::now().format("%Y%m%d%H%M%S").to_string())))
     }
 }
 
@@ -58,14 +55,7 @@ impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
     fn try_from(value: &TestRunSourceConfig) -> Result<Self, Self::Error> {
         match TestRunId::try_from(value) {
             Ok(test_run_id) => {
-                match value {
-                    TestRunSourceConfig::Inline { test_source_definition, .. } => {
-                        Ok(TestRunSourceId::new(&test_run_id, &test_source_definition.test_source_id))
-                    },
-                    TestRunSourceConfig::Repo { test_source_id, .. } => {
-                        Ok(TestRunSourceId::new(&test_run_id, test_source_id))
-                    }
-                }
+                Ok(TestRunSourceId::new(&test_run_id, &value.test_source_id))
             }
             Err(e) => return Err(ParseTestRunSourceIdError::InvalidValues(e.to_string())),
         }
@@ -74,14 +64,8 @@ impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
 
 impl fmt::Display for TestRunSourceConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            TestRunSourceConfig::Inline { test_id, test_run_id, test_source_definition, .. } => {
-                write!(f, "TestRunSourceDefinition: Inline: test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}", test_id, test_run_id, test_source_definition.test_source_id)
-            },
-            TestRunSourceConfig::Repo { test_repo_id, test_id, test_run_id, test_source_id, .. } => {
-                write!(f, "TestRunSourceDefinition: Repo: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}", test_repo_id, test_id, test_run_id, test_source_id)
-            }
-        }
+        write!(f, "TestRunSourceDefinition: Repo: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}", 
+            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id)
     }
 }
 
@@ -97,69 +81,53 @@ pub struct TestRunSourceDefinition {
 }
 
 impl TestRunSourceDefinition {
-    pub fn new( test_run_source_config: TestRunSourceConfig, test_source_definition: Option<TestSourceDefinition> ) -> anyhow::Result<Self> {
-        let id = TestRunSourceId::try_from(&test_run_source_config)?;
+    pub fn new( test_run_source_config: TestRunSourceConfig, test_source_definition: TestSourceDefinition) -> anyhow::Result<Self> {
+            
+        let mut def = Self {
+            bootstrap_data_generator_def: test_source_definition.bootstrap_data_generator_def.clone(),
+            id: TestRunSourceId::try_from(&test_run_source_config)?,
+            source_change_dispatcher_defs: test_source_definition.source_change_dispatcher_defs.clone(),
+            source_change_generator_def: test_source_definition.source_change_generator_def.clone(),
+            start_immediately: test_run_source_config.start_immediately.unwrap_or(false),
+            subscribers: test_source_definition.subscribers.clone(),
+        };
 
-        match (&test_run_source_config, test_source_definition) {
-            (TestRunSourceConfig::Inline { start_immediately, test_source_definition, .. }, _) => {
-                Ok(Self {
-                    bootstrap_data_generator_def: test_source_definition.bootstrap_data_generator_def.clone(),
-                    id,
-                    source_change_dispatcher_defs: test_source_definition.source_change_dispatcher_defs.clone(),
-                    source_change_generator_def: test_source_definition.source_change_generator_def.clone(),
-                    start_immediately: start_immediately.unwrap_or(false), 
-                    subscribers: test_source_definition.subscribers.clone(),
-                })
-            },
-            (TestRunSourceConfig::Repo { start_immediately, test_run_overrides, .. }, Some(test_source_definition)) => {
-
-                // If test_run_overrides is Some, use the values from test_run_overrides if they are available, 
-                // otherwise use the values from if they are available.
-                let bootstrap_data_generator_def = match test_run_overrides {
-                    Some(overrides) => match &overrides.bootstrap_data_generator_def {
-                        Some(definition) => Some(definition.clone()),
-                        None => test_source_definition.bootstrap_data_generator_def.clone(),
+        if let Some(overrides) = test_run_source_config.test_run_overrides {
+            if let Some(bdg_overrides) = overrides.bootstrap_data_generator {
+                match &mut def.bootstrap_data_generator_def {
+                    Some(BootstrapDataGeneratorDefinition::Script { common_config, .. }) => {
+                        if let Some(time_mode) = bdg_overrides.time_mode {
+                            common_config.time_mode = time_mode.clone();
+                        }
                     },
-                    None => test_source_definition.bootstrap_data_generator_def.clone(),
-                };
-
-                let source_change_generator_def = match test_run_overrides {
-                    Some(overrides) => match &overrides.source_change_generator_def {
-                        Some(definition) => Some(definition.clone()),
-                        None => test_source_definition.source_change_generator_def.clone(),
-                    },
-                    None => test_source_definition.source_change_generator_def.clone(),
-                };
-
-                let source_change_dispatchers_def = match test_run_overrides {
-                    Some(overrides) => match &overrides.source_change_dispatcher_defs.len() {
-                        0 => test_source_definition.source_change_dispatcher_defs.clone(),
-                        _ => overrides.source_change_dispatcher_defs.clone(),
-                    },
-                    None => test_source_definition.source_change_dispatcher_defs.clone(),
-                };
-
-                let subscribers = match test_run_overrides {
-                    Some(overrides) => match &overrides.subscribers.len() {
-                        0 => test_source_definition.subscribers.clone(),
-                        _ => overrides.subscribers.clone(),
-                    },
-                    None => test_source_definition.subscribers.clone(),
-                };
-
-                Ok(Self {
-                    bootstrap_data_generator_def,
-                    id,
-                    source_change_dispatcher_defs: source_change_dispatchers_def,
-                    source_change_generator_def,
-                    start_immediately: start_immediately.unwrap_or(false),
-                    subscribers,
-                })
-            },
-            (TestRunSourceConfig::Repo { .. }, None) => {
-                anyhow::bail!("Attempt to create TestRunSourceDefinition from repo without definition {:?}", test_run_source_config);
+                    None => {}
+                }
             }
-        }
+
+            if let Some(scg_overrides) = overrides.source_change_generator {
+                match &mut def.source_change_generator_def {
+                    Some(SourceChangeGeneratorDefinition::Script { common_config, .. }) => {
+                        if let Some(spacing_mode) = scg_overrides.spacing_mode {
+                            common_config.spacing_mode = spacing_mode.clone();
+                        }
+                        if let Some(time_mode) = scg_overrides.time_mode {
+                            common_config.time_mode = time_mode.clone();
+                        }
+                    },
+                    None => {}
+                }
+            }
+            
+            if let Some(dispatchers) = overrides.source_change_dispatchers {
+                def.source_change_dispatcher_defs = dispatchers;
+            }
+
+            if let Some(subscribers) = overrides.subscribers {
+                def.subscribers = subscribers;
+            }
+        };
+
+        Ok(def)
     }
 }
 

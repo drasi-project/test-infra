@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use models::TestDefinition;
+use models::{LocalTestDefinition, TestDefinition};
 use serde::Serialize;
 use tokio::fs;
 use walkdir::WalkDir;
@@ -37,7 +37,7 @@ impl TestRepoStore {
             test_repos: HashMap::new(),
         };
 
-        if !initial_repos.is_none() {
+        if initial_repos.is_some() {
             for repo in initial_repos.unwrap() {
                 store.add_test_repo(repo, false).await?;
             }    
@@ -61,11 +61,19 @@ impl TestRepoStore {
             self.test_repos.insert(id.clone(), repo_config.clone());
         }
 
-        Ok(TestRepoStorage {
+        let test_repo_storage = TestRepoStorage {
             id: id.to_string(),
             path: repo_path,
-            repo_config: repo_config,
-        })
+            repo_config,
+        };
+
+        // If the repo definition contains local tests, add them.
+        let local_tests = test_repo_storage.repo_config.get_local_tests();
+        for local_test in local_tests {
+            test_repo_storage.add_local_test(local_test, false).await?;
+        }
+
+        Ok(test_repo_storage)
     }
 
     pub async fn contains_test_repo(&self, id: &str) -> anyhow::Result<bool> {
@@ -109,7 +117,7 @@ pub struct TestRepoStorage {
 }
 
 impl TestRepoStorage {
-    pub async fn add_local_test(&self, test_def: TestDefinition, replace: bool) -> anyhow::Result<TestStorage> {
+    pub async fn add_local_test(&self, test_def: LocalTestDefinition, replace: bool) -> anyhow::Result<TestStorage> {
         log::debug!("Adding Local ((replace = {}) ) Test {:?}", replace, &test_def);
 
         let test_def_path = self.path.join(format!("{}.test.json", &test_def.test_id));

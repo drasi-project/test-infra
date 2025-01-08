@@ -5,7 +5,7 @@ use tempfile::TempDir;
 use test_run_storage::{TestRunId, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
-use test_repo_storage::{models::{TestDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage, TestStorage};
+use test_repo_storage::{models::{LocalTestDefinition, TestDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage, TestStorage};
 use tokio::sync::Mutex;
 
 pub mod data_collection_storage;
@@ -126,7 +126,7 @@ impl TestDataStore {
     }
 
     // Test Repo functions
-    pub async fn add_local_test(&self, repo_id: &str, test_def: TestDefinition, replace: bool) -> anyhow::Result<TestStorage> {
+    pub async fn add_local_test(&self, repo_id: &str, test_def: LocalTestDefinition, replace: bool) -> anyhow::Result<TestStorage> {
         self.test_repo_store.lock().await
             .get_test_repo_storage(repo_id).await?
             .add_local_test(test_def, replace).await
@@ -302,17 +302,17 @@ mod tests {
         let mut test_repos: Vec<TestRepoConfig> = Vec::new();
 
         test_repos.push(TestRepoConfig::LocalStorage { 
-            common_config: CommonTestRepoConfig { id: "test_repo_1".to_string() },
+            common_config: CommonTestRepoConfig { id: "test_repo_1".to_string(), local_tests: Vec::new() },
             unique_config: LocalStorageTestRepoConfig { source_path: None }
         });
 
         test_repos.push(TestRepoConfig::LocalStorage { 
-            common_config: CommonTestRepoConfig { id: "test_repo_2".to_string() },
+            common_config: CommonTestRepoConfig { id: "test_repo_2".to_string(), local_tests: Vec::new()  },
             unique_config: LocalStorageTestRepoConfig { source_path: Some("test_source_path".to_string()) }
         });
 
         test_repos.push(TestRepoConfig::AzureStorageBlob { 
-            common_config: CommonTestRepoConfig { id: "test_repo_3".to_string() },
+            common_config: CommonTestRepoConfig { id: "test_repo_3".to_string(), local_tests: Vec::new()  },
             unique_config: AzureStorageBlobTestRepoConfig {
                 account_name: "test_account_name".to_string(),
                 access_key: "test_access_key".to_string(),
@@ -399,17 +399,17 @@ mod tests {
         let mut test_repos: Vec<TestRepoConfig> = Vec::new();
 
         test_repos.push(TestRepoConfig::LocalStorage { 
-            common_config: CommonTestRepoConfig { id: "test_repo_1".to_string() },
+            common_config: CommonTestRepoConfig { id: "test_repo_1".to_string(), local_tests: Vec::new() },
             unique_config: LocalStorageTestRepoConfig { source_path: None }
         });
 
         test_repos.push(TestRepoConfig::LocalStorage { 
-            common_config: CommonTestRepoConfig { id: "test_repo_2".to_string() },
+            common_config: CommonTestRepoConfig { id: "test_repo_2".to_string(), local_tests: Vec::new() },
             unique_config: LocalStorageTestRepoConfig { source_path: Some("test_source_path".to_string()) }
         });
 
         test_repos.push(TestRepoConfig::AzureStorageBlob { 
-            common_config: CommonTestRepoConfig { id: "test_repo_3".to_string() },
+            common_config: CommonTestRepoConfig { id: "test_repo_3".to_string(), local_tests: Vec::new() },
             unique_config: AzureStorageBlobTestRepoConfig {
                 account_name: "test_account_name".to_string(),
                 access_key: "test_access_key".to_string(),

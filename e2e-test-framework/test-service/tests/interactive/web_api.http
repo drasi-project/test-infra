@@ -5,7 +5,7 @@
 @hostname = localhost
 @port = 63123
 @repo_id = local_dev_repo
-@test_id = population_example_to_file
+@test_id = population
 @test_run_id = test_run_001
 @source_id = geo-db
 

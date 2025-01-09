@@ -142,11 +142,9 @@ pub struct TestDefinition {
     #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
     #[serde(default)]
-    pub queries: Vec<QueryDefinition>,
+    pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
-    pub reactions: Vec<ReactionDefinition>,
-    #[serde(default)]
-    pub clients: Vec<ClientDefinition>,
+    pub reactions: Vec<TestReactionDefinition>,
 }
 
 impl TestDefinition {
@@ -158,8 +156,7 @@ impl TestDefinition {
             test_folder: None,
             sources: vec![source],
             queries: Vec::new(),
-            reactions: Vec::new(),
-            clients: Vec::new(),
+            reactions: Vec::new()
         }
     }
 
@@ -293,17 +290,15 @@ fn default_query_node_id() -> String { "default".to_string() }
 fn default_query_id() -> String { "test_query".to_string() }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct QueryDefinition {
+pub struct TestQueryDefinition {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ReactionDefinition {
+pub struct TestReactionDefinition {
+    pub test_reaction_id: String,
+    #[serde(default)]
+    pub queries: Vec<QueryId>,
 }
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ClientDefinition {
-}
-
 
 #[cfg(test)]
 mod tests {

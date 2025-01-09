@@ -1,5 +1,5 @@
 [package]
-name = "test-run-source"
+name = "test-run-host"
 version = "0.1.0"
 edition = "2021"
 

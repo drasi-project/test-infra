@@ -8,7 +8,7 @@ drasi-comms-abstractions = { path = "../infrastructure/comms-abstractions" }
 drasi-comms-dapr = { path = "../infrastructure/comms-dapr" }
 data-collector = { path = "../data-collector" }
 test-data-store = { path = "../test-data-store" }
-test-run-source = { path = "../test-run-source" }
+test-run-host = { path = "../test-run-host" }
 
 axum = "0.6.19"
 azure_core = "0.20.0"

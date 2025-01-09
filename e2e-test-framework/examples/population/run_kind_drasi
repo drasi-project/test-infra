@@ -22,7 +22,7 @@ sleep 5
 
 echo -e "${GREEN}\n\nAdding Test Repository and Test Source...${RESET}"
 curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/add_az_dev_repo.json http://localhost:63123/test_repos
-curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/add_population_test_source.json http://localhost:63123/test_runner/sources
+curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/add_population_test_source.json http://localhost:63123/test_run_host/sources
 
 echo -e "${GREEN}\n\nCreating Drasi Continuous Queries...${RESET}"
 drasi apply -f examples/population/kind_drasi/query.yaml

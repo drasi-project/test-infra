@@ -15,7 +15,7 @@ pub mod source_change_dispatchers;
 pub mod test_run_sources;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct TestRunnerConfig {
+pub struct TestRunHostConfig {
     #[serde(default)]
     pub sources: Vec<TestRunSourceConfig>,
     #[serde(default = "is_true")]
@@ -23,72 +23,72 @@ pub struct TestRunnerConfig {
 }
 fn is_true() -> bool { true }
 
-impl Default for TestRunnerConfig {
+impl Default for TestRunHostConfig {
     fn default() -> Self {
-        TestRunnerConfig {
+        TestRunHostConfig {
             sources: Vec::new(),
             start_immediately: false,
         }
     }
 }
 
-// An enum that represents the current state of the TestRunner.
+// An enum that represents the current state of the TestRunHost.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub enum TestRunnerStatus {
-    // The Test Runner is Initialized and is ready to start.
+pub enum TestRunHostStatus {
+    // The TestRunHost is Initialized and is ready to start.
     Initialized,
-    // The Test Runner has been started.
+    // The TestRunHost has been started.
     Running,
-    // The Test Runner is in an Error state. and will not be able to process requests.
+    // The TestRunHost is in an Error state. and will not be able to process requests.
     Error(String),
 }
 
 #[derive(Debug)]
-pub struct TestRunner {
+pub struct TestRunHost {
     data_store: Arc<TestDataStore>,
     sources: Arc<RwLock<HashMap<TestRunSourceId, TestRunSource>>>,
-    status: Arc<RwLock<TestRunnerStatus>>,
+    status: Arc<RwLock<TestRunHostStatus>>,
 }
 
-impl TestRunner {
-    pub async fn new(config: TestRunnerConfig, data_store: Arc<TestDataStore>) -> anyhow::Result<Self> {   
-        log::debug!("Creating TestRunner from {:?}", config);
+impl TestRunHost {
+    pub async fn new(config: TestRunHostConfig, data_store: Arc<TestDataStore>) -> anyhow::Result<Self> {   
+        log::debug!("Creating TestRunHost from {:?}", config);
 
-        let test_runner = TestRunner {
+        let test_run_host = TestRunHost {
             data_store,
             sources: Arc::new(RwLock::new(HashMap::new())),
-            status: Arc::new(RwLock::new(TestRunnerStatus::Initialized)),
+            status: Arc::new(RwLock::new(TestRunHostStatus::Initialized)),
         };
 
         // Add the initial set of Test Run Sources.
         for source_config in config.sources {
-            test_runner.add_test_source(source_config).await?;
+            test_run_host.add_test_source(source_config).await?;
         };
 
-        log::debug!("TestRunner created -  {:?}", &test_runner);
+        log::debug!("TestRunHost created -  {:?}", &test_run_host);
 
         if config.start_immediately {
-            test_runner.start().await?;
+            test_run_host.start().await?;
         }
 
-        Ok(test_runner)
+        Ok(test_run_host)
     }
     
     pub async fn add_test_source(&self, test_run_config: TestRunSourceConfig) -> anyhow::Result<TestRunSourceId> {
         log::trace!("Adding TestRunSource from {:?}", test_run_config);
 
-        // If the TestRunner is in an Error state, return an error.
-        if let TestRunnerStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunner is in an Error state: {}", msg);
+        // If the TestRunHost is in an Error state, return an error.
+        if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
+            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
         };
         
         let id = TestRunSourceId::try_from(&test_run_config)?;
 
         let mut sources_lock = self.sources.write().await;
 
-        // Fail if the TestRunner already contains a TestRunSource with the specified Id.
+        // Fail if the TestRunHost already contains a TestRunSource with the specified Id.
         if sources_lock.contains_key(&id) {
-            anyhow::bail!("TestRunner already contains TestRunSource with ID: {:?}", &id);
+            anyhow::bail!("TestRunHost already contains TestRunSource with ID: {:?}", &id);
         }
 
         // Get the TestRepoStorage that is associated with the Repo for the TestRunSource
@@ -107,11 +107,11 @@ impl TestRunner {
         // This is where the TestRunSource will write the output to.
         let output_storage = self.data_store.get_test_run_source_storage(&id).await?;
 
-        // Create the TestRunSource and add it to the TestRunner.
+        // Create the TestRunSource and add it to the TestRunHost.
         let test_run_source = TestRunSource::new(definition, input_storage, output_storage).await?;        
 
         let start_immediately = 
-            self.get_status().await? == TestRunnerStatus::Running && test_run_source.start_immediately;
+            self.get_status().await? == TestRunHostStatus::Running && test_run_source.start_immediately;
 
         sources_lock.insert(id.clone(), test_run_source);
         
@@ -142,7 +142,7 @@ impl TestRunner {
         Ok(bootstrap_data)
     }
 
-    pub async fn get_status(&self) -> anyhow::Result<TestRunnerStatus> {
+    pub async fn get_status(&self) -> anyhow::Result<TestRunHostStatus> {
         Ok(self.status.read().await.clone())
     }
 
@@ -162,7 +162,7 @@ impl TestRunner {
         Ok(self.sources.read().await.keys().map(|id| id.to_string()).collect())
     }
 
-    async fn set_status(&self, status: TestRunnerStatus) {
+    async fn set_status(&self, status: TestRunHostStatus) {
         let mut write_lock = self.status.write().await;
         *write_lock = status.clone();
     }
@@ -239,31 +239,31 @@ impl TestRunner {
         }
     }
 
-    pub async fn start(&self) -> anyhow::Result<TestRunnerStatus> {
+    pub async fn start(&self) -> anyhow::Result<TestRunHostStatus> {
 
         match &self.get_status().await? {
-            TestRunnerStatus::Initialized => {
-                log::info!("Starting TestRunner...");
+            TestRunHostStatus::Initialized => {
+                log::info!("Starting TestRunHost...");
             },
-            TestRunnerStatus::Running => {
-                let msg = format!("Test Runner is already been Running, cannot start.");
+            TestRunHostStatus::Running => {
+                let msg = format!("TestRunHost is already been Running, cannot start.");
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
             },
-            TestRunnerStatus::Error(_) => {
-                let msg = format!("Test Runner is in an Error state, cannot Start.");
+            TestRunHostStatus::Error(_) => {
+                let msg = format!("TestRunHost is in an Error state, cannot Start.");
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
             },
         };
 
-        // Set the TestRunnerStatus to Running.
-        log::info!("Test Runner started successfully !!!\n\n");            
-        self.set_status(TestRunnerStatus::Running).await;
+        // Set the TestRunHostStatus to Running.
+        log::info!("TestRunHost started successfully !!!\n\n");            
+        self.set_status(TestRunHostStatus::Running).await;
 
         // Iterate over the TestRunSources and start each one if it is configured to start immediately.
-        // If any of the TestSources fail to start, set the TestRunnerStatus to Error and return an error.
-        log::info!("Test Runner starting auto-start TestRunSources...");            
+        // If any of the TestSources fail to start, set the TestRunHostStatus to Error and return an error.
+        log::info!("TestRunHost starting auto-start TestRunSources...");            
         let mut auto_start_sources_count: u32 = 0;
 
         let sources_lock = self.sources.read().await;
@@ -276,14 +276,14 @@ impl TestRunner {
                         match response.result {
                             Ok(_) => { auto_start_sources_count += 1; },
                             Err(e) => {
-                                let error = TestRunnerStatus::Error(format!("Error starting TestRunSources: {}", e));
+                                let error = TestRunHostStatus::Error(format!("Error starting TestRunSources: {}", e));
                                 self.set_status(error.clone()).await;
                                 anyhow::bail!("{:?}", error);
                             }
                         }
                     },
                     Err(e) => {
-                        let error = TestRunnerStatus::Error(format!("Error starting TestRunSources: {}", e));
+                        let error = TestRunHostStatus::Error(format!("Error starting TestRunSources: {}", e));
                         self.set_status(error.clone()).await;
                         anyhow::bail!("{:?}", error);
                     }
@@ -291,8 +291,8 @@ impl TestRunner {
             }
         }
         
-        log::info!("Test Runner auto started {} of {} TestRunSources.", auto_start_sources_count, sources_lock.len());            
-        Ok(TestRunnerStatus::Running)
+        log::info!("TestRunHost auto started {} of {} TestRunSources.", auto_start_sources_count, sources_lock.len());            
+        Ok(TestRunHostStatus::Running)
     }
 }
 
@@ -302,17 +302,17 @@ mod tests {
 
     use test_data_store::TestDataStore;
 
-    use crate::{TestRunner, TestRunnerConfig, TestRunnerStatus};
+    use crate::{TestRunHost, TestRunHostConfig, TestRunHostStatus};
 
     #[tokio::test]
-    async fn test_new_testrunner() -> anyhow::Result<()> {
+    async fn test_new_test_run_host() -> anyhow::Result<()> {
 
         let data_store = Arc::new(TestDataStore::new_temp(None).await?);    
         
-        let test_runner_config = TestRunnerConfig::default();
-        let test_runner = TestRunner::new(test_runner_config, data_store.clone()).await.unwrap();
+        let test_run_host_config = TestRunHostConfig::default();
+        let test_run_host = TestRunHost::new(test_run_host_config, data_store.clone()).await.unwrap();
 
-        assert_eq!(test_runner.get_status().await?, TestRunnerStatus::Initialized);
+        assert_eq!(test_run_host.get_status().await?, TestRunHostStatus::Initialized);
 
         Ok(())
     }

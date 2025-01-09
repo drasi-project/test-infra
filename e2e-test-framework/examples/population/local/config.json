@@ -44,7 +44,7 @@
             }                    
         ]
     },
-    "test_runner": {
+    "test_run_host": {
         "sources": [
             {
                 "test_id": "population",

@@ -62,12 +62,12 @@ http://localhost:5000/test_repos/az_dev_repo
 Add the Test Run Source for geo-db:
 
 ```
-curl -i -X POST -H "Content-Type: application/json" -d @test-service/tests/interactive/city_populations/add_test_source.json http://localhost:5000/test_runner/sources
+curl -i -X POST -H "Content-Type: application/json" -d @test-service/tests/interactive/city_populations/add_test_source.json http://localhost:5000/test_run_host/sources
 ```
 
 View the Test Run Source for geo-db:
 
-http://localhost:5000/test_runner/sources/az_dev_repo.city_populations.test_run_001.geo-db
+http://localhost:5000/test_run_host/sources/az_dev_repo.city_populations.test_run_001.geo-db
 
 
 View bootstrap data:
@@ -123,17 +123,17 @@ http://localhost:9411
 Use commands in ```kind_city_populations.http``` or the following curl commands:
 
 ### Start
-curl -X POST -H "Content-Type: application/json" http://localhost:5000/test_runner/sources/az_dev_repo.city_populations.test_run_001.geo-db/start
+curl -X POST -H "Content-Type: application/json" http://localhost:5000/test_run_host/sources/az_dev_repo.city_populations.test_run_001.geo-db/start
 
 ### Pause
-curl -X POST -H "Content-Type: application/json" http://localhost:5000/test_runner/sources/az_dev_repo.city_populations.test_run_001.geo-db/pause
+curl -X POST -H "Content-Type: application/json" http://localhost:5000/test_run_host/sources/az_dev_repo.city_populations.test_run_001.geo-db/pause
 
 ### Step
-curl -X POST -H "Content-Type: application/json" -d '{ "num_steps": 1 }' http://localhost:5000/test_runner/sources/az_dev_repo.city_populations.test_run_001.geo-db/step
+curl -X POST -H "Content-Type: application/json" -d '{ "num_steps": 1 }' http://localhost:5000/test_run_host/sources/az_dev_repo.city_populations.test_run_001.geo-db/step
 
 
 ### Stop
-curl -X POST -H "Content-Type: application/json" http://localhost:5000/test_runner/sources/az_dev_repo.city_populations.test_run_001.geo-db/stop
+curl -X POST -H "Content-Type: application/json" http://localhost:5000/test_run_host/sources/az_dev_repo.city_populations.test_run_001.geo-db/stop
 
 
 ## Cleanup

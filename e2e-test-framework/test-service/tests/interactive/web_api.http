@@ -10,18 +10,18 @@
 @source_id = geo-db
 
 ### GET STATE of test run source
-GET http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}
+GET http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}
 
 ### START test run source
-POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/start
+POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/start
 Content-Type: application/json
 
 ### PAUSE test run source
-POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/pause
+POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/pause
 Content-Type: application/json
 
 ### STEP test run source
-POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/step
+POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/step
 Content-Type: application/json
 
 {
@@ -30,7 +30,7 @@ Content-Type: application/json
 }
 
 ### SKIP test run source
-POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/skip
+POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/skip
 Content-Type: application/json
 
 {
@@ -39,11 +39,11 @@ Content-Type: application/json
 }
 
 ### STOP test run source
-POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/stop
+POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/stop
 Content-Type: application/json
 
 ### RESET test run source
-POST http://{{hostname}}:{{port}}/test_runner/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/reset
+POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/reset
 Content-Type: application/json
 
 ### BOOTSTRAP Data

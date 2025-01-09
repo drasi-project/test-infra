@@ -10,9 +10,9 @@ use tokio::{select, signal};
 use acquire::post_acquire_handler;
 use data_collector::DataCollector;
 use repo::get_test_repo_routes;
-use runner::get_test_runner_routes;
+use runner::get_test_run_host_routes;
 use test_data_store::TestDataStore;
-use test_run_host::TestRunner;
+use test_run_host::TestRunHost;
 
 pub mod acquire;
 pub mod repo;
@@ -26,8 +26,8 @@ pub enum TestServiceWebApiError {
     NotFound(String, String),
     #[error("Error: {0}")]
     SerdeJsonError(serde_json::Error),
-    #[error("TestRunner is in an Error state: {0}")]
-    TestRunnerError(String),
+    #[error("TestRunHost is in an Error state: {0}")]
+    TestRunHostError(String),
 }
 
 impl From<anyhow::Error> for TestServiceWebApiError {
@@ -54,7 +54,7 @@ impl IntoResponse for TestServiceWebApiError {
             TestServiceWebApiError::SerdeJsonError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
             },
-            TestServiceWebApiError::TestRunnerError(msg) => {
+            TestServiceWebApiError::TestRunHostError(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
             },
         }
@@ -64,7 +64,7 @@ impl IntoResponse for TestServiceWebApiError {
 #[derive(Debug, Serialize)]
 struct TestServiceStateResponse {
     pub data_store: TestDataStoreStateResponse,
-    pub test_runner: TestRunnerStateResponse,
+    pub test_run_host: TestRunHostStateResponse,
     pub data_collector: DataCollectorStateResponse,
 }
 
@@ -75,7 +75,7 @@ struct TestDataStoreStateResponse {
 }
 
 #[derive(Debug, Serialize)]
-struct TestRunnerStateResponse {
+struct TestRunHostStateResponse {
     pub status: String,
     pub test_run_source_ids: Vec<String>,
 }
@@ -86,17 +86,17 @@ struct DataCollectorStateResponse {
     pub data_collection_ids: Vec<String>,
 }
 
-pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>, test_runner: Arc<TestRunner>, data_collector: Arc<DataCollector>) {
+pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>, test_run_host: Arc<TestRunHost>, data_collector: Arc<DataCollector>) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
     let app = Router::new()
         .route("/", get(get_service_info_handler))
         .route("/acquire", post(post_acquire_handler))
         .nest("/test_repos", get_test_repo_routes())
-        .nest("/test_runner", get_test_runner_routes())
+        .nest("/test_run_host", get_test_run_host_routes())
         .layer(axum::extract::Extension(data_collector))
         .layer(axum::extract::Extension(test_data_store))
-        .layer(axum::extract::Extension(test_runner));
+        .layer(axum::extract::Extension(test_run_host));
 
     println!("\n\nTest Service Web API listening on http://{}", addr);
 
@@ -149,7 +149,7 @@ async fn shutdown_signal() {
 async fn get_service_info_handler(
     data_collector: Extension<Arc<DataCollector>>,
     test_data_store: Extension<Arc<TestDataStore>>,
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - service_info");
 
@@ -158,9 +158,9 @@ async fn get_service_info_handler(
             path: test_data_store.get_data_store_path().await?.to_string_lossy().to_string(),
             test_repo_ids: test_data_store.get_test_repo_ids().await?,
         },
-        test_runner: TestRunnerStateResponse {
-            status: format!("{:?}", test_runner.get_status().await?),
-            test_run_source_ids: test_runner.get_test_source_ids().await?,
+        test_run_host: TestRunHostStateResponse {
+            status: format!("{:?}", test_run_host.get_status().await?),
+            test_run_source_ids: test_run_host.get_test_source_ids().await?,
         },
         data_collector: DataCollectorStateResponse {
             status: format!("{:?}", data_collector.get_status().await?),

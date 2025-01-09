@@ -2,17 +2,16 @@ use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
-use test_run_sources::{TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState};
 use tokio::sync::RwLock;
 
-use bootstrap_data_generators::BootstrapData;
-use source_change_generators::SourceChangeGeneratorCommandResponse;
-use test_data_store::{test_repo_storage::models::{SpacingMode, TimeMode}, test_run_storage::TestRunSourceId, TestDataStore};
+use test_data_store::{test_repo_storage::models::SpacingMode, test_run_storage::TestRunSourceId, TestDataStore};
+use sources::{
+    bootstrap_data_generators::BootstrapData, 
+    source_change_generators::SourceChangeGeneratorCommandResponse,
+    TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState,
+};
 
-pub mod bootstrap_data_generators;
-pub mod source_change_generators;
-pub mod source_change_dispatchers;
-pub mod test_run_sources;
+pub mod sources;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TestRunHostConfig {

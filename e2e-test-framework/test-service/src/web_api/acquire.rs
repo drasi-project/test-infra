@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize, Serializer };
 use serde_json::{json, Value};
 
 use test_data_store::scripts::{NodeRecord, RelationRecord};
-use test_run_host::{bootstrap_data_generators::BootstrapData, TestRunHost, TestRunHostStatus};
+use test_run_host::{sources::bootstrap_data_generators::BootstrapData, TestRunHost, TestRunHostStatus};
 
 use super::TestServiceWebApiError;
 

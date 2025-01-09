@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use test_data_store::test_repo_storage::models::SpacingMode;
-use test_run_host::{test_run_sources::TestRunSourceConfig, TestRunHost, TestRunHostStatus};
+use test_run_host::{sources::TestRunSourceConfig, TestRunHost, TestRunHostStatus};
 
 use super::TestServiceWebApiError;
 

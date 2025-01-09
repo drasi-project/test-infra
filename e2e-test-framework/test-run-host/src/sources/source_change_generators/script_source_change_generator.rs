@@ -12,7 +12,7 @@ use test_data_store::{
         change_script_file_reader::ChangeScriptReader, ChangeHeaderRecord, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent
     }, 
     test_repo_storage::{
-        models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode}, 
+        models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
         TestSourceStorage
     }, 
     test_run_storage::{
@@ -20,8 +20,7 @@ use test_data_store::{
     }
 };
 
-use crate::{source_change_dispatchers::create_source_change_dispatcher, TimeMode};
-use crate::source_change_dispatchers::SourceChangeDispatcher;
+use crate::sources::source_change_dispatchers::{create_source_change_dispatcher, SourceChangeDispatcher};
 
 use super::{SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStatus};
 

@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use derive_more::Debug;
@@ -45,6 +46,16 @@ pub enum TestRunHostStatus {
     Running,
     // The TestRunHost is in an Error state. and will not be able to process requests.
     Error(String),
+}
+
+impl fmt::Display for TestRunHostStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TestRunHostStatus::Initialized => write!(f, "Initialized"),
+            TestRunHostStatus::Running => write!(f, "Running"),
+            TestRunHostStatus::Error(msg) => write!(f, "Error: {}", msg),
+        }
+    }
 }
 
 #[derive(Debug)]

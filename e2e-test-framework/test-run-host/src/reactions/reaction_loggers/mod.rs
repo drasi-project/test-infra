@@ -1,11 +1,21 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
-use test_data_store::test_run_storage::{ReactionDataEvent, TestRunReactionStorage};
+use console_logger::{ConsoleReactionLogger, ConsoleTestRunReactionLoggerConfig};
+use jsonl_file_logger::{JsonlFileReactionLogger, JsonlFileTestRunReactionLoggerConfig};
+use test_data_store::test_run_storage::TestRunReactionStorage;
 
-use super::TestRunReactionLoggerConfig;
+use super::reaction_collector::ReactionOutputRecord;
 
 pub mod console_logger;
 pub mod jsonl_file_logger;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum TestRunReactionLoggerConfig {
+    Console(ConsoleTestRunReactionLoggerConfig),
+    JsonlFile(JsonlFileTestRunReactionLoggerConfig),
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReactionLoggerError {
@@ -25,7 +35,7 @@ impl std::fmt::Display for ReactionLoggerError {
 #[async_trait]
 pub trait ReactionLogger : Send + Sync {
     async fn close(&mut self) -> anyhow::Result<()>;
-    async fn log_reaction_data(&mut self, events: Vec<&ReactionDataEvent>) -> anyhow::Result<()>;
+    async fn log_reaction_record(&mut self, record: &ReactionOutputRecord) -> anyhow::Result<()>;
 }
 
 #[async_trait]
@@ -33,14 +43,14 @@ impl ReactionLogger for Box<dyn ReactionLogger + Send + Sync> {
     async fn close(&mut self) -> anyhow::Result<()> {
         (**self).close().await
     }
-    async fn log_reaction_data(&mut self, events: Vec<&ReactionDataEvent>) -> anyhow::Result<()> {
-        (**self).log_reaction_data(events).await
+    async fn log_reaction_record(&mut self, record: &ReactionOutputRecord) -> anyhow::Result<()> {
+        (**self).log_reaction_record(record).await
     }
 }
 
 pub async fn create_reaction_logger(def: &TestRunReactionLoggerConfig, output_storage: &TestRunReactionStorage) -> anyhow::Result<Box<dyn ReactionLogger + Send + Sync>> {
     match def {
-        TestRunReactionLoggerConfig::Console(def) => console_logger::ConsoleReactionLogger::new(def, output_storage),
-        TestRunReactionLoggerConfig::JsonlFile(def) => jsonl_file_logger::JsonlFileReactionLogger::new(def, output_storage).await,
+        TestRunReactionLoggerConfig::Console(def) => ConsoleReactionLogger::new(def, output_storage),
+        TestRunReactionLoggerConfig::JsonlFile(def) => JsonlFileReactionLogger::new(def, output_storage).await,
     }
 }

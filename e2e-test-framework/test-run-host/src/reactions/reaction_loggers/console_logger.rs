@@ -1,14 +1,19 @@
 use async_trait::async_trait;
 use chrono::prelude::*;
+use serde::{Deserialize, Serialize};
 
-use test_data_store::test_run_storage::{ReactionDataEvent, TestRunReactionStorage};
+use test_data_store::test_run_storage::TestRunReactionStorage;
 
-use crate::reactions::ConsoleTestRunReactionLoggerConfig;
+use crate::reactions::reaction_collector::ReactionOutputRecord;
 
 use super::ReactionLogger;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsoleTestRunReactionLoggerConfig {
+    pub date_time_format: Option<String>,
+}
 
+#[derive(Debug)]
 pub struct ConsoleReactionLoggerSettings {
     pub date_time_format: String,
 }
@@ -42,19 +47,11 @@ impl ReactionLogger for ConsoleReactionLogger {
         Ok(())
     }
 
-    async fn log_reaction_data(&mut self, events: Vec<&ReactionDataEvent>) -> anyhow::Result<()> {
-
-        log::trace!("Dispatch reaction data");
+    async fn log_reaction_record(&mut self, record: &ReactionOutputRecord) -> anyhow::Result<()> {
 
         let time = Local::now().format(&self.settings.date_time_format);
 
-        let event_list = events
-            .iter()
-            .map(|event| event.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        
-        println!("ConsoleReactionLogger - Time: {}, ReactionDataEvents: [{}]", time, event_list);
+        println!("ConsoleReactionLogger - Time: {}, ReactionOutputRecord: {}", time, record);
 
         Ok(())
     }

@@ -1,9 +1,10 @@
 use std::fmt;
 
 use derive_more::Debug;
-use reaction_observer::{ReactionObserver, ReactionObserverCommandResponse, ReactionObserverState};
 use serde::{Deserialize, Serialize};
 
+use reaction_loggers::TestRunReactionLoggerConfig;
+use reaction_observer::{ReactionObserver, ReactionObserverCommandResponse, ReactionObserverState};
 use test_data_store::{test_repo_storage::models::TestReactionDefinition, test_run_storage::{ParseTestRunIdError, ParseTestRunReactionIdError, TestRunId, TestRunReactionId, TestRunReactionStorage}};
 
 mod reaction_collector;
@@ -53,23 +54,6 @@ impl fmt::Display for TestRunReactionConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum TestRunReactionLoggerConfig {
-    Console(ConsoleTestRunReactionLoggerConfig),
-    JsonlFile(JsonlFileTestRunReactionLoggerConfig),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ConsoleTestRunReactionLoggerConfig {
-    pub date_time_format: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JsonlFileTestRunReactionLoggerConfig {
-    pub max_lines_per_file: Option<u64>,
-}
-
 #[derive(Clone, Debug)]
 pub struct TestRunReactionDefinition {
     pub id: TestRunReactionId,
@@ -105,10 +89,7 @@ pub struct TestRunReaction {
 }
 
 impl TestRunReaction {
-    pub async fn new(
-        definition: TestRunReactionDefinition,
-        output_storage: TestRunReactionStorage
-    ) -> anyhow::Result<Self> {
+    pub async fn new(definition: TestRunReactionDefinition, output_storage: TestRunReactionStorage) -> anyhow::Result<Self> {
 
         let reaction_observer = ReactionObserver::new(
             definition.id.clone(),
@@ -125,7 +106,6 @@ impl TestRunReaction {
     }
 
     pub async fn get_state(&self) -> anyhow::Result<TestRunReactionState> {
-
         Ok(TestRunReactionState {
             id: self.id.clone(),
             reaction_observer: self.get_reaction_observer_state().await?,

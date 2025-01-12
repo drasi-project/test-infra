@@ -50,7 +50,7 @@ pub enum ReactionCollectorMessage {
     Error(ReactionCollectorError),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ReactionOutputRecord {
     pub result_data: serde_json::Value,
     pub dequeue_time_ns: u64,
@@ -59,6 +59,22 @@ pub struct ReactionOutputRecord {
     pub seq: usize,
     pub traceid: String,
     pub traceparent: String,
+}
+
+impl std::fmt::Display for ReactionOutputRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+
+        match serde_json::to_string(self) {
+            Ok(json_data) => {
+                let json_data_unescaped = json_data
+                    .replace("\\\"", "\"") 
+                    .replace("\\'", "'"); 
+
+                write!(f, "{}", json_data_unescaped)
+            },
+            Err(e) => return write!(f, "Error serializing ReactionOutputRecord: {:?}. Error: {}", self, e),
+        }
+    }
 }
 
 #[async_trait]

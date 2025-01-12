@@ -131,9 +131,9 @@ pub struct ReactionObserverMessageResponse {
 pub struct ReactionObserver {
     settings: ReactionObserverSettings,
     #[serde(skip_serializing)]
-    script_processor_tx_channel: Sender<ReactionObserverMessage>,
+    observer_tx_channel: Sender<ReactionObserverMessage>,
     #[serde(skip_serializing)]
-    _script_processor_thread_handle: Arc<Mutex<JoinHandle<anyhow::Result<()>>>>,
+    _observer_thread_handle: Arc<Mutex<JoinHandle<anyhow::Result<()>>>>,
 }
 
 impl ReactionObserver {
@@ -146,13 +146,13 @@ impl ReactionObserver {
         let settings = ReactionObserverSettings::new(test_run_reaction_id, definition, output_storage.clone(), loggers).await?;
         log::debug!("Creating ScriptSourceChangeGenerator from {:?}", &settings);
 
-        let (script_processor_tx_channel, script_processor_rx_channel) = tokio::sync::mpsc::channel(100);
-        let script_processor_thread_handle = tokio::spawn(observer_thread(script_processor_rx_channel, settings.clone()));
+        let (observer_tx_channel, observer_rx_channel) = tokio::sync::mpsc::channel(100);
+        let observer_thread_handle = tokio::spawn(observer_thread(observer_rx_channel, settings.clone()));
 
         Ok(Self {
             settings,
-            script_processor_tx_channel,
-            _script_processor_thread_handle: Arc::new(Mutex::new(script_processor_thread_handle)),
+            observer_tx_channel,
+            _observer_thread_handle: Arc::new(Mutex::new(observer_thread_handle)),
         })
     }
 
@@ -167,20 +167,20 @@ impl ReactionObserver {
     async fn send_command(&self, command: ReactionObserverCommand) -> anyhow::Result<ReactionObserverCommandResponse> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        let r = self.script_processor_tx_channel.send(ReactionObserverMessage {
+        let r = self.observer_tx_channel.send(ReactionObserverMessage {
             command,
             response_tx: Some(response_tx),
         }).await;
 
         match r {
             Ok(_) => {
-                let player_response = response_rx.await?;
+                let observer_response = response_rx.await?;
 
                 Ok(ReactionObserverCommandResponse {
-                    result: player_response.result,
+                    result: observer_response.result,
                     state: super::ReactionObserverState {
-                        status: player_response.state.status,
-                        state: serde_json::to_value(player_response.state).unwrap(),
+                        status: observer_response.state.status,
+                        state: serde_json::to_value(observer_response.state).unwrap(),
                     },
                 })
             },
@@ -229,7 +229,7 @@ impl From<&mut ReactionObserverInternalState> for ReactionObserverExternalState 
 pub struct ReactionObserverInternalState {
     pub collector: Box<dyn ReactionCollector + Send + Sync>,
     pub collector_tx_channel: Sender<ReactionCollectorMessage>,
-    pub dispatchers: Vec<Box<dyn ReactionLogger + Send>>,
+    pub loggers: Vec<Box<dyn ReactionLogger + Send>>,
     pub error_messages: Vec<String>,
     pub message_seq_num: u64,
     pub next_event: Option<ReactionOutputRecord>,
@@ -243,16 +243,15 @@ impl ReactionObserverInternalState {
     async fn initialize(settings: ReactionObserverSettings) -> anyhow::Result<(Self, Receiver<ReactionCollectorMessage>)> {
         log::info!("Initializing ScriptSourceChangeGenerator using {:?}", settings);
     
-        // Create the change stream.
         let collector = create_reaction_collector(settings.id.clone(), settings.definition.clone()).await?;
         
-        // Create the dispatchers
-        let mut dispatchers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
-        for def in settings.loggers.iter() {
-            match create_reaction_logger(def, &settings.output_storage).await {
-                Ok(dispatcher) => dispatchers.push(dispatcher),
+        // Create the loggers
+        let mut loggers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
+        for logger_cfg in settings.loggers.iter() {
+            match create_reaction_logger(logger_cfg, &settings.output_storage).await {
+                Ok(logger) => loggers.push(logger),
                 Err(e) => {
-                    anyhow::bail!("Error creating ReactionDataDispatcher: {:?}; Error: {:?}", def, e);
+                    anyhow::bail!("Error creating ReactionLogger: {:?}; Error: {:?}", logger_cfg, e);
                 }
             }
         }
@@ -263,7 +262,7 @@ impl ReactionObserverInternalState {
         let state = Self {
             collector,
             collector_tx_channel,
-            dispatchers,
+            loggers,
             error_messages: Vec::new(),
             message_seq_num: 0,
             next_event: None,
@@ -275,15 +274,15 @@ impl ReactionObserverInternalState {
         Ok((state, collector_rx_channel))
     }
 
-    async fn close_dispatchers(&mut self) {
-        let dispatchers = &mut self.dispatchers;
+    async fn close_loggers(&mut self) {
+        let loggers = &mut self.loggers;
     
-        log::debug!("Closing dispatchers - #dispatchers:{}", dispatchers.len());
+        log::debug!("Closing loggers - #loggers:{}", loggers.len());
     
-        let futures: Vec<_> = dispatchers.iter_mut()
-            .map(|dispatcher| {
+        let futures: Vec<_> = loggers.iter_mut()
+            .map(|logger| {
                 async move {
-                    let _ = dispatcher.close().await;
+                    let _ = logger.close().await;
                 }
             })
             .collect();
@@ -293,27 +292,26 @@ impl ReactionObserverInternalState {
         let _ = join_all(futures).await;
     }
         
-    async fn dispatch_reaction_event(&mut self, _event: &ReactionOutputRecord) {
-        // let dispatchers = &mut self.dispatchers;
+    async fn log_reaction_output(&mut self, record: &ReactionOutputRecord) {
+        let loggers = &mut self.loggers;
 
-        // log::debug!("Dispatching SourceChangeEvents - #dispatchers:{}, #events:{}", dispatchers.len(), events.len());
+        log::debug!("Logging ReactionOutputRecord - #loggers:{}", loggers.len());
+        log::trace!("Logging ReactionOutputRecord: {:?}", record);
 
-        // let futures: Vec<_> = dispatchers.iter_mut()
-        //     .map(|dispatcher| {
-        //         let events = events.clone();
-        //         async move {
-        //             let _ = dispatcher.dispatch_reaction_data(events).await;
-        //         }
-        //     })
-        //     .collect();
+        let futures: Vec<_> = loggers.iter_mut()
+            .map(|logger| {
+                async move {
+                    let _ = logger.log_reaction_record(record).await;
+                }
+            })
+            .collect();
 
-        // // Wait for all of them to complete
-        // // TODO - Handle errors properly.
-        // let _ = join_all(futures).await;
+        // Wait for all of them to complete
+        // TODO - Handle errors properly.
+        let _ = join_all(futures).await;
     }
 
-    // Function to log the Player State at varying levels of detail.
-    fn log_state(&self, msg: &str) {
+    fn log_observer_state(&self, msg: &str) {
         match log::max_level() {
             log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, self),
             log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, self),
@@ -327,16 +325,16 @@ impl ReactionObserverInternalState {
         // Process the evmessageent.
         match message {
             ReactionCollectorMessage::Event(event) => {
-                self.stats.num_reaction_change_events += 1;
+                self.stats.num_reaction_records += 1;
     
                 // Dispatch the event to the dispatchers.
-                self.dispatch_reaction_event(&event).await;
+                self.log_reaction_output(&event).await;
     
                 // Increment the message sequence number.
                 self.message_seq_num += 1;
             },
             ReactionCollectorMessage::Error(error) => {
-                self.transition_to_error_state(&format!("Error in change stream: {:?}", error), None);
+                self.transition_to_error_state(&format!("Error in collector stream: {:?}", error), None);
             },
 
         };
@@ -345,7 +343,7 @@ impl ReactionObserverInternalState {
     }    
 
     async fn process_command_message(&mut self, message: ReactionObserverMessage) -> anyhow::Result<()> {
-        log::debug!("Received command message: {:?}", message.command);
+        log::debug!("Received observer command message: {:?}", message.command);
     
         if let ReactionObserverCommand::GetState = message.command {
             let message_response = ReactionObserverMessageResponse {
@@ -384,23 +382,19 @@ impl ReactionObserverInternalState {
     
     async fn reset(&mut self) -> anyhow::Result<()> {
 
-        // Create the new dispatchers
-        self.close_dispatchers().await;    
-        let mut dispatchers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
-        for def in self.settings.loggers.iter() {
-            match create_reaction_logger(def, &self.settings.output_storage).await {
-                Ok(dispatcher) => dispatchers.push(dispatcher),
+        // Create the new loggers
+        self.close_loggers().await;    
+        let mut loggers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
+        for logger_cfg in self.settings.loggers.iter() {
+            match create_reaction_logger(logger_cfg, &self.settings.output_storage).await {
+                Ok(logger) => loggers.push(logger),
                 Err(e) => {
-                    anyhow::bail!("Error creating ReactionDataDispatcher: {:?}; Error: {:?}", def, e);
+                    anyhow::bail!("Error creating ReactionLogger: {:?}; Error: {:?}", logger_cfg, e);
                 }
             }
         }    
-        // These fields do not get reset:
-        //   state.change_tx_channel
-        //   state.delayer_tx_channel
-        //   state.settings
-    
-        self.dispatchers = dispatchers;
+
+        self.loggers = loggers;
         self.error_messages = Vec::new();
         self.message_seq_num = 0;
         self.next_event = None;
@@ -499,7 +493,7 @@ impl ReactionObserverInternalState {
         self.status = ReactionObserverStatus::Stopped;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
 
-        self.close_dispatchers().await;
+        self.close_loggers().await;
         self.write_result_summary().await.ok();
     }
     
@@ -511,7 +505,7 @@ impl ReactionObserverInternalState {
             None => error_message.to_string(),
         };
     
-        self.log_state(&msg);
+        self.log_observer_state(&msg);
     
         self.error_messages.push(msg);
     }    
@@ -548,7 +542,7 @@ impl Debug for ReactionObserverInternalState {
 pub struct ReactionObserverStats {
     pub actual_start_time_ns: u64,
     pub actual_end_time_ns: u64,
-    pub num_reaction_change_events: u64,
+    pub num_reaction_records: u64,
 }
 
 impl Default for ReactionObserverStats {
@@ -556,7 +550,7 @@ impl Default for ReactionObserverStats {
         Self {
             actual_start_time_ns: 0,
             actual_end_time_ns: 0,
-            num_reaction_change_events: 0,
+            num_reaction_records: 0,
         }
     }
 }
@@ -586,10 +580,10 @@ impl From<&mut ReactionObserverInternalState> for ReactionObserverResultSummary 
             actual_end_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.actual_end_time_ns as i128).expect("Invalid timestamp")
                 .format(&format_description::well_known::Rfc3339).unwrap(),
             actual_end_time_ns: state.stats.actual_end_time_ns,
-            num_reaction_change_events: state.stats.num_reaction_change_events,
+            num_reaction_change_events: state.stats.num_reaction_records,
             run_duration_ns,
             run_duration_sec,
-            processing_rate: state.stats.num_reaction_change_events as f64 / run_duration_sec,
+            processing_rate: state.stats.num_reaction_records as f64 / run_duration_sec,
             test_run_reaction_id: state.settings.id.to_string(),
         }
     }
@@ -630,7 +624,7 @@ pub async fn observer_thread(mut command_rx_channel: Receiver<ReactionObserverMe
 
     // Loop to process commands sent to the ScriptSourceChangeGenerator or read from the Change Stream.
     loop {
-        state.log_state("Top of script processor loop");
+        state.log_observer_state("Top of script processor loop");
 
         tokio::select! {
             // Always process all messages in the command channel and act on them first.

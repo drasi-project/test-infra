@@ -2,14 +2,20 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File}, io::{AsyncWriteExt, BufWriter}};
 
-use test_data_store::test_run_storage::{ReactionDataEvent, TestRunReactionStorage};
+use test_data_store::test_run_storage::TestRunReactionStorage;
 
-use crate::reactions::JsonlFileTestRunReactionLoggerConfig;
+use crate::reactions::reaction_collector::ReactionOutputRecord;
 
 use super::{ReactionLogger, ReactionLoggerError};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonlFileTestRunReactionLoggerConfig {
+    pub max_lines_per_file: Option<u64>,
+}
 
 #[derive(Debug)]
 pub struct JsonlFileReactionLoggerSettings {
@@ -72,13 +78,8 @@ impl ReactionLogger for JsonlFileReactionLogger {
         self.writer.close().await
     }
     
-    async fn log_reaction_data(&mut self, events: Vec<&ReactionDataEvent>) -> anyhow::Result<()> {
-
-        log::trace!("Dispatch reaction data");
-
-        for event in events {
-            self.writer.write_reaction_data(event).await?;
-        }
+    async fn log_reaction_record(&mut self, record: &ReactionOutputRecord) -> anyhow::Result<()> {
+        self.writer.write_reaction_data(record).await?;
         Ok(())
     }
 }
@@ -116,7 +117,7 @@ impl ReactionDataEventLogWriter {
         Ok(writer)
     }
 
-    pub async fn write_reaction_data(&mut self, event: &ReactionDataEvent) -> anyhow::Result<()> {
+    pub async fn write_reaction_data(&mut self, event: &ReactionOutputRecord) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
             let json = format!("{}\n", to_string(event).map_err(|e| ReactionDataEventLogWriterError::FileWriteError(e.to_string()))?);
             writer.write_all(json.as_bytes()).await.map_err(|e| ReactionDataEventLogWriterError::FileWriteError(e.to_string()))?;

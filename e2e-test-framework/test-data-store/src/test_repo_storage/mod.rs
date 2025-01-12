@@ -117,35 +117,22 @@ pub struct TestRepoStorage {
 }
 
 impl TestRepoStorage {
-    pub async fn add_local_test(&self, test_def: LocalTestDefinition, replace: bool) -> anyhow::Result<TestStorage> {
-        log::debug!("Adding Local ((replace = {}) ) Test {:?}", replace, &test_def);
+    pub async fn add_local_test(&self, test_def: LocalTestDefinition, erase_data: bool) -> anyhow::Result<TestStorage> {
+        log::error!("Adding Local Test {:?}", &test_def.test_id);
+        log::debug!("Adding Local ((replace = {}) ) Test {:?}", erase_data, &test_def);
 
         let test_def_path = self.path.join(format!("{}.test.json", &test_def.test_id));
         let test_path = self.path.join(&test_def.test_id);
 
-        if replace {
-            if test_def_path.exists() {
-                fs::remove_file(&test_def_path).await?;
-            }
+        if erase_data && test_path.exists() {
+            fs::remove_dir_all(&test_path).await?;
+        } 
 
-            if test_path.exists() {
-                fs::remove_dir_all(&test_path).await?;
-            }
-        } else {
-            if test_def_path.exists() {
-                anyhow::bail!("Test with ID {:?} already exists", &test_def.test_id);
-            }
-        }
+        // Write the test definition to a file.
+        let json_content = serde_json::to_string_pretty(&test_def)?;
+        fs::write(test_def_path.clone(), json_content).await?;
 
-        if !test_def_path.exists() {
-            // Write the test definition to a file.
-            let json_content = serde_json::to_string_pretty(&test_def)?;
-            fs::write(test_def_path.clone(), json_content).await?;
-
-            self.get_test_storage(&test_def.test_id).await
-        } else {
-            self.get_test_storage(&test_def.test_id).await
-        }
+        self.get_test_storage(&test_def.test_id).await
     }
 
     pub async fn add_remote_test(&self, id: &str, replace: bool) -> anyhow::Result<TestStorage> {

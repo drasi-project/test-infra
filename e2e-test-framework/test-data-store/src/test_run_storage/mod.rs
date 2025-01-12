@@ -1,6 +1,6 @@
 use std::{fmt, path::PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::fs;
 
@@ -155,6 +155,44 @@ impl TryFrom<&str> for TestRunReactionId {
             })
         } else {
             Err(ParseTestRunReactionIdError::InvalidFormat(value.to_string()))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReactionDataEvent {
+    pub op: String,
+    pub ts_ms: u64,
+}
+
+impl TryFrom<&str> for ReactionDataEvent {
+    type Error = serde_json::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        serde_json::from_str(value)
+    }
+}
+
+impl TryFrom<&String> for ReactionDataEvent {
+    type Error = serde_json::Error;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        serde_json::from_str(value)
+    }
+}
+
+impl std::fmt::Display for ReactionDataEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+
+        match serde_json::to_string(self) {
+            Ok(json_data) => {
+                let json_data_unescaped = json_data
+                    .replace("\\\"", "\"") 
+                    .replace("\\'", "'"); 
+
+                write!(f, "{}", json_data_unescaped)
+            },
+            Err(e) => return write!(f, "Error serializing ReactionDataEvent: {:?}. Error: {}", self, e),
         }
     }
 }
@@ -330,4 +368,12 @@ pub struct TestRunReactionStorage {
     pub id: TestRunReactionId,
     pub path: PathBuf,
     pub result_change_path: PathBuf,
+}
+
+impl TestRunReactionStorage {
+    pub async fn write_result_summary(&self, summary: &Value) -> anyhow::Result<()> {
+        let summary_path = self.path.join("result_summary.json");
+        fs::write(summary_path, serde_json::to_string_pretty(summary)?).await?;
+        Ok(())
+    }
 }

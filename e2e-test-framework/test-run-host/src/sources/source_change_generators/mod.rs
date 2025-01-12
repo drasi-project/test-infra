@@ -55,23 +55,21 @@ pub enum SourceChangeGeneratorStatus {
 }
 
 impl SourceChangeGeneratorStatus {
-    pub fn is_processing(&self) -> bool {
-        match self {
-            SourceChangeGeneratorStatus::Running => true,
-            SourceChangeGeneratorStatus::Skipping => true,
-            SourceChangeGeneratorStatus::Stepping => true,
-            _ => false,
-        }
-    }
-}
-
-impl SourceChangeGeneratorStatus {
     pub fn is_active(&self) -> bool {
         match self {
             SourceChangeGeneratorStatus::Running => true,
             SourceChangeGeneratorStatus::Skipping => true,
             SourceChangeGeneratorStatus::Stepping => true,
             SourceChangeGeneratorStatus::Paused => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_processing(&self) -> bool {
+        match self {
+            SourceChangeGeneratorStatus::Running => true,
+            SourceChangeGeneratorStatus::Skipping => true,
+            SourceChangeGeneratorStatus::Stepping => true,
             _ => false,
         }
     }

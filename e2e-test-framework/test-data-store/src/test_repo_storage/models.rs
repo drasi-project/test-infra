@@ -129,6 +129,10 @@ pub struct LocalTestDefinition {
     pub test_folder: Option<String>,
     #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
+    #[serde(default)]
+    pub queries: Vec<TestQueryDefinition>,
+    #[serde(default)]
+    pub reactions: Vec<TestReactionDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -255,6 +259,76 @@ pub struct JsonlFileSourceChangeDispatcherDefinition {
     pub max_events_per_file: Option<u64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum TestReactionDefinition {
+    DaprResultQueue {
+        #[serde(flatten)]
+        common_def: CommonTestReactionDefinition,
+        #[serde(flatten)]
+        unique_def: DaprResultQueueTestReactionDefinition,
+    },
+    RedisResultQueue {
+        #[serde(flatten)]
+        common_def: CommonTestReactionDefinition,
+        #[serde(flatten)]
+        unique_def: RedisResultQueueTestReactionDefinition,
+    },
+}
+
+impl TestReactionDefinition {
+    pub fn get_id(&self) -> String {
+        match self {
+            TestReactionDefinition::DaprResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
+            TestReactionDefinition::RedisResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
+        }
+    }
+
+    pub fn get_dispatchers(&self) -> Vec<TestReactionDispatcherDefinition> {
+        match self {
+            TestReactionDefinition::DaprResultQueue { common_def, .. } => common_def.dispatcher_defs.clone(),
+            TestReactionDefinition::RedisResultQueue { common_def, .. } => common_def.dispatcher_defs.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommonTestReactionDefinition {
+    #[serde(default, alias = "dispatchers")]
+    pub dispatcher_defs: Vec<TestReactionDispatcherDefinition>,
+    #[serde(default)]
+    pub queries: Vec<QueryId>,
+    pub test_reaction_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaprResultQueueTestReactionDefinition {
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RedisResultQueueTestReactionDefinition {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub queue_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum TestReactionDispatcherDefinition {
+    Console(ConsoleTestReactionDispatcherDefinition),
+    JsonlFile(JsonlFileTestReactionDispatcherDefinition),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsoleTestReactionDispatcherDefinition {
+    pub date_time_format: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonlFileTestReactionDispatcherDefinition {
+    pub max_lines_per_file: Option<u64>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ParseQueryIdError {
     #[error("Invalid format for QueryId - {0}")]
@@ -291,13 +365,6 @@ fn default_query_id() -> String { "test_query".to_string() }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TestQueryDefinition {
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestReactionDefinition {
-    pub test_reaction_id: String,
-    #[serde(default)]
-    pub queries: Vec<QueryId>,
 }
 
 #[cfg(test)]

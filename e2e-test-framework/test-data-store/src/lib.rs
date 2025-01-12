@@ -2,11 +2,11 @@ use std::{path::PathBuf, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
-use test_run_storage::{TestRunId, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
+use tokio::sync::Mutex;
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
-use test_repo_storage::{models::{LocalTestDefinition, TestDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage, TestStorage};
-use tokio::sync::Mutex;
+use test_repo_storage::{models::{LocalTestDefinition, TestDefinition, TestReactionDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage, TestStorage};
+use test_run_storage::{TestRunId, TestRunReactionId, TestRunReactionStorage, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
 
 pub mod data_collection_storage;
 pub mod scripts;
@@ -193,11 +193,35 @@ impl TestDataStore {
         Ok(self.test_run_store.lock().await.contains_test_run(id).await?)
     }
 
+    pub async fn get_test_definition_for_test_run_reaction(&self, test_run_reaction_id: &TestRunReactionId) -> anyhow::Result<TestDefinition> {
+        self.get_test_definition(
+            &test_run_reaction_id.test_run_id.test_repo_id, 
+            &test_run_reaction_id.test_run_id.test_id
+        ).await
+    }
+
     pub async fn get_test_definition_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestDefinition> {
         self.get_test_definition(
             &test_run_source_id.test_run_id.test_repo_id, 
             &test_run_source_id.test_run_id.test_id
         ).await
+    }
+
+    pub async fn get_test_reaction_definition_for_test_run_reaction(&self, test_run_reaction_id: &TestRunReactionId) -> anyhow::Result<TestReactionDefinition> {
+        let test_definition = self.get_test_definition(
+            &test_run_reaction_id.test_run_id.test_repo_id, 
+            &test_run_reaction_id.test_run_id.test_id
+        ).await?;
+
+        match test_definition.reactions.iter().find(
+            |reaction| match reaction {
+                TestReactionDefinition::RedisResultQueue {common_def, ..} => common_def.test_reaction_id == test_run_reaction_id.test_reaction_id,
+                TestReactionDefinition::DaprResultQueue {common_def, ..} => common_def.test_reaction_id == test_run_reaction_id.test_reaction_id,
+            })
+        {
+            Some(reaaction_definition) => Ok(reaaction_definition.clone()),
+            None => anyhow::bail!("TestReactionDefinition not found for TestRunSourceId: {:?}", &test_run_reaction_id)
+        }
     }
 
     pub async fn get_test_source_definition_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceDefinition> {
@@ -209,7 +233,7 @@ impl TestDataStore {
         match test_definition.sources.iter().find(|source| source.test_source_id == test_run_source_id.test_source_id)
         {
             Some(source_definition) => Ok(source_definition.clone()),
-            None => anyhow::bail!("SourceDefinition not found for TestRunSourceId: {:?}", &test_run_source_id)
+            None => anyhow::bail!("TestSourceDefinition not found for TestRunSourceId: {:?}", &test_run_source_id)
         }
     }
 
@@ -235,6 +259,12 @@ impl TestDataStore {
 
     pub async fn get_test_run_storage(&self, test_run_id: &TestRunId) -> anyhow::Result<TestRunStorage> {
         Ok(self.test_run_store.lock().await.get_test_run_storage(test_run_id, false).await?)
+    }
+
+    pub async fn get_test_run_reaction_storage(&self, test_run_reaction_id: &TestRunReactionId) -> anyhow::Result<TestRunReactionStorage> {
+        Ok(self.test_run_store.lock().await
+            .get_test_run_storage(&test_run_reaction_id.test_run_id, false).await?
+            .get_reaction_storage(test_run_reaction_id, false).await?)
     }
 
     pub async fn get_test_run_source_storage(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestRunSourceStorage> {

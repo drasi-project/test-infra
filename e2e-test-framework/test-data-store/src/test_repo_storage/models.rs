@@ -283,19 +283,10 @@ impl TestReactionDefinition {
             TestReactionDefinition::RedisResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
         }
     }
-
-    pub fn get_dispatchers(&self) -> Vec<TestReactionDispatcherDefinition> {
-        match self {
-            TestReactionDefinition::DaprResultQueue { common_def, .. } => common_def.dispatcher_defs.clone(),
-            TestReactionDefinition::RedisResultQueue { common_def, .. } => common_def.dispatcher_defs.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonTestReactionDefinition {
-    #[serde(default, alias = "dispatchers")]
-    pub dispatcher_defs: Vec<TestReactionDispatcherDefinition>,
     #[serde(default)]
     pub queries: Vec<QueryId>,
     pub test_reaction_id: String,
@@ -310,23 +301,6 @@ pub struct RedisResultQueueTestReactionDefinition {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub queue_name: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum TestReactionDispatcherDefinition {
-    Console(ConsoleTestReactionDispatcherDefinition),
-    JsonlFile(JsonlFileTestReactionDispatcherDefinition),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ConsoleTestReactionDispatcherDefinition {
-    pub date_time_format: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JsonlFileTestReactionDispatcherDefinition {
-    pub max_lines_per_file: Option<u64>,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -77,6 +77,7 @@ struct TestDataStoreStateResponse {
 #[derive(Debug, Serialize)]
 struct TestRunHostStateResponse {
     pub status: String,
+    pub test_run_reaction_ids: Vec<String>,
     pub test_run_source_ids: Vec<String>,
 }
 
@@ -159,11 +160,12 @@ async fn get_service_info_handler(
             test_repo_ids: test_data_store.get_test_repo_ids().await?,
         },
         test_run_host: TestRunHostStateResponse {
-            status: format!("{:?}", test_run_host.get_status().await?),
+            status: test_run_host.get_status().await?.to_string(),
+            test_run_reaction_ids: test_run_host.get_test_reaction_ids().await?,
             test_run_source_ids: test_run_host.get_test_source_ids().await?,
         },
         data_collector: DataCollectorStateResponse {
-            status: format!("{:?}", data_collector.get_status().await?),
+            status: data_collector.get_status().await?.to_string(),
             data_collection_ids: data_collector.get_data_collection_ids().await?,
         },
     }))

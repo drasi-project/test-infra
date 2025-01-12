@@ -6,13 +6,13 @@ use time::{OffsetDateTime, format_description};
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle};
 
 use test_data_store::{
-    test_repo_storage::models::{TestReactionDefinition, TestReactionDispatcherDefinition}, 
+    test_repo_storage::models::TestReactionDefinition, 
     test_run_storage::{TestRunReactionId, TestRunReactionStorage}
 };
 
 use crate::reactions::reaction_collector::create_reaction_collector;
 
-use super::{reaction_collector::{ReactionCollector, ReactionOutputRecord, ReactionCollectorMessage}, reaction_dispatchers::{create_reaction_data_dispatcher, ReactionDataDispatcher}};
+use super::{reaction_collector::{ReactionCollector, ReactionCollectorMessage, ReactionOutputRecord}, reaction_loggers::{create_reaction_logger, ReactionLogger}, TestRunReactionLoggerConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ReactionObserverStatus {
@@ -80,8 +80,8 @@ pub struct ReactionObserverState {
 #[derive(Clone, Debug, Serialize)]
 pub struct ReactionObserverSettings {
     pub definition: TestReactionDefinition,
-    pub dispatchers: Vec<TestReactionDispatcherDefinition>,
     pub id: TestRunReactionId,
+    pub loggers: Vec<TestRunReactionLoggerConfig>,
     pub output_storage: TestRunReactionStorage,
 }
 
@@ -90,13 +90,13 @@ impl ReactionObserverSettings {
         test_run_reaction_id: TestRunReactionId, 
         definition: TestReactionDefinition, 
         output_storage: TestRunReactionStorage,
-        dispatchers: Vec<TestReactionDispatcherDefinition>,
+        loggers: Vec<TestRunReactionLoggerConfig>,
     ) -> anyhow::Result<Self> {
 
         Ok(ReactionObserverSettings {
             definition,
-            dispatchers,
             id: test_run_reaction_id,
+            loggers,
             output_storage,
         })
     }
@@ -141,9 +141,9 @@ impl ReactionObserver {
         test_run_reaction_id: TestRunReactionId, 
         definition: TestReactionDefinition, 
         output_storage: TestRunReactionStorage,
-        dispatchers: Vec<TestReactionDispatcherDefinition>,
+        loggers: Vec<TestRunReactionLoggerConfig>,
     ) -> anyhow::Result<Self> {
-        let settings = ReactionObserverSettings::new(test_run_reaction_id, definition, output_storage.clone(), dispatchers).await?;
+        let settings = ReactionObserverSettings::new(test_run_reaction_id, definition, output_storage.clone(), loggers).await?;
         log::debug!("Creating ScriptSourceChangeGenerator from {:?}", &settings);
 
         let (script_processor_tx_channel, script_processor_rx_channel) = tokio::sync::mpsc::channel(100);
@@ -229,7 +229,7 @@ impl From<&mut ReactionObserverInternalState> for ReactionObserverExternalState 
 pub struct ReactionObserverInternalState {
     pub collector: Box<dyn ReactionCollector + Send + Sync>,
     pub collector_tx_channel: Sender<ReactionCollectorMessage>,
-    pub dispatchers: Vec<Box<dyn ReactionDataDispatcher + Send>>,
+    pub dispatchers: Vec<Box<dyn ReactionLogger + Send>>,
     pub error_messages: Vec<String>,
     pub message_seq_num: u64,
     pub next_event: Option<ReactionOutputRecord>,
@@ -247,9 +247,9 @@ impl ReactionObserverInternalState {
         let collector = create_reaction_collector(settings.id.clone(), settings.definition.clone()).await?;
         
         // Create the dispatchers
-        let mut dispatchers: Vec<Box<dyn ReactionDataDispatcher + Send>> = Vec::new();
-        for def in settings.dispatchers.iter() {
-            match create_reaction_data_dispatcher(def, &settings.output_storage).await {
+        let mut dispatchers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
+        for def in settings.loggers.iter() {
+            match create_reaction_logger(def, &settings.output_storage).await {
                 Ok(dispatcher) => dispatchers.push(dispatcher),
                 Err(e) => {
                     anyhow::bail!("Error creating ReactionDataDispatcher: {:?}; Error: {:?}", def, e);
@@ -386,9 +386,9 @@ impl ReactionObserverInternalState {
 
         // Create the new dispatchers
         self.close_dispatchers().await;    
-        let mut dispatchers: Vec<Box<dyn ReactionDataDispatcher + Send>> = Vec::new();
-        for def in self.settings.dispatchers.iter() {
-            match create_reaction_data_dispatcher(def, &self.settings.output_storage).await {
+        let mut dispatchers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
+        for def in self.settings.loggers.iter() {
+            match create_reaction_logger(def, &self.settings.output_storage).await {
                 Ok(dispatcher) => dispatchers.push(dispatcher),
                 Err(e) => {
                     anyhow::bail!("Error creating ReactionDataDispatcher: {:?}; Error: {:?}", def, e);

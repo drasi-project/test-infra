@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use test_data_store::{test_repo_storage::models::TestReactionDefinition, test_run_storage::{ParseTestRunIdError, ParseTestRunReactionIdError, TestRunId, TestRunReactionId, TestRunReactionStorage}};
 
 mod reaction_collector;
-mod reaction_dispatchers;
+mod reaction_loggers;
 pub mod reaction_observer;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -17,6 +17,7 @@ pub struct TestRunReactionConfig {
     pub test_repo_id: String,
     pub test_run_id: Option<String>,
     pub test_reaction_id: String,
+    pub loggers: Vec<TestRunReactionLoggerConfig>,
 }
 
 impl TryFrom<&TestRunReactionConfig> for TestRunId {
@@ -47,14 +48,32 @@ impl TryFrom<&TestRunReactionConfig> for TestRunReactionId {
 
 impl fmt::Display for TestRunReactionConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TestRunSourceDefinition: Repo: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_reaction_id: {:?}", 
+        write!(f, "TestRunReactionDefinition: Repo: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_reaction_id: {:?}", 
             self.test_repo_id, self.test_id, self.test_run_id, self.test_reaction_id)
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum TestRunReactionLoggerConfig {
+    Console(ConsoleTestRunReactionLoggerConfig),
+    JsonlFile(JsonlFileTestRunReactionLoggerConfig),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConsoleTestRunReactionLoggerConfig {
+    pub date_time_format: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonlFileTestRunReactionLoggerConfig {
+    pub max_lines_per_file: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TestRunReactionDefinition {
     pub id: TestRunReactionId,
+    pub loggers: Vec<TestRunReactionLoggerConfig>,
     pub start_immediately: bool,    
     pub test_reaction_definition: TestReactionDefinition,
 }
@@ -63,6 +82,7 @@ impl TestRunReactionDefinition {
     pub fn new( test_run_reaction_config: TestRunReactionConfig, test_reaction_definition: TestReactionDefinition) -> anyhow::Result<Self> {
         Ok(Self {
             id: TestRunReactionId::try_from(&test_run_reaction_config)?,
+            loggers: test_run_reaction_config.loggers,
             start_immediately: test_run_reaction_config.start_immediately.unwrap_or(false),
             test_reaction_definition,
         })
@@ -76,21 +96,26 @@ pub struct TestRunReactionState {
     pub start_immediately: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug)]
 pub struct TestRunReaction {
-    #[debug(skip)]
     pub id: TestRunReactionId,
-    pub reaction_observer: Option<ReactionObserver>,
+    #[debug(skip)]
+    pub reaction_observer: ReactionObserver,
     pub start_immediately: bool,
 }
 
 impl TestRunReaction {
     pub async fn new(
         definition: TestRunReactionDefinition,
-        _output_storage: TestRunReactionStorage
+        output_storage: TestRunReactionStorage
     ) -> anyhow::Result<Self> {
 
-        let reaction_observer = None;
+        let reaction_observer = ReactionObserver::new(
+            definition.id.clone(),
+            definition.test_reaction_definition.clone(), 
+            output_storage,
+            definition.loggers
+        ).await?;
 
         Ok(Self { 
             id: definition.id.clone(),
@@ -109,62 +134,22 @@ impl TestRunReaction {
     }
 
     pub async fn get_reaction_observer_state(&self) -> anyhow::Result<ReactionObserverState> {
-        match &self.reaction_observer {
-            Some(observer) => {
-                let response = observer.get_state().await?;
-                Ok(response.state)
-            },
-            None => {
-                anyhow::bail!("SourceChangeobserver not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
+        Ok(self.reaction_observer.get_state().await?.state)
     }
 
     pub async fn pause_reaction_observer(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        match &self.reaction_observer {
-            Some(observer) => {
-                let response = observer.pause().await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeobserver not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
+        Ok(self.reaction_observer.pause().await?)
     }
 
     pub async fn reset_reaction_observer(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        match &self.reaction_observer {
-            Some(observer) => {
-                let response = observer.reset().await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeobserver not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
+        Ok(self.reaction_observer.reset().await?)
     }    
 
     pub async fn start_reaction_observer(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        match &self.reaction_observer {
-            Some(observer) => {
-                let response = observer.start().await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeobserver not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
+        Ok(self.reaction_observer.start().await?)
     }
 
     pub async fn stop_reaction_observer(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        match &self.reaction_observer {
-            Some(observer) => {
-                let response = observer.stop().await?;
-                Ok(response)
-            },
-            None => {
-                anyhow::bail!("SourceChangeobserver not configured for TestRunSource: {:?}", &self.id);
-            }
-        }
+        Ok(self.reaction_observer.stop().await?)
     }
 }

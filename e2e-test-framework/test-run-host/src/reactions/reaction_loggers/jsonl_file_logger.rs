@@ -5,18 +5,20 @@ use chrono::Utc;
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File}, io::{AsyncWriteExt, BufWriter}};
 
-use test_data_store::{test_repo_storage::models::JsonlFileTestReactionDispatcherDefinition, test_run_storage::{ReactionDataEvent, TestRunReactionStorage}};
+use test_data_store::test_run_storage::{ReactionDataEvent, TestRunReactionStorage};
 
-use super::{ReactionDataDispatcher, ReactionDataDispatcherError};
+use crate::reactions::JsonlFileTestRunReactionLoggerConfig;
+
+use super::{ReactionLogger, ReactionLoggerError};
 
 #[derive(Debug)]
-pub struct JsonlFileReactionDataDispatcherSettings {
+pub struct JsonlFileReactionLoggerSettings {
     pub folder_path: PathBuf,
     pub max_events_per_file: u64,
 }
 
-impl JsonlFileReactionDataDispatcherSettings {
-    pub fn new(config: &JsonlFileTestReactionDispatcherDefinition, folder_path: PathBuf) -> anyhow::Result<Self> {
+impl JsonlFileReactionLoggerSettings {
+    pub fn new(config: &JsonlFileTestRunReactionLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
         return Ok(Self {
             folder_path,
             max_events_per_file: config.max_lines_per_file.unwrap_or(10000),
@@ -24,26 +26,26 @@ impl JsonlFileReactionDataDispatcherSettings {
     }
 }
 
-pub struct JsonlFileReactionDataDispatcher {
+pub struct JsonlFileReactionLogger {
     #[allow(dead_code)]
-    settings: JsonlFileReactionDataDispatcherSettings,
+    settings: JsonlFileReactionLoggerSettings,
     writer: ReactionDataEventLogWriter,
 }
 
-impl JsonlFileReactionDataDispatcher {
-    pub async fn new(def:&JsonlFileTestReactionDispatcherDefinition, output_storage: &TestRunReactionStorage) -> anyhow::Result<Box<dyn ReactionDataDispatcher + Send + Sync>> {
-        log::debug!("Creating JsonlFileReactionDataDispatcher from {:?}, ", def);
+impl JsonlFileReactionLogger {
+    pub async fn new(def:&JsonlFileTestRunReactionLoggerConfig, output_storage: &TestRunReactionStorage) -> anyhow::Result<Box<dyn ReactionLogger + Send + Sync>> {
+        log::debug!("Creating JsonlFileReactionLogger from {:?}, ", def);
 
         let folder_path = output_storage.result_change_path.clone();
-        let settings = JsonlFileReactionDataDispatcherSettings::new(&def, folder_path)?;
-        log::trace!("Creating JsonlFileReactionDataDispatcher with settings {:?}, ", settings);
+        let settings = JsonlFileReactionLoggerSettings::new(&def, folder_path)?;
+        log::trace!("Creating JsonlFileReactionLogger with settings {:?}, ", settings);
 
         // Make sure the local change_data_folder exists, if not, create it.
         // If the folder cannot be created, return an error.
         if !std::path::Path::new(&settings.folder_path).exists() {
             match create_dir_all(&settings.folder_path).await {
                 Ok(_) => {},
-                Err(e) => return Err(ReactionDataDispatcherError::Io(e).into()),
+                Err(e) => return Err(ReactionLoggerError::Io(e).into()),
             };
         }        
 
@@ -65,12 +67,12 @@ impl JsonlFileReactionDataDispatcher {
 }
 
 #[async_trait]
-impl ReactionDataDispatcher for JsonlFileReactionDataDispatcher {
+impl ReactionLogger for JsonlFileReactionLogger {
     async fn close(&mut self) -> anyhow::Result<()> {
         self.writer.close().await
     }
     
-    async fn dispatch_reaction_data(&mut self, events: Vec<&ReactionDataEvent>) -> anyhow::Result<()> {
+    async fn log_reaction_data(&mut self, events: Vec<&ReactionDataEvent>) -> anyhow::Result<()> {
 
         log::trace!("Dispatch reaction data");
 

@@ -118,7 +118,6 @@ pub struct TestRepoStorage {
 
 impl TestRepoStorage {
     pub async fn add_local_test(&self, test_def: LocalTestDefinition, erase_data: bool) -> anyhow::Result<TestStorage> {
-        log::error!("Adding Local Test {:?}", &test_def.test_id);
         log::debug!("Adding Local ((replace = {}) ) Test {:?}", erase_data, &test_def);
 
         let test_def_path = self.path.join(format!("{}.test.json", &test_def.test_id));

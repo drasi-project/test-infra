@@ -13,13 +13,16 @@ pub mod reaction_observer;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunReactionConfig {
-    pub start_immediately: Option<bool>,    
+    #[serde(default="default_start_immediately")]
+    pub start_immediately: bool,    
     pub test_id: String,
     pub test_repo_id: String,
     pub test_run_id: Option<String>,
     pub test_reaction_id: String,
+    #[serde(default)]
     pub loggers: Vec<TestRunReactionLoggerConfig>,
 }
+fn default_start_immediately() -> bool { false }
 
 impl TryFrom<&TestRunReactionConfig> for TestRunId {
     type Error = ParseTestRunIdError;
@@ -67,7 +70,7 @@ impl TestRunReactionDefinition {
         Ok(Self {
             id: TestRunReactionId::try_from(&test_run_reaction_config)?,
             loggers: test_run_reaction_config.loggers,
-            start_immediately: test_run_reaction_config.start_immediately.unwrap_or(false),
+            start_immediately: test_run_reaction_config.start_immediately,
             test_reaction_definition,
         })
     }

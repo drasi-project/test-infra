@@ -388,12 +388,43 @@ impl TestRunHost {
         };
 
         // Set the TestRunHostStatus to Running.
-        log::info!("TestRunHost started successfully !!!\n\n");            
+        log::debug!("TestRunHost started successfully !!!\n\n");            
         self.set_status(TestRunHostStatus::Running).await;
+
+        // Iterate over the TestRunReactions and start each one if it is configured to start immediately.
+        // If any of the TestRunReactions fail to start, set the TestRunHostStatus to Error and return an error.
+        log::trace!("Auto-starting TestRunReactions ...");            
+        let mut auto_start_reactions_count: u32 = 0;
+
+        let reactions_lock = self.reactions.read().await;
+        for (_, reaction) in &*reactions_lock {
+            if reaction.start_immediately {
+                log::info!("Starting TestRunReaction: {}", reaction.id);
+
+                match reaction.start_reaction_observer().await {
+                    Ok(response) => {
+                        match response.result {
+                            Ok(_) => { auto_start_reactions_count += 1; },
+                            Err(e) => {
+                                let error = TestRunHostStatus::Error(format!("Error starting TestRunReaction: {}", e));
+                                self.set_status(error.clone()).await;
+                                anyhow::bail!("{:?}", error);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        let error = TestRunHostStatus::Error(format!("Error starting TestRunReaction: {}", e));
+                        self.set_status(error.clone()).await;
+                        anyhow::bail!("{:?}", error);
+                    }
+                }
+            }
+        }
+        log::info!("Auto-started {} of {} TestRunReactions.", auto_start_reactions_count, reactions_lock.len());            
 
         // Iterate over the TestRunSources and start each one if it is configured to start immediately.
         // If any of the TestSources fail to start, set the TestRunHostStatus to Error and return an error.
-        log::info!("TestRunHost starting auto-start TestRunSources...");            
+        log::debug!("Auto-starting TestRunSources ...");            
         let mut auto_start_sources_count: u32 = 0;
 
         let sources_lock = self.sources.read().await;
@@ -420,8 +451,8 @@ impl TestRunHost {
                 }
             }
         }
-        
-        log::info!("TestRunHost auto started {} of {} TestRunSources.", auto_start_sources_count, sources_lock.len());            
+        log::info!("Auto-started {} of {} TestRunSources.", auto_start_sources_count, sources_lock.len());            
+
         Ok(TestRunHostStatus::Running)
     }
 }

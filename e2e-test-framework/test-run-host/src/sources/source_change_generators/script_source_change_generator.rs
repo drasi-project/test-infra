@@ -297,7 +297,7 @@ pub struct ScriptSourceChangeGeneratorInternalState {
 impl ScriptSourceChangeGeneratorInternalState {
 
     async fn initialize(settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<(Self, Receiver<ScheduledChangeScriptRecordMessage>)> {
-        log::info!("Initializing ScriptSourceChangeGenerator using {:?}", settings);
+        log::debug!("Initializing ScriptSourceChangeGenerator using {:?}", settings);
     
         // Get the list of script files from the input storage.
         let script_files = match settings.input_storage.get_script_files().await {
@@ -457,8 +457,6 @@ impl ScriptSourceChangeGeneratorInternalState {
         match log::max_level() {
             log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, self),
             log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, self),
-            // log::LevelFilter::Info => log::info!("{} - status:{:?}, error_message:{:?}, virtual_time_ns_start:{:?}, virtual_time_ns_current:{:?}, skips_remaining:{:?}, steps_remaining:{:?}",
-            //     msg, state.status, state.error_messages, state.virtual_time_ns_start, state.virtual_time_ns_current, state.skips_remaining, state.steps_remaining),
             _ => {}
         }
     }

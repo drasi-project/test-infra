@@ -168,7 +168,7 @@ impl TestRunStore {
     pub async fn new(folder_name: String, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
 
         let path = parent_path.join(&folder_name);
-        log::info!("Creating (replace = {}) TestRunStore in folder: {:?}", replace, &path);
+        log::debug!("Creating (replace = {}) TestRunStore in folder: {:?}", replace, &path);
 
         if replace && path.exists() {
             fs::remove_dir_all(&path).await?;
@@ -204,7 +204,7 @@ impl TestRunStore {
     }    
 
     pub async fn get_test_run_storage(&self, test_run_id: &TestRunId, replace: bool) -> anyhow::Result<TestRunStorage> {
-        log::info!("Getting (replace = {}) TestRunStorage for ID: {:?}", replace, &test_run_id);
+        log::debug!("Getting (replace = {}) TestRunStorage for ID: {:?}", replace, &test_run_id);
 
         let test_run_path = self.path.join(test_run_id.to_string());
         let sources_path = test_run_path.join(SOURCES_FOLDER_NAME);
@@ -236,7 +236,7 @@ pub struct TestRunStorage {
 
 impl TestRunStorage {
     pub async fn get_reaction_storage(&self, reaction_id: &TestRunReactionId, replace: bool) -> anyhow::Result<TestRunReactionStorage> {
-        log::info!("Getting (replace = {}) TestRunReactionStorage for ID: {:?}", replace, reaction_id);
+        log::debug!("Getting (replace = {}) TestRunReactionStorage for ID: {:?}", replace, reaction_id);
 
         let reaction_path = self.reactions_path.join(&reaction_id.test_reaction_id);
         let result_change_path = reaction_path.join(RESULT_CHANGE_FOLDER_NAME);
@@ -273,7 +273,7 @@ impl TestRunStorage {
 
 
     pub async fn get_source_storage(&self, source_id: &TestRunSourceId, replace: bool) -> anyhow::Result<TestRunSourceStorage> {
-        log::info!("Getting (replace = {}) TestRunSourceStorage for ID: {:?}", replace, source_id);
+        log::debug!("Getting (replace = {}) TestRunSourceStorage for ID: {:?}", replace, source_id);
 
         let source_path = self.sources_path.join(&source_id.test_source_id);
         let source_change_path = source_path.join(SOURCE_CHANGE_FOLDER_NAME);

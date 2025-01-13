@@ -20,6 +20,8 @@ pub enum ReactionCollectorError {
     Serde(#[from]serde_json::Error),
     #[error("Redis error: {0}")]
     RedisError(#[from] redis::RedisError),
+    #[error("Coversion error")]
+    ConversionError
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,8 +48,9 @@ impl Serialize for ReactionCollectorStatus {
 
 #[derive(Debug)]
 pub enum ReactionCollectorMessage {
-    Event(ReactionOutputRecord),
+    Record(ReactionOutputRecord),
     Error(ReactionCollectorError),
+    TestCompleted
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -105,12 +108,12 @@ impl ReactionCollector for Box<dyn ReactionCollector + Send + Sync> {
 }
 
 pub async fn create_reaction_collector (
-    _id: TestRunReactionId, 
+    id: TestRunReactionId, 
     definition: TestReactionDefinition
 ) -> anyhow::Result<Box<dyn ReactionCollector + Send + Sync>> {
     match definition {
         TestReactionDefinition::RedisResultQueue{common_def, unique_def} => {
-            Ok(Box::new(RedisResultQueueCollector::new(common_def, unique_def).await?))            
+            Ok(Box::new(RedisResultQueueCollector::new(id, common_def, unique_def).await?))            
         },
         TestReactionDefinition::DaprResultQueue { .. } => {
             unimplemented!("DaprResultQueue is not implemented yet")

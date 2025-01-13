@@ -21,6 +21,7 @@ pub struct JsonlFileTestRunReactionLoggerConfig {
 pub struct JsonlFileReactionLoggerSettings {
     pub folder_path: PathBuf,
     pub max_events_per_file: u64,
+    pub script_name: String,
 }
 
 impl JsonlFileReactionLoggerSettings {
@@ -28,6 +29,7 @@ impl JsonlFileReactionLoggerSettings {
         return Ok(Self {
             folder_path,
             max_events_per_file: config.max_lines_per_file.unwrap_or(10000),
+            script_name: Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
         });
     }
 }
@@ -55,15 +57,7 @@ impl JsonlFileReactionLogger {
             };
         }        
 
-        let script_name = Utc::now()
-            .format("%Y-%m-%d_%H-%M-%S")
-            .to_string();
-
-        let writer = ReactionDataEventLogWriter::new(
-            settings.folder_path.clone(),
-            script_name,
-            settings.max_events_per_file
-        ).await?;
+        let writer = ReactionDataEventLogWriter::new(&settings).await?;
 
         Ok(Box::new( Self { 
             settings,
@@ -101,15 +95,16 @@ pub struct ReactionDataEventLogWriter {
     current_file_event_count: u64,
 }
 
-impl ReactionDataEventLogWriter {
-    pub async fn new(folder_path: PathBuf, log_file_name: String, max_size: u64) -> anyhow::Result<Self> {
+impl ReactionDataEventLogWriter { 
+    pub async fn new(settings: &JsonlFileReactionLoggerSettings) -> anyhow::Result<Self> {
+    // pub async fn new(folder_path: PathBuf, log_file_name: String, max_size: u64) -> anyhow::Result<Self> {
 
         let mut writer = ReactionDataEventLogWriter {
-            folder_path,
-            log_file_name,
+            folder_path: settings.folder_path.clone(),
+            log_file_name: settings.script_name.clone(),
             next_file_index: 0,
             current_writer: None,
-            max_size,
+            max_size: settings.max_events_per_file,
             current_file_event_count: 0,
         };
 

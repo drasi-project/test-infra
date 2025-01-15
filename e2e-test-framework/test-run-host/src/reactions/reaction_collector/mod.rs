@@ -6,7 +6,6 @@ use tokio::sync::mpsc::Receiver;
 use test_data_store::{test_repo_storage::models::TestReactionDefinition, test_run_storage::TestRunReactionId};
 
 pub mod redis_result_queue_collector;
-pub mod result_event;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReactionCollectorError {
@@ -21,7 +20,7 @@ pub enum ReactionCollectorError {
     #[error("Redis error: {0}")]
     RedisError(#[from] redis::RedisError),
     #[error("Coversion error")]
-    ConversionError
+    ConversionError,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

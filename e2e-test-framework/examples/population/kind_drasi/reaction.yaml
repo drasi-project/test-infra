@@ -1,11 +1,9 @@
 kind: Reaction
 apiVersion: v1
-name: city-population-debug
+name: population-debug
 spec:
   kind: Debug
   queries:
-    continent-country-population:
-    country-city-population:
     city-population:
   endpoints:
     gateway: 8080  

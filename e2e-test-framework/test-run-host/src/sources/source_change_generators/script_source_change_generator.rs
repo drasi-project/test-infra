@@ -12,7 +12,7 @@ use test_data_store::{
         change_script_file_reader::ChangeScriptReader, ChangeHeaderRecord, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent
     }, 
     test_repo_storage::{
-        models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode}, 
+        models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
         TestSourceStorage
     }, 
     test_run_storage::{
@@ -20,8 +20,7 @@ use test_data_store::{
     }
 };
 
-use crate::{source_change_dispatchers::create_source_change_dispatcher, TimeMode};
-use crate::source_change_dispatchers::SourceChangeDispatcher;
+use crate::sources::source_change_dispatchers::{create_source_change_dispatcher, SourceChangeDispatcher};
 
 use super::{SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStatus};
 
@@ -298,7 +297,7 @@ pub struct ScriptSourceChangeGeneratorInternalState {
 impl ScriptSourceChangeGeneratorInternalState {
 
     async fn initialize(settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<(Self, Receiver<ScheduledChangeScriptRecordMessage>)> {
-        log::info!("Initializing ScriptSourceChangeGenerator using {:?}", settings);
+        log::debug!("Initializing ScriptSourceChangeGenerator using {:?}", settings);
     
         // Get the list of script files from the input storage.
         let script_files = match settings.input_storage.get_script_files().await {
@@ -458,8 +457,6 @@ impl ScriptSourceChangeGeneratorInternalState {
         match log::max_level() {
             log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, self),
             log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, self),
-            // log::LevelFilter::Info => log::info!("{} - status:{:?}, error_message:{:?}, virtual_time_ns_start:{:?}, virtual_time_ns_current:{:?}, skips_remaining:{:?}, steps_remaining:{:?}",
-            //     msg, state.status, state.error_messages, state.virtual_time_ns_start, state.virtual_time_ns_current, state.skips_remaining, state.steps_remaining),
             _ => {}
         }
     }

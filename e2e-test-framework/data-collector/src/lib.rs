@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use futures::future::join_all;
 use serde::Serialize;
@@ -20,6 +20,16 @@ pub enum DataCollectorStatus {
     Started,
     // The Test Data Collector is in an Error state. and will not be able to process requests.
     Error(String),
+}
+
+impl fmt::Display for DataCollectorStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DataCollectorStatus::Initialized => write!(f, "Initialized"),
+            DataCollectorStatus::Started => write!(f, "Started"),
+            DataCollectorStatus::Error(msg) => write!(f, "Error: {}", msg),
+        }
+    }
 }
 
 #[derive(Debug)]

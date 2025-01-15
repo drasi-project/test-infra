@@ -4,7 +4,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use data_collector::{config::DataCollectorConfig, DataCollector};
 use test_data_store::{TestDataStoreConfig, TestDataStore};
-use test_run_source::{TestRunnerConfig, TestRunner};
+use test_run_host::{TestRunHostConfig, TestRunHost};
 
 mod web_api;
 
@@ -39,7 +39,7 @@ pub struct TestServiceConfig {
     #[serde(default)]
     pub data_store: TestDataStoreConfig,
     #[serde(default)]
-    pub test_runner: TestRunnerConfig,
+    pub test_run_host: TestRunHostConfig,
     #[serde(default)]
     pub data_collector: DataCollectorConfig,
 }
@@ -48,13 +48,13 @@ impl Default for TestServiceConfig {
     fn default() -> Self {
         TestServiceConfig {
             data_store: TestDataStoreConfig::default(),
-            test_runner: TestRunnerConfig::default(),
+            test_run_host: TestRunHostConfig::default(),
             data_collector: DataCollectorConfig::default(),
         }
     }
 }
 
-// The main function that starts the starts the Test Runner Host.
+// The main function that starts the starts the Test Service.
 #[tokio::main]
 async fn main() {
      
@@ -113,15 +113,15 @@ async fn main() {
         panic!("Error starting DataCollector: {}", err);
     });
 
-    let test_runner = Arc::new(TestRunner::new(test_service_config.test_runner, test_data_store.clone()).await.unwrap_or_else(|err| {
-        panic!("Error creating TestRunner: {}", err);
+    let test_run_host = Arc::new(TestRunHost::new(test_service_config.test_run_host, test_data_store.clone()).await.unwrap_or_else(|err| {
+        panic!("Error creating TestRunHost: {}", err);
     }));
 
     // Start the Web API.
     web_api::start_web_api(
         host_params.port, 
         test_data_store, 
-        test_runner, 
+        test_run_host, 
         data_collector
     ).await;
 }

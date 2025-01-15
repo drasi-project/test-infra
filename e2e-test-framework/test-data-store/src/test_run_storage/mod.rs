@@ -4,6 +4,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::fs;
 
+const REACTIONS_FOLDER_NAME: &str = "reactions";
+const RESULT_CHANGE_FOLDER_NAME: &str = "result_change";
 const SOURCES_FOLDER_NAME: &str = "sources";
 const SOURCE_CHANGE_FOLDER_NAME: &str = "source_change";
 
@@ -108,6 +110,55 @@ impl TryFrom<&str> for TestRunSourceId {
     }
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+pub struct TestRunReactionId {
+    pub test_run_id: TestRunId,
+    pub test_reaction_id: String,
+}
+
+impl TestRunReactionId {
+    pub fn new(test_run_id: &TestRunId, test_reaction_id: &str) -> Self {
+        Self {
+            test_run_id: test_run_id.clone(),
+            test_reaction_id: test_reaction_id.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for TestRunReactionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}",
+            self.test_run_id, self.test_reaction_id
+        )
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ParseTestRunReactionIdError {
+    #[error("Invalid format for TestRunReactionId - {0}")]
+    InvalidFormat(String),
+    #[error("Invalid values for TestRunReactionId - {0}")]
+    InvalidValues(String),
+}
+
+impl TryFrom<&str> for TestRunReactionId {
+    type Error = ParseTestRunReactionIdError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let parts: Vec<&str> = value.split('.').collect();
+        if parts.len() == 4 {
+            Ok(TestRunReactionId {
+                test_run_id: TestRunId::new(parts[0], parts[1], parts[2]),
+                test_reaction_id: parts[3].to_string(),
+            })
+        } else {
+            Err(ParseTestRunReactionIdError::InvalidFormat(value.to_string()))
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TestRunStore {
     pub path: PathBuf,
@@ -117,7 +168,7 @@ impl TestRunStore {
     pub async fn new(folder_name: String, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
 
         let path = parent_path.join(&folder_name);
-        log::info!("Creating (replace = {}) TestRunStore in folder: {:?}", replace, &path);
+        log::debug!("Creating (replace = {}) TestRunStore in folder: {:?}", replace, &path);
 
         if replace && path.exists() {
             fs::remove_dir_all(&path).await?;
@@ -153,23 +204,24 @@ impl TestRunStore {
     }    
 
     pub async fn get_test_run_storage(&self, test_run_id: &TestRunId, replace: bool) -> anyhow::Result<TestRunStorage> {
-        log::info!("Getting (replace = {}) TestRunStorage for ID: {:?}", replace, &test_run_id);
+        log::debug!("Getting (replace = {}) TestRunStorage for ID: {:?}", replace, &test_run_id);
 
         let test_run_path = self.path.join(test_run_id.to_string());
         let sources_path = test_run_path.join(SOURCES_FOLDER_NAME);
+        let reactions_path = test_run_path.join(REACTIONS_FOLDER_NAME);
 
         if replace && test_run_path.exists() {
             fs::remove_dir_all(&test_run_path).await?;
         }
 
         if !test_run_path.exists() {
-            // fs::create_dir_all(&path).await?;
             fs::create_dir_all(&sources_path).await?;
         }
 
         Ok(TestRunStorage {
             id: test_run_id.clone(),
             path: test_run_path,
+            reactions_path,
             sources_path,
         })
     }
@@ -178,12 +230,50 @@ impl TestRunStore {
 pub struct TestRunStorage {
     pub id: TestRunId,
     pub path: PathBuf,
+    pub reactions_path: PathBuf,
     pub sources_path: PathBuf,
 }
 
 impl TestRunStorage {
+    pub async fn get_reaction_storage(&self, reaction_id: &TestRunReactionId, replace: bool) -> anyhow::Result<TestRunReactionStorage> {
+        log::debug!("Getting (replace = {}) TestRunReactionStorage for ID: {:?}", replace, reaction_id);
+
+        let reaction_path = self.reactions_path.join(&reaction_id.test_reaction_id);
+        let result_change_path = reaction_path.join(RESULT_CHANGE_FOLDER_NAME);
+
+        if replace && reaction_path.exists() {
+            fs::remove_dir_all(&reaction_path).await?;
+        }
+
+        if !reaction_path.exists() {
+            fs::create_dir_all(&result_change_path).await?;
+        }
+
+        Ok(TestRunReactionStorage {
+            id: reaction_id.clone(),
+            path: reaction_path,
+            result_change_path,
+        })
+    }
+
+    pub async fn get_reaction_ids(&self) -> anyhow::Result<Vec<TestRunReactionId>> {
+        let mut test_run_reactions = Vec::new();
+
+        let mut entries = fs::read_dir(&self.path).await?;     
+        while let Some(entry) = entries.next_entry().await? {
+            let metadata = entry.metadata().await?;
+            if metadata.is_dir() {
+                if let Some(folder_name) = entry.file_name().to_str() {
+                    test_run_reactions.push(TestRunReactionId::new(&self.id, folder_name));
+                }
+            }
+        }
+        Ok(test_run_reactions)        
+    }
+
+
     pub async fn get_source_storage(&self, source_id: &TestRunSourceId, replace: bool) -> anyhow::Result<TestRunSourceStorage> {
-        log::info!("Getting (replace = {}) TestRunSourceStorage for ID: {:?}", replace, source_id);
+        log::debug!("Getting (replace = {}) TestRunSourceStorage for ID: {:?}", replace, source_id);
 
         let source_path = self.sources_path.join(&source_id.test_source_id);
         let source_change_path = source_path.join(SOURCE_CHANGE_FOLDER_NAME);
@@ -228,6 +318,21 @@ pub struct TestRunSourceStorage {
 }
 
 impl TestRunSourceStorage {
+    pub async fn write_result_summary(&self, summary: &Value) -> anyhow::Result<()> {
+        let summary_path = self.path.join("result_summary.json");
+        fs::write(summary_path, serde_json::to_string_pretty(summary)?).await?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TestRunReactionStorage {
+    pub id: TestRunReactionId,
+    pub path: PathBuf,
+    pub result_change_path: PathBuf,
+}
+
+impl TestRunReactionStorage {
     pub async fn write_result_summary(&self, summary: &Value) -> anyhow::Result<()> {
         let summary_path = self.path.join("result_summary.json");
         fs::write(summary_path, serde_json::to_string_pretty(summary)?).await?;

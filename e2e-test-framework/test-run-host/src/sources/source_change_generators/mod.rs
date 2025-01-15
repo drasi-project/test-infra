@@ -12,37 +12,6 @@ pub enum SourceChangeGeneratorError {
     // NotConfigured
 }
 
-// Enum of SourceChangeGenerator status.
-// Running --start--> <ignore>
-// Running --skip--> <ignore>
-// Running --step--> <ignore>
-// Running --pause--> Paused
-// Running --stop--> Stopped
-// Running --finish_script--> Finished
-
-// Skipping --start--> <ignore>
-// Skipping --skip--> <ignore>
-// Skipping --step--> <ignore>
-// Skipping --pause--> Paused
-// Skipping --stop--> Stopped
-// Skipping --finish_script--> Finished
-
-// Stepping --start--> <ignore>
-// Stepping --skip--> <ignore>
-// Stepping --step--> <ignore>
-// Stepping --pause--> Paused
-// Stepping --stop--> Stopped
-// Stepping --finish_script--> Finished
-
-// Paused --start--> Running
-// Paused --skip--> Skipping
-// Paused --step--> Stepping
-// Paused --pause--> <ignore>
-// Paused --stop--> Stopped
-
-// Stopped --*--> <ignore>
-// Finished --*--> <ignore>
-// Error --*--> <ignore>
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SourceChangeGeneratorStatus {
     Running,
@@ -55,23 +24,21 @@ pub enum SourceChangeGeneratorStatus {
 }
 
 impl SourceChangeGeneratorStatus {
-    pub fn is_processing(&self) -> bool {
-        match self {
-            SourceChangeGeneratorStatus::Running => true,
-            SourceChangeGeneratorStatus::Skipping => true,
-            SourceChangeGeneratorStatus::Stepping => true,
-            _ => false,
-        }
-    }
-}
-
-impl SourceChangeGeneratorStatus {
     pub fn is_active(&self) -> bool {
         match self {
             SourceChangeGeneratorStatus::Running => true,
             SourceChangeGeneratorStatus::Skipping => true,
             SourceChangeGeneratorStatus::Stepping => true,
             SourceChangeGeneratorStatus::Paused => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_processing(&self) -> bool {
+        match self {
+            SourceChangeGeneratorStatus::Running => true,
+            SourceChangeGeneratorStatus::Skipping => true,
+            SourceChangeGeneratorStatus::Stepping => true,
             _ => false,
         }
     }

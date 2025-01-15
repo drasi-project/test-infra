@@ -6,12 +6,18 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use test_data_store::test_repo_storage::models::SpacingMode;
-use test_run_source::{test_run_sources::TestRunSourceConfig, TestRunner, TestRunnerStatus};
+use test_run_host::{reactions::TestRunReactionConfig, sources::TestRunSourceConfig, TestRunHost, TestRunHostStatus};
 
 use super::TestServiceWebApiError;
 
-pub fn get_test_runner_routes() -> Router {
+pub fn get_test_run_host_routes() -> Router {
     Router::new()
+        .route("/reactions", get(get_reaction_list_handler).post(post_reaction_handler))
+        .route("/reactions/:id", get(get_reaction_handler))
+        .route("/reactions/:id/pause", post(reaction_observer_pause_handler))
+        .route("/reactions/:id/reset", post(reaction_observer_reset_handler))
+        .route("/reactions/:id/start", post(reaction_observer_start_handler))
+        .route("/reactions/:id/stop", post(reaction_observer_stop_handler))        
         .route("/sources", get(get_source_list_handler).post(post_source_handler))
         .route("/sources/:id", get(get_source_handler))
         .route("/sources/:id/pause", post(source_change_generator_pause_handler))
@@ -19,46 +25,65 @@ pub fn get_test_runner_routes() -> Router {
         .route("/sources/:id/skip", post(source_change_generator_skip_handler))
         .route("/sources/:id/start", post(source_change_generator_start_handler))
         .route("/sources/:id/step", post(source_change_generator_step_handler))
-        .route("/sources/:id/stop", post(source_change_generator_stop_handler))
+        .route("/sources/:id/stop", post(source_change_generator_stop_handler))        
+}
+
+pub async fn get_reaction_list_handler(
+    test_run_host: Extension<Arc<TestRunHost>>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - get_reaction_list");
+
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
+
+    let reactions = test_run_host.get_test_reaction_ids().await?;
+    Ok(Json(reactions).into_response())
+}
+
+pub async fn get_reaction_handler(
+    Path(id): Path<String>,
+    test_run_host: Extension<Arc<TestRunHost>>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - get_reaction: {}", id);
+
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
+
+    let reaction_state = test_run_host.get_test_reaction_state(&id).await?;
+    Ok(Json(reaction_state).into_response())
 }
 
 pub async fn get_source_list_handler(
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_source_list");
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let sources = test_runner.get_test_source_ids().await?;
+    let sources = test_run_host.get_test_source_ids().await?;
     Ok(Json(sources).into_response())
 }
 
 pub async fn get_source_handler(
     Path(id): Path<String>,
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - get_source: {}", id);
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let source_state = test_runner.get_test_source_state(&id).await?;
+    let source_state = test_run_host.get_test_source_state(&id).await?;
     Ok(Json(source_state).into_response())
-
-    // let response = test_runner.get_test_source_state(&id).await;
-    // match response {
-    //     Ok(source) => {
-    //         Ok(Json(source).into_response())
-    //     },
-    //     Err(_) => {
-    //         Err(TestServiceWebApiError::NotFound("TestRunSource".to_string(), id))
-    //     }
-    // }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,18 +102,106 @@ impl Default for TestSkipConfig {
     }
 }
 
+pub async fn reaction_observer_pause_handler (
+    Path(id): Path<String>,
+    test_run_host: Extension<Arc<TestRunHost>>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - reaction_observer_pause: {}", id);
+
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
+
+    let response = test_run_host.test_reaction_pause(&id).await;
+    match response {
+        Ok(reaction) => {
+            Ok(Json(reaction.state).into_response())
+        },
+        Err(e) => {
+            Err(TestServiceWebApiError::AnyhowError(e))
+        }
+    }
+}
+
+pub async fn reaction_observer_reset_handler (
+    Path(id): Path<String>,
+    test_run_host: Extension<Arc<TestRunHost>>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - reaction_observer_reset: {}", id);
+
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
+
+    let response = test_run_host.test_reaction_reset(&id).await;
+    match response {
+        Ok(reaction) => {
+            Ok(Json(reaction.state).into_response())
+        },
+        Err(e) => {
+            Err(TestServiceWebApiError::AnyhowError(e))
+        }
+    }
+}
+
+pub async fn reaction_observer_start_handler (
+    Path(id): Path<String>,
+    test_run_host: Extension<Arc<TestRunHost>>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - reaction_observer_start: {}", id);
+
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
+
+    let response = test_run_host.test_reaction_start(&id).await;
+    match response {
+        Ok(reaction) => {
+            Ok(Json(reaction.state).into_response())
+        },
+        Err(e) => {
+            Err(TestServiceWebApiError::AnyhowError(e))
+        }
+    }
+}
+
+pub async fn reaction_observer_stop_handler (
+    Path(id): Path<String>,
+    test_run_host: Extension<Arc<TestRunHost>>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - reaction_observer_stop: {}", id);
+
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
+
+    let response = test_run_host.test_reaction_stop(&id).await;
+    match response {
+        Ok(reaction) => {
+            Ok(Json(reaction.state).into_response())
+        },
+        Err(e) => {
+            Err(TestServiceWebApiError::AnyhowError(e))
+        }
+    }
+}
+
 pub async fn source_change_generator_pause_handler (
     Path(id): Path<String>,
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_pause: {}", id);
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let response = test_runner.test_source_pause(&id).await;
+    let response = test_run_host.test_source_pause(&id).await;
     match response {
         Ok(source) => {
             Ok(Json(source.state).into_response())
@@ -101,16 +214,16 @@ pub async fn source_change_generator_pause_handler (
 
 pub async fn source_change_generator_reset_handler (
     Path(id): Path<String>,
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_reset: {}", id);
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let response = test_runner.test_source_reset(&id).await;
+    let response = test_run_host.test_source_reset(&id).await;
     match response {
         Ok(source) => {
             Ok(Json(source.state).into_response())
@@ -123,20 +236,20 @@ pub async fn source_change_generator_reset_handler (
 
 pub async fn source_change_generator_skip_handler (
     Path(id): Path<String>,
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
     body: Json<Option<TestSkipConfig>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_skip: {}", id);
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
     let skips_body = body.0.unwrap_or_default();
 
     let response = 
-        test_runner.test_source_skip(&id, skips_body.num_skips, skips_body.spacing_mode).await;
+        test_run_host.test_source_skip(&id, skips_body.num_skips, skips_body.spacing_mode).await;
     match response {
         Ok(source) => {
             Ok(Json(source.state).into_response())
@@ -149,16 +262,16 @@ pub async fn source_change_generator_skip_handler (
 
 pub async fn source_change_generator_start_handler (
     Path(id): Path<String>,
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_start: {}", id);
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let response = test_runner.test_source_start(&id).await;
+    let response = test_run_host.test_source_start(&id).await;
     match response {
         Ok(source) => {
             Ok(Json(source.state).into_response())
@@ -187,20 +300,20 @@ impl Default for TestStepConfig {
 
 pub async fn source_change_generator_step_handler (
     Path(id): Path<String>,
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
     body: Json<Option<TestStepConfig>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_step: {}", id);
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
     let steps_body = body.0.unwrap_or_default();
 
     let response = 
-        test_runner.test_source_step(&id, steps_body.num_steps, steps_body.spacing_mode).await;
+        test_run_host.test_source_step(&id, steps_body.num_steps, steps_body.spacing_mode).await;
     match response {
         Ok(source) => {
             Ok(Json(source.state).into_response())
@@ -213,16 +326,16 @@ pub async fn source_change_generator_step_handler (
 
 pub async fn source_change_generator_stop_handler (
     Path(id): Path<String>,
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - source_change_generator_stop: {}", id);
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let response = test_runner.test_source_stop(&id).await;
+    let response = test_run_host.test_source_stop(&id).await;
     match response {
         Ok(source) => {
             Ok(Json(source.state).into_response())
@@ -233,22 +346,54 @@ pub async fn source_change_generator_stop_handler (
     }
 }
 
+pub async fn post_reaction_handler (
+    test_run_host: Extension<Arc<TestRunHost>>,
+    body: Json<TestRunReactionConfig>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - post_reaction");
+
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
+
+    let reaction_config = body.0;
+
+    match test_run_host.add_test_reaction(reaction_config).await {
+        Ok(id) => {
+            match test_run_host.get_test_reaction_state(&id.to_string()).await {
+                Ok(reaction) => {
+                    Ok(Json(reaction).into_response())
+                },
+                Err(_) => {
+                    Err(TestServiceWebApiError::NotFound("TestRunReaction".to_string(), id.to_string()))
+                }
+            }
+        },
+        Err(e) => {
+            let msg = format!("Error creating Reaction: {}", e);
+            log::error!("{}", &msg);
+            Err(TestServiceWebApiError::AnyhowError(e))
+        }
+    }
+}
+
 pub async fn post_source_handler (
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
     body: Json<TestRunSourceConfig>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_source");
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
     let source_config = body.0;
 
-    match test_runner.add_test_source(source_config).await {
+    match test_run_host.add_test_source(source_config).await {
         Ok(id) => {
-            match test_runner.get_test_source_state(&id.to_string()).await {
+            match test_run_host.get_test_source_state(&id.to_string()).await {
                 Ok(source) => {
                     Ok(Json(source).into_response())
                 },

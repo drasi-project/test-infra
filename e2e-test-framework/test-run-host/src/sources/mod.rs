@@ -2,9 +2,14 @@ use std::{collections::HashSet, fmt};
 
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
+
+use bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator};
+use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState};
 use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinition, QueryId, SourceChangeDispatcherDefinition, SourceChangeGeneratorDefinition, SpacingMode, TestSourceDefinition, TimeMode}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
 
-use crate::{bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator}, source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState}};
+pub mod bootstrap_data_generators;
+pub mod source_change_generators;
+pub mod source_change_dispatchers;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunSourceOverrides {

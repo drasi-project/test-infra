@@ -129,6 +129,10 @@ pub struct LocalTestDefinition {
     pub test_folder: Option<String>,
     #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
+    #[serde(default)]
+    pub queries: Vec<TestQueryDefinition>,
+    #[serde(default)]
+    pub reactions: Vec<TestReactionDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -142,11 +146,9 @@ pub struct TestDefinition {
     #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
     #[serde(default)]
-    pub queries: Vec<QueryDefinition>,
+    pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
-    pub reactions: Vec<ReactionDefinition>,
-    #[serde(default)]
-    pub clients: Vec<ClientDefinition>,
+    pub reactions: Vec<TestReactionDefinition>,
 }
 
 impl TestDefinition {
@@ -158,8 +160,7 @@ impl TestDefinition {
             test_folder: None,
             sources: vec![source],
             queries: Vec::new(),
-            reactions: Vec::new(),
-            clients: Vec::new(),
+            reactions: Vec::new()
         }
     }
 
@@ -258,6 +259,54 @@ pub struct JsonlFileSourceChangeDispatcherDefinition {
     pub max_events_per_file: Option<u64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum TestReactionDefinition {
+    DaprResultQueue {
+        #[serde(flatten)]
+        common_def: CommonTestReactionDefinition,
+        #[serde(flatten)]
+        unique_def: DaprResultQueueTestReactionDefinition,
+    },
+    RedisResultQueue {
+        #[serde(flatten)]
+        common_def: CommonTestReactionDefinition,
+        #[serde(flatten)]
+        unique_def: RedisResultQueueTestReactionDefinition,
+    },
+}
+
+impl TestReactionDefinition {
+    pub fn get_id(&self) -> String {
+        match self {
+            TestReactionDefinition::DaprResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
+            TestReactionDefinition::RedisResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommonTestReactionDefinition {
+    #[serde(default)]
+    pub queries: Vec<QueryId>,
+    pub test_reaction_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaprResultQueueTestReactionDefinition {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub pubsub_name: Option<String>,
+    pub pubsub_topic: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RedisResultQueueTestReactionDefinition {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub queue_name: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ParseQueryIdError {
     #[error("Invalid format for QueryId - {0}")]
@@ -293,17 +342,8 @@ fn default_query_node_id() -> String { "default".to_string() }
 fn default_query_id() -> String { "test_query".to_string() }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct QueryDefinition {
+pub struct TestQueryDefinition {
 }
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ReactionDefinition {
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ClientDefinition {
-}
-
 
 #[cfg(test)]
 mod tests {

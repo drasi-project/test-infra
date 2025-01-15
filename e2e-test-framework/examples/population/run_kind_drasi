@@ -9,6 +9,26 @@ kind create cluster
 echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
 drasi init
 
+echo -e "${GREEN}\n\Install ZipKin...${RESET}"
+kubectl create deployment -n drasi-system zipkin --image openzipkin/zipkin
+kubectl expose deployment -n drasi-system zipkin --type ClusterIP --port 9411
+kubectl patch deployment zipkin -n drasi-system \
+  --patch '{
+    "spec": {
+      "template": {
+        "spec": {
+          "containers": [{
+            "name": "zipkin",
+            "env": [{
+              "name": "JAVA_OPTS",
+              "value": "-Xms1g -Xmx1g"
+            }]
+          }]
+        }
+      }
+    }
+  }'
+  
 echo -e "${GREEN}\n\nRegistering E2ETestService SourceProvider with Drasi...${RESET}"
 drasi apply -f ./test-source-provider/e2e-test-service-provider.yaml
 
@@ -20,12 +40,19 @@ echo -e "${GREEN}\n\nPort forwarding to enable access the Test Service Web API..
 kubectl port-forward -n drasi-system services/geo-db-api 63123:63123 &
 sleep 5
 
-echo -e "${GREEN}\n\nAdding Test Repository and Test Source...${RESET}"
-curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/add_az_dev_repo.json http://localhost:63123/test_repos
-curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/add_population_test_source.json http://localhost:63123/test_runner/sources
+echo -e "${GREEN}\n\nAdding Test Repository, Test Source, and Test Reaction...${RESET}"
+curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/cfg_repo_az_dev.json http://localhost:63123/test_repos
+curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/cfg_source_population.json http://localhost:63123/test_run_host/sources
+curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/cfg_reaction_city_population.json http://localhost:63123/test_run_host/reactions
 
 echo -e "${GREEN}\n\nCreating Drasi Continuous Queries...${RESET}"
 drasi apply -f examples/population/kind_drasi/query.yaml
 drasi wait -f examples/population/kind_drasi/query.yaml -t 120
 
-drasi watch city-population
+echo -e "${GREEN}\n\nCreating Drasi Debug Reaction...${RESET}"
+drasi apply -f examples/population/kind_drasi/reaction.yaml
+
+
+#drasi watch city-population
+
+#kubectl port-forward -n drasi-system svc/zipkin 9411:9411

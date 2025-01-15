@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize, Serializer };
 use serde_json::{json, Value};
 
 use test_data_store::scripts::{NodeRecord, RelationRecord};
-use test_run_source::{bootstrap_data_generators::BootstrapData, TestRunner, TestRunnerStatus};
+use test_run_host::{sources::bootstrap_data_generators::BootstrapData, TestRunHost, TestRunHostStatus};
 
 use super::TestServiceWebApiError;
 
@@ -114,14 +114,14 @@ where
 }
 
 pub async fn post_acquire_handler(
-    test_runner: Extension<Arc<TestRunner>>,
+    test_run_host: Extension<Arc<TestRunHost>>,
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_acquire");
 
-    // If the TestRunner is an Error state, return an error and a description of the error.
-    if let TestRunnerStatus::Error(msg) = &test_runner.get_status().await? {
-        return Err(TestServiceWebApiError::TestRunnerError(msg.to_string()));
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
     let acquire_body: AcquireRequestBody = serde_json::from_value(body.0)?;
@@ -130,7 +130,7 @@ pub async fn post_acquire_handler(
     let rel_labels: HashSet<String> = acquire_body.rel_labels.into_iter().collect();
     log::debug!("Query ID: {}, Node Labels: {:?}, Rel Labels: {:?}", query_id, node_labels, rel_labels);
 
-    let result = test_runner.get_bootstrap_data_for_query(&query_id, &node_labels, &rel_labels).await;
+    let result = test_run_host.get_bootstrap_data_for_query(&query_id, &node_labels, &rel_labels).await;
     match result {
         Ok(data) => {
             Ok(Json(AcquireResponseBody::new(data)).into_response())

@@ -8,7 +8,7 @@
                 "id": "local_dev_repo",
                 "kind": "LocalStorage",
                 "source_path": "examples/population/local/dev_repo",
-                "local_tests": [
+                "local_tests": [ 
                     {
                         "test_id": "population",
                         "version": 1,

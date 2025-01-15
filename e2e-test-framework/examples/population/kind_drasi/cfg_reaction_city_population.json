@@ -1,0 +1,16 @@
+{
+  "test_id": "population",
+  "test_repo_id": "az_dev_repo",
+  "test_run_id": "test_run_001",
+  "test_reaction_id": "city-population",
+  "start_immediately": false,
+  "loggers": [
+    {
+      "kind": "Console"
+    },
+    {
+      "kind": "JsonlFile",
+      "max_lines_per_file": 5
+    }
+  ]
+}

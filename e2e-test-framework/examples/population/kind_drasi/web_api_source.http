@@ -58,3 +58,6 @@ Content-Type: application/json
     "nodeLabels": ["Continent", "Country", "City"],
     "relLabels": []
 }
+
+### Homepage
+GET http://{{hostname}}:{{port}}

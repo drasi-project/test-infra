@@ -294,6 +294,10 @@ pub struct CommonTestReactionDefinition {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DaprResultQueueTestReactionDefinition {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub pubsub_name: Option<String>,
+    pub pubsub_topic: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

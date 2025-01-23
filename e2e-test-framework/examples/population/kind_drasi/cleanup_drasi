@@ -3,3 +3,5 @@ drasi delete query country-city-population
 drasi delete query city-population
 
 drasi delete source geo-db
+
+drasi delete sourceprovider E2ETestSource

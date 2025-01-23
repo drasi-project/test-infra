@@ -2,11 +2,21 @@ kind: Source
 apiVersion: v1
 name: geo-db
 spec:
-  kind: E2ETestService
+  kind: E2ETestSource
   services:
+    proxy:
+      properties:
+          PORT: 4002
+          SOURCE_ID: "geo-db"
+          TEST_RUN_SOURCE_ID: "az_dev_repo.population.test_run_001.geo-db"
+          TEST_SERVICE_HOST: "drasi-test-service"
+          TEST_SERVICE_PORT: 63123
+          RUST_LOG: "debug"
     reactivator:
       properties:
-          DRASI_PORT: 63123
-#          DRASI_DATA_CACHE: "./data_cache"
-#          DRASI_CONFIG_FILE: "./config.json"
-
+          PORT: 80
+          SOURCE_ID: "geo-db"
+          TEST_RUN_SOURCE_ID: "az_dev_repo.population.test_run_001.geo-db"
+          TEST_SERVICE_HOST: "drasi-test-service"
+          TEST_SERVICE_PORT: 63123
+          RUST_LOG: "debug"

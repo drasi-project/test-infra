@@ -185,11 +185,10 @@ impl TestRunSource {
         })
     }
 
-    pub async fn get_bootstrap_data_for_query(&self, query_id: QueryId, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
-        log::debug!("Query ID: {:?}, Node Labels: {:?}, Rel Labels: {:?}", query_id, node_labels, rel_labels);
+    pub async fn get_bootstrap_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
+        log::debug!("Node Labels: {:?}, Rel Labels: {:?}", node_labels, rel_labels);
 
-        // If the QueryId is in the subscribers list, return the BootstrapData.
-        if self.bootstrap_data_generator.is_some() && self.subscribers.contains(&query_id) {
+        if self.bootstrap_data_generator.is_some() {
             self.bootstrap_data_generator.as_ref().unwrap().get_data(node_labels, rel_labels).await
         } else {
             Ok(BootstrapData::new())

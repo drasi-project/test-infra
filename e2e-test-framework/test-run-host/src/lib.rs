@@ -193,23 +193,37 @@ impl TestRunHost {
         Ok(self.sources.read().await.contains_key(&test_run_source_id))
     }
     
-    pub async fn get_bootstrap_data_for_query(&self, query_id: &str, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
-        log::debug!("Query ID: {}, Node Labels: {:?}, Rel Labels: {:?}", query_id, node_labels, rel_labels);
+    // pub async fn get_bootstrap_data_for_query(&self, query_id: &str, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
+    //     log::debug!("Query ID: {}, Node Labels: {:?}, Rel Labels: {:?}", query_id, node_labels, rel_labels);
 
-        let sources_lock = self.sources.read().await;
+    //     let sources_lock = self.sources.read().await;
 
-        let mut bootstrap_data = BootstrapData::new();
+    //     let mut bootstrap_data = BootstrapData::new();
 
-        for (_, source) in &*sources_lock {
-            let source_data = source.get_bootstrap_data_for_query(query_id.try_into()?, node_labels, rel_labels).await?;
-            bootstrap_data.merge(source_data);
-        }
+    //     for (_, source) in &*sources_lock {
+    //         let source_data = source.get_bootstrap_data_for_query(query_id.try_into()?, node_labels, rel_labels).await?;
+    //         bootstrap_data.merge(source_data);
+    //     }
 
-        Ok(bootstrap_data)
-    }
+    //     Ok(bootstrap_data)
+    // }
 
     pub async fn get_status(&self) -> anyhow::Result<TestRunHostStatus> {
         Ok(self.status.read().await.clone())
+    }
+
+    pub async fn get_source_bootstrap_data(&self, test_run_source_id: &str, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
+        log::debug!("Source ID: {}, Node Labels: {:?}, Rel Labels: {:?}", test_run_source_id, node_labels, rel_labels);
+
+        let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
+        match self.sources.read().await.get(&test_run_source_id) {
+            Some(source) => {
+                source.get_bootstrap_data(node_labels, rel_labels).await
+            },
+            None => {
+                anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
+            }
+        }
     }
 
     pub async fn get_test_reaction_ids(&self) -> anyhow::Result<Vec<String>> {

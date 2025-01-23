@@ -1,4 +1,4 @@
-FROM rust:1.81 as builder
+FROM rust:1.81 AS builder
 # rust:1.81
 RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
 
@@ -17,7 +17,7 @@ COPY ./test-service .
 RUN cargo install --force --path .
 
     
-FROM  gcr.io/distroless/cc
+FROM gcr.io/distroless/cc
 ENV RUST_BACKTRACE=1
 COPY --from=builder /usr/local/cargo/bin/test-service /usr/local/bin/test-service
 # RUN apt-get update && apt install -y openssl

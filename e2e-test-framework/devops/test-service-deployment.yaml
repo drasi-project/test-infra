@@ -11,6 +11,11 @@ spec:
     metadata:
       labels:
         app: drasi-test-service
+      annotations:
+          dapr.io/app-id: drasi-test-service
+          dapr.io/config: dapr-config
+          dapr.io/enabled: "true"
+          dapr.io/sidecar-image: daprio/daprd:1.9.0
     spec:
       containers:
       - name: drasi-test-service

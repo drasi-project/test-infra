@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: SourceProvider
+name: E2ETestSource
+spec:
+  services:
+    proxy:
+      image: e2e-proxy    
+      # image: docker.io/drasi-project/e2e-proxy:latest
+      # externalImage: true
+      deprovisionHandler: false
+      dapr:
+        app-port: "4002"
+      config_schema:
+        type: object
+        properties:
+          PORT:
+            type: number
+            default: 4002
+          SOURCE_ID:
+            type: string
+          TEST_RUN_SOURCE_ID:
+            type: string
+          TEST_SERVICE_HOST:
+            type: string
+            default: "drasi-test-service"
+          TEST_SERVICE_PORT:
+            type: number
+            default: 63123
+          RUST_LOG:
+            type: string
+            default: "error"
+    reactivator:
+      image: e2e-reactivator
+      # image: docker.io/drasi-project/e2e-reactivator:latest
+      # externalImage: true
+      deprovisionHandler: false
+      dapr:
+        app-port: "80"
+      config_schema:
+        type: object
+        properties:
+          PORT:
+            type: number
+            default: 80
+          SOURCE_ID:
+            type: string
+          TEST_RUN_SOURCE_ID:
+            type: string
+          TEST_SERVICE_HOST:
+            type: string
+            default: "drasi-test-service"
+          TEST_SERVICE_PORT:
+            type: number
+            default: 63123
+          RUST_LOG:
+            type: string
+            default: "error"            

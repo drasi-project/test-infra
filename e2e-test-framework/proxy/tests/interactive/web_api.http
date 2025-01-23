@@ -1,0 +1,32 @@
+# This file is for use with the REST Client extension for Visual Studio Code to make it easy to manually 
+# test the Test Service Web API.
+# https://marketplace.visualstudio.com/items?itemName=humao.rest-client
+
+@hostname = localhost
+@port = 8080
+
+### ACQUIRE
+POST http://{{hostname}}:{{port}}/acquire
+Content-Type: application/json
+
+{
+    "queryId": "continent-country-population",
+    "queryNodeId": "default",
+    "nodeLabels": ["Country"],
+    "nodeLabels_2": ["Continent", "Country"],
+    "nodeLabels_3": ["Continent", "Country", "City"],
+    "relLabels": []
+}
+
+### QUERI API
+POST http://{{hostname}}:{{port}}/subscription
+Content-Type: application/json
+
+{
+    "queryId": "continent-country-population",
+    "queryNodeId": "default",
+    "nodeLabels": ["Continent"],
+    "nodeLabels_2": ["Continent", "Country"],
+    "nodeLabels_3": ["Continent", "Country", "City"],
+    "relLabels": []
+}

@@ -1,12 +1,13 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use axum::{
     extract::{Extension, Path}, response::IntoResponse, routing::{get, post}, Json, Router
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
-use test_data_store::test_repo_storage::models::SpacingMode;
-use test_run_host::{reactions::TestRunReactionConfig, sources::TestRunSourceConfig, TestRunHost, TestRunHostStatus};
+use serde_json::{json, Value};
+use test_data_store::{scripts::{NodeRecord, RelationRecord}, test_repo_storage::models::SpacingMode};
+use test_run_host::{reactions::TestRunReactionConfig, sources::{bootstrap_data_generators::BootstrapData, TestRunSourceConfig}, TestRunHost, TestRunHostStatus};
 
 use super::TestServiceWebApiError;
 
@@ -20,6 +21,7 @@ pub fn get_test_run_host_routes() -> Router {
         .route("/reactions/:id/stop", post(reaction_observer_stop_handler))        
         .route("/sources", get(get_source_list_handler).post(post_source_handler))
         .route("/sources/:id", get(get_source_handler))
+        .route("/sources/:id/bootstrap", post(source_bootstrap_handler))
         .route("/sources/:id/pause", post(source_change_generator_pause_handler))
         .route("/sources/:id/reset", post(source_change_generator_reset_handler))
         .route("/sources/:id/skip", post(source_change_generator_skip_handler))
@@ -183,6 +185,139 @@ pub async fn reaction_observer_stop_handler (
     match response {
         Ok(reaction) => {
             Ok(Json(reaction.state).into_response())
+        },
+        Err(e) => {
+            Err(TestServiceWebApiError::AnyhowError(e))
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SourceBootstrapRequestBody {
+    // #[serde(rename = "queryId")]
+    // pub query_id: String,
+    // #[serde(rename = "queryNodeId")]
+    // pub query_node_id: String,
+    #[serde(rename = "nodeLabels")]
+    pub node_labels: Vec<String>,
+    #[serde(rename = "relLabels")]
+    pub rel_labels: Vec<String>
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SourceBootstrapResponseBody {
+    pub nodes: Vec<Node>,
+    pub rels: Vec<Relation>
+}
+
+impl SourceBootstrapResponseBody {
+    pub fn new(data: BootstrapData) -> Self {
+
+        let mut body = Self {
+            nodes: Vec::new(),
+            rels: Vec::new()
+        };
+
+        for (_, nodes) in data.nodes {
+            body.nodes.extend(nodes.iter().map(|node| Node::from_script_record(node)));
+        }
+        for (_, rels) in data.rels {
+            body.rels.extend(rels.iter().map(|rel| Relation::from_script_record(rel)));
+        }
+
+        body
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Node {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(serialize_with = "serialize_properties")] 
+    pub properties: Value
+}
+
+impl Node {
+    fn from_script_record(record: &NodeRecord) -> Self {
+        Self {
+            id: record.id.clone(),
+            labels: record.labels.clone(),
+            properties: record.properties.clone()
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Relation {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default, rename = "startId")]
+    pub start_id: String,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "startLabel")]
+    pub start_label: Option<String>,
+    #[serde(default, rename = "endId")]
+    pub end_id: String,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "endLabel")]
+    pub end_label: Option<String>,
+    #[serde(serialize_with = "serialize_properties")]
+    pub properties: Value
+}
+
+impl Relation {
+    fn from_script_record(record: &RelationRecord) -> Self {
+        Self {
+            id: record.id.clone(),
+            labels: record.labels.clone(),
+            start_id: record.start_id.clone(),
+            start_label: record.start_label.clone(),
+            end_id: record.end_id.clone(),
+            end_label: record.end_label.clone(),
+            properties: record.properties.clone()
+        }
+    }
+}
+
+fn serialize_properties<S>(value: &serde_json::Value, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        // If properties is Null, serialize it as an empty object `{}`.
+        Value::Null => {
+            let empty_obj = json!({});
+            empty_obj.serialize(serializer)
+        },
+        // Otherwise, serialize the value as-is.
+        _ => value.serialize(serializer),
+    }
+}
+
+pub async fn source_bootstrap_handler(
+    Path(id): Path<String>,
+    test_run_host: Extension<Arc<TestRunHost>>,
+    body: Json<SourceBootstrapRequestBody>,
+) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
+    log::info!("Processing call - source_bootstrap");
+
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
+
+    let bootstrap_body = body.0;
+
+    let node_labels: HashSet<String> = bootstrap_body.node_labels.into_iter().collect();
+    let rel_labels: HashSet<String> = bootstrap_body.rel_labels.into_iter().collect();
+    log::debug!("Source: {:?}, Node Labels: {:?}, Rel Labels: {:?}", id, node_labels, rel_labels);
+
+    let response = test_run_host.get_source_bootstrap_data(&id, &node_labels, &rel_labels).await;
+    match response {
+        Ok(data) => {
+            Ok(Json(SourceBootstrapResponseBody::new(data)).into_response())
         },
         Err(e) => {
             Err(TestServiceWebApiError::AnyhowError(e))

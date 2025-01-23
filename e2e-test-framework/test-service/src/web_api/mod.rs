@@ -1,20 +1,18 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::{get, post}, Json, Router
+    extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::get, Json, Router
 };
 use serde::Serialize;
 use thiserror::Error;
 use tokio::{select, signal};
 
-use acquire::post_acquire_handler;
 use data_collector::DataCollector;
 use repo::get_test_repo_routes;
 use runner::get_test_run_host_routes;
 use test_data_store::TestDataStore;
 use test_run_host::TestRunHost;
 
-pub mod acquire;
 pub mod repo;
 pub mod runner;
 
@@ -92,7 +90,6 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>
 
     let app = Router::new()
         .route("/", get(get_service_info_handler))
-        .route("/acquire", post(post_acquire_handler))
         .nest("/test_repos", get_test_repo_routes())
         .nest("/test_run_host", get_test_run_host_routes())
         .layer(axum::extract::Extension(data_collector))
@@ -104,7 +101,7 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>
     let server = axum::Server::bind(&addr)
         .serve(app.into_make_service());
 
-    // Graceful shutdown when receiving `Ctrl+C` or ENTER
+    // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = server.with_graceful_shutdown(shutdown_signal());
 
     println!("\n\nPress CTRL-C to stop the server...\n\n");

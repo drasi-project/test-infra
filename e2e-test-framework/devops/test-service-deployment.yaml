@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: drasi-test-service
-        image: ghcr.io/drasi-project/e2e-test-service:0.1.6
+        image: ghcr.io/drasi-project/e2e-test-service:0.1.8
         ports:
         - containerPort: 63123
 ---

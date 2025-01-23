@@ -9,6 +9,9 @@
 @test_run_id = test_run_001
 @source_id = geo-db
 
+### ROOT
+GET http://{{hostname}}:{{port}}
+
 ### GET STATE of test run source
 GET http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}
 
@@ -42,18 +45,19 @@ Content-Type: application/json
 POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/stop
 Content-Type: application/json
 
-
 ### RESET test run source
 POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/reset
 Content-Type: application/json
 
 ### BOOTSTRAP Data
-POST http://{{hostname}}:{{port}}/acquire
+POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}/bootstrap
 Content-Type: application/json
 
 {
     "queryId": "continent-country-population",
     "queryNodeId": "default",
-    "nodeLabels": ["Continent", "Country", "City"],
+    "nodeLabels_1": ["Continent"],
+    "nodeLabels": ["Continent", "Country"],
+    "nodeLabels_3": ["Continent", "Country", "City"],
     "relLabels": []
 }

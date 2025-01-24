@@ -9,6 +9,28 @@ kind create cluster
 echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
 drasi init
 
+echo -e "${GREEN}\n\Install ZipKin...${RESET}"
+kubectl create deployment -n drasi-system zipkin --image openzipkin/zipkin
+kubectl patch deployment zipkin -n drasi-system \
+  --patch '{
+    "spec": {
+      "template": { 
+        "spec": {
+          "containers": [{
+            "name": "zipkin",
+            "env": [{
+              "name": "JAVA_OPTS",
+              "value": "-Xms1g -Xmx1g"
+            }]
+          }]
+        }
+      }
+    }
+  }'
+kubectl wait -n drasi-system --for=condition=available deployment/zipkin --timeout=300s
+kubectl expose deployment -n drasi-system zipkin --type ClusterIP --port 9411
+kubectl port-forward -n drasi-system svc/zipkin 9411:9411 &
+
 # Deploy the Test Service and wait for it to be available
 echo -e "${GREEN}\n\Deploying Test Service...${RESET}"
 kubectl apply -n drasi-system -f ./devops/test-service-deployment.yaml

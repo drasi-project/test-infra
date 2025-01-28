@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use otel_trace_logger::{OtelTraceReactionLogger, OtelTraceTestRunReactionLoggerConfig};
 use serde::{Deserialize, Serialize};
 
 use console_logger::{ConsoleReactionLogger, ConsoleTestRunReactionLoggerConfig};
@@ -9,18 +10,21 @@ use super::reaction_collector::ReactionOutputRecord;
 
 pub mod console_logger;
 pub mod jsonl_file_logger;
+pub mod otel_trace_logger;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum TestRunReactionLoggerConfig {
     Console(ConsoleTestRunReactionLoggerConfig),
     JsonlFile(JsonlFileTestRunReactionLoggerConfig),
+    OtelTrace(OtelTraceTestRunReactionLoggerConfig)
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReactionLoggerError {
     Io(#[from] std::io::Error),
-    Serde(#[from]serde_json::Error),
+    Serde(#[from] serde_json::Error),
+    Trace(#[from] opentelemetry::trace::TraceError),
 }
 
 impl std::fmt::Display for ReactionLoggerError {
@@ -28,6 +32,7 @@ impl std::fmt::Display for ReactionLoggerError {
         match self {
             Self::Io(e) => write!(f, "IO error: {}:", e),
             Self::Serde(e) => write!(f, "Serde error: {}:", e),
+            Self::Trace(e) => write!(f, "Trace error: {}:", e),
         }
     }
 }
@@ -52,5 +57,6 @@ pub async fn create_reaction_logger(def: &TestRunReactionLoggerConfig, output_st
     match def {
         TestRunReactionLoggerConfig::Console(def) => ConsoleReactionLogger::new(def, output_storage),
         TestRunReactionLoggerConfig::JsonlFile(def) => JsonlFileReactionLogger::new(def, output_storage).await,
+        TestRunReactionLoggerConfig::OtelTrace(def) => OtelTraceReactionLogger::new(def, output_storage),
     }
 }

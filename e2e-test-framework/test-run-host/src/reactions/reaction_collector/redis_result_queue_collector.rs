@@ -219,106 +219,118 @@ impl RedisResultQueueCollector {
 #[async_trait]
 impl ReactionCollector for RedisResultQueueCollector {
     async fn init(&self) -> anyhow::Result<Receiver<ReactionCollectorMessage>> {
-        log::trace!("Initializing RedisResultQueueCollector");
+        log::debug!("Initializing RedisResultQueueCollector");
 
-        let mut status = self.status.write().await;
-        match *status {
-            ReactionCollectorStatus::Uninitialized => {
-                let (collector_tx_channel, collector_rx_channel) = tokio::sync::mpsc::channel(100);
-                
-                *status = ReactionCollectorStatus::Paused;
-
-                tokio::spawn(reader_thread(self.seq.clone(), self.settings.clone(), self.status.clone(), self.notifier.clone(), collector_tx_channel));
-
-                Ok(collector_rx_channel)
-            },
-            ReactionCollectorStatus::Running => {
-                anyhow::bail!("Cant Init Collector, Collector currently Running");
-            },
-            ReactionCollectorStatus::Paused => {
-                anyhow::bail!("Cant Init Collector, Collector currently Paused");
-            },
-            ReactionCollectorStatus::Stopped => {
-                anyhow::bail!("Cant Init Collector, Collector currently Stopped");
-            },            
-            ReactionCollectorStatus::Error => {
-                anyhow::bail!("Collector in Error state");
-            },
+        if let Ok(mut status) = self.status.try_write() {
+            match *status {
+                ReactionCollectorStatus::Uninitialized => {
+                    let (collector_tx_channel, collector_rx_channel) = tokio::sync::mpsc::channel(100);
+                    
+                    *status = ReactionCollectorStatus::Paused;
+    
+                    tokio::spawn(reader_thread(self.seq.clone(), self.settings.clone(), self.status.clone(), self.notifier.clone(), collector_tx_channel));
+    
+                    Ok(collector_rx_channel)
+                },
+                ReactionCollectorStatus::Running => {
+                    anyhow::bail!("Cant Init Collector, Collector currently Running");
+                },
+                ReactionCollectorStatus::Paused => {
+                    anyhow::bail!("Cant Init Collector, Collector currently Paused");
+                },
+                ReactionCollectorStatus::Stopped => {
+                    anyhow::bail!("Cant Init Collector, Collector currently Stopped");
+                },            
+                ReactionCollectorStatus::Error => {
+                    anyhow::bail!("Collector in Error state");
+                },
+            }    
+        } else {
+            anyhow::bail!("Could not acquire status lock");
         }
     }
 
     async fn start(&self) -> anyhow::Result<()> {
-        log::trace!("Starting RedisResultQueueCollector");
+        log::debug!("Starting RedisResultQueueCollector");
 
-        let mut status = self.status.write().await;
-        match *status {
-            ReactionCollectorStatus::Uninitialized => {
-                anyhow::bail!("Cant Start Collector, Collector Uninitialized");
-            },
-            ReactionCollectorStatus::Running => {
-                Ok(())
-            },
-            ReactionCollectorStatus::Paused => {
-                *status = ReactionCollectorStatus::Running;
-                self.notifier.notify_one();
-                Ok(())
-            },
-            ReactionCollectorStatus::Stopped => {
-                anyhow::bail!("Cant Start Collector, Collector already Stopped");
-            },            
-            ReactionCollectorStatus::Error => {
-                anyhow::bail!("Collector in Error state");
-            },
+        if let Ok(mut status) = self.status.try_write() {
+            match *status {
+                ReactionCollectorStatus::Uninitialized => {
+                    anyhow::bail!("Can't Start Collector, Collector Uninitialized");
+                },
+                ReactionCollectorStatus::Running => {
+                    Ok(())
+                },
+                ReactionCollectorStatus::Paused => {
+                    *status = ReactionCollectorStatus::Running;
+                    self.notifier.notify_one();
+                    Ok(())
+                },
+                ReactionCollectorStatus::Stopped => {
+                    anyhow::bail!("Cant Start Collector, Collector already Stopped");
+                },            
+                ReactionCollectorStatus::Error => {
+                    anyhow::bail!("Collector in Error state");
+                },
+            }
+        } else {
+            anyhow::bail!("Could not acquire status lock");
         }
     }
 
     async fn pause(&self) -> anyhow::Result<()> {
-        log::trace!("Pausing RedisResultQueueCollector");
+        log::debug!("Pausing RedisResultQueueCollector");
 
-        let mut status = self.status.write().await;
-        match *status {
-            ReactionCollectorStatus::Uninitialized => {
-                anyhow::bail!("Cant Pause Collector, Collector Uninitialized");
-            },
-            ReactionCollectorStatus::Running => {
-                *status = ReactionCollectorStatus::Paused;
-                Ok(())
-            },
-            ReactionCollectorStatus::Paused => {
-                Ok(())
-            },
-            ReactionCollectorStatus::Stopped => {
-                anyhow::bail!("Cant Pause Collector, Collector already Stopped");
-            },            
-            ReactionCollectorStatus::Error => {
-                anyhow::bail!("Collector in Error state");
-            },
+        if let Ok(mut status) = self.status.try_write() {
+            match *status {
+                ReactionCollectorStatus::Uninitialized => {
+                    anyhow::bail!("Cant Pause Collector, Collector Uninitialized");
+                },
+                ReactionCollectorStatus::Running => {
+                    *status = ReactionCollectorStatus::Paused;
+                    Ok(())
+                },
+                ReactionCollectorStatus::Paused => {
+                    Ok(())
+                },
+                ReactionCollectorStatus::Stopped => {
+                    anyhow::bail!("Cant Pause Collector, Collector already Stopped");
+                },            
+                ReactionCollectorStatus::Error => {
+                    anyhow::bail!("Collector in Error state");
+                },
+            }
+        } else {
+            anyhow::bail!("Could not acquire status lock");
         }
     }
 
     async fn stop(&self) -> anyhow::Result<()> {
-        log::trace!("Stopping RedisResultQueueCollector");
+        log::debug!("Stopping RedisResultQueueCollector");
 
-        let mut status = self.status.write().await;
-        match *status {
-            ReactionCollectorStatus::Uninitialized => {
-                anyhow::bail!("Collector not initialized, current status: Uninitialized");
-            },
-            ReactionCollectorStatus::Running => {
-                *status = ReactionCollectorStatus::Stopped;
-                Ok(())
-            },
-            ReactionCollectorStatus::Paused => {
-                *status = ReactionCollectorStatus::Stopped;
-                self.notifier.notify_one();
-                Ok(())
-            },
-            ReactionCollectorStatus::Stopped => {
-                Ok(())
-            },            
-            ReactionCollectorStatus::Error => {
-                anyhow::bail!("Collector in Error state");
-            },
+        if let Ok(mut status) = self.status.try_write() {
+            match *status {
+                ReactionCollectorStatus::Uninitialized => {
+                    anyhow::bail!("Collector not initialized, current status: Uninitialized");
+                },
+                ReactionCollectorStatus::Running => {
+                    *status = ReactionCollectorStatus::Stopped;
+                    Ok(())
+                },
+                ReactionCollectorStatus::Paused => {
+                    *status = ReactionCollectorStatus::Stopped;
+                    self.notifier.notify_one();
+                    Ok(())
+                },
+                ReactionCollectorStatus::Stopped => {
+                    Ok(())
+                },            
+                ReactionCollectorStatus::Error => {
+                    anyhow::bail!("Collector in Error state");
+                },
+            }
+        } else {
+            anyhow::bail!("Could not acquire status lock");
         }
     }
 }
@@ -330,6 +342,7 @@ async fn reader_thread(
     notify: Arc<Notify>, reaction_collector_tx_channel: 
     Sender<ReactionCollectorMessage>) 
 {
+    log::debug!("Starting RedisResultQueueCollector Reader Thread");
 
     let client_result = redis::Client::open(format!("redis://{}:{}", &settings.host, &settings.port));
 
@@ -378,48 +391,58 @@ async fn reader_thread(
     let opts = StreamReadOptions::default().count(1).block(5000);
 
     loop {
-        match *status.read().await {
+        let current_status = {
+            if let Ok(status) = status.try_read() {
+                (*status).clone()
+            } else {
+                log::warn!("Could not acquire status lock in loop");
+                continue;
+            }
+        };
+
+        match current_status {
             ReactionCollectorStatus::Uninitialized 
             | ReactionCollectorStatus::Stopped
             | ReactionCollectorStatus::Error => {
+                log::debug!("Uninitialized, Stopped, or Error, exiting");
                 return;
             },
             ReactionCollectorStatus::Paused => {
+                log::debug!("Paused, waiting for notify");
                 notify.notified().await;
+                log::debug!("Notified");
             },
             ReactionCollectorStatus::Running => {
-                while *status.read().await == ReactionCollectorStatus::Running {
-                    let read_result = read_stream(&mut con, seq.clone(), stream_key, &stream_last_id, &opts).await;
-                    match read_result {
-                        Ok(results) => {
-                            for result in results {
-                                stream_last_id = result.id.clone();
+                let read_result = read_stream(&mut con, seq.clone(), stream_key, &stream_last_id, &opts).await;
+                match read_result {
+                    Ok(results) => {
+                        for result in results {
+                            stream_last_id = result.id.clone();
 
-                                let reaction_collector_message: ReactionCollectorMessage = match result.try_into() {
-                                    Ok(msg) => msg,
-                                    Err(e) => {
-                                        log::error!("Error converting RedisStreamReadResult to ReactionCollectorMessage: {:?}", e);
-                                        ReactionCollectorMessage::Error(ReactionCollectorError::ConversionError)
-                                    }
-                                };
+                            let reaction_collector_message: ReactionCollectorMessage = match result.try_into() {
+                                Ok(msg) => msg,
+                                Err(e) => {
+                                    log::error!("Error converting RedisStreamReadResult to ReactionCollectorMessage: {:?}", e);
+                                    ReactionCollectorMessage::Error(ReactionCollectorError::ConversionError)
+                                }
+                            };
 
-                                match reaction_collector_tx_channel.send(reaction_collector_message).await {
-                                    Ok(_) => {},
-                                    Err(e) => {
-                                        match e {
-                                            tokio::sync::mpsc::error::SendError(msg) => {
-                                                log::error!("Error sending change message: {:?}", msg);
-                                            }
+                            match reaction_collector_tx_channel.send(reaction_collector_message).await {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    match e {
+                                        tokio::sync::mpsc::error::SendError(msg) => {
+                                            log::error!("Error sending change message: {:?}", msg);
                                         }
                                     }
                                 }
                             }
-                        },
-                        Err(e) => {
-                            log::error!("Error reading from Redis stream: {:?}", e);
                         }
+                    },
+                    Err(e) => {
+                        log::error!("Error reading from Redis stream: {:?}", e);
                     }
-                };        
+                }
             },
         }
     }

@@ -191,15 +191,17 @@ impl ReactionObserver {
 #[derive(Debug, Serialize)]
 pub struct ReactionObserverExternalState {
     pub error_messages: Vec<String>,
+    pub result_summary: ReactionObserverResultSummary,
     pub stats: ReactionObserverStats,
     pub status: ReactionObserverStatus,
     pub test_run_reaction_id: TestRunReactionId,
 }
 
-impl From<&mut ReactionObserverInternalState> for ReactionObserverExternalState {
-    fn from(state: &mut ReactionObserverInternalState) -> Self {
+impl From<&ReactionObserverInternalState> for ReactionObserverExternalState {
+    fn from(state: &ReactionObserverInternalState) -> Self {
         Self {
             error_messages: state.error_messages.clone(),
+            result_summary: ReactionObserverResultSummary::from(state),
             stats: state.stats.clone(),
             status: state.status,
             test_run_reaction_id: state.settings.id.clone(),
@@ -280,8 +282,8 @@ impl ReactionObserverInternalState {
     async fn log_reaction_record(&mut self, record: &ReactionOutputRecord) {
         let loggers = &mut self.loggers;
 
-        log::debug!("Logging ReactionOutputRecord - #loggers:{}", loggers.len());
-        log::trace!("Logging ReactionOutputRecord: {:?}", record);
+        // log::debug!("Logging ReactionOutputRecord - #loggers:{}", loggers.len());
+        // log::trace!("Logging ReactionOutputRecord: {:?}", record);
 
         let futures: Vec<_> = loggers.iter_mut()
             .map(|logger| {
@@ -301,7 +303,12 @@ impl ReactionObserverInternalState {
     
         match message {
             ReactionCollectorMessage::Record(record) => {
+                // Update the stats
+                if self.stats.num_reaction_records == 0 {
+                    self.stats.first_result_time_ns = record.dequeue_time_ns;
+                }
                 self.stats.num_reaction_records += 1;
+                self.stats.last_result_time_ns = record.dequeue_time_ns;
     
                 self.log_reaction_record(&record).await;
     
@@ -326,7 +333,7 @@ impl ReactionObserverInternalState {
         if let ReactionObserverCommand::GetState = message.command {
             let message_response = ReactionObserverMessageResponse {
                 result: Ok(()),
-                state: self.into(),
+                state: (&*self).into(),
             };
     
             let r = message.response_tx.unwrap().send(message_response);
@@ -345,7 +352,7 @@ impl ReactionObserverInternalState {
             if message.response_tx.is_some() {
                 let message_response = ReactionObserverMessageResponse {
                     result: transition_response,
-                    state: self.into(),
+                    state: (&*self).into(),
                 };
     
                 let r = message.response_tx.unwrap().send(message_response);
@@ -413,6 +420,9 @@ impl ReactionObserverInternalState {
                 log::info!("ReactionObserver Started for TestRunReaction {}", self.settings.id);
                 
                 self.status = ReactionObserverStatus::Running;
+                if self.stats.actual_start_time_ns == 0 {
+                    self.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+                }
                 self.reaction_collector.start().await
             },
             ReactionObserverCommand::Stop => Ok(self.transition_to_stopped_state().await),
@@ -453,8 +463,8 @@ impl ReactionObserverInternalState {
         log::info!("ReactionObserver Finished for TestRunReaction {}", self.settings.id);
     
         self.status = ReactionObserverStatus::Finished;
-        self.reaction_collector.stop().await.ok();
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+        self.reaction_collector.stop().await.ok();
         
         self.close_loggers().await;
         self.write_result_summary().await.ok();
@@ -464,8 +474,8 @@ impl ReactionObserverInternalState {
         log::info!("ReactionObserver Stopped for TestRunReaction {}", self.settings.id);
     
         self.status = ReactionObserverStatus::Stopped;
-        self.reaction_collector.stop().await.ok();
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+        self.reaction_collector.stop().await.ok();
 
         self.close_loggers().await;
         self.write_result_summary().await.ok();
@@ -473,18 +483,18 @@ impl ReactionObserverInternalState {
     
     fn transition_to_error_state(&mut self, error_message: &str, error: Option<&anyhow::Error>) {    
         self.status = ReactionObserverStatus::Error;
+        self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     
         let msg = match error {
             Some(e) => format!("{}: {:?}", error_message, e),
             None => error_message.to_string(),
         };
+        self.error_messages.push(msg.clone());
     
         self.log_observer_state(&msg);
-    
-        self.error_messages.push(msg);
     }    
 
-    pub async fn write_result_summary(&mut self) -> anyhow::Result<()> {
+    pub async fn write_result_summary(&self) -> anyhow::Result<()> {
 
         let result_summary: ReactionObserverResultSummary = self.into();
         log::info!("Stats for TestRunReaction:\n{:#?}", &result_summary);
@@ -516,14 +526,18 @@ impl Debug for ReactionObserverInternalState {
 pub struct ReactionObserverStats {
     pub actual_start_time_ns: u64,
     pub actual_end_time_ns: u64,
+    pub first_result_time_ns: u64,
+    pub last_result_time_ns: u64,
     pub num_reaction_records: u64,
 }
 
 impl Default for ReactionObserverStats {
     fn default() -> Self {
         Self {
-            actual_start_time_ns: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64,
+            actual_start_time_ns: 0,
             actual_end_time_ns: 0,
+            first_result_time_ns: 0,
+            last_result_time_ns: 0,
             num_reaction_records: 0,
         }
     }
@@ -535,16 +549,23 @@ pub struct ReactionObserverResultSummary {
     pub actual_start_time_ns: u64,
     pub actual_end_time: String,
     pub actual_end_time_ns: u64,
+    pub first_result_time: String,
+    pub first_result_time_ns: u64,
+    pub last_result_time: String,
+    pub last_result_time_ns: u64,
     pub num_reaction_records: u64,
     pub run_duration_ns: u64,
     pub run_duration_sec: f64,
     pub processing_rate: f64,
     pub test_run_reaction_id: String,
+    pub time_since_last_result_ns: u64,
 }
 
-impl From<&mut ReactionObserverInternalState> for ReactionObserverResultSummary {
-    fn from(state: &mut ReactionObserverInternalState) -> Self {
-        let run_duration_ns = state.stats.actual_end_time_ns - state.stats.actual_start_time_ns;
+impl From<&ReactionObserverInternalState> for ReactionObserverResultSummary {
+    fn from(state: &ReactionObserverInternalState) -> Self {
+        let now_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+
+        let run_duration_ns = state.stats.last_result_time_ns - state.stats.first_result_time_ns;
         let run_duration_sec = run_duration_ns as f64 / 1_000_000_000.0;
 
         Self {
@@ -554,11 +575,18 @@ impl From<&mut ReactionObserverInternalState> for ReactionObserverResultSummary 
             actual_end_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.actual_end_time_ns as i128).expect("Invalid timestamp")
                 .format(&format_description::well_known::Rfc3339).unwrap(),
             actual_end_time_ns: state.stats.actual_end_time_ns,
+            first_result_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.first_result_time_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap(),
+            first_result_time_ns: state.stats.first_result_time_ns,
+            last_result_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.last_result_time_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap(),
+            last_result_time_ns: state.stats.last_result_time_ns,
             num_reaction_records: state.stats.num_reaction_records,
             run_duration_ns,
             run_duration_sec,
             processing_rate: state.stats.num_reaction_records as f64 / run_duration_sec,
             test_run_reaction_id: state.settings.id.to_string(),
+            time_since_last_result_ns: now_ns - state.stats.last_result_time_ns,
         }
     }
 }
@@ -567,6 +595,8 @@ impl Debug for ReactionObserverResultSummary {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let start_time = format!("{} ({} ns)", self.actual_start_time, self.actual_start_time_ns);
         let end_time = format!("{} ({} ns)", self.actual_end_time, self.actual_end_time_ns);
+        let first_time = format!("{} ({} ns)", self.first_result_time, self.first_result_time_ns);
+        let last_time = format!("{} ({} ns)", self.last_result_time, self.last_result_time_ns);
         let run_duration = format!("{} sec ({} ns)", self.run_duration_sec, self.run_duration_ns, );
         let processing_rate = format!("{:.2} changes / sec", self.processing_rate);
 
@@ -574,9 +604,12 @@ impl Debug for ReactionObserverResultSummary {
             .field("test_run_source_id", &self.test_run_reaction_id)
             .field("start_time", &start_time)
             .field("end_time", &end_time)
+            .field("first_result_time", &first_time)
+            .field("last_result_time", &last_time)
+            .field("time_since_last_result_ns", &self.time_since_last_result_ns)
             .field("run_duration", &run_duration)
             .field("num_reaction_change_events", &self.num_reaction_records)
-            .field("processing_rate", &processing_rate)
+            .field("processing_rate", &processing_rate)            
             .finish()
     }
 }
@@ -612,7 +645,7 @@ pub async fn observer_thread(mut command_rx_channel: Receiver<ReactionObserverMe
             reaction_collector_message = state.reaction_collector_rx_channel.recv() => {
                 match reaction_collector_message {
                     Some(reaction_collector_message) => {
-                        log::trace!("Received Reaction Collector message: {:?}", reaction_collector_message);
+                        // log::trace!("Received Reaction Collector message: {:?}", reaction_collector_message);
                         state.process_reaction_collector_message(reaction_collector_message).await
                             .inspect_err(|e| state.transition_to_error_state("Error calling process_reaction_collector_message", Some(e))).ok();
                     }

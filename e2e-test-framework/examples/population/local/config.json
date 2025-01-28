@@ -38,7 +38,19 @@
                               { "node_id": "default", "query_id": "city-population" }
                             ]
                           }
-                        ]
+                        ],
+                        "reactions": [
+                          {
+                            "test_reaction_id": "city-population",
+                            "kind": "RedisResultQueue",
+                            "queries": [
+                              { "node_id": "default", "query_id": "city-population" }
+                            ],
+                            "host": "localhost",
+                            "port": 6379,
+                            "queue_name": "city-population-results"
+                          }
+                        ]                      
                       }                 
                 ]
             }                    
@@ -54,6 +66,21 @@
                 "start_immediately": false,
                 "test_run_overrides" : {}
             }
+        ],
+        "reactions": [
+          {
+            "test_id": "population",
+            "test_repo_id": "local_dev_repo",
+            "test_run_id": "test_run_001",
+            "test_reaction_id": "city-population",
+            "start_immediately": false,
+            "loggers": [
+              {
+                "kind": "JsonlFile",
+                "max_lines_per_file": 5000
+              }
+            ]
+          }          
         ]        
     }
 }

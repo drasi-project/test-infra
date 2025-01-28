@@ -5,3 +5,5 @@ drasi delete query city-population
 drasi delete source geo-db
 
 drasi delete sourceprovider E2ETestSource
+
+kubectl delete deployment drasi-test-service -n drasi-system

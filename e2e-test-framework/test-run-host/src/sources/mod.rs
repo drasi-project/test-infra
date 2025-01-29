@@ -1,7 +1,7 @@
-use std::{collections::HashSet, fmt};
+use std::{collections::HashSet, fmt, str::FromStr};
 
 use derive_more::Debug;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::{self, Deserializer}};
 
 use bootstrap_data_generators::{create_bootstrap_data_generator, BootstrapData, BootstrapDataGenerator};
 use source_change_generators::{create_source_change_generator, SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState};
@@ -10,6 +10,54 @@ use test_data_store::{test_repo_storage::{models::{BootstrapDataGeneratorDefinit
 pub mod bootstrap_data_generators;
 pub mod source_change_generators;
 pub mod source_change_dispatchers;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum SourceChangeGeneratorStartMode {
+    Auto,
+    Bootstrap,
+    Manual,
+}
+
+impl Default for SourceChangeGeneratorStartMode {
+    fn default() -> Self {
+        Self::Bootstrap
+    }
+}
+
+impl FromStr for SourceChangeGeneratorStartMode {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s.to_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "bootstrap" => Ok(Self::Bootstrap),
+            "manual" => Ok(Self::Manual),
+            _ => {
+                anyhow::bail!("Invalid SourceChangeGeneratorStartMode value:{}", s);
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for SourceChangeGeneratorStartMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto => write!(f, "auto"),
+            Self::Bootstrap => write!(f, "bootstrap"),
+            Self::Manual => write!(f, "manual"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SourceChangeGeneratorStartMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: String = Deserialize::deserialize(deserializer)?;
+        value.parse::<SourceChangeGeneratorStartMode>().map_err(de::Error::custom)
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunSourceOverrides {
@@ -33,7 +81,7 @@ pub struct TestRunSourceChangeGeneratorOverrides {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunSourceConfig {
-    pub start_immediately: Option<bool>,    
+    pub source_change_generator_start_mode: Option<SourceChangeGeneratorStartMode>,    
     pub test_id: String,
     pub test_repo_id: String,
     pub test_run_id: Option<String>,
@@ -81,7 +129,7 @@ pub struct TestRunSourceDefinition {
     pub id: TestRunSourceId,
     pub source_change_dispatcher_defs: Vec<SourceChangeDispatcherDefinition>,
     pub source_change_generator_def: Option<SourceChangeGeneratorDefinition>,
-    pub start_immediately: bool,    
+    pub source_change_generator_start_mode: SourceChangeGeneratorStartMode,    
     pub subscribers: Vec<QueryId>,
 }
 
@@ -93,7 +141,7 @@ impl TestRunSourceDefinition {
             id: TestRunSourceId::try_from(&test_run_source_config)?,
             source_change_dispatcher_defs: test_source_definition.source_change_dispatcher_defs.clone(),
             source_change_generator_def: test_source_definition.source_change_generator_def.clone(),
-            start_immediately: test_run_source_config.start_immediately.unwrap_or(false),
+            source_change_generator_start_mode: test_run_source_config.source_change_generator_start_mode.unwrap_or_default(),
             subscribers: test_source_definition.subscribers.clone(),
         };
 
@@ -140,7 +188,7 @@ impl TestRunSourceDefinition {
 pub struct TestRunSourceState {
     pub id: TestRunSourceId,
     pub source_change_generator: SourceChangeGeneratorState,
-    pub start_immediately: bool,
+    pub source_change_generator_start_mode: SourceChangeGeneratorStartMode,
 }
 
 #[derive(Debug)]
@@ -150,7 +198,7 @@ pub struct TestRunSource {
     pub id: TestRunSourceId,
     #[debug(skip)]
     pub source_change_generator: Option<Box<dyn SourceChangeGenerator + Send + Sync>>,    
-    pub start_immediately: bool,
+    pub source_change_generator_start_mode: SourceChangeGeneratorStartMode,
     pub subscribers: Vec<QueryId>
 }
 
@@ -178,9 +226,9 @@ impl TestRunSource {
     
         Ok(Self { 
             id: definition.id.clone(),
-            start_immediately: definition.start_immediately,
             bootstrap_data_generator, 
             source_change_generator,
+            source_change_generator_start_mode: definition.source_change_generator_start_mode,
             subscribers: definition.subscribers,
         })
     }
@@ -188,11 +236,17 @@ impl TestRunSource {
     pub async fn get_bootstrap_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
         log::debug!("Node Labels: {:?}, Rel Labels: {:?}", node_labels, rel_labels);
 
-        if self.bootstrap_data_generator.is_some() {
+        let bootstrap_data = if self.bootstrap_data_generator.is_some() {
             self.bootstrap_data_generator.as_ref().unwrap().get_data(node_labels, rel_labels).await
         } else {
             Ok(BootstrapData::new())
-        }
+        };
+
+        if self.source_change_generator_start_mode == SourceChangeGeneratorStartMode::Bootstrap {
+            self.start_source_change_generator().await?;
+        };
+        
+        bootstrap_data
     }
 
     pub async fn get_state(&self) -> anyhow::Result<TestRunSourceState> {
@@ -200,7 +254,7 @@ impl TestRunSource {
         Ok(TestRunSourceState {
             id: self.id.clone(),
             source_change_generator: self.get_source_change_generator_state().await?,
-            start_immediately: self.start_immediately,
+            source_change_generator_start_mode: self.source_change_generator_start_mode.clone(),
         })
     }
 

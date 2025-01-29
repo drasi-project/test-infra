@@ -7,9 +7,7 @@ use tokio::sync::RwLock;
 
 use reactions::{reaction_observer::ReactionObserverCommandResponse, TestRunReaction, TestRunReactionConfig, TestRunReactionDefinition, TestRunReactionState};
 use sources::{
-    bootstrap_data_generators::BootstrapData, 
-    source_change_generators::SourceChangeGeneratorCommandResponse,
-    TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState,
+    bootstrap_data_generators::BootstrapData, source_change_generators::SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStartMode, TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState
 };
 use test_data_store::{test_repo_storage::models::SpacingMode, test_run_storage::{TestRunReactionId, TestRunSourceId}, TestDataStore};
 
@@ -177,7 +175,7 @@ impl TestRunHost {
         let test_run_source = TestRunSource::new(definition, input_storage, output_storage).await?;        
 
         let start_immediately = 
-            self.get_status().await? == TestRunHostStatus::Running && test_run_source.start_immediately;
+            self.get_status().await? == TestRunHostStatus::Running && test_run_source.source_change_generator_start_mode == SourceChangeGeneratorStartMode::Auto;
 
         sources_lock.insert(id.clone(), test_run_source);
         
@@ -193,21 +191,6 @@ impl TestRunHost {
         Ok(self.sources.read().await.contains_key(&test_run_source_id))
     }
     
-    // pub async fn get_bootstrap_data_for_query(&self, query_id: &str, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
-    //     log::debug!("Query ID: {}, Node Labels: {:?}, Rel Labels: {:?}", query_id, node_labels, rel_labels);
-
-    //     let sources_lock = self.sources.read().await;
-
-    //     let mut bootstrap_data = BootstrapData::new();
-
-    //     for (_, source) in &*sources_lock {
-    //         let source_data = source.get_bootstrap_data_for_query(query_id.try_into()?, node_labels, rel_labels).await?;
-    //         bootstrap_data.merge(source_data);
-    //     }
-
-    //     Ok(bootstrap_data)
-    // }
-
     pub async fn get_status(&self) -> anyhow::Result<TestRunHostStatus> {
         Ok(self.status.read().await.clone())
     }
@@ -443,7 +426,7 @@ impl TestRunHost {
 
         let sources_lock = self.sources.read().await;
         for (_, source) in &*sources_lock {
-            if source.start_immediately {
+            if source.source_change_generator_start_mode == SourceChangeGeneratorStartMode::Auto {
                 log::info!("Starting TestRunSource: {}", source.id);
 
                 match source.start_source_change_generator().await {

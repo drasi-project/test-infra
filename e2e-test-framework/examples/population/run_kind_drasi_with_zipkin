@@ -9,7 +9,7 @@ kind create cluster
 echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
 drasi init
 
-echo -e "${GREEN}\n\Install ZipKin...${RESET}"
+echo -e "${GREEN}\n\nInstall ZipKin...${RESET}"
 kubectl create deployment -n drasi-system zipkin --image openzipkin/zipkin
 kubectl patch deployment zipkin -n drasi-system \
   --patch '{
@@ -29,10 +29,10 @@ kubectl patch deployment zipkin -n drasi-system \
   }'
 kubectl wait -n drasi-system --for=condition=available deployment/zipkin --timeout=300s
 kubectl expose deployment -n drasi-system zipkin --type ClusterIP --port 9411
-kubectl port-forward -n drasi-system svc/zipkin 9411:9411 &
+kubectl port-forward -n drasi-system services/zipkin 9411:9411 &
 
 # Deploy the Test Service and wait for it to be available
-echo -e "${GREEN}\n\Deploying Test Service...${RESET}"
+echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"
 kubectl apply -n drasi-system -f ./devops/test-service-deployment.yaml
 kubectl wait -n drasi-system --for=condition=available deployment/drasi-test-service --timeout=300s
 
@@ -59,4 +59,10 @@ echo -e "${GREEN}\n\nCreating Drasi Continuous Queries...${RESET}"
 drasi apply -f examples/population/kind_drasi/query.yaml
 drasi wait -f examples/population/kind_drasi/query.yaml -t 200
 
-# drasi watch city-population
+# Start the Test Run Reaction
+echo -e "${GREEN}\n\nStarting the Test Run Reaction...${RESET}"
+curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/reactions/az_dev_repo.population_tiny.test_run_001.city-population/start
+
+# Start the Test Run Source 
+echo -e "${GREEN}\n\nStarting the Test Run Source...${RESET}"
+curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/sources/az_dev_repo.population_tiny.test_run_001.geo-db/start

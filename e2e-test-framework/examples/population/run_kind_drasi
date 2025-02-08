@@ -10,7 +10,7 @@ echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
 drasi init
 
 # Deploy the Test Service and wait for it to be available
-echo -e "${GREEN}\n\Deploying Test Service...${RESET}"
+echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"
 kubectl apply -n drasi-system -f ./devops/test-service-deployment.yaml
 kubectl wait -n drasi-system --for=condition=available deployment/drasi-test-service --timeout=300s
 
@@ -37,4 +37,10 @@ echo -e "${GREEN}\n\nCreating Drasi Continuous Queries...${RESET}"
 drasi apply -f examples/population/kind_drasi/query.yaml
 drasi wait -f examples/population/kind_drasi/query.yaml -t 200
 
-# drasi watch city-population
+# Start the Test Run Reaction
+echo -e "${GREEN}\n\nStarting the Test Run Reaction...${RESET}"
+curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/reactions/az_dev_repo.population_tiny.test_run_001.city-population/start
+
+# Start the Test Run Source 
+echo -e "${GREEN}\n\nStarting the Test Run Source...${RESET}"
+curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/sources/az_dev_repo.population_tiny.test_run_001.geo-db/start

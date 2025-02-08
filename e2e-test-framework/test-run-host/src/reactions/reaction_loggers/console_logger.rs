@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use test_data_store::test_run_storage::TestRunReactionStorage;
 
-use crate::reactions::reaction_collector::ReactionOutputRecord;
+use crate::reactions::reaction_handlers::ReactionOutputRecord;
 
 use super::ReactionLogger;
 

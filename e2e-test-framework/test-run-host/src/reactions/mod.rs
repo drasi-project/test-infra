@@ -7,7 +7,7 @@ use reaction_loggers::TestRunReactionLoggerConfig;
 use reaction_observer::{ReactionObserver, ReactionObserverCommandResponse, ReactionObserverState};
 use test_data_store::{test_repo_storage::models::TestReactionDefinition, test_run_storage::{ParseTestRunIdError, ParseTestRunReactionIdError, TestRunId, TestRunReactionId, TestRunReactionStorage}};
 
-mod reaction_collector;
+mod reaction_handlers;
 mod reaction_loggers;
 pub mod reaction_observer;
 
@@ -101,11 +101,17 @@ impl TestRunReaction {
             definition.loggers
         ).await?;
 
-        Ok(Self { 
+        let trr = Self { 
             id: definition.id.clone(),
             reaction_observer,
             start_immediately: definition.start_immediately,
-        })
+        };
+
+        if trr.start_immediately {
+            trr.start_reaction_observer().await?;
+        }
+
+        Ok(trr)
     }
 
     pub async fn get_state(&self) -> anyhow::Result<TestRunReactionState> {

@@ -7,9 +7,7 @@ use tokio::sync::RwLock;
 
 use reactions::{reaction_observer::ReactionObserverCommandResponse, TestRunReaction, TestRunReactionConfig, TestRunReactionDefinition, TestRunReactionState};
 use sources::{
-    bootstrap_data_generators::BootstrapData, 
-    source_change_generators::SourceChangeGeneratorCommandResponse,
-    TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState,
+    bootstrap_data_generators::BootstrapData, source_change_generators::SourceChangeGeneratorCommandResponse, TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState
 };
 use test_data_store::{test_repo_storage::models::SpacingMode, test_run_storage::{TestRunReactionId, TestRunSourceId}, TestDataStore};
 
@@ -22,17 +20,13 @@ pub struct TestRunHostConfig {
     pub reactions: Vec<TestRunReactionConfig>,
     #[serde(default)]
     pub sources: Vec<TestRunSourceConfig>,
-    #[serde(default = "is_true")]
-    pub start_immediately: bool,    
 }
-fn is_true() -> bool { true }
 
 impl Default for TestRunHostConfig {
     fn default() -> Self {
         TestRunHostConfig {
             reactions: Vec::new(),
             sources: Vec::new(),
-            start_immediately: false,
         }
     }
 }
@@ -77,21 +71,34 @@ impl TestRunHost {
             status: Arc::new(RwLock::new(TestRunHostStatus::Initialized)),
         };
 
-        // Add the initial set of Test Run Sources.
-        for source_config in config.sources {
-            test_run_host.add_test_source(source_config).await?;
-        };
-
         // Add the initial set of Test Run Reactions.
         for reaction_config in config.reactions {
             test_run_host.add_test_reaction(reaction_config).await?;
         };
         
+        // Add the initial set of Test Run Sources.
+        for source_config in config.sources {
+            test_run_host.add_test_source(source_config).await?;
+        };
+        
         log::debug!("TestRunHost created -  {:?}", &test_run_host);
 
-        if config.start_immediately {
-            test_run_host.start().await?;
-        }
+        match &test_run_host.get_status().await? {
+            TestRunHostStatus::Initialized => {
+                log::info!("Starting TestRunHost...");
+                test_run_host.set_status(TestRunHostStatus::Running).await;
+            },
+            TestRunHostStatus::Running => {
+                let msg = format!("TestRunHost is already been Running, cannot start.");
+                log::error!("{}", msg);
+                anyhow::bail!("{}", msg);
+            },
+            TestRunHostStatus::Error(_) => {
+                let msg = format!("TestRunHost is in an Error state, cannot Start.");
+                log::error!("{}", msg);
+                anyhow::bail!("{}", msg);
+            },
+        };
 
         Ok(test_run_host)
     }
@@ -128,15 +135,8 @@ impl TestRunHost {
         // Create the TestRunReaction and add it to the TestRunHost.
         let test_run_reaction = TestRunReaction::new(definition, output_storage).await?;        
 
-        let start_immediately = 
-            self.get_status().await? == TestRunHostStatus::Running && test_run_reaction.start_immediately;
-
         reactions_lock.insert(id.clone(), test_run_reaction);
         
-        if start_immediately {
-            reactions_lock.get(&id).unwrap().start_reaction_observer().await?;
-        }
-
         Ok(id)
     }
 
@@ -176,14 +176,7 @@ impl TestRunHost {
         // Create the TestRunSource and add it to the TestRunHost.
         let test_run_source = TestRunSource::new(definition, input_storage, output_storage).await?;        
 
-        let start_immediately = 
-            self.get_status().await? == TestRunHostStatus::Running && test_run_source.start_immediately;
-
         sources_lock.insert(id.clone(), test_run_source);
-        
-        if start_immediately {
-            sources_lock.get(&id).unwrap().start_source_change_generator().await?;
-        }
 
         Ok(id)
     }
@@ -193,21 +186,6 @@ impl TestRunHost {
         Ok(self.sources.read().await.contains_key(&test_run_source_id))
     }
     
-    // pub async fn get_bootstrap_data_for_query(&self, query_id: &str, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
-    //     log::debug!("Query ID: {}, Node Labels: {:?}, Rel Labels: {:?}", query_id, node_labels, rel_labels);
-
-    //     let sources_lock = self.sources.read().await;
-
-    //     let mut bootstrap_data = BootstrapData::new();
-
-    //     for (_, source) in &*sources_lock {
-    //         let source_data = source.get_bootstrap_data_for_query(query_id.try_into()?, node_labels, rel_labels).await?;
-    //         bootstrap_data.merge(source_data);
-    //     }
-
-    //     Ok(bootstrap_data)
-    // }
-
     pub async fn get_status(&self) -> anyhow::Result<TestRunHostStatus> {
         Ok(self.status.read().await.clone())
     }
@@ -381,93 +359,6 @@ impl TestRunHost {
                 anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id);
             }
         }
-    }
-
-    pub async fn start(&self) -> anyhow::Result<TestRunHostStatus> {
-
-        match &self.get_status().await? {
-            TestRunHostStatus::Initialized => {
-                log::info!("Starting TestRunHost...");
-            },
-            TestRunHostStatus::Running => {
-                let msg = format!("TestRunHost is already been Running, cannot start.");
-                log::error!("{}", msg);
-                anyhow::bail!("{}", msg);
-            },
-            TestRunHostStatus::Error(_) => {
-                let msg = format!("TestRunHost is in an Error state, cannot Start.");
-                log::error!("{}", msg);
-                anyhow::bail!("{}", msg);
-            },
-        };
-
-        // Set the TestRunHostStatus to Running.
-        log::debug!("TestRunHost started successfully !!!\n\n");            
-        self.set_status(TestRunHostStatus::Running).await;
-
-        // Iterate over the TestRunReactions and start each one if it is configured to start immediately.
-        // If any of the TestRunReactions fail to start, set the TestRunHostStatus to Error and return an error.
-        log::trace!("Auto-starting TestRunReactions ...");            
-        let mut auto_start_reactions_count: u32 = 0;
-
-        let reactions_lock = self.reactions.read().await;
-        for (_, reaction) in &*reactions_lock {
-            if reaction.start_immediately {
-                log::info!("Starting TestRunReaction: {}", reaction.id);
-
-                match reaction.start_reaction_observer().await {
-                    Ok(response) => {
-                        match response.result {
-                            Ok(_) => { auto_start_reactions_count += 1; },
-                            Err(e) => {
-                                let error = TestRunHostStatus::Error(format!("Error starting TestRunReaction: {}", e));
-                                self.set_status(error.clone()).await;
-                                anyhow::bail!("{:?}", error);
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        let error = TestRunHostStatus::Error(format!("Error starting TestRunReaction: {}", e));
-                        self.set_status(error.clone()).await;
-                        anyhow::bail!("{:?}", error);
-                    }
-                }
-            }
-        }
-        log::info!("Auto-started {} of {} TestRunReactions.", auto_start_reactions_count, reactions_lock.len());            
-
-        // Iterate over the TestRunSources and start each one if it is configured to start immediately.
-        // If any of the TestSources fail to start, set the TestRunHostStatus to Error and return an error.
-        log::debug!("Auto-starting TestRunSources ...");            
-        let mut auto_start_sources_count: u32 = 0;
-
-        let sources_lock = self.sources.read().await;
-        for (_, source) in &*sources_lock {
-            if source.start_immediately {
-                log::info!("Starting TestRunSource: {}", source.id);
-
-                match source.start_source_change_generator().await {
-                    Ok(response) => {
-                        match response.result {
-                            Ok(_) => { auto_start_sources_count += 1; },
-                            Err(e) => {
-                                let error = TestRunHostStatus::Error(format!("Error starting TestRunSources: {}", e));
-                                self.set_status(error.clone()).await;
-                                anyhow::bail!("{:?}", error);
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        let error = TestRunHostStatus::Error(format!("Error starting TestRunSources: {}", e));
-                        self.set_status(error.clone()).await;
-                        anyhow::bail!("{:?}", error);
-                    }
-                }
-            }
-        }
-        log::info!("Auto-started {} of {} TestRunSources.", auto_start_sources_count, sources_lock.len());            
-
-        Ok(TestRunHostStatus::Running)
     }
 }
 

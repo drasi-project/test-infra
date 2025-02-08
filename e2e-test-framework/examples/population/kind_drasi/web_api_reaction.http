@@ -5,13 +5,12 @@
 @hostname = localhost
 @port = 63123
 @repo_id = az_dev_repo
-@test_id = population
+@test_id = population_tiny
 @test_run_id = test_run_001
 @reaction_id = city-population
 
 ### GET STATE of test run reaction
 GET http://{{hostname}}:{{port}}/test_run_host/reactions/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{reaction_id}}
-
 
 ### START test run reaction
 POST http://{{hostname}}:{{port}}/test_run_host/reactions/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{reaction_id}}/start
@@ -24,7 +23,6 @@ Content-Type: application/json
 ### STOP test run reaction
 POST http://{{hostname}}:{{port}}/test_run_host/reactions/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{reaction_id}}/stop
 Content-Type: application/json
-
 
 ### RESET test run reaction
 POST http://{{hostname}}:{{port}}/test_run_host/reactions/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{reaction_id}}/reset

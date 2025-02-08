@@ -1,14 +1,14 @@
 use async_trait::async_trait;
-use redis_result_queue_collector::RedisResultQueueCollector;
+use redis_result_queue_handler::RedisResultQueueHandler;
 use serde::Serialize;
 use tokio::sync::mpsc::Receiver;
 
 use test_data_store::{test_repo_storage::models::TestReactionDefinition, test_run_storage::TestRunReactionId};
 
-pub mod redis_result_queue_collector;
+pub mod redis_result_queue_handler;
 
 #[derive(Debug, thiserror::Error)]
-pub enum ReactionCollectorError {
+pub enum ReactionHandlerError {
     #[error("Invalid {0} command, reader is currently in state: {1}")]
     InvalidCommand(String, String),
     #[error("Invalid queue data")]
@@ -24,7 +24,7 @@ pub enum ReactionCollectorError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ReactionCollectorStatus {
+pub enum ReactionHandlerStatus {
     Uninitialized,
     Running,
     Paused,
@@ -32,35 +32,49 @@ pub enum ReactionCollectorStatus {
     Error
 }
 
-impl Serialize for ReactionCollectorStatus {
+impl Serialize for ReactionHandlerStatus {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         match self {
-            ReactionCollectorStatus::Uninitialized => serializer.serialize_str("Uninitialized"),
-            ReactionCollectorStatus::Running => serializer.serialize_str("Running"),
-            ReactionCollectorStatus::Paused => serializer.serialize_str("Paused"),
-            ReactionCollectorStatus::Stopped => serializer.serialize_str("Stopped"),
-            ReactionCollectorStatus::Error => serializer.serialize_str("Error"),
+            ReactionHandlerStatus::Uninitialized => serializer.serialize_str("Uninitialized"),
+            ReactionHandlerStatus::Running => serializer.serialize_str("Running"),
+            ReactionHandlerStatus::Paused => serializer.serialize_str("Paused"),
+            ReactionHandlerStatus::Stopped => serializer.serialize_str("Stopped"),
+            ReactionHandlerStatus::Error => serializer.serialize_str("Error"),
         }
     }
 }
 
 #[derive(Debug)]
-pub enum ReactionCollectorMessage {
+pub enum ReactionHandlerMessage {
     Record(ReactionOutputRecord),
-    Error(ReactionCollectorError),
+    Error(ReactionHandlerError),
     TestCompleted
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ReactionOutputRecord {
-    pub result_data: serde_json::Value,
+    pub reaction_output_data: serde_json::Value,
     pub dequeue_time_ns: u64,
     pub enqueue_time_ns: u64,
     pub id: String,
     pub seq: usize,
-    pub traceid: String,
-    pub traceparent: String,
+    pub traceparent: Option<String>,
+    pub tracestate: Option<String>,
+}
+
+impl opentelemetry::propagation::Extractor for ReactionOutputRecord {
+    fn get(&self, key: &str) -> Option<&str> {
+        match key {
+            "traceparent" => self.traceparent.as_deref(),
+            "tracestate" => self.tracestate.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        vec!["traceparent", "tracestate"]
+    }
 }
 
 impl std::fmt::Display for ReactionOutputRecord {
@@ -80,16 +94,16 @@ impl std::fmt::Display for ReactionOutputRecord {
 }
 
 #[async_trait]
-pub trait ReactionCollector : Send + Sync {
-    async fn init(&self) -> anyhow::Result<Receiver<ReactionCollectorMessage>>;
+pub trait ReactionHandler : Send + Sync {
+    async fn init(&self) -> anyhow::Result<Receiver<ReactionHandlerMessage>>;
     async fn pause(&self) -> anyhow::Result<()>;
     async fn start(&self) -> anyhow::Result<()>;
     async fn stop(&self) -> anyhow::Result<()>;
 }
 
 #[async_trait]
-impl ReactionCollector for Box<dyn ReactionCollector + Send + Sync> {
-    async fn init(&self) -> anyhow::Result<Receiver<ReactionCollectorMessage>> {
+impl ReactionHandler for Box<dyn ReactionHandler + Send + Sync> {
+    async fn init(&self) -> anyhow::Result<Receiver<ReactionHandlerMessage>> {
         (**self).init().await
     }
 
@@ -106,13 +120,13 @@ impl ReactionCollector for Box<dyn ReactionCollector + Send + Sync> {
     }
 }
 
-pub async fn create_reaction_collector (
+pub async fn create_reaction_handler (
     id: TestRunReactionId, 
     definition: TestReactionDefinition
-) -> anyhow::Result<Box<dyn ReactionCollector + Send + Sync>> {
+) -> anyhow::Result<Box<dyn ReactionHandler + Send + Sync>> {
     match definition {
         TestReactionDefinition::RedisResultQueue{common_def, unique_def} => {
-            Ok(Box::new(RedisResultQueueCollector::new(id, common_def, unique_def).await?))            
+            Ok(Box::new(RedisResultQueueHandler::new(id, common_def, unique_def).await?))            
         },
         TestReactionDefinition::DaprResultQueue { .. } => {
             unimplemented!("DaprResultQueue is not implemented yet")

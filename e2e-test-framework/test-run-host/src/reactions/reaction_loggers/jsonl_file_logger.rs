@@ -8,7 +8,7 @@ use tokio::{fs::{create_dir_all, File}, io::{AsyncWriteExt, BufWriter}};
 
 use test_data_store::test_run_storage::TestRunReactionStorage;
 
-use crate::reactions::reaction_collector::ReactionOutputRecord;
+use crate::reactions::reaction_handlers::ReactionOutputRecord;
 
 use super::{ReactionLogger, ReactionLoggerError};
 

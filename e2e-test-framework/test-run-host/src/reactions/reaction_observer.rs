@@ -10,9 +10,9 @@ use test_data_store::{
     test_run_storage::{TestRunReactionId, TestRunReactionStorage}
 };
 
-use crate::reactions::reaction_collector::create_reaction_collector;
+use crate::reactions::reaction_handlers::create_reaction_handler;
 
-use super::{reaction_collector::{ReactionCollector, ReactionCollectorMessage, ReactionOutputRecord}, reaction_loggers::{create_reaction_logger, ReactionLogger}, TestRunReactionLoggerConfig};
+use super::{reaction_handlers::{ReactionHandler, ReactionHandlerMessage, ReactionOutputRecord}, reaction_loggers::{create_reaction_logger, ReactionLogger}, TestRunReactionLoggerConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ReactionObserverStatus {
@@ -210,8 +210,8 @@ impl From<&ReactionObserverInternalState> for ReactionObserverExternalState {
 }
 
 pub struct ReactionObserverInternalState {
-    pub reaction_collector: Box<dyn ReactionCollector + Send + Sync>,
-    pub reaction_collector_rx_channel: Receiver<ReactionCollectorMessage>,
+    pub reaction_handler: Box<dyn ReactionHandler + Send + Sync>,
+    pub reaction_handler_rx_channel: Receiver<ReactionHandlerMessage>,
     pub loggers: Vec<Box<dyn ReactionLogger + Send>>,
     pub error_messages: Vec<String>,
     pub record_seq_num: u64,
@@ -226,8 +226,8 @@ impl ReactionObserverInternalState {
     async fn initialize(settings: ReactionObserverSettings) -> anyhow::Result<Self> {
         log::debug!("Initializing ReactionObserver using {:?}", settings);
     
-        let reaction_collector = create_reaction_collector(settings.id.clone(), settings.definition.clone()).await?;
-        let reaction_collector_rx_channel = reaction_collector.init().await?;
+        let reaction_handler = create_reaction_handler(settings.id.clone(), settings.definition.clone()).await?;
+        let reaction_handler_rx_channel = reaction_handler.init().await?;
         
         // Create the loggers
         let mut loggers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
@@ -241,8 +241,8 @@ impl ReactionObserverInternalState {
         }
     
         Ok(Self {
-            reaction_collector,
-            reaction_collector_rx_channel,
+            reaction_handler,
+            reaction_handler_rx_channel,
             loggers,
             error_messages: Vec::new(),
             record_seq_num: 0,
@@ -298,11 +298,11 @@ impl ReactionObserverInternalState {
         let _ = join_all(futures).await;
     }
 
-    async fn process_reaction_collector_message(&mut self, message: ReactionCollectorMessage) -> anyhow::Result<()> {
-        log::trace!("Received Reaction Collector message: {:?}", message);
+    async fn process_reaction_handler_message(&mut self, message: ReactionHandlerMessage) -> anyhow::Result<()> {
+        log::trace!("Received Reaction Handler message: {:?}", message);
     
         match message {
-            ReactionCollectorMessage::Record(record) => {
+            ReactionHandlerMessage::Record(record) => {
                 // Update the stats
                 if self.stats.num_reaction_records == 0 {
                     self.stats.first_result_time_ns = record.dequeue_time_ns;
@@ -315,10 +315,10 @@ impl ReactionObserverInternalState {
                 // Increment the record sequence number.
                 self.record_seq_num += 1;
             },
-            ReactionCollectorMessage::Error(error) => {
-                self.transition_to_error_state(&format!("Error in reaction collector stream: {:?}", error), None);
+            ReactionHandlerMessage::Error(error) => {
+                self.transition_to_error_state(&format!("Error in Reaction Handler stream: {:?}", error), None);
             },
-            ReactionCollectorMessage::TestCompleted => {
+            ReactionHandlerMessage::TestCompleted => {
                 self.transition_to_finished_state().await;
             },
 
@@ -423,7 +423,7 @@ impl ReactionObserverInternalState {
                 if self.stats.actual_start_time_ns == 0 {
                     self.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
                 }
-                self.reaction_collector.start().await
+                self.reaction_handler.start().await
             },
             ReactionObserverCommand::Stop => Ok(self.transition_to_stopped_state().await),
         }
@@ -436,7 +436,7 @@ impl ReactionObserverInternalState {
             ReactionObserverCommand::GetState => Ok(()),
             ReactionObserverCommand::Pause => {
                 self.status = ReactionObserverStatus::Paused;
-                self.reaction_collector.pause().await?;
+                self.reaction_handler.pause().await?;
                 Ok(())
             },
             ReactionObserverCommand::Reset => {
@@ -464,7 +464,7 @@ impl ReactionObserverInternalState {
     
         self.status = ReactionObserverStatus::Finished;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-        self.reaction_collector.stop().await.ok();
+        self.reaction_handler.stop().await.ok();
         
         self.close_loggers().await;
         self.write_result_summary().await.ok();
@@ -475,7 +475,7 @@ impl ReactionObserverInternalState {
     
         self.status = ReactionObserverStatus::Stopped;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-        self.reaction_collector.stop().await.ok();
+        self.reaction_handler.stop().await.ok();
 
         self.close_loggers().await;
         self.write_result_summary().await.ok();
@@ -641,16 +641,16 @@ pub async fn observer_thread(mut command_rx_channel: Receiver<ReactionObserverMe
                 }
             },
 
-            // Process messages from the Reaction Stream.
-            reaction_collector_message = state.reaction_collector_rx_channel.recv() => {
-                match reaction_collector_message {
-                    Some(reaction_collector_message) => {
-                        // log::trace!("Received Reaction Collector message: {:?}", reaction_collector_message);
-                        state.process_reaction_collector_message(reaction_collector_message).await
-                            .inspect_err(|e| state.transition_to_error_state("Error calling process_reaction_collector_message", Some(e))).ok();
+            // Process messages from the Reaction Handler.
+            reaction_handler_message = state.reaction_handler_rx_channel.recv() => {
+                match reaction_handler_message {
+                    Some(reaction_handler_message) => {
+                        // log::trace!("Received Reaction Handler message: {:?}", reaction_handler_message);
+                        state.process_reaction_handler_message(reaction_handler_message).await
+                            .inspect_err(|e| state.transition_to_error_state("Error calling process_reaction_handler_message", Some(e))).ok();
                     }
                     None => {
-                        state.transition_to_error_state("Reaction collector channel closed.", None);
+                        state.transition_to_error_state("Reaction handler channel closed.", None);
                         break;
                     }
                 }

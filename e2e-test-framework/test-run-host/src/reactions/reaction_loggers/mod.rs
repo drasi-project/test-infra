@@ -6,7 +6,7 @@ use console_logger::{ConsoleReactionLogger, ConsoleTestRunReactionLoggerConfig};
 use jsonl_file_logger::{JsonlFileReactionLogger, JsonlFileTestRunReactionLoggerConfig};
 use test_data_store::test_run_storage::TestRunReactionStorage;
 
-use super::reaction_collector::ReactionOutputRecord;
+use super::reaction_handlers::ReactionOutputRecord;
 
 pub mod console_logger;
 pub mod jsonl_file_logger;

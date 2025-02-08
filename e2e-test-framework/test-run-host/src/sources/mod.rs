@@ -224,13 +224,19 @@ impl TestRunSource {
             definition.source_change_dispatcher_defs
         ).await?;
     
-        Ok(Self { 
+        let trs = Self { 
             id: definition.id.clone(),
             bootstrap_data_generator, 
             source_change_generator,
             source_change_generator_start_mode: definition.source_change_generator_start_mode,
             subscribers: definition.subscribers,
-        })
+        };
+
+        if trs.source_change_generator_start_mode == SourceChangeGeneratorStartMode::Auto {
+            trs.start_source_change_generator().await?;
+        }
+
+        Ok(trs)
     }
 
     pub async fn get_bootstrap_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
@@ -245,7 +251,7 @@ impl TestRunSource {
         if self.source_change_generator_start_mode == SourceChangeGeneratorStartMode::Bootstrap {
             self.start_source_change_generator().await?;
         };
-        
+
         bootstrap_data
     }
 

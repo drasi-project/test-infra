@@ -2,21 +2,15 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-// Enum to represent versions
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Versions {
-    V1,
-}
-
-// Base struct for ResultEvent
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
-pub enum ResultEvent {
+pub enum QueryResultRecord {
+    #[serde(rename = "change")]
     Change(ChangeEvent),
+    #[serde(rename = "control")]
     Control(ControlEvent),
 }
 
-// Base fields for ResultEvent
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BaseResultEvent {
     #[serde(rename = "queryId")]
@@ -27,10 +21,45 @@ pub struct BaseResultEvent {
     #[serde(rename = "sourceTimeMs")]
     pub source_time_ms: i64,
 
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    pub metadata: Option<BaseResultMetadata>,
 }
 
-// ChangeEvent struct
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BaseResultMetadata {
+    #[serde(rename = "changeEvent")]
+    pub change_event: Option<HashMap<String, serde_json::Value>>,
+    pub tracking: TrackingMetadata,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TrackingMetadata {
+    pub query: QueryTrackingMetadata,
+    pub source: SourceTrackingMetadata,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QueryTrackingMetadata {
+    pub dequeue_ms: u64,
+    #[serde(rename = "queryEnd_ms")]
+    pub query_end_ms: u64,
+    #[serde(rename = "queryStart_ms")]
+    pub query_start_ms: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SourceTrackingMetadata {
+    #[serde(rename = "changeDispatcherEnd_ms")]
+    pub change_dispatcher_end_ms: u64,
+    #[serde(rename = "changeDispatcherStart_ms")]
+    pub change_dispatcher_start_ms: u64,
+    #[serde(rename = "changeSvcEnd_ms")]
+    pub change_svc_end_ms: u64,
+    #[serde(rename = "changeSvcStart_ms")]
+    pub change_svc_start_ms: u64,
+    pub reactivator_ms: u64,
+    pub seq: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChangeEvent {
     #[serde(flatten)]
@@ -46,14 +75,12 @@ pub struct ChangeEvent {
     pub deleted_results: Vec<HashMap<String, serde_json::Value>>,
 }
 
-// UpdatePayload struct
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdatePayload {
     pub before: HashMap<String, serde_json::Value>,
     pub after: HashMap<String, serde_json::Value>,
 }
 
-// ControlEvent struct
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ControlEvent {
     #[serde(flatten)]
@@ -63,18 +90,21 @@ pub struct ControlEvent {
     pub control_signal: ControlSignal,
 }
 
-// ControlSignal enum
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ControlSignal {
+    #[serde(rename = "bootstrapStarted")]
     BootstrapStarted(BootstrapStartedSignal),
+    #[serde(rename = "bootstrapCompleted")]
     BootstrapCompleted(BootstrapCompletedSignal),
+    #[serde(rename = "running")]
     Running(RunningSignal),
+    #[serde(rename = "stopped")]
     Stopped(StoppedSignal),
+    #[serde(rename = "deleted")]
     Deleted(DeletedSignal),
 }
 
-// Individual signal structs
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BootstrapStartedSignal {
     // Additional fields can be added if necessary
@@ -98,20 +128,4 @@ pub struct StoppedSignal {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeletedSignal {
     // Additional fields can be added if necessary
-}
-
-impl TryFrom<&str> for ResultEvent {
-    type Error = serde_json::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        serde_json::from_str(value)
-    }
-}
-
-impl TryFrom<&String> for ResultEvent {
-    type Error = serde_json::Error;
-
-    fn try_from(value: &String) -> Result<Self, Self::Error> {
-        serde_json::from_str(value)
-    }
 }

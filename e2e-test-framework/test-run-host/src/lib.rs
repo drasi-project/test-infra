@@ -11,6 +11,7 @@ use sources::{
 };
 use test_data_store::{test_repo_storage::models::SpacingMode, test_run_storage::{TestRunReactionId, TestRunSourceId}, TestDataStore};
 
+pub mod queries;
 pub mod reactions;
 pub mod sources;
 

@@ -194,7 +194,6 @@ pub struct QueryResultObserverExternalState {
     pub result_summary: QueryResultObserverResultSummary,
     pub stats: QueryResultObserverStats,
     pub status: QueryResultObserverStatus,
-    pub test_run_query_id: TestRunQueryId,
 }
 
 impl From<&QueryResultObserverInternalState> for QueryResultObserverExternalState {
@@ -204,7 +203,6 @@ impl From<&QueryResultObserverInternalState> for QueryResultObserverExternalStat
             result_summary: QueryResultObserverResultSummary::from(state),
             stats: state.stats.clone(),
             status: state.status,
-            test_run_query_id: state.settings.id.clone(),
         }
     }
 }

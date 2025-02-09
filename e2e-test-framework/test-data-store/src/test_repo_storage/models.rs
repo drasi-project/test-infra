@@ -262,25 +262,25 @@ pub struct JsonlFileSourceChangeDispatcherDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum TestReactionDefinition {
-    DaprResultQueue {
+    AzureEventGrid {
         #[serde(flatten)]
         common_def: CommonTestReactionDefinition,
         #[serde(flatten)]
-        unique_def: DaprResultQueueTestReactionDefinition,
+        unique_def: AzureEventGridTestReactionDefinition,
     },
-    RedisResultQueue {
+    SignalR {
         #[serde(flatten)]
         common_def: CommonTestReactionDefinition,
         #[serde(flatten)]
-        unique_def: RedisResultQueueTestReactionDefinition,
+        unique_def: SignalRTestReactionDefinition,
     },
 }
 
 impl TestReactionDefinition {
     pub fn get_id(&self) -> String {
         match self {
-            TestReactionDefinition::DaprResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
-            TestReactionDefinition::RedisResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
+            TestReactionDefinition::AzureEventGrid { common_def, .. } => common_def.test_reaction_id.clone(),
+            TestReactionDefinition::SignalR { common_def, .. } => common_def.test_reaction_id.clone(),
         }
     }
 }
@@ -293,18 +293,11 @@ pub struct CommonTestReactionDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DaprResultQueueTestReactionDefinition {
-    pub host: Option<String>,
-    pub port: Option<u16>,
-    pub pubsub_name: Option<String>,
-    pub pubsub_topic: Option<String>,
+pub struct AzureEventGridTestReactionDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RedisResultQueueTestReactionDefinition {
-    pub host: Option<String>,
-    pub port: Option<u16>,
-    pub queue_name: Option<String>,
+pub struct SignalRTestReactionDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -228,8 +228,8 @@ impl TestDataStore {
 
         match test_definition.reactions.iter().find(
             |reaction| match reaction {
-                TestReactionDefinition::RedisResultQueue {common_def, ..} => common_def.test_reaction_id == test_run_reaction_id.test_reaction_id,
-                TestReactionDefinition::DaprResultQueue {common_def, ..} => common_def.test_reaction_id == test_run_reaction_id.test_reaction_id,
+                TestReactionDefinition::SignalR {common_def, ..} => common_def.test_reaction_id == test_run_reaction_id.test_reaction_id,
+                TestReactionDefinition::AzureEventGrid {common_def, ..} => common_def.test_reaction_id == test_run_reaction_id.test_reaction_id,
             })
         {
             Some(reaaction_definition) => Ok(reaaction_definition.clone()),

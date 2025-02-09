@@ -305,10 +305,10 @@ impl ReactionObserverInternalState {
             ReactionHandlerMessage::Record(record) => {
                 // Update the stats
                 if self.stats.num_reaction_records == 0 {
-                    self.stats.first_result_time_ns = record.dequeue_time_ns;
+                    self.stats.first_result_time_ns = record.receive_time_ns;
                 }
                 self.stats.num_reaction_records += 1;
-                self.stats.last_result_time_ns = record.dequeue_time_ns;
+                self.stats.last_result_time_ns = record.receive_time_ns;
     
                 self.log_reaction_record(&record).await;
     

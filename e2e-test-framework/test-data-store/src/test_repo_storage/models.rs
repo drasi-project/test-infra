@@ -128,11 +128,11 @@ pub struct LocalTestDefinition {
     pub description: Option<String>,
     pub test_folder: Option<String>,
     #[serde(default)]
-    pub sources: Vec<TestSourceDefinition>,
-    #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
     pub reactions: Vec<TestReactionDefinition>,
+    #[serde(default)]
+    pub sources: Vec<TestSourceDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -144,11 +144,11 @@ pub struct TestDefinition {
     pub description: Option<String>,
     pub test_folder: Option<String>,
     #[serde(default)]
-    pub sources: Vec<TestSourceDefinition>,
-    #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
     pub reactions: Vec<TestReactionDefinition>,
+    #[serde(default)]
+    pub sources: Vec<TestSourceDefinition>,    
 }
 
 impl TestDefinition {
@@ -307,6 +307,63 @@ pub struct RedisResultQueueTestReactionDefinition {
     pub queue_name: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum TestQueryDefinition {
+    DaprPubSub {
+        #[serde(flatten)]
+        common_def: CommonTestQueryDefinition,
+        #[serde(flatten)]
+        unique_def: DaprPubSubTestQueryDefinition,
+    },
+    RedisStream {
+        #[serde(flatten)]
+        common_def: CommonTestQueryDefinition,
+        #[serde(flatten)]
+        unique_def: RedisStreamTestQueryDefinition,
+    },
+}
+
+impl TestQueryDefinition {
+    pub fn get_id(&self) -> String {
+        match self {
+            TestQueryDefinition::DaprPubSub { common_def, .. } => common_def.test_query_id.clone(),
+            TestQueryDefinition::RedisStream { common_def, .. } => common_def.test_query_id.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommonTestQueryDefinition {
+    #[serde(default)]
+    pub test_query_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaprPubSubTestQueryDefinition {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub pubsub_name: Option<String>,
+    pub pubsub_topic: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RedisStreamTestQueryDefinition {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub stream_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueryId {
+    #[serde(default = "default_query_node_id")]
+    pub node_id: String,
+    #[serde(default = "default_query_id")]
+    pub query_id: String,
+}
+fn default_query_node_id() -> String { "default".to_string() }
+fn default_query_id() -> String { "test_query".to_string() }
+
 #[derive(Debug, thiserror::Error)]
 pub enum ParseQueryIdError {
     #[error("Invalid format for QueryId - {0}")]
@@ -329,20 +386,6 @@ impl TryFrom<&str> for QueryId {
             Err(ParseQueryIdError::InvalidFormat(value.to_string()))
         }
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct QueryId {
-    #[serde(default = "default_query_node_id")]
-    pub node_id: String,
-    #[serde(default = "default_query_id")]
-    pub query_id: String,
-}
-fn default_query_node_id() -> String { "default".to_string() }
-fn default_query_id() -> String { "test_query".to_string() }
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestQueryDefinition {
 }
 
 #[cfg(test)]

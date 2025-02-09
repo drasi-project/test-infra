@@ -5,8 +5,8 @@ use tempfile::TempDir;
 use tokio::sync::Mutex;
 
 use data_collection_storage::{DataCollectionStorage, DataCollectionStore};
-use test_repo_storage::{models::{LocalTestDefinition, TestDefinition, TestReactionDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage, TestStorage};
-use test_run_storage::{TestRunId, TestRunReactionId, TestRunReactionStorage, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
+use test_repo_storage::{models::{LocalTestDefinition, TestDefinition, TestQueryDefinition, TestReactionDefinition, TestSourceDefinition}, repo_clients::TestRepoConfig, TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage, TestStorage};
+use test_run_storage::{TestRunId, TestRunQueryId, TestRunQueryStorage, TestRunReactionId, TestRunReactionStorage, TestRunSourceId, TestRunSourceStorage, TestRunStorage, TestRunStore};
 
 pub mod data_collection_storage;
 pub mod scripts;
@@ -207,6 +207,23 @@ impl TestDataStore {
         ).await
     }
 
+    pub async fn get_test_query_definition_for_test_run_query(&self, test_run_query_id: &TestRunQueryId) -> anyhow::Result<TestQueryDefinition> {
+        let test_definition = self.get_test_definition(
+            &test_run_query_id.test_run_id.test_repo_id, 
+            &test_run_query_id.test_run_id.test_id
+        ).await?;
+
+        match test_definition.queries.iter().find(
+            |query| match query {
+                TestQueryDefinition::RedisStream {common_def, ..} => common_def.test_query_id == test_run_query_id.test_query_id,
+                TestQueryDefinition::DaprPubSub {common_def, ..} => common_def.test_query_id == test_run_query_id.test_query_id,
+            })
+        {
+            Some(query_definition) => Ok(query_definition.clone()),
+            None => anyhow::bail!("TestQueryDefinition not found for TestRunQueryId: {:?}", &test_run_query_id)
+        }
+    }
+
     pub async fn get_test_reaction_definition_for_test_run_reaction(&self, test_run_reaction_id: &TestRunReactionId) -> anyhow::Result<TestReactionDefinition> {
         let test_definition = self.get_test_definition(
             &test_run_reaction_id.test_run_id.test_repo_id, 
@@ -259,6 +276,12 @@ impl TestDataStore {
 
     pub async fn get_test_run_storage(&self, test_run_id: &TestRunId) -> anyhow::Result<TestRunStorage> {
         Ok(self.test_run_store.lock().await.get_test_run_storage(test_run_id, false).await?)
+    }
+
+    pub async fn get_test_run_query_storage(&self, test_run_query_id: &TestRunQueryId) -> anyhow::Result<TestRunQueryStorage> {
+        Ok(self.test_run_store.lock().await
+            .get_test_run_storage(&test_run_query_id.test_run_id, false).await?
+            .get_query_storage(test_run_query_id, false).await?)
     }
 
     pub async fn get_test_run_reaction_storage(&self, test_run_reaction_id: &TestRunReactionId) -> anyhow::Result<TestRunReactionStorage> {

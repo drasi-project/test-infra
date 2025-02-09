@@ -3,55 +3,55 @@ use std::{sync::{atomic::{AtomicUsize, Ordering}, Arc}, time::SystemTime};
 use async_trait::async_trait;
 use redis::{aio::MultiplexedConnection, streams::{StreamId, StreamReadOptions, StreamReadReply}, AsyncCommands, RedisResult};
 use redis_stream_read_result::{RedisStreamReadResult, RedisStreamRecordData};
-use test_data_store::{test_repo_storage::models::{CommonTestReactionDefinition, RedisResultQueueTestReactionDefinition}, test_run_storage::TestRunReactionId};
+use test_data_store::{test_repo_storage::models::{CommonTestQueryDefinition, RedisStreamTestQueryDefinition}, test_run_storage::TestRunQueryId};
 use tokio::sync::{mpsc::{Receiver, Sender}, Notify, RwLock};
 
-use super::{ReactionHandler, ReactionHandlerError, ReactionHandlerMessage, ReactionHandlerStatus};
+use super::{ResultStreamHandler, ResultStreamHandlerError, ResultStreamHandlerMessage, ResultStreamHandlerStatus};
 
 pub mod redis_stream_read_result;
 pub mod result_stream_record;
 
 #[derive(Clone, Debug)]
-pub struct RedisResultQueueHandlerSettings {
+pub struct RedisResultStreamHandlerSettings {
     pub host: String,
     pub port: u16,
-    pub queue_name: String,
-    pub reaction_id: String,
-    pub test_run_reaction_id: TestRunReactionId,
+    pub stream_name: String,
+    pub query_id: String,
+    pub test_run_query_id: TestRunQueryId,
 }
 
-impl RedisResultQueueHandlerSettings {
-    pub fn new(id: TestRunReactionId, common_def: CommonTestReactionDefinition, unique_def: RedisResultQueueTestReactionDefinition) -> anyhow::Result<Self> {
+impl RedisResultStreamHandlerSettings {
+    pub fn new(id: TestRunQueryId, common_def: CommonTestQueryDefinition, unique_def: RedisStreamTestQueryDefinition) -> anyhow::Result<Self> {
 
         let host = unique_def.host.clone().unwrap_or_else(|| "127.0.0.1".to_string());
         let port = unique_def.port.unwrap_or(6379);        
-        let queue_name = unique_def.queue_name.clone().unwrap_or_else(|| format!("{}-results", common_def.test_reaction_id.clone()));
+        let stream_name = unique_def.stream_name.clone().unwrap_or_else(|| format!("{}-results", common_def.test_query_id.clone()));
 
-        Ok(RedisResultQueueHandlerSettings {
+        Ok(RedisResultStreamHandlerSettings {
             host,
             port,
-            queue_name,
-            reaction_id: common_def.test_reaction_id.clone(),
-            test_run_reaction_id: id
+            stream_name,
+            query_id: common_def.test_query_id.clone(),
+            test_run_query_id: id
         })
     }
 }
 
 #[allow(dead_code)]
-pub struct RedisResultQueueHandler {
+pub struct RedisResultStreamHandler {
     notifier: Arc<Notify>,
     seq: Arc<AtomicUsize>,
-    settings: RedisResultQueueHandlerSettings,
-    status: Arc<RwLock<ReactionHandlerStatus>>,
+    settings: RedisResultStreamHandlerSettings,
+    status: Arc<RwLock<ResultStreamHandlerStatus>>,
 }
 
-impl RedisResultQueueHandler {
-    pub async fn new(id: TestRunReactionId, common_def: CommonTestReactionDefinition, unique_def: RedisResultQueueTestReactionDefinition) -> anyhow::Result<Box<dyn ReactionHandler + Send + Sync>> {
-        let settings = RedisResultQueueHandlerSettings::new(id, common_def, unique_def)?;
-        log::trace!("Creating RedisResultQueueHandler with settings {:?}", settings);
+impl RedisResultStreamHandler {
+    pub async fn new(id: TestRunQueryId, common_def: CommonTestQueryDefinition, unique_def: RedisStreamTestQueryDefinition) -> anyhow::Result<Box<dyn ResultStreamHandler + Send + Sync>> {
+        let settings = RedisResultStreamHandlerSettings::new(id, common_def, unique_def)?;
+        log::trace!("Creating RedisResultStreamHandler with settings {:?}", settings);
 
         let notifier = Arc::new(Notify::new());
-        let status = Arc::new(RwLock::new(ReactionHandlerStatus::Uninitialized));
+        let status = Arc::new(RwLock::new(ResultStreamHandlerStatus::Uninitialized));
         
         Ok(Box::new(Self {
             notifier,
@@ -63,31 +63,31 @@ impl RedisResultQueueHandler {
 }
 
 #[async_trait]
-impl ReactionHandler for RedisResultQueueHandler {
-    async fn init(&self) -> anyhow::Result<Receiver<ReactionHandlerMessage>> {
-        log::debug!("Initializing RedisResultQueueHandler");
+impl ResultStreamHandler for RedisResultStreamHandler {
+    async fn init(&self) -> anyhow::Result<Receiver<ResultStreamHandlerMessage>> {
+        log::debug!("Initializing RedisResultStreamHandler");
 
         if let Ok(mut status) = self.status.try_write() {
             match *status {
-                ReactionHandlerStatus::Uninitialized => {
+                ResultStreamHandlerStatus::Uninitialized => {
                     let (handler_tx_channel, handler_rx_channel) = tokio::sync::mpsc::channel(100);
                     
-                    *status = ReactionHandlerStatus::Paused;
+                    *status = ResultStreamHandlerStatus::Paused;
     
                     tokio::spawn(reader_thread(self.seq.clone(), self.settings.clone(), self.status.clone(), self.notifier.clone(), handler_tx_channel));
     
                     Ok(handler_rx_channel)
                 },
-                ReactionHandlerStatus::Running => {
+                ResultStreamHandlerStatus::Running => {
                     anyhow::bail!("Cant Init Handler, Handler currently Running");
                 },
-                ReactionHandlerStatus::Paused => {
+                ResultStreamHandlerStatus::Paused => {
                     anyhow::bail!("Cant Init Handler, Handler currently Paused");
                 },
-                ReactionHandlerStatus::Stopped => {
+                ResultStreamHandlerStatus::Stopped => {
                     anyhow::bail!("Cant Init Handler, Handler currently Stopped");
                 },            
-                ReactionHandlerStatus::Error => {
+                ResultStreamHandlerStatus::Error => {
                     anyhow::bail!("Handler in Error state");
                 },
             }    
@@ -97,25 +97,25 @@ impl ReactionHandler for RedisResultQueueHandler {
     }
 
     async fn start(&self) -> anyhow::Result<()> {
-        log::debug!("Starting RedisResultQueueHandler");
+        log::debug!("Starting RedisResultStreamHandler");
 
         if let Ok(mut status) = self.status.try_write() {
             match *status {
-                ReactionHandlerStatus::Uninitialized => {
+                ResultStreamHandlerStatus::Uninitialized => {
                     anyhow::bail!("Can't Start Handler, Handler Uninitialized");
                 },
-                ReactionHandlerStatus::Running => {
+                ResultStreamHandlerStatus::Running => {
                     Ok(())
                 },
-                ReactionHandlerStatus::Paused => {
-                    *status = ReactionHandlerStatus::Running;
+                ResultStreamHandlerStatus::Paused => {
+                    *status = ResultStreamHandlerStatus::Running;
                     self.notifier.notify_one();
                     Ok(())
                 },
-                ReactionHandlerStatus::Stopped => {
+                ResultStreamHandlerStatus::Stopped => {
                     anyhow::bail!("Cant Start Handler, Handler already Stopped");
                 },            
-                ReactionHandlerStatus::Error => {
+                ResultStreamHandlerStatus::Error => {
                     anyhow::bail!("Handler in Error state");
                 },
             }
@@ -125,24 +125,24 @@ impl ReactionHandler for RedisResultQueueHandler {
     }
 
     async fn pause(&self) -> anyhow::Result<()> {
-        log::debug!("Pausing RedisResultQueueHandler");
+        log::debug!("Pausing RedisResultStreamHandler");
 
         if let Ok(mut status) = self.status.try_write() {
             match *status {
-                ReactionHandlerStatus::Uninitialized => {
+                ResultStreamHandlerStatus::Uninitialized => {
                     anyhow::bail!("Cant Pause Handler, Handler Uninitialized");
                 },
-                ReactionHandlerStatus::Running => {
-                    *status = ReactionHandlerStatus::Paused;
+                ResultStreamHandlerStatus::Running => {
+                    *status = ResultStreamHandlerStatus::Paused;
                     Ok(())
                 },
-                ReactionHandlerStatus::Paused => {
+                ResultStreamHandlerStatus::Paused => {
                     Ok(())
                 },
-                ReactionHandlerStatus::Stopped => {
+                ResultStreamHandlerStatus::Stopped => {
                     anyhow::bail!("Cant Pause Handler, Handler already Stopped");
                 },            
-                ReactionHandlerStatus::Error => {
+                ResultStreamHandlerStatus::Error => {
                     anyhow::bail!("Handler in Error state");
                 },
             }
@@ -152,26 +152,26 @@ impl ReactionHandler for RedisResultQueueHandler {
     }
 
     async fn stop(&self) -> anyhow::Result<()> {
-        log::debug!("Stopping RedisResultQueueHandler");
+        log::debug!("Stopping RedisResultStreamHandler");
 
         if let Ok(mut status) = self.status.try_write() {
             match *status {
-                ReactionHandlerStatus::Uninitialized => {
+                ResultStreamHandlerStatus::Uninitialized => {
                     anyhow::bail!("Handler not initialized, current status: Uninitialized");
                 },
-                ReactionHandlerStatus::Running => {
-                    *status = ReactionHandlerStatus::Stopped;
+                ResultStreamHandlerStatus::Running => {
+                    *status = ResultStreamHandlerStatus::Stopped;
                     Ok(())
                 },
-                ReactionHandlerStatus::Paused => {
-                    *status = ReactionHandlerStatus::Stopped;
+                ResultStreamHandlerStatus::Paused => {
+                    *status = ResultStreamHandlerStatus::Stopped;
                     self.notifier.notify_one();
                     Ok(())
                 },
-                ReactionHandlerStatus::Stopped => {
+                ResultStreamHandlerStatus::Stopped => {
                     Ok(())
                 },            
-                ReactionHandlerStatus::Error => {
+                ResultStreamHandlerStatus::Error => {
                     anyhow::bail!("Handler in Error state");
                 },
             }
@@ -183,12 +183,12 @@ impl ReactionHandler for RedisResultQueueHandler {
 
 async fn reader_thread(
     seq: Arc<AtomicUsize>, 
-    settings: RedisResultQueueHandlerSettings, 
-    status: Arc<RwLock<ReactionHandlerStatus>>, 
-    notify: Arc<Notify>, reaction_handler_tx_channel: 
-    Sender<ReactionHandlerMessage>) 
+    settings: RedisResultStreamHandlerSettings, 
+    status: Arc<RwLock<ResultStreamHandlerStatus>>, 
+    notify: Arc<Notify>, result_stream_handler_tx_channel: 
+    Sender<ResultStreamHandlerMessage>) 
 {
-    log::debug!("Starting RedisResultQueueHandler Reader Thread");
+    log::debug!("Starting RedisResultStreamHandler Reader Thread");
 
     let client_result = redis::Client::open(format!("redis://{}:{}", &settings.host, &settings.port));
 
@@ -200,8 +200,8 @@ async fn reader_thread(
         Err(e) => {
             let msg = format!("Client creation error: {:?}", e);
             log::error!("{}", &msg);
-            *status.write().await = ReactionHandlerStatus::Error;
-            match reaction_handler_tx_channel.send(ReactionHandlerMessage::Error(ReactionHandlerError::RedisError(e))).await {
+            *status.write().await = ResultStreamHandlerStatus::Error;
+            match result_stream_handler_tx_channel.send(ResultStreamHandlerMessage::Error(ResultStreamHandlerError::RedisError(e))).await {
                 Ok(_) => {},
                 Err(e) => {
                     log::error!("Error sending error message: {:?}", e);
@@ -221,8 +221,8 @@ async fn reader_thread(
         Err(e) => {
             let msg = format!("Connection Error: {:?}", e);
             log::error!("{}", &msg);
-            *status.write().await = ReactionHandlerStatus::Error;
-            match reaction_handler_tx_channel.send(ReactionHandlerMessage::Error(ReactionHandlerError::RedisError(e))).await {
+            *status.write().await = ResultStreamHandlerStatus::Error;
+            match result_stream_handler_tx_channel.send(ResultStreamHandlerMessage::Error(ResultStreamHandlerError::RedisError(e))).await {
                 Ok(_) => {},
                 Err(e) => {
                     log::error!("Error sending error message: {:?}", e);
@@ -232,7 +232,7 @@ async fn reader_thread(
         }
     };
 
-    let stream_key = &settings.queue_name;
+    let stream_key = &settings.stream_name;
     let mut stream_last_id = format!("{}-0",SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis().to_string());
     let opts = StreamReadOptions::default().count(1).block(5000);
 
@@ -247,33 +247,33 @@ async fn reader_thread(
         };
 
         match current_status {
-            ReactionHandlerStatus::Uninitialized 
-            | ReactionHandlerStatus::Stopped
-            | ReactionHandlerStatus::Error => {
+            ResultStreamHandlerStatus::Uninitialized 
+            | ResultStreamHandlerStatus::Stopped
+            | ResultStreamHandlerStatus::Error => {
                 log::debug!("Uninitialized, Stopped, or Error, exiting");
                 return;
             },
-            ReactionHandlerStatus::Paused => {
+            ResultStreamHandlerStatus::Paused => {
                 log::debug!("Paused, waiting for notify");
                 notify.notified().await;
                 log::debug!("Notified");
             },
-            ReactionHandlerStatus::Running => {
+            ResultStreamHandlerStatus::Running => {
                 let read_result = read_stream(&mut con, seq.clone(), stream_key, &stream_last_id, &opts).await;
                 match read_result {
                     Ok(results) => {
                         for result in results {
                             stream_last_id = result.id.clone();
 
-                            let reaction_handler_message: ReactionHandlerMessage = match result.try_into() {
+                            let result_stream_handler_message: ResultStreamHandlerMessage = match result.try_into() {
                                 Ok(msg) => msg,
                                 Err(e) => {
-                                    log::error!("Error converting RedisStreamReadResult to ReactionHandlerMessage: {:?}", e);
-                                    ReactionHandlerMessage::Error(ReactionHandlerError::ConversionError)
+                                    log::error!("Error converting RedisStreamReadResult to ResultStreamHandlerMessage: {:?}", e);
+                                    ResultStreamHandlerMessage::Error(ResultStreamHandlerError::ConversionError)
                                 }
                             };
 
-                            match reaction_handler_tx_channel.send(reaction_handler_message).await {
+                            match result_stream_handler_tx_channel.send(result_stream_handler_message).await {
                                 Ok(_) => {},
                                 Err(e) => {
                                     match e {
@@ -345,7 +345,7 @@ async fn read_stream(con: &mut MultiplexedConnection, seq: Arc<AtomicUsize>, str
                                                 enqueue_time_ns,
                                                 dequeue_time_ns,
                                                 record: None,
-                                                error: Some(ReactionHandlerError::InvalidQueueData),
+                                                error: Some(ResultStreamHandlerError::InvalidStreamData),
                                             });   
                                         }
                                     }
@@ -358,7 +358,7 @@ async fn read_stream(con: &mut MultiplexedConnection, seq: Arc<AtomicUsize>, str
                                         enqueue_time_ns,
                                         dequeue_time_ns,
                                         record: None,
-                                        error: Some(ReactionHandlerError::InvalidQueueData),
+                                        error: Some(ResultStreamHandlerError::InvalidStreamData),
                                     });   
                                 }
                             }
@@ -371,7 +371,7 @@ async fn read_stream(con: &mut MultiplexedConnection, seq: Arc<AtomicUsize>, str
                                 enqueue_time_ns,
                                 dequeue_time_ns,
                                 record: None,
-                                error: Some(ReactionHandlerError::InvalidQueueData),
+                                error: Some(ResultStreamHandlerError::InvalidStreamData),
                             });   
                         }
                     }
@@ -384,7 +384,7 @@ async fn read_stream(con: &mut MultiplexedConnection, seq: Arc<AtomicUsize>, str
                         enqueue_time_ns,
                         dequeue_time_ns,
                         record: None,
-                        error: Some(ReactionHandlerError::InvalidQueueData),
+                        error: Some(ResultStreamHandlerError::InvalidStreamData),
                     });   
                 }
             };

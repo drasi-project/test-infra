@@ -3,31 +3,31 @@ use std::fmt;
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 
-use result_stream_loggers::TestRunReactionLoggerConfig;
-use query_result_observer::{ReactionObserver, ReactionObserverCommandResponse, ReactionObserverState};
-use test_data_store::{test_repo_storage::models::TestReactionDefinition, test_run_storage::{ParseTestRunIdError, ParseTestRunReactionIdError, TestRunId, TestRunReactionId, TestRunReactionStorage}};
+use result_stream_loggers::ResultStreamLoggerConfig;
+use query_result_observer::{QueryResultObserver, QueryResultObserverCommandResponse, QueryResultObserverState};
+use test_data_store::{test_repo_storage::models::TestQueryDefinition, test_run_storage::{ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId, TestRunQueryStorage}};
 
 mod result_stream_handlers;
 mod result_stream_loggers;
 pub mod query_result_observer;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TestRunReactionConfig {
+pub struct TestRunQueryConfig {
     #[serde(default="default_start_immediately")]
     pub start_immediately: bool,    
     pub test_id: String,
     pub test_repo_id: String,
     pub test_run_id: Option<String>,
-    pub test_reaction_id: String,
+    pub test_query_id: String,
     #[serde(default)]
-    pub loggers: Vec<TestRunReactionLoggerConfig>,
+    pub loggers: Vec<ResultStreamLoggerConfig>,
 }
 fn default_start_immediately() -> bool { false }
 
-impl TryFrom<&TestRunReactionConfig> for TestRunId {
+impl TryFrom<&TestRunQueryConfig> for TestRunId {
     type Error = ParseTestRunIdError;
 
-    fn try_from(value: &TestRunReactionConfig) -> Result<Self, Self::Error> {
+    fn try_from(value: &TestRunQueryConfig) -> Result<Self, Self::Error> {
         Ok(TestRunId::new(
             &value.test_repo_id, 
             &value.test_id, 
@@ -37,108 +37,108 @@ impl TryFrom<&TestRunReactionConfig> for TestRunId {
     }
 }
 
-impl TryFrom<&TestRunReactionConfig> for TestRunReactionId {
-    type Error = ParseTestRunReactionIdError;
+impl TryFrom<&TestRunQueryConfig> for TestRunQueryId {
+    type Error = ParseTestRunQueryIdError;
 
-    fn try_from(value: &TestRunReactionConfig) -> Result<Self, Self::Error> {
+    fn try_from(value: &TestRunQueryConfig) -> Result<Self, Self::Error> {
         match TestRunId::try_from(value) {
             Ok(test_run_id) => {
-                Ok(TestRunReactionId::new(&test_run_id, &value.test_reaction_id))
+                Ok(TestRunQueryId::new(&test_run_id, &value.test_query_id))
             }
-            Err(e) => return Err(ParseTestRunReactionIdError::InvalidValues(e.to_string())),
+            Err(e) => return Err(ParseTestRunQueryIdError::InvalidValues(e.to_string())),
         }
     }
 }
 
-impl fmt::Display for TestRunReactionConfig {
+impl fmt::Display for TestRunQueryConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TestRunReactionDefinition: Repo: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_reaction_id: {:?}", 
-            self.test_repo_id, self.test_id, self.test_run_id, self.test_reaction_id)
+        write!(f, "TestRunQueryDefinition: Repo: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_query_id: {:?}", 
+            self.test_repo_id, self.test_id, self.test_run_id, self.test_query_id)
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct TestRunReactionDefinition {
-    pub id: TestRunReactionId,
-    pub loggers: Vec<TestRunReactionLoggerConfig>,
+pub struct TestRunQueryDefinition {
+    pub id: TestRunQueryId,
+    pub loggers: Vec<ResultStreamLoggerConfig>,
     pub start_immediately: bool,    
-    pub test_reaction_definition: TestReactionDefinition,
+    pub test_query_definition: TestQueryDefinition,
 }
 
-impl TestRunReactionDefinition {
-    pub fn new( test_run_reaction_config: TestRunReactionConfig, test_reaction_definition: TestReactionDefinition) -> anyhow::Result<Self> {
+impl TestRunQueryDefinition {
+    pub fn new( test_run_query_config: TestRunQueryConfig, test_query_definition: TestQueryDefinition) -> anyhow::Result<Self> {
         Ok(Self {
-            id: TestRunReactionId::try_from(&test_run_reaction_config)?,
-            loggers: test_run_reaction_config.loggers,
-            start_immediately: test_run_reaction_config.start_immediately,
-            test_reaction_definition,
+            id: TestRunQueryId::try_from(&test_run_query_config)?,
+            loggers: test_run_query_config.loggers,
+            start_immediately: test_run_query_config.start_immediately,
+            test_query_definition,
         })
     }
 }
 
 #[derive(Debug, Serialize)]
-pub struct TestRunReactionState {
-    pub id: TestRunReactionId,
-    pub reaction_observer: ReactionObserverState,
+pub struct TestRunQueryState {
+    pub id: TestRunQueryId,
+    pub query_observer: QueryResultObserverState,
     pub start_immediately: bool,
 }
 
 #[derive(Debug)]
-pub struct TestRunReaction {
-    pub id: TestRunReactionId,
+pub struct TestRunQuery {
+    pub id: TestRunQueryId,
     #[debug(skip)]
-    pub reaction_observer: ReactionObserver,
+    pub query_result_observer: QueryResultObserver,
     pub start_immediately: bool,
 }
 
-impl TestRunReaction {
-    pub async fn new(definition: TestRunReactionDefinition, output_storage: TestRunReactionStorage) -> anyhow::Result<Self> {
+impl TestRunQuery {
+    pub async fn new(definition: TestRunQueryDefinition, output_storage: TestRunQueryStorage) -> anyhow::Result<Self> {
 
-        let reaction_observer = ReactionObserver::new(
+        let query_result_observer = QueryResultObserver::new(
             definition.id.clone(),
-            definition.test_reaction_definition.clone(), 
+            definition.test_query_definition.clone(), 
             output_storage,
             definition.loggers
         ).await?;
 
         let trr = Self { 
             id: definition.id.clone(),
-            reaction_observer,
+            query_result_observer,
             start_immediately: definition.start_immediately,
         };
 
         if trr.start_immediately {
-            trr.start_reaction_observer().await?;
+            trr.start_query_result_observer().await?;
         }
 
         Ok(trr)
     }
 
-    pub async fn get_state(&self) -> anyhow::Result<TestRunReactionState> {
-        Ok(TestRunReactionState {
+    pub async fn get_state(&self) -> anyhow::Result<TestRunQueryState> {
+        Ok(TestRunQueryState {
             id: self.id.clone(),
-            reaction_observer: self.get_reaction_observer_state().await?,
+            query_observer: self.get_query_result_observer_state().await?,
             start_immediately: self.start_immediately,
         })
     }
 
-    pub async fn get_reaction_observer_state(&self) -> anyhow::Result<ReactionObserverState> {
-        Ok(self.reaction_observer.get_state().await?.state)
+    pub async fn get_query_result_observer_state(&self) -> anyhow::Result<QueryResultObserverState> {
+        Ok(self.query_result_observer.get_state().await?.state)
     }
 
-    pub async fn pause_reaction_observer(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        Ok(self.reaction_observer.pause().await?)
+    pub async fn pause_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+        Ok(self.query_result_observer.pause().await?)
     }
 
-    pub async fn reset_reaction_observer(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        Ok(self.reaction_observer.reset().await?)
+    pub async fn reset_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+        Ok(self.query_result_observer.reset().await?)
     }    
 
-    pub async fn start_reaction_observer(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        Ok(self.reaction_observer.start().await?)
+    pub async fn start_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+        Ok(self.query_result_observer.start().await?)
     }
 
-    pub async fn stop_reaction_observer(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        Ok(self.reaction_observer.stop().await?)
+    pub async fn stop_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+        Ok(self.query_result_observer.stop().await?)
     }
 }

@@ -1,66 +1,65 @@
 use std::sync::Arc;
 
-use axum::{
-    extract::{Extension, Path}, response::IntoResponse, routing::{get, post}, Json, Router
-};
-use test_run_host::{reactions::TestRunReactionConfig, TestRunHost, TestRunHostStatus};
+use axum::{ extract::{Extension, Path}, response::IntoResponse, routing::{get, post}, Json, Router };
+
+use test_run_host::{queries::TestRunQueryConfig, TestRunHost, TestRunHostStatus};
 
 use super::TestServiceWebApiError;
 
-pub fn get_reactions_routes() -> Router {
+pub fn get_queries_routes() -> Router {
     Router::new()
-        .route("/reactions", get(get_reaction_list_handler).post(post_reaction_handler))
-        .route("/reactions/:id", get(get_reaction_handler))
-        .route("/reactions/:id/pause", post(reaction_observer_pause_handler))
-        .route("/reactions/:id/reset", post(reaction_observer_reset_handler))
-        .route("/reactions/:id/start", post(reaction_observer_start_handler))
-        .route("/reactions/:id/stop", post(reaction_observer_stop_handler))        
+        .route("/queries", get(get_query_list_handler).post(post_query_handler))
+        .route("/queries/:id", get(get_query_handler))
+        .route("/queries/:id/pause", post(query_observer_pause_handler))
+        .route("/queries/:id/reset", post(query_observer_reset_handler))
+        .route("/queries/:id/start", post(query_observer_start_handler))
+        .route("/queries/:id/stop", post(query_observer_stop_handler))        
 }
 
-pub async fn get_reaction_list_handler(
+pub async fn get_query_list_handler(
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - get_reaction_list");
+    log::info!("Processing call - get_query_list");
 
     // If the TestRunHost is an Error state, return an error and a description of the error.
     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let reactions = test_run_host.get_test_reaction_ids().await?;
-    Ok(Json(reactions).into_response())
+    let queries = test_run_host.get_test_query_ids().await?;
+    Ok(Json(queries).into_response())
 }
 
-pub async fn get_reaction_handler(
+pub async fn get_query_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - get_reaction: {}", id);
+    log::info!("Processing call - get_query: {}", id);
 
     // If the TestRunHost is an Error state, return an error and a description of the error.
     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let reaction_state = test_run_host.get_test_reaction_state(&id).await?;
-    Ok(Json(reaction_state).into_response())
+    let query_state = test_run_host.get_test_query_state(&id).await?;
+    Ok(Json(query_state).into_response())
 }
 
-pub async fn reaction_observer_pause_handler (
+pub async fn query_observer_pause_handler (
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - reaction_observer_pause: {}", id);
+    log::info!("Processing call - query_observer_pause: {}", id);
 
     // If the TestRunHost is an Error state, return an error and a description of the error.
     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let response = test_run_host.test_reaction_pause(&id).await;
+    let response = test_run_host.test_query_pause(&id).await;
     match response {
-        Ok(reaction) => {
-            Ok(Json(reaction.state).into_response())
+        Ok(query) => {
+            Ok(Json(query.state).into_response())
         },
         Err(e) => {
             Err(TestServiceWebApiError::AnyhowError(e))
@@ -68,21 +67,21 @@ pub async fn reaction_observer_pause_handler (
     }
 }
 
-pub async fn reaction_observer_reset_handler (
+pub async fn query_observer_reset_handler (
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - reaction_observer_reset: {}", id);
+    log::info!("Processing call - query_observer_reset: {}", id);
 
     // If the TestRunHost is an Error state, return an error and a description of the error.
     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let response = test_run_host.test_reaction_reset(&id).await;
+    let response = test_run_host.test_query_reset(&id).await;
     match response {
-        Ok(reaction) => {
-            Ok(Json(reaction.state).into_response())
+        Ok(query) => {
+            Ok(Json(query.state).into_response())
         },
         Err(e) => {
             Err(TestServiceWebApiError::AnyhowError(e))
@@ -90,21 +89,21 @@ pub async fn reaction_observer_reset_handler (
     }
 }
 
-pub async fn reaction_observer_start_handler (
+pub async fn query_observer_start_handler (
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - reaction_observer_start: {}", id);
+    log::info!("Processing call - query_observer_start: {}", id);
 
     // If the TestRunHost is an Error state, return an error and a description of the error.
     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let response = test_run_host.test_reaction_start(&id).await;
+    let response = test_run_host.test_query_start(&id).await;
     match response {
-        Ok(reaction) => {
-            Ok(Json(reaction.state).into_response())
+        Ok(query) => {
+            Ok(Json(query.state).into_response())
         },
         Err(e) => {
             Err(TestServiceWebApiError::AnyhowError(e))
@@ -112,21 +111,21 @@ pub async fn reaction_observer_start_handler (
     }
 }
 
-pub async fn reaction_observer_stop_handler (
+pub async fn query_observer_stop_handler (
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - reaction_observer_stop: {}", id);
+    log::info!("Processing call - query_observer_stop: {}", id);
 
     // If the TestRunHost is an Error state, return an error and a description of the error.
     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let response = test_run_host.test_reaction_stop(&id).await;
+    let response = test_run_host.test_query_stop(&id).await;
     match response {
-        Ok(reaction) => {
-            Ok(Json(reaction.state).into_response())
+        Ok(query) => {
+            Ok(Json(query.state).into_response())
         },
         Err(e) => {
             Err(TestServiceWebApiError::AnyhowError(e))
@@ -134,32 +133,32 @@ pub async fn reaction_observer_stop_handler (
     }
 }
 
-pub async fn post_reaction_handler (
+pub async fn post_query_handler (
     test_run_host: Extension<Arc<TestRunHost>>,
-    body: Json<TestRunReactionConfig>,
+    body: Json<TestRunQueryConfig>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - post_reaction");
+    log::info!("Processing call - post_query");
 
     // If the TestRunHost is an Error state, return an error and a description of the error.
     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
     }
 
-    let reaction_config = body.0;
+    let query_config = body.0;
 
-    match test_run_host.add_test_reaction(reaction_config).await {
+    match test_run_host.add_test_query(query_config).await {
         Ok(id) => {
-            match test_run_host.get_test_reaction_state(&id.to_string()).await {
-                Ok(reaction) => {
-                    Ok(Json(reaction).into_response())
+            match test_run_host.get_test_query_state(&id.to_string()).await {
+                Ok(query) => {
+                    Ok(Json(query).into_response())
                 },
                 Err(_) => {
-                    Err(TestServiceWebApiError::NotFound("TestRunReaction".to_string(), id.to_string()))
+                    Err(TestServiceWebApiError::NotFound("TestRunQuery".to_string(), id.to_string()))
                 }
             }
         },
         Err(e) => {
-            let msg = format!("Error creating Reaction: {}", e);
+            let msg = format!("Error creating Query: {}", e);
             log::error!("{}", &msg);
             Err(TestServiceWebApiError::AnyhowError(e))
         }

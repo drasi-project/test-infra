@@ -4,46 +4,46 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{propagation::TraceContextPropagator, Resource};
 use serde::{Deserialize, Serialize};
 
-use test_data_store::test_run_storage::{TestRunReactionId, TestRunReactionStorage};
+use test_data_store::test_run_storage::{TestRunQueryId, TestRunQueryStorage};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{layer::SubscriberExt, Registry};
 
-use crate::queries::result_stream_handlers::ReactionOutputRecord;
+use crate::queries::result_stream_handlers::ResultStreamRecord;
 
-use super::ReactionLogger;
+use super::ResultStreamLogger;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OtelTraceTestRunReactionLoggerConfig {
+pub struct OtelTraceResultStreamLoggerConfig {
     pub otel_endpoint: Option<String>,
 }
 
 #[derive(Debug)]
-pub struct OtelTraceReactionLoggerSettings {
+pub struct OtelTraceResultStreamLoggerSettings {
     pub otel_endpoint: String,
-    pub test_run_reaction_id: TestRunReactionId,
+    pub test_run_query_id: TestRunQueryId,
 }
 
-impl OtelTraceReactionLoggerSettings {
-    pub fn new(def: &OtelTraceTestRunReactionLoggerConfig, test_run_reaction_id: TestRunReactionId) -> anyhow::Result<Self> {
+impl OtelTraceResultStreamLoggerSettings {
+    pub fn new(def: &OtelTraceResultStreamLoggerConfig, test_run_query_id: TestRunQueryId) -> anyhow::Result<Self> {
         return Ok(Self {
             otel_endpoint: def.otel_endpoint.clone().unwrap_or("http://otel-collector:4317".to_string()),
-            test_run_reaction_id,
+            test_run_query_id,
         });
     }
 }
 
 #[allow(unused)]
-pub struct OtelTraceReactionLogger {
-    settings: OtelTraceReactionLoggerSettings,
+pub struct OtelTraceResultStreamLogger {
+    settings: OtelTraceResultStreamLoggerSettings,
     trace_propogator: TraceContextPropagator,
 }
 
-impl OtelTraceReactionLogger {
-    pub fn new(def: &OtelTraceTestRunReactionLoggerConfig, output_storage: &TestRunReactionStorage) -> anyhow::Result<Box<dyn ReactionLogger + Send + Sync>> {
-        log::debug!("Creating OtelTraceReactionLogger from {:?}, ", def);
+impl OtelTraceResultStreamLogger {
+    pub fn new(def: &OtelTraceResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
+        log::debug!("Creating OtelTraceResultStreamLogger from {:?}, ", def);
 
-        let settings = OtelTraceReactionLoggerSettings::new(&def, output_storage.id.clone())?;
-        log::trace!("Creating OtelTraceReactionLogger with settings {:?}, ", settings);
+        let settings = OtelTraceResultStreamLoggerSettings::new(&def, output_storage.id.clone())?;
+        log::trace!("Creating OtelTraceResultStreamLogger with settings {:?}, ", settings);
 
         let tracer = opentelemetry_otlp::new_pipeline()
             .tracing()
@@ -55,7 +55,7 @@ impl OtelTraceReactionLogger {
             .with_trace_config(
                 opentelemetry::sdk::trace::config().with_resource(Resource::new(vec![KeyValue::new(
                     opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                    format!("drasi-reaction-observer-{}", settings.test_run_reaction_id),
+                    format!("drasi-query-result-observer-{}", settings.test_run_query_id),
                 )])),
             )
             .install_batch(opentelemetry_sdk::runtime::Tokio);
@@ -81,24 +81,24 @@ impl OtelTraceReactionLogger {
 }  
 
 #[async_trait]
-impl ReactionLogger for OtelTraceReactionLogger {
+impl ResultStreamLogger for OtelTraceResultStreamLogger {
     async fn close(&mut self) -> anyhow::Result<()> {
         // opentelemetry::global::shutdown_tracer_provider();
         Ok(())
     }
 
-    async fn log_reaction_record(&mut self, record: &ReactionOutputRecord) -> anyhow::Result<()> {
+    async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {
         create_span(&self.settings, &self.trace_propogator, record);
         Ok(())
     }
 }
 
-fn create_span(setings: &OtelTraceReactionLoggerSettings, trace_propogator: &TraceContextPropagator, record: &ReactionOutputRecord) {
+fn create_span(setings: &OtelTraceResultStreamLoggerSettings, trace_propogator: &TraceContextPropagator, record: &ResultStreamRecord) {
     let parent_context = trace_propogator.extract(record);
-    let span = tracing::span!(tracing::Level::INFO, "reaction_observer");
+    let span = tracing::span!(tracing::Level::INFO, "query_result");
     span.set_parent(parent_context);
-    span.set_attribute("test_id", setings.test_run_reaction_id.test_run_id.test_id.to_string());
-    span.set_attribute("test_run_id", setings.test_run_reaction_id.test_run_id.to_string());
-    span.set_attribute("test_run_reaction_id", setings.test_run_reaction_id.to_string());
+    span.set_attribute("test_id", setings.test_run_query_id.test_run_id.test_id.to_string());
+    span.set_attribute("test_run_id", setings.test_run_query_id.test_run_id.to_string());
+    span.set_attribute("test_run_query_id", setings.test_run_query_id.to_string());
     let _ = span.enter();
 }

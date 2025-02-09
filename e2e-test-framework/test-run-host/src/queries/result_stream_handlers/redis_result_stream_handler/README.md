@@ -1,4 +1,4 @@
-# Example of Result Queue Control Message
+# Example of Result Strean Control Message
 
 ```json
 {
@@ -26,7 +26,7 @@
 }
 ```
 
-# Example of Result Queue Data Message
+# Example of Result Stream Data Message
 
 ```json
 {

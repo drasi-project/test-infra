@@ -6,16 +6,16 @@ use time::{OffsetDateTime, format_description};
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle};
 
 use test_data_store::{
-    test_repo_storage::models::TestReactionDefinition, 
-    test_run_storage::{TestRunReactionId, TestRunReactionStorage}
+    test_repo_storage::models::TestQueryDefinition, 
+    test_run_storage::{TestRunQueryId, TestRunQueryStorage}
 };
 
-use crate::queries::result_stream_handlers::create_reaction_handler;
+use crate::queries::result_stream_handlers::create_result_stream_handler;
 
-use super::{result_stream_handlers::{ReactionHandler, ReactionHandlerMessage, ReactionOutputRecord}, result_stream_loggers::{create_reaction_logger, ReactionLogger}, TestRunReactionLoggerConfig};
+use super::{result_stream_handlers::{ResultStreamHandler, ResultStreamHandlerMessage, ResultStreamRecord}, result_stream_loggers::{create_result_stream_logger, ResultStreamLogger}, ResultStreamLoggerConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ReactionObserverStatus {
+pub enum QueryResultObserverStatus {
     Running,
     Paused,
     Stopped,
@@ -23,74 +23,74 @@ pub enum ReactionObserverStatus {
     Error
 }
 
-impl Serialize for ReactionObserverStatus {
+impl Serialize for QueryResultObserverStatus {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where S: serde::Serializer {
         match self {
-            ReactionObserverStatus::Running => serializer.serialize_str("Running"),
-            ReactionObserverStatus::Paused => serializer.serialize_str("Paused"),
-            ReactionObserverStatus::Stopped => serializer.serialize_str("Stopped"),
-            ReactionObserverStatus::Finished => serializer.serialize_str("Finished"),
-            ReactionObserverStatus::Error => serializer.serialize_str("Error"),
+            QueryResultObserverStatus::Running => serializer.serialize_str("Running"),
+            QueryResultObserverStatus::Paused => serializer.serialize_str("Paused"),
+            QueryResultObserverStatus::Stopped => serializer.serialize_str("Stopped"),
+            QueryResultObserverStatus::Finished => serializer.serialize_str("Finished"),
+            QueryResultObserverStatus::Error => serializer.serialize_str("Error"),
         }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ReactionObserverError {
-    #[error("ReactionObserver is already finished. Reset to start over.")]
+pub enum QueryResultObserverError {
+    #[error("QueryResultObserver is already finished. Reset to start over.")]
     AlreadyFinished,
-    #[error("ReactionObserver is already stopped. Reset to start over.")]
+    #[error("QueryResultObserver is already stopped. Reset to start over.")]
     AlreadyStopped,
-    #[error("ReactionObserver is currently in an Error state - {0:?}")]
-    Error(ReactionObserverStatus),
-    #[error("ReactionObserver is currently Running. Pause before trying to Reset.")]
+    #[error("QueryResultObserver is currently in an Error state - {0:?}")]
+    Error(QueryResultObserverStatus),
+    #[error("QueryResultObserver is currently Running. Pause before trying to Reset.")]
     PauseToReset,
 }
 
 #[derive(Debug)]
-pub struct ReactionObserverCommandResponse {
+pub struct QueryResultObserverCommandResponse {
     pub result: anyhow::Result<()>,
-    pub state: ReactionObserverState,
+    pub state: QueryResultObserverState,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ReactionObserverState {    
+pub struct QueryResultObserverState {    
     state: serde_json::Value,
-    status: ReactionObserverStatus,
+    status: QueryResultObserverStatus,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ReactionObserverSettings {
-    pub definition: TestReactionDefinition,
-    pub id: TestRunReactionId,
-    pub loggers: Vec<TestRunReactionLoggerConfig>,
-    pub output_storage: TestRunReactionStorage,
+pub struct QueryResultObserverSettings {
+    pub definition: TestQueryDefinition,
+    pub id: TestRunQueryId,
+    pub loggers: Vec<ResultStreamLoggerConfig>,
+    pub output_storage: TestRunQueryStorage,
 }
 
-impl ReactionObserverSettings {
+impl QueryResultObserverSettings {
     pub async fn new(
-        test_run_reaction_id: TestRunReactionId, 
-        definition: TestReactionDefinition, 
-        output_storage: TestRunReactionStorage,
-        loggers: Vec<TestRunReactionLoggerConfig>,
+        test_run_query_id: TestRunQueryId, 
+        definition: TestQueryDefinition, 
+        output_storage: TestRunQueryStorage,
+        loggers: Vec<ResultStreamLoggerConfig>,
     ) -> anyhow::Result<Self> {
 
-        Ok(ReactionObserverSettings {
+        Ok(QueryResultObserverSettings {
             definition,
-            id: test_run_reaction_id,
+            id: test_run_query_id,
             loggers,
             output_storage,
         })
     }
 
-    pub fn get_id(&self) -> TestRunReactionId {
+    pub fn get_id(&self) -> TestRunQueryId {
         self.id.clone()
     }
 }
 
 #[derive(Debug)]
-pub enum ReactionObserverCommand {
+pub enum QueryResultObserverCommand {
     GetState,
     Pause,
     Reset,
@@ -98,32 +98,32 @@ pub enum ReactionObserverCommand {
     Stop,
 }
 
-pub struct ReactionObserverMessage {
-    pub command: ReactionObserverCommand,
-    pub response_tx: Option<oneshot::Sender<ReactionObserverMessageResponse>>,
+pub struct QueryResultObserverMessage {
+    pub command: QueryResultObserverCommand,
+    pub response_tx: Option<oneshot::Sender<QueryResultObserverMessageResponse>>,
 }
 
 #[derive(Debug)]
-pub struct ReactionObserverMessageResponse {
+pub struct QueryResultObserverMessageResponse {
     pub result: anyhow::Result<()>,
-    pub state: ReactionObserverExternalState,
+    pub state: QueryResultObserverExternalState,
 }
 
-pub struct ReactionObserver {
-    settings: ReactionObserverSettings,
-    observer_tx_channel: Sender<ReactionObserverMessage>,
+pub struct QueryResultObserver {
+    settings: QueryResultObserverSettings,
+    observer_tx_channel: Sender<QueryResultObserverMessage>,
     _observer_thread_handle: Arc<Mutex<JoinHandle<anyhow::Result<()>>>>,
 }
 
-impl ReactionObserver {
+impl QueryResultObserver {
     pub async fn new(
-        test_run_reaction_id: TestRunReactionId, 
-        definition: TestReactionDefinition, 
-        output_storage: TestRunReactionStorage,
-        loggers: Vec<TestRunReactionLoggerConfig>,
+        test_run_query_id: TestRunQueryId, 
+        definition: TestQueryDefinition, 
+        output_storage: TestRunQueryStorage,
+        loggers: Vec<ResultStreamLoggerConfig>,
     ) -> anyhow::Result<Self> {
-        let settings = ReactionObserverSettings::new(test_run_reaction_id, definition, output_storage.clone(), loggers).await?;
-        log::debug!("Creating ReactionObserver from {:?}", &settings);
+        let settings = QueryResultObserverSettings::new(test_run_query_id, definition, output_storage.clone(), loggers).await?;
+        log::debug!("Creating QueryResultObserver from {:?}", &settings);
 
         let (observer_tx_channel, observer_rx_channel) = tokio::sync::mpsc::channel(100);
         let observer_thread_handle = tokio::spawn(observer_thread(observer_rx_channel, settings.clone()));
@@ -135,18 +135,18 @@ impl ReactionObserver {
         })
     }
 
-    pub fn get_id(&self) -> TestRunReactionId {
+    pub fn get_id(&self) -> TestRunQueryId {
         self.settings.get_id()
     }
 
-    pub fn get_settings(&self) -> ReactionObserverSettings {
+    pub fn get_settings(&self) -> QueryResultObserverSettings {
         self.settings.clone()
     }
 
-    async fn send_command(&self, command: ReactionObserverCommand) -> anyhow::Result<ReactionObserverCommandResponse> {
+    async fn send_command(&self, command: QueryResultObserverCommand) -> anyhow::Result<QueryResultObserverCommandResponse> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        let r = self.observer_tx_channel.send(ReactionObserverMessage {
+        let r = self.observer_tx_channel.send(QueryResultObserverMessage {
             command,
             response_tx: Some(response_tx),
         }).await;
@@ -155,101 +155,101 @@ impl ReactionObserver {
             Ok(_) => {
                 let observer_response = response_rx.await?;
 
-                Ok(ReactionObserverCommandResponse {
+                Ok(QueryResultObserverCommandResponse {
                     result: observer_response.result,
-                    state: super::ReactionObserverState {
+                    state: super::QueryResultObserverState {
                         status: observer_response.state.status,
                         state: serde_json::to_value(observer_response.state).unwrap(),
                     },
                 })
             },
-            Err(e) => anyhow::bail!("Error sending command to ReactionObserver: {:?}", e),
+            Err(e) => anyhow::bail!("Error sending command to QueryResultObserver: {:?}", e),
         }
     }
 
-    pub async fn get_state(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        self.send_command(ReactionObserverCommand::GetState).await
+    pub async fn get_state(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+        self.send_command(QueryResultObserverCommand::GetState).await
     }
 
-    pub async fn pause(&self) -> anyhow::Result<ReactionObserverCommandResponse>  {
-        self.send_command(ReactionObserverCommand::Pause).await
+    pub async fn pause(&self) -> anyhow::Result<QueryResultObserverCommandResponse>  {
+        self.send_command(QueryResultObserverCommand::Pause).await
     }
 
-    pub async fn reset(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        self.send_command(ReactionObserverCommand::Reset).await
+    pub async fn reset(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+        self.send_command(QueryResultObserverCommand::Reset).await
     }
 
-    pub async fn start(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        self.send_command(ReactionObserverCommand::Start).await
+    pub async fn start(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+        self.send_command(QueryResultObserverCommand::Start).await
     }
 
-    pub async fn stop(&self) -> anyhow::Result<ReactionObserverCommandResponse>  {
-        self.send_command(ReactionObserverCommand::Stop).await
+    pub async fn stop(&self) -> anyhow::Result<QueryResultObserverCommandResponse>  {
+        self.send_command(QueryResultObserverCommand::Stop).await
     }
 }
 
 #[derive(Debug, Serialize)]
-pub struct ReactionObserverExternalState {
+pub struct QueryResultObserverExternalState {
     pub error_messages: Vec<String>,
-    pub result_summary: ReactionObserverResultSummary,
-    pub stats: ReactionObserverStats,
-    pub status: ReactionObserverStatus,
-    pub test_run_reaction_id: TestRunReactionId,
+    pub result_summary: QueryResultObserverResultSummary,
+    pub stats: QueryResultObserverStats,
+    pub status: QueryResultObserverStatus,
+    pub test_run_query_id: TestRunQueryId,
 }
 
-impl From<&ReactionObserverInternalState> for ReactionObserverExternalState {
-    fn from(state: &ReactionObserverInternalState) -> Self {
+impl From<&QueryResultObserverInternalState> for QueryResultObserverExternalState {
+    fn from(state: &QueryResultObserverInternalState) -> Self {
         Self {
             error_messages: state.error_messages.clone(),
-            result_summary: ReactionObserverResultSummary::from(state),
+            result_summary: QueryResultObserverResultSummary::from(state),
             stats: state.stats.clone(),
             status: state.status,
-            test_run_reaction_id: state.settings.id.clone(),
+            test_run_query_id: state.settings.id.clone(),
         }
     }
 }
 
-pub struct ReactionObserverInternalState {
-    pub reaction_handler: Box<dyn ReactionHandler + Send + Sync>,
-    pub reaction_handler_rx_channel: Receiver<ReactionHandlerMessage>,
-    pub loggers: Vec<Box<dyn ReactionLogger + Send>>,
+pub struct QueryResultObserverInternalState {
+    pub result_stream_handler: Box<dyn ResultStreamHandler + Send + Sync>,
+    pub result_stream_handler_rx_channel: Receiver<ResultStreamHandlerMessage>,
+    pub loggers: Vec<Box<dyn ResultStreamLogger + Send>>,
     pub error_messages: Vec<String>,
     pub record_seq_num: u64,
-    pub next_event: Option<ReactionOutputRecord>,
-    pub settings: ReactionObserverSettings,
-    pub status: ReactionObserverStatus,
-    pub stats: ReactionObserverStats,
+    pub next_event: Option<ResultStreamRecord>,
+    pub settings: QueryResultObserverSettings,
+    pub status: QueryResultObserverStatus,
+    pub stats: QueryResultObserverStats,
 }
 
-impl ReactionObserverInternalState {
+impl QueryResultObserverInternalState {
 
-    async fn initialize(settings: ReactionObserverSettings) -> anyhow::Result<Self> {
-        log::debug!("Initializing ReactionObserver using {:?}", settings);
+    async fn initialize(settings: QueryResultObserverSettings) -> anyhow::Result<Self> {
+        log::debug!("Initializing QueryResultObserver using {:?}", settings);
     
-        let reaction_handler = create_reaction_handler(settings.id.clone(), settings.definition.clone()).await?;
-        let reaction_handler_rx_channel = reaction_handler.init().await?;
+        let result_stream_handler = create_result_stream_handler(settings.id.clone(), settings.definition.clone()).await?;
+        let result_stream_handler_rx_channel = result_stream_handler.init().await?;
         
         // Create the loggers
-        let mut loggers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
+        let mut loggers: Vec<Box<dyn ResultStreamLogger + Send>> = Vec::new();
         for logger_cfg in settings.loggers.iter() {
-            match create_reaction_logger(logger_cfg, &settings.output_storage).await {
+            match create_result_stream_logger(logger_cfg, &settings.output_storage).await {
                 Ok(logger) => loggers.push(logger),
                 Err(e) => {
-                    anyhow::bail!("Error creating ReactionLogger: {:?}; Error: {:?}", logger_cfg, e);
+                    anyhow::bail!("Error creating ResultStreamLogger: {:?}; Error: {:?}", logger_cfg, e);
                 }
             }
         }
     
         Ok(Self {
-            reaction_handler,
-            reaction_handler_rx_channel,
+            result_stream_handler,
+            result_stream_handler_rx_channel,
             loggers,
             error_messages: Vec::new(),
             record_seq_num: 0,
             next_event: None,
             settings,
-            status: ReactionObserverStatus::Paused,
-            stats: ReactionObserverStats::default(),
+            status: QueryResultObserverStatus::Paused,
+            stats: QueryResultObserverStats::default(),
         })
     }
 
@@ -279,16 +279,16 @@ impl ReactionObserverInternalState {
         }
     }
 
-    async fn log_reaction_record(&mut self, record: &ReactionOutputRecord) {
+    async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) {
         let loggers = &mut self.loggers;
 
-        // log::debug!("Logging ReactionOutputRecord - #loggers:{}", loggers.len());
-        // log::trace!("Logging ReactionOutputRecord: {:?}", record);
+        // log::debug!("Logging ResultStreamRecord - #loggers:{}", loggers.len());
+        // log::trace!("Logging ResultStreamRecord: {:?}", record);
 
         let futures: Vec<_> = loggers.iter_mut()
             .map(|logger| {
                 async move {
-                    let _ = logger.log_reaction_record(record).await;
+                    let _ = logger.log_result_stream_record(record).await;
                 }
             })
             .collect();
@@ -298,27 +298,27 @@ impl ReactionObserverInternalState {
         let _ = join_all(futures).await;
     }
 
-    async fn process_reaction_handler_message(&mut self, message: ReactionHandlerMessage) -> anyhow::Result<()> {
-        log::trace!("Received Reaction Handler message: {:?}", message);
+    async fn process_result_stream_handler_message(&mut self, message: ResultStreamHandlerMessage) -> anyhow::Result<()> {
+        log::trace!("Received ResultStreamHandlerMessage: {:?}", message);
     
         match message {
-            ReactionHandlerMessage::Record(record) => {
+            ResultStreamHandlerMessage::Record(record) => {
                 // Update the stats
-                if self.stats.num_reaction_records == 0 {
+                if self.stats.num_result_stream_records == 0 {
                     self.stats.first_result_time_ns = record.dequeue_time_ns;
                 }
-                self.stats.num_reaction_records += 1;
+                self.stats.num_result_stream_records += 1;
                 self.stats.last_result_time_ns = record.dequeue_time_ns;
     
-                self.log_reaction_record(&record).await;
+                self.log_result_stream_record(&record).await;
     
                 // Increment the record sequence number.
                 self.record_seq_num += 1;
             },
-            ReactionHandlerMessage::Error(error) => {
-                self.transition_to_error_state(&format!("Error in Reaction Handler stream: {:?}", error), None);
+            ResultStreamHandlerMessage::Error(error) => {
+                self.transition_to_error_state(&format!("Error in ResultStreamHandler stream: {:?}", error), None);
             },
-            ReactionHandlerMessage::TestCompleted => {
+            ResultStreamHandlerMessage::TestCompleted => {
                 self.transition_to_finished_state().await;
             },
 
@@ -327,11 +327,11 @@ impl ReactionObserverInternalState {
         Ok(())
     }    
 
-    async fn process_command_message(&mut self, message: ReactionObserverMessage) -> anyhow::Result<()> {
-        log::debug!("Received ReactionObserver command message: {:?}", message.command);
+    async fn process_command_message(&mut self, message: QueryResultObserverMessage) -> anyhow::Result<()> {
+        log::debug!("Received QueryResultObserver command message: {:?}", message.command);
     
-        if let ReactionObserverCommand::GetState = message.command {
-            let message_response = ReactionObserverMessageResponse {
+        if let QueryResultObserverCommand::GetState = message.command {
+            let message_response = QueryResultObserverMessageResponse {
                 result: Ok(()),
                 state: (&*self).into(),
             };
@@ -342,15 +342,15 @@ impl ReactionObserverInternalState {
             }
         } else {
             let transition_response = match self.status {
-                ReactionObserverStatus::Running => self.transition_from_running_state(&message.command).await,
-                ReactionObserverStatus::Paused => self.transition_from_paused_state(&message.command).await,
-                ReactionObserverStatus::Stopped => self.transition_from_stopped_state(&message.command).await,
-                ReactionObserverStatus::Finished => self.transition_from_finished_state(&message.command).await,
-                ReactionObserverStatus::Error => self.transition_from_error_state(&message.command).await,
+                QueryResultObserverStatus::Running => self.transition_from_running_state(&message.command).await,
+                QueryResultObserverStatus::Paused => self.transition_from_paused_state(&message.command).await,
+                QueryResultObserverStatus::Stopped => self.transition_from_stopped_state(&message.command).await,
+                QueryResultObserverStatus::Finished => self.transition_from_finished_state(&message.command).await,
+                QueryResultObserverStatus::Error => self.transition_from_error_state(&message.command).await,
             };
     
             if message.response_tx.is_some() {
-                let message_response = ReactionObserverMessageResponse {
+                let message_response = QueryResultObserverMessageResponse {
                     result: transition_response,
                     state: (&*self).into(),
                 };
@@ -369,12 +369,12 @@ impl ReactionObserverInternalState {
 
         // Create the new loggers
         self.close_loggers().await;    
-        let mut loggers: Vec<Box<dyn ReactionLogger + Send>> = Vec::new();
+        let mut loggers: Vec<Box<dyn ResultStreamLogger + Send>> = Vec::new();
         for logger_cfg in self.settings.loggers.iter() {
-            match create_reaction_logger(logger_cfg, &self.settings.output_storage).await {
+            match create_result_stream_logger(logger_cfg, &self.settings.output_storage).await {
                 Ok(logger) => loggers.push(logger),
                 Err(e) => {
-                    anyhow::bail!("Error creating ReactionLogger: {:?}; Error: {:?}", logger_cfg, e);
+                    anyhow::bail!("Error creating ResultStreamLogger: {:?}; Error: {:?}", logger_cfg, e);
                 }
             }
         }    
@@ -383,106 +383,106 @@ impl ReactionObserverInternalState {
         self.error_messages = Vec::new();
         self.record_seq_num = 0;
         self.next_event = None;
-        self.status = ReactionObserverStatus::Paused;
-        self.stats = ReactionObserverStats::default();
+        self.status = QueryResultObserverStatus::Paused;
+        self.stats = QueryResultObserverStats::default();
     
         Ok(())
     }
 
-    async fn transition_from_error_state(&mut self, command: &ReactionObserverCommand) -> anyhow::Result<()> {
+    async fn transition_from_error_state(&mut self, command: &QueryResultObserverCommand) -> anyhow::Result<()> {
         log::debug!("Attempting to transition from {:?} state via command: {:?}", self.status, command);
     
-        if let ReactionObserverCommand::Reset = command {
+        if let QueryResultObserverCommand::Reset = command {
             self.reset().await
         } else {
-            Err(ReactionObserverError::Error(self.status).into())
+            Err(QueryResultObserverError::Error(self.status).into())
         }
     }
     
-    async fn transition_from_finished_state(&mut self, command: &ReactionObserverCommand) -> anyhow::Result<()> {
+    async fn transition_from_finished_state(&mut self, command: &QueryResultObserverCommand) -> anyhow::Result<()> {
         log::debug!("Attempting to transition from {:?} state via command: {:?}", self.status, command);
     
-        if let ReactionObserverCommand::Reset = command {
+        if let QueryResultObserverCommand::Reset = command {
             self.reset().await
         } else {
-            Err(ReactionObserverError::AlreadyFinished.into())
+            Err(QueryResultObserverError::AlreadyFinished.into())
         }
     }
     
-    async fn transition_from_paused_state(&mut self, command: &ReactionObserverCommand) -> anyhow::Result<()> {
+    async fn transition_from_paused_state(&mut self, command: &QueryResultObserverCommand) -> anyhow::Result<()> {
         log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
     
         match command {
-            ReactionObserverCommand::GetState => Ok(()),
-            ReactionObserverCommand::Pause => Ok(()),
-            ReactionObserverCommand::Reset => self.reset().await,
-            ReactionObserverCommand::Start => {
-                log::info!("ReactionObserver Started for TestRunReaction {}", self.settings.id);
+            QueryResultObserverCommand::GetState => Ok(()),
+            QueryResultObserverCommand::Pause => Ok(()),
+            QueryResultObserverCommand::Reset => self.reset().await,
+            QueryResultObserverCommand::Start => {
+                log::info!("QueryResultObserver Started for TestRunQuery {}", self.settings.id);
                 
-                self.status = ReactionObserverStatus::Running;
+                self.status = QueryResultObserverStatus::Running;
                 if self.stats.actual_start_time_ns == 0 {
                     self.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
                 }
-                self.reaction_handler.start().await
+                self.result_stream_handler.start().await
             },
-            ReactionObserverCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            QueryResultObserverCommand::Stop => Ok(self.transition_to_stopped_state().await),
         }
     }
     
-    async fn transition_from_running_state(&mut self, command: &ReactionObserverCommand) -> anyhow::Result<()> {
+    async fn transition_from_running_state(&mut self, command: &QueryResultObserverCommand) -> anyhow::Result<()> {
         log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
     
         match command {
-            ReactionObserverCommand::GetState => Ok(()),
-            ReactionObserverCommand::Pause => {
-                self.status = ReactionObserverStatus::Paused;
-                self.reaction_handler.pause().await?;
+            QueryResultObserverCommand::GetState => Ok(()),
+            QueryResultObserverCommand::Pause => {
+                self.status = QueryResultObserverStatus::Paused;
+                self.result_stream_handler.pause().await?;
                 Ok(())
             },
-            ReactionObserverCommand::Reset => {
-                Err(ReactionObserverError::PauseToReset.into())
+            QueryResultObserverCommand::Reset => {
+                Err(QueryResultObserverError::PauseToReset.into())
             },
-            ReactionObserverCommand::Start => Ok(()),
-            ReactionObserverCommand::Stop => {
+            QueryResultObserverCommand::Start => Ok(()),
+            QueryResultObserverCommand::Stop => {
                 Ok(self.transition_to_stopped_state().await)
             },
         }
     }
     
-    async fn transition_from_stopped_state(&mut self, command: &ReactionObserverCommand) -> anyhow::Result<()> {
+    async fn transition_from_stopped_state(&mut self, command: &QueryResultObserverCommand) -> anyhow::Result<()> {
         log::debug!("Attempting to transition from {:?} state via command: {:?}", self.status, command);
     
-        if let ReactionObserverCommand::Reset = command {
+        if let QueryResultObserverCommand::Reset = command {
             self.reset().await
         } else {
-            Err(ReactionObserverError::AlreadyStopped.into())
+            Err(QueryResultObserverError::AlreadyStopped.into())
         }
     }    
 
     async fn transition_to_finished_state(&mut self) {
-        log::info!("ReactionObserver Finished for TestRunReaction {}", self.settings.id);
+        log::info!("QueryResultObserver Finished for TestRunQuery {}", self.settings.id);
     
-        self.status = ReactionObserverStatus::Finished;
+        self.status = QueryResultObserverStatus::Finished;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-        self.reaction_handler.stop().await.ok();
+        self.result_stream_handler.stop().await.ok();
         
         self.close_loggers().await;
         self.write_result_summary().await.ok();
     }
     
     async fn transition_to_stopped_state(&mut self) {
-        log::info!("ReactionObserver Stopped for TestRunReaction {}", self.settings.id);
+        log::info!("QueryResultObserver Stopped for TestRunQuery {}", self.settings.id);
     
-        self.status = ReactionObserverStatus::Stopped;
+        self.status = QueryResultObserverStatus::Stopped;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-        self.reaction_handler.stop().await.ok();
+        self.result_stream_handler.stop().await.ok();
 
         self.close_loggers().await;
         self.write_result_summary().await.ok();
     }
     
     fn transition_to_error_state(&mut self, error_message: &str, error: Option<&anyhow::Error>) {    
-        self.status = ReactionObserverStatus::Error;
+        self.status = QueryResultObserverStatus::Error;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     
         let msg = match error {
@@ -496,8 +496,8 @@ impl ReactionObserverInternalState {
 
     pub async fn write_result_summary(&self) -> anyhow::Result<()> {
 
-        let result_summary: ReactionObserverResultSummary = self.into();
-        log::info!("Stats for TestRunReaction:\n{:#?}", &result_summary);
+        let result_summary: QueryResultObserverResultSummary = self.into();
+        log::info!("Stats for TestRunQuery:\n{:#?}", &result_summary);
     
         let result_summary_value = serde_json::to_value(result_summary).unwrap();
         match self.settings.output_storage.write_result_summary(&result_summary_value).await {
@@ -511,9 +511,9 @@ impl ReactionObserverInternalState {
 }
 
 
-impl Debug for ReactionObserverInternalState {
+impl Debug for QueryResultObserverInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReactionObserverInternalState")
+        f.debug_struct("QueryResultObserverInternalState")
             .field("error_messages", &self.error_messages)
             .field("next_record", &self.next_event)
             .field("status", &self.status)
@@ -523,28 +523,28 @@ impl Debug for ReactionObserverInternalState {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ReactionObserverStats {
+pub struct QueryResultObserverStats {
     pub actual_start_time_ns: u64,
     pub actual_end_time_ns: u64,
     pub first_result_time_ns: u64,
     pub last_result_time_ns: u64,
-    pub num_reaction_records: u64,
+    pub num_result_stream_records: u64,
 }
 
-impl Default for ReactionObserverStats {
+impl Default for QueryResultObserverStats {
     fn default() -> Self {
         Self {
             actual_start_time_ns: 0,
             actual_end_time_ns: 0,
             first_result_time_ns: 0,
             last_result_time_ns: 0,
-            num_reaction_records: 0,
+            num_result_stream_records: 0,
         }
     }
 }
 
 #[derive(Clone, Serialize)]
-pub struct ReactionObserverResultSummary {
+pub struct QueryResultObserverResultSummary {
     pub actual_start_time: String,
     pub actual_start_time_ns: u64,
     pub actual_end_time: String,
@@ -553,16 +553,16 @@ pub struct ReactionObserverResultSummary {
     pub first_result_time_ns: u64,
     pub last_result_time: String,
     pub last_result_time_ns: u64,
-    pub num_reaction_records: u64,
+    pub num_result_stream_records: u64,
     pub run_duration_ns: u64,
     pub run_duration_sec: f64,
     pub processing_rate: f64,
-    pub test_run_reaction_id: String,
+    pub test_run_query_id: String,
     pub time_since_last_result_ns: u64,
 }
 
-impl From<&ReactionObserverInternalState> for ReactionObserverResultSummary {
-    fn from(state: &ReactionObserverInternalState) -> Self {
+impl From<&QueryResultObserverInternalState> for QueryResultObserverResultSummary {
+    fn from(state: &QueryResultObserverInternalState) -> Self {
         let now_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
 
         let run_duration_ns = state.stats.last_result_time_ns - state.stats.first_result_time_ns;
@@ -581,17 +581,17 @@ impl From<&ReactionObserverInternalState> for ReactionObserverResultSummary {
             last_result_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.last_result_time_ns as i128).expect("Invalid timestamp")
                 .format(&format_description::well_known::Rfc3339).unwrap(),
             last_result_time_ns: state.stats.last_result_time_ns,
-            num_reaction_records: state.stats.num_reaction_records,
+            num_result_stream_records: state.stats.num_result_stream_records,
             run_duration_ns,
             run_duration_sec,
-            processing_rate: state.stats.num_reaction_records as f64 / run_duration_sec,
-            test_run_reaction_id: state.settings.id.to_string(),
+            processing_rate: state.stats.num_result_stream_records as f64 / run_duration_sec,
+            test_run_query_id: state.settings.id.to_string(),
             time_since_last_result_ns: now_ns - state.stats.last_result_time_ns,
         }
     }
 }
 
-impl Debug for ReactionObserverResultSummary {
+impl Debug for QueryResultObserverResultSummary {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let start_time = format!("{} ({} ns)", self.actual_start_time, self.actual_start_time_ns);
         let end_time = format!("{} ({} ns)", self.actual_end_time, self.actual_end_time_ns);
@@ -600,28 +600,28 @@ impl Debug for ReactionObserverResultSummary {
         let run_duration = format!("{} sec ({} ns)", self.run_duration_sec, self.run_duration_ns, );
         let processing_rate = format!("{:.2} changes / sec", self.processing_rate);
 
-        f.debug_struct("ReactionObserverResultSummary")
-            .field("test_run_source_id", &self.test_run_reaction_id)
+        f.debug_struct("QueryResultObserverResultSummary")
+            .field("test_run_source_id", &self.test_run_query_id)
             .field("start_time", &start_time)
             .field("end_time", &end_time)
             .field("first_result_time", &first_time)
             .field("last_result_time", &last_time)
             .field("time_since_last_result_ns", &self.time_since_last_result_ns)
             .field("run_duration", &run_duration)
-            .field("num_reaction_change_events", &self.num_reaction_records)
+            .field("num_result_stream_records", &self.num_result_stream_records)
             .field("processing_rate", &processing_rate)            
             .finish()
     }
 }
 
-pub async fn observer_thread(mut command_rx_channel: Receiver<ReactionObserverMessage>, settings: ReactionObserverSettings) -> anyhow::Result<()>{
-    log::info!("ReactionObserver thread started for TestRunReaction {} ...", settings.id);
+pub async fn observer_thread(mut command_rx_channel: Receiver<QueryResultObserverMessage>, settings: QueryResultObserverSettings) -> anyhow::Result<()>{
+    log::info!("QueryResultObserver thread started for TestRunQuery {} ...", settings.id);
 
-    let mut state = ReactionObserverInternalState::initialize(settings).await?;
+    let mut state = QueryResultObserverInternalState::initialize(settings).await?;
 
-    // Loop to process commands sent to the ReactionObserver or read from the Change Stream.
+    // Loop to process commands sent to the QueryResultObserver or read from the Change Stream.
     loop {
-        state.log_observer_state("Top of ReactionObserver processor loop");
+        state.log_observer_state("Top of QueryResultObserver processor loop");
 
         tokio::select! {
             // Always process all messages in the command channel and act on them first.
@@ -641,27 +641,27 @@ pub async fn observer_thread(mut command_rx_channel: Receiver<ReactionObserverMe
                 }
             },
 
-            // Process messages from the Reaction Handler.
-            reaction_handler_message = state.reaction_handler_rx_channel.recv() => {
-                match reaction_handler_message {
-                    Some(reaction_handler_message) => {
-                        // log::trace!("Received Reaction Handler message: {:?}", reaction_handler_message);
-                        state.process_reaction_handler_message(reaction_handler_message).await
-                            .inspect_err(|e| state.transition_to_error_state("Error calling process_reaction_handler_message", Some(e))).ok();
+            // Process messages from the Result Stream Handler.
+            result_stream_handler_message = state.result_stream_handler_rx_channel.recv() => {
+                match result_stream_handler_message {
+                    Some(msg) => {
+                        // log::trace!("Received ResultStreamHandler message: {:?}", msg);
+                        state.process_result_stream_handler_message(msg).await
+                            .inspect_err(|e| state.transition_to_error_state("Error calling process_result_stream_handler_message", Some(e))).ok();
                     }
                     None => {
-                        state.transition_to_error_state("Reaction handler channel closed.", None);
+                        state.transition_to_error_state("ResultStreamHandler channel closed.", None);
                         break;
                     }
                 }
             },
 
             else => {
-                log::error!("ReactionObserver loop activated for {} but no command or reaction output to process.", state.settings.id);
+                log::error!("QueryResultObserver loop activated for {} but no command or result stream output to process.", state.settings.id);
             }
         }
     }
 
-    log::info!("ReactionObserver thread exiting for TestRunReaction {} ...", state.settings.id);    
+    log::info!("QueryResultObserver thread exiting for TestRunQuery {} ...", state.settings.id);    
     Ok(())
 }

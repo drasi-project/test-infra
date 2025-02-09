@@ -5,10 +5,13 @@ use serde_json::Value;
 use tokio::fs;
 
 const QUERIES_FOLDER_NAME: &str = "queries";
+const QUERY_RESULT_LOG_FOLDER_NAME: &str = "result_stream_log";
+
 const REACTIONS_FOLDER_NAME: &str = "reactions";
-const RESULT_CHANGE_FOLDER_NAME: &str = "result_change";
+const REACTION_OUTPUT_LOG_FOLDER_NAME: &str = "reaction_output_log";
+
 const SOURCES_FOLDER_NAME: &str = "sources";
-const SOURCE_CHANGE_FOLDER_NAME: &str = "source_change";
+const SOURCE_CHANGE_LOG_FOLDER_NAME: &str = "source_change_log";
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
 pub struct TestRunId {
@@ -292,7 +295,7 @@ impl TestRunStorage {
         log::debug!("Getting (replace = {}) TestRunQueryStorage for ID: {:?}", replace, query_id);
 
         let query_path = self.queries_path.join(&query_id.test_query_id);
-        let result_change_path = query_path.join(RESULT_CHANGE_FOLDER_NAME);
+        let result_change_path = query_path.join(QUERY_RESULT_LOG_FOLDER_NAME);
 
         if replace && query_path.exists() {
             fs::remove_dir_all(&query_path).await?;
@@ -329,7 +332,7 @@ impl TestRunStorage {
         log::debug!("Getting (replace = {}) TestRunReactionStorage for ID: {:?}", replace, reaction_id);
 
         let reaction_path = self.reactions_path.join(&reaction_id.test_reaction_id);
-        let result_change_path = reaction_path.join(RESULT_CHANGE_FOLDER_NAME);
+        let result_change_path = reaction_path.join(REACTION_OUTPUT_LOG_FOLDER_NAME);
 
         if replace && reaction_path.exists() {
             fs::remove_dir_all(&reaction_path).await?;
@@ -365,7 +368,7 @@ impl TestRunStorage {
         log::debug!("Getting (replace = {}) TestRunSourceStorage for ID: {:?}", replace, source_id);
 
         let source_path = self.sources_path.join(&source_id.test_source_id);
-        let source_change_path = source_path.join(SOURCE_CHANGE_FOLDER_NAME);
+        let source_change_path = source_path.join(SOURCE_CHANGE_LOG_FOLDER_NAME);
 
         if replace && source_path.exists() {
             fs::remove_dir_all(&source_path).await?;
@@ -407,8 +410,8 @@ pub struct TestRunQueryStorage {
 }
 
 impl TestRunQueryStorage {
-    pub async fn write_result_summary(&self, summary: &Value) -> anyhow::Result<()> {
-        let summary_path = self.path.join("result_summary.json");
+    pub async fn write_test_run_summary(&self, summary: &Value) -> anyhow::Result<()> {
+        let summary_path = self.path.join("test_run_summary.json");
         fs::write(summary_path, serde_json::to_string_pretty(summary)?).await?;
         Ok(())
     }
@@ -422,8 +425,8 @@ pub struct TestRunReactionStorage {
 }
 
 impl TestRunReactionStorage {
-    pub async fn write_result_summary(&self, summary: &Value) -> anyhow::Result<()> {
-        let summary_path = self.path.join("result_summary.json");
+    pub async fn write_test_run_summary(&self, summary: &Value) -> anyhow::Result<()> {
+        let summary_path = self.path.join("test_run_summary.json");
         fs::write(summary_path, serde_json::to_string_pretty(summary)?).await?;
         Ok(())
     }
@@ -437,8 +440,8 @@ pub struct TestRunSourceStorage {
 }
 
 impl TestRunSourceStorage {
-    pub async fn write_result_summary(&self, summary: &Value) -> anyhow::Result<()> {
-        let summary_path = self.path.join("result_summary.json");
+    pub async fn write_test_run_summary(&self, summary: &Value) -> anyhow::Result<()> {
+        let summary_path = self.path.join("test_run_summary.json");
         fs::write(summary_path, serde_json::to_string_pretty(summary)?).await?;
         Ok(())
     }

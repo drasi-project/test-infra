@@ -15,8 +15,9 @@ pub mod result_stream_record;
 pub struct RedisResultStreamHandlerSettings {
     pub host: String,
     pub port: u16,
-    pub stream_name: String,
+    pub process_old_entries: bool,
     pub query_id: String,
+    pub stream_name: String,
     pub test_run_query_id: TestRunQueryId,
 }
 
@@ -26,8 +27,9 @@ impl RedisResultStreamHandlerSettings {
         Ok(RedisResultStreamHandlerSettings {
             host: definition.host.clone().unwrap_or_else(|| "127.0.0.1".to_string()),
             port: definition.port.unwrap_or(6379),
-            stream_name: definition.stream_name.clone().unwrap_or_else(|| format!("{}-results", id.test_query_id.clone())),
+            process_old_entries: definition.process_old_entries.unwrap_or(false),
             query_id: id.test_query_id.clone(),
+            stream_name: definition.stream_name.clone().unwrap_or_else(|| format!("{}-results", id.test_query_id.clone())),
             test_run_query_id: id
         })
     }
@@ -229,7 +231,10 @@ async fn reader_thread(
     };
 
     let stream_key = &settings.stream_name;
-    let mut stream_last_id = format!("{}-0",SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis().to_string());
+    let mut stream_last_id = match settings.process_old_entries {
+        true => "0-0".to_string(),
+        false =>  "$".to_string(),
+    };
     let opts = StreamReadOptions::default().count(1).block(5000);
 
     loop {

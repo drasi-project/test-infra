@@ -327,6 +327,7 @@ pub struct RedisStreamResultStreamHandlerDefinition {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub stream_name: Option<String>,
+    pub process_old_entries: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

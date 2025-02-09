@@ -21,7 +21,8 @@
                               "kind": "RedisStream",
                               "host": "localhost",
                               "port": 6379,
-                              "stream_name": "city-population-results"
+                              "stream_name": "city-population-results",
+                              "process_old_entries": true
                             }
                           }
                         ],

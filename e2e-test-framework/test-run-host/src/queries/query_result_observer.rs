@@ -500,7 +500,7 @@ impl QueryResultObserverInternalState {
         log::info!("Stats for TestRunQuery:\n{:#?}", &result_summary);
     
         let result_summary_value = serde_json::to_value(result_summary).unwrap();
-        match self.settings.output_storage.write_result_summary(&result_summary_value).await {
+        match self.settings.output_storage.write_test_run_summary(&result_summary_value).await {
             Ok(_) => Ok(()),
             Err(e) => {
                 log::error!("Error writing result summary to output storage: {:?}", e);

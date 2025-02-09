@@ -17,10 +17,12 @@
                         "queries": [
                           {
                             "test_query_id": "city-population",
-                            "kind": "RedisStream",
-                            "host": "localhost",
-                            "port": 6379,
-                            "stream_name": "city-population-results"
+                            "result_stream_handler": {
+                              "kind": "RedisStream",
+                              "host": "localhost",
+                              "port": 6379,
+                              "stream_name": "city-population-results"
+                            }
                           }
                         ],
                         "reactions": [],                      

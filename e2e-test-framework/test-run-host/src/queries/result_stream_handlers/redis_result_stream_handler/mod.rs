@@ -3,7 +3,7 @@ use std::{sync::{atomic::{AtomicUsize, Ordering}, Arc}, time::SystemTime};
 use async_trait::async_trait;
 use redis::{aio::MultiplexedConnection, streams::{StreamId, StreamReadOptions, StreamReadReply}, AsyncCommands, RedisResult};
 use redis_stream_read_result::{RedisStreamReadResult, RedisStreamRecordData};
-use test_data_store::{test_repo_storage::models::{CommonTestQueryDefinition, RedisStreamTestQueryDefinition}, test_run_storage::TestRunQueryId};
+use test_data_store::{test_repo_storage::models::RedisStreamResultStreamHandlerDefinition, test_run_storage::TestRunQueryId};
 use tokio::sync::{mpsc::{Receiver, Sender}, Notify, RwLock};
 
 use super::{ResultStreamHandler, ResultStreamHandlerError, ResultStreamHandlerMessage, ResultStreamHandlerStatus};
@@ -21,17 +21,13 @@ pub struct RedisResultStreamHandlerSettings {
 }
 
 impl RedisResultStreamHandlerSettings {
-    pub fn new(id: TestRunQueryId, common_def: CommonTestQueryDefinition, unique_def: RedisStreamTestQueryDefinition) -> anyhow::Result<Self> {
-
-        let host = unique_def.host.clone().unwrap_or_else(|| "127.0.0.1".to_string());
-        let port = unique_def.port.unwrap_or(6379);        
-        let stream_name = unique_def.stream_name.clone().unwrap_or_else(|| format!("{}-results", common_def.test_query_id.clone()));
+    pub fn new(id: TestRunQueryId, definition: RedisStreamResultStreamHandlerDefinition) -> anyhow::Result<Self> {
 
         Ok(RedisResultStreamHandlerSettings {
-            host,
-            port,
-            stream_name,
-            query_id: common_def.test_query_id.clone(),
+            host: definition.host.clone().unwrap_or_else(|| "127.0.0.1".to_string()),
+            port: definition.port.unwrap_or(6379),
+            stream_name: definition.stream_name.clone().unwrap_or_else(|| format!("{}-results", id.test_query_id.clone())),
+            query_id: id.test_query_id.clone(),
             test_run_query_id: id
         })
     }
@@ -46,8 +42,8 @@ pub struct RedisResultStreamHandler {
 }
 
 impl RedisResultStreamHandler {
-    pub async fn new(id: TestRunQueryId, common_def: CommonTestQueryDefinition, unique_def: RedisStreamTestQueryDefinition) -> anyhow::Result<Box<dyn ResultStreamHandler + Send + Sync>> {
-        let settings = RedisResultStreamHandlerSettings::new(id, common_def, unique_def)?;
+    pub async fn new(id: TestRunQueryId, definition: RedisStreamResultStreamHandlerDefinition) -> anyhow::Result<Box<dyn ResultStreamHandler + Send + Sync>> {
+        let settings = RedisResultStreamHandlerSettings::new(id, definition)?;
         log::trace!("Creating RedisResultStreamHandler with settings {:?}", settings);
 
         let notifier = Arc::new(Notify::new());

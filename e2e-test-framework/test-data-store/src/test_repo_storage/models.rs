@@ -308,39 +308,21 @@ pub struct RedisResultQueueTestReactionDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum TestQueryDefinition {
-    DaprPubSub {
-        #[serde(flatten)]
-        common_def: CommonTestQueryDefinition,
-        #[serde(flatten)]
-        unique_def: DaprPubSubTestQueryDefinition,
-    },
-    RedisStream {
-        #[serde(flatten)]
-        common_def: CommonTestQueryDefinition,
-        #[serde(flatten)]
-        unique_def: RedisStreamTestQueryDefinition,
-    },
-}
-
-impl TestQueryDefinition {
-    pub fn get_id(&self) -> String {
-        match self {
-            TestQueryDefinition::DaprPubSub { common_def, .. } => common_def.test_query_id.clone(),
-            TestQueryDefinition::RedisStream { common_def, .. } => common_def.test_query_id.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommonTestQueryDefinition {
+pub struct TestQueryDefinition {
     #[serde(default)]
     pub test_query_id: String,
+    pub result_stream_handler: ResultStreamHandlerDefinition
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DaprPubSubTestQueryDefinition {
+#[serde(tag = "kind")]
+pub enum ResultStreamHandlerDefinition {
+    DaprPubSub(DaprPubSubResultStreamHandlerDefinition),
+    RedisStream(RedisStreamResultStreamHandlerDefinition),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaprPubSubResultStreamHandlerDefinition {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub pubsub_name: Option<String>,
@@ -348,7 +330,7 @@ pub struct DaprPubSubTestQueryDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RedisStreamTestQueryDefinition {
+pub struct RedisStreamResultStreamHandlerDefinition {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub stream_name: Option<String>,

@@ -226,7 +226,7 @@ impl QueryResultObserverInternalState {
     async fn initialize(settings: QueryResultObserverSettings) -> anyhow::Result<Self> {
         log::debug!("Initializing QueryResultObserver using {:?}", settings);
     
-        let result_stream_handler = create_result_stream_handler(settings.id.clone(), settings.definition.clone()).await?;
+        let result_stream_handler = create_result_stream_handler(settings.id.clone(), settings.definition.result_stream_handler.clone()).await?;
         let result_stream_handler_rx_channel = result_stream_handler.init().await?;
         
         // Create the loggers

@@ -213,11 +213,7 @@ impl TestDataStore {
             &test_run_query_id.test_run_id.test_id
         ).await?;
 
-        match test_definition.queries.iter().find(
-            |query| match query {
-                TestQueryDefinition::RedisStream {common_def, ..} => common_def.test_query_id == test_run_query_id.test_query_id,
-                TestQueryDefinition::DaprPubSub {common_def, ..} => common_def.test_query_id == test_run_query_id.test_query_id,
-            })
+        match test_definition.queries.iter().find(|query| query.test_query_id == test_run_query_id.test_query_id)
         {
             Some(query_definition) => Ok(query_definition.clone()),
             None => anyhow::bail!("TestQueryDefinition not found for TestRunQueryId: {:?}", &test_run_query_id)

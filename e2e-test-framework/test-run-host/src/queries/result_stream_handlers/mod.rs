@@ -3,7 +3,7 @@ use redis_result_stream_handler::RedisResultStreamHandler;
 use serde::Serialize;
 use tokio::sync::mpsc::Receiver;
 
-use test_data_store::{test_repo_storage::models::TestQueryDefinition, test_run_storage::TestRunQueryId};
+use test_data_store::{test_repo_storage::models::ResultStreamHandlerDefinition, test_run_storage::TestRunQueryId};
 
 pub mod redis_result_stream_handler;
 
@@ -122,13 +122,13 @@ impl ResultStreamHandler for Box<dyn ResultStreamHandler + Send + Sync> {
 
 pub async fn create_result_stream_handler (
     id: TestRunQueryId, 
-    definition: TestQueryDefinition
+    definition: ResultStreamHandlerDefinition
 ) -> anyhow::Result<Box<dyn ResultStreamHandler + Send + Sync>> {
     match definition {
-        TestQueryDefinition::RedisStream{common_def, unique_def} => {
-            Ok(Box::new(RedisResultStreamHandler::new(id, common_def, unique_def).await?))            
+        ResultStreamHandlerDefinition::RedisStream(definition) => {
+            Ok(Box::new(RedisResultStreamHandler::new(id, definition).await?))            
         },
-        TestQueryDefinition::DaprPubSub { .. } => {
+        ResultStreamHandlerDefinition::DaprPubSub(_) => {
             unimplemented!("DaprResultStreamHandler is not implemented yet")
         }
     }

@@ -20,16 +20,16 @@ pub struct JsonlFileResultStreamLoggerConfig {
 #[derive(Debug)]
 pub struct JsonlFileResultStreamLoggerSettings {
     pub folder_path: PathBuf,
-    pub max_events_per_file: u64,
-    pub script_name: String,
+    pub log_name: String,
+    pub max_lines_per_file: u64,
 }
 
 impl JsonlFileResultStreamLoggerSettings {
     pub fn new(config: &JsonlFileResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
         return Ok(Self {
             folder_path,
-            max_events_per_file: config.max_lines_per_file.unwrap_or(10000),
-            script_name: Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
+            log_name: Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
+            max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
         });
     }
 }
@@ -48,8 +48,6 @@ impl JsonlFileResultStreamLogger {
         let settings = JsonlFileResultStreamLoggerSettings::new(&def, folder_path)?;
         log::trace!("Creating JsonlFileResultStreamLogger with settings {:?}, ", settings);
 
-        // Make sure the local change_data_folder exists, if not, create it.
-        // If the folder cannot be created, return an error.
         if !std::path::Path::new(&settings.folder_path).exists() {
             match create_dir_all(&settings.folder_path).await {
                 Ok(_) => {},
@@ -86,7 +84,7 @@ pub enum ResultStreamRecordLogWriterError {
     FileWriteError(String),
 }
 
-pub struct ResultStreamRecordLogWriter {
+struct ResultStreamRecordLogWriter {
     folder_path: PathBuf,
     log_file_name: String,
     next_file_index: usize,
@@ -99,10 +97,10 @@ impl ResultStreamRecordLogWriter {
     pub async fn new(settings: &JsonlFileResultStreamLoggerSettings) -> anyhow::Result<Self> {
         let mut writer = ResultStreamRecordLogWriter {
             folder_path: settings.folder_path.clone(),
-            log_file_name: settings.script_name.clone(),
+            log_file_name: settings.log_name.clone(),
             next_file_index: 0,
             current_writer: None,
-            max_size: settings.max_events_per_file,
+            max_size: settings.max_lines_per_file,
             current_file_event_count: 0,
         };
 

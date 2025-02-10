@@ -128,11 +128,11 @@ pub struct LocalTestDefinition {
     pub description: Option<String>,
     pub test_folder: Option<String>,
     #[serde(default)]
-    pub sources: Vec<TestSourceDefinition>,
-    #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
     pub reactions: Vec<TestReactionDefinition>,
+    #[serde(default)]
+    pub sources: Vec<TestSourceDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -144,11 +144,11 @@ pub struct TestDefinition {
     pub description: Option<String>,
     pub test_folder: Option<String>,
     #[serde(default)]
-    pub sources: Vec<TestSourceDefinition>,
-    #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
     pub reactions: Vec<TestReactionDefinition>,
+    #[serde(default)]
+    pub sources: Vec<TestSourceDefinition>,    
 }
 
 impl TestDefinition {
@@ -262,25 +262,25 @@ pub struct JsonlFileSourceChangeDispatcherDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum TestReactionDefinition {
-    DaprResultQueue {
+    AzureEventGrid {
         #[serde(flatten)]
         common_def: CommonTestReactionDefinition,
         #[serde(flatten)]
-        unique_def: DaprResultQueueTestReactionDefinition,
+        unique_def: AzureEventGridTestReactionDefinition,
     },
-    RedisResultQueue {
+    SignalR {
         #[serde(flatten)]
         common_def: CommonTestReactionDefinition,
         #[serde(flatten)]
-        unique_def: RedisResultQueueTestReactionDefinition,
+        unique_def: SignalRTestReactionDefinition,
     },
 }
 
 impl TestReactionDefinition {
     pub fn get_id(&self) -> String {
         match self {
-            TestReactionDefinition::DaprResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
-            TestReactionDefinition::RedisResultQueue { common_def, .. } => common_def.test_reaction_id.clone(),
+            TestReactionDefinition::AzureEventGrid { common_def, .. } => common_def.test_reaction_id.clone(),
+            TestReactionDefinition::SignalR { common_def, .. } => common_def.test_reaction_id.clone(),
         }
     }
 }
@@ -293,7 +293,29 @@ pub struct CommonTestReactionDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DaprResultQueueTestReactionDefinition {
+pub struct AzureEventGridTestReactionDefinition {
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignalRTestReactionDefinition {
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TestQueryDefinition {
+    #[serde(default)]
+    pub test_query_id: String,
+    pub result_stream_handler: ResultStreamHandlerDefinition
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum ResultStreamHandlerDefinition {
+    DaprPubSub(DaprPubSubResultStreamHandlerDefinition),
+    RedisStream(RedisStreamResultStreamHandlerDefinition),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DaprPubSubResultStreamHandlerDefinition {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub pubsub_name: Option<String>,
@@ -301,11 +323,22 @@ pub struct DaprResultQueueTestReactionDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RedisResultQueueTestReactionDefinition {
+pub struct RedisStreamResultStreamHandlerDefinition {
     pub host: Option<String>,
     pub port: Option<u16>,
-    pub queue_name: Option<String>,
+    pub stream_name: Option<String>,
+    pub process_old_entries: Option<bool>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueryId {
+    #[serde(default = "default_query_node_id")]
+    pub node_id: String,
+    #[serde(default = "default_query_id")]
+    pub query_id: String,
+}
+fn default_query_node_id() -> String { "default".to_string() }
+fn default_query_id() -> String { "test_query".to_string() }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParseQueryIdError {
@@ -329,20 +362,6 @@ impl TryFrom<&str> for QueryId {
             Err(ParseQueryIdError::InvalidFormat(value.to_string()))
         }
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct QueryId {
-    #[serde(default = "default_query_node_id")]
-    pub node_id: String,
-    #[serde(default = "default_query_id")]
-    pub query_id: String,
-}
-fn default_query_node_id() -> String { "default".to_string() }
-fn default_query_id() -> String { "test_query".to_string() }
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestQueryDefinition {
 }
 
 #[cfg(test)]

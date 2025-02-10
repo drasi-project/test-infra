@@ -1,0 +1,32 @@
+# This file is for use with the REST Client extension for Visual Studio Code to make it easy to manually 
+# test the Test Service Web API.
+# https://marketplace.visualstudio.com/items?itemName=humao.rest-client
+
+@hostname = localhost
+@port = 63123
+@repo_id = az_dev_repo
+@test_id = population
+@test_run_id = test_run_001
+@query_id = city-population
+
+### GET STATE of test run reaction
+GET http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}
+
+### START test run reaction
+POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/start
+Content-Type: application/json
+
+### PAUSE test run reaction
+POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/pause
+Content-Type: application/json
+
+### STOP test run reaction
+POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/stop
+Content-Type: application/json
+
+### RESET test run reaction
+POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/reset
+Content-Type: application/json
+
+### Homepage
+GET http://{{hostname}}:{{port}}

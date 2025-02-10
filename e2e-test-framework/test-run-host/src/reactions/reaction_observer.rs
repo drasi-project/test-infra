@@ -305,10 +305,10 @@ impl ReactionObserverInternalState {
             ReactionHandlerMessage::Record(record) => {
                 // Update the stats
                 if self.stats.num_reaction_records == 0 {
-                    self.stats.first_result_time_ns = record.dequeue_time_ns;
+                    self.stats.first_result_time_ns = record.receive_time_ns;
                 }
                 self.stats.num_reaction_records += 1;
-                self.stats.last_result_time_ns = record.dequeue_time_ns;
+                self.stats.last_result_time_ns = record.receive_time_ns;
     
                 self.log_reaction_record(&record).await;
     
@@ -500,7 +500,7 @@ impl ReactionObserverInternalState {
         log::info!("Stats for TestRunReaction:\n{:#?}", &result_summary);
     
         let result_summary_value = serde_json::to_value(result_summary).unwrap();
-        match self.settings.output_storage.write_result_summary(&result_summary_value).await {
+        match self.settings.output_storage.write_test_run_summary(&result_summary_value).await {
             Ok(_) => Ok(()),
             Err(e) => {
                 log::error!("Error writing result summary to output storage: {:?}", e);

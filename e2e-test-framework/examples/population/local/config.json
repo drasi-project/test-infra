@@ -14,6 +14,19 @@
                         "version": 1,
                         "description": "An example of the E2E Test Framework using data from Wikidata.",
                         "test_folder": "population_2024-01-01_small",
+                        "queries": [
+                          {
+                            "test_query_id": "city-population",
+                            "result_stream_handler": {
+                              "kind": "RedisStream",
+                              "host": "localhost",
+                              "port": 6379,
+                              "stream_name": "city-population-results",
+                              "process_old_entries": true
+                            }
+                          }
+                        ],
+                        "reactions": [],                      
                         "sources": [
                           {
                             "test_source_id": "geo-db",
@@ -38,25 +51,34 @@
                               { "node_id": "default", "query_id": "city-population" }
                             ]
                           }
-                        ],
-                        "reactions": [
-                          {
-                            "test_reaction_id": "city-population",
-                            "kind": "RedisResultQueue",
-                            "queries": [
-                              { "node_id": "default", "query_id": "city-population" }
-                            ],
-                            "host": "localhost",
-                            "port": 6379,
-                            "queue_name": "city-population-results"
-                          }
-                        ]                      
+                        ]
                       }                 
                 ]
             }                    
         ]
     },
     "test_run_host": {
+        "queries": [
+          {
+            "test_id": "population",
+            "test_repo_id": "local_dev_repo",
+            "test_run_id": "test_run_001",
+            "test_query_id": "city-population",
+            "start_immediately": true,
+            "loggers": [
+              {
+                "kind": "Profiler",
+                "write_bootstrap_log": false,
+                "write_change_log": true
+              },
+              {
+                "kind": "JsonlFile",
+                "max_lines_per_file": 5000
+              }
+            ]
+          }          
+        ],
+        "reactions":[],        
         "sources": [
             {
                 "test_id": "population",
@@ -66,21 +88,6 @@
                 "source_change_generator_start_mode": "bootstrap",
                 "test_run_overrides" : {}
             }
-        ],
-        "reactions": [
-          {
-            "test_id": "population",
-            "test_repo_id": "local_dev_repo",
-            "test_run_id": "test_run_001",
-            "test_reaction_id": "city-population",
-            "start_immediately": false,
-            "loggers": [
-              {
-                "kind": "JsonlFile",
-                "max_lines_per_file": 5000
-              }
-            ]
-          }          
-        ]        
+        ]
     }
 }

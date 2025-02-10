@@ -1,26 +1,26 @@
 use serde::{Deserialize, Serialize};
 
-use crate::reactions::reaction_handlers::ReactionOutputRecord;
+use crate::queries::{result_stream_handlers::ResultStreamRecord, result_stream_record::QueryResultRecord};
 
-use super::{query_result_record::QueryResultRecord, ReactionHandlerError, ReactionHandlerMessage};
+use super::{ResultStreamHandlerError, ResultStreamHandlerMessage};
 
 pub struct RedisStreamReadResult {
     pub dequeue_time_ns: u64,
     pub enqueue_time_ns: u64,
-    pub error: Option<ReactionHandlerError>,
+    pub error: Option<ResultStreamHandlerError>,
     pub id: String,
     pub record: Option<RedisStreamRecordData>,
     pub seq: usize,
 }
 
-impl TryInto<ReactionHandlerMessage> for RedisStreamReadResult {
+impl TryInto<ResultStreamHandlerMessage> for RedisStreamReadResult {
     type Error = anyhow::Error;
 
-    fn try_into(self) -> Result<ReactionHandlerMessage, Self::Error> {
+    fn try_into(self) -> Result<ResultStreamHandlerMessage, Self::Error> {
         match self.record {
             Some(record) => {
-                let reaction_collector_event = ReactionOutputRecord {
-                    reaction_output_data: serde_json::to_value(&record.data).unwrap(),
+                let result_stream_record = ResultStreamRecord {
+                    record_data: record.data,
                     dequeue_time_ns: self.dequeue_time_ns,
                     enqueue_time_ns: self.enqueue_time_ns,
                     id: record.id,
@@ -29,12 +29,12 @@ impl TryInto<ReactionHandlerMessage> for RedisStreamReadResult {
                     tracestate: record.tracestate
                 };
 
-                Ok(ReactionHandlerMessage::Record(reaction_collector_event))
+                Ok(ResultStreamHandlerMessage::Record(result_stream_record))
             },
             None => {
                 match self.error {
                     Some(e) => {
-                        Ok(ReactionHandlerMessage::Error(e))
+                        Ok(ResultStreamHandlerMessage::Error(e))
                     },
                     None => {
                         Err(anyhow::anyhow!("No record or error found in stream entry"))

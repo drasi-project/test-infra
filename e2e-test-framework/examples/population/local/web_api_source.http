@@ -9,9 +9,6 @@
 @test_run_id = test_run_001
 @source_id = geo-db
 
-### ROOT
-GET http://{{hostname}}:{{port}}
-
 ### GET STATE of test run source
 GET http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}
 
@@ -61,3 +58,7 @@ Content-Type: application/json
     "nodeLabels_3": ["Continent", "Country", "City"],
     "relLabels": []
 }
+
+### ROOT
+GET http://{{hostname}}:{{port}}
+

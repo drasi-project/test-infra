@@ -8,13 +8,17 @@ use thiserror::Error;
 use tokio::{select, signal};
 
 use data_collector::DataCollector;
+use queries::get_queries_routes;
+use reactions::get_reactions_routes;
 use repo::get_test_repo_routes;
-use runner::get_test_run_host_routes;
+use sources::get_sources_routes;
 use test_data_store::TestDataStore;
 use test_run_host::TestRunHost;
 
-pub mod repo;
-pub mod runner;
+mod queries;
+mod reactions;
+mod repo;
+mod sources;
 
 #[derive(Debug, Error)]
 pub enum TestServiceWebApiError {
@@ -61,9 +65,9 @@ impl IntoResponse for TestServiceWebApiError {
 
 #[derive(Debug, Serialize)]
 struct TestServiceStateResponse {
+    pub data_collector: DataCollectorStateResponse,
     pub data_store: TestDataStoreStateResponse,
     pub test_run_host: TestRunHostStateResponse,
-    pub data_collector: DataCollectorStateResponse,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +79,7 @@ struct TestDataStoreStateResponse {
 #[derive(Debug, Serialize)]
 struct TestRunHostStateResponse {
     pub status: String,
+    pub test_run_query_ids: Vec<String>,
     pub test_run_reaction_ids: Vec<String>,
     pub test_run_source_ids: Vec<String>,
 }
@@ -91,7 +96,9 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>
     let app = Router::new()
         .route("/", get(get_service_info_handler))
         .nest("/test_repos", get_test_repo_routes())
-        .nest("/test_run_host", get_test_run_host_routes())
+        .nest("/test_run_host", get_queries_routes())
+        .nest("/test_run_host", get_reactions_routes())
+        .nest("/test_run_host", get_sources_routes())
         .layer(axum::extract::Extension(data_collector))
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_run_host));
@@ -158,6 +165,7 @@ async fn get_service_info_handler(
         },
         test_run_host: TestRunHostStateResponse {
             status: test_run_host.get_status().await?.to_string(),
+            test_run_query_ids: test_run_host.get_test_query_ids().await?,
             test_run_reaction_ids: test_run_host.get_test_reaction_ids().await?,
             test_run_source_ids: test_run_host.get_test_source_ids().await?,
         },

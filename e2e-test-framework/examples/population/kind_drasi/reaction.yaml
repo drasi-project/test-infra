@@ -1,9 +1,0 @@
-kind: Reaction
-apiVersion: v1
-name: population-debug
-spec:
-  kind: Debug
-  queries:
-    city-population:
-  endpoints:
-    gateway: 8080  

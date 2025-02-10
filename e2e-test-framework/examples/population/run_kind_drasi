@@ -19,10 +19,10 @@ echo -e "${GREEN}\n\nPort forwarding to enable access the Test Service Web API..
 kubectl port-forward -n drasi-system services/drasi-test-service 63123:63123 &
 sleep 5
 
-echo -e "${GREEN}\n\nAdding Test Repository, Test Source, and Test Reaction...${RESET}"
+echo -e "${GREEN}\n\nAdding Test Repository, Test Source, and Test Query...${RESET}"
 curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/cfg_repo_az_dev.json http://localhost:63123/test_repos
 curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/cfg_source_population.json http://localhost:63123/test_run_host/sources
-curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/cfg_reaction_city_population.json http://localhost:63123/test_run_host/reactions
+curl -i -X POST -H "Content-Type: application/json" -d @examples/population/kind_drasi/cfg_query_city_population.json http://localhost:63123/test_run_host/queries
 
 # Create the Test Source Provider and Test Source
 echo -e "${GREEN}\n\nRegistering E2ETestService SourceProvider with Drasi...${RESET}"
@@ -37,10 +37,10 @@ echo -e "${GREEN}\n\nCreating Drasi Continuous Queries...${RESET}"
 drasi apply -f examples/population/kind_drasi/query.yaml
 drasi wait -f examples/population/kind_drasi/query.yaml -t 200
 
-# Start the Test Run Reaction
-echo -e "${GREEN}\n\nStarting the Test Run Reaction...${RESET}"
-curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/reactions/az_dev_repo.population_tiny.test_run_001.city-population/start
+# Start the Test Run Query
+echo -e "${GREEN}\n\nStarting the Test Run Query...${RESET}"
+curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/queries/az_dev_repo.population.test_run_001.city-population/start
 
 # Start the Test Run Source 
 echo -e "${GREEN}\n\nStarting the Test Run Source...${RESET}"
-curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/sources/az_dev_repo.population_tiny.test_run_001.geo-db/start
+curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/sources/az_dev_repo.population.test_run_001.geo-db/start

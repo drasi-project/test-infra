@@ -44,7 +44,7 @@ impl JsonlFileResultStreamLogger {
     pub async fn new(def:&JsonlFileResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
         log::debug!("Creating JsonlFileResultStreamLogger from {:?}, ", def);
 
-        let folder_path = output_storage.result_change_path.clone();
+        let folder_path = output_storage.result_change_path.join("jsonl_file");
         let settings = JsonlFileResultStreamLoggerSettings::new(&def, folder_path)?;
         log::trace!("Creating JsonlFileResultStreamLogger with settings {:?}, ", settings);
 

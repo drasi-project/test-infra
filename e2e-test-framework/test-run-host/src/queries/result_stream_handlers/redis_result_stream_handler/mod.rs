@@ -9,7 +9,6 @@ use tokio::sync::{mpsc::{Receiver, Sender}, Notify, RwLock};
 use super::{ResultStreamHandler, ResultStreamHandlerError, ResultStreamHandlerMessage, ResultStreamHandlerStatus};
 
 pub mod redis_stream_read_result;
-pub mod result_stream_record;
 
 #[derive(Clone, Debug)]
 pub struct RedisResultStreamHandlerSettings {

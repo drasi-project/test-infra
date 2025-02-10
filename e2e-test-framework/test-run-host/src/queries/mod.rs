@@ -7,9 +7,10 @@ use result_stream_loggers::ResultStreamLoggerConfig;
 use query_result_observer::{QueryResultObserver, QueryResultObserverCommandResponse, QueryResultObserverState};
 use test_data_store::{test_repo_storage::models::TestQueryDefinition, test_run_storage::{ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId, TestRunQueryStorage}};
 
+pub mod query_result_observer;
 mod result_stream_handlers;
 mod result_stream_loggers;
-pub mod query_result_observer;
+mod result_stream_record;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunQueryConfig {

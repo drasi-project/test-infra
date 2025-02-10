@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum QueryResultRecord {
     #[serde(rename = "change")]
@@ -11,7 +11,7 @@ pub enum QueryResultRecord {
     Control(ControlEvent),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BaseResultEvent {
     #[serde(rename = "queryId")]
     pub query_id: String,
@@ -24,20 +24,20 @@ pub struct BaseResultEvent {
     pub metadata: Option<BaseResultMetadata>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BaseResultMetadata {
-    #[serde(rename = "changeEvent")]
-    pub change_event: Option<HashMap<String, serde_json::Value>>,
+    // #[serde(rename = "changeEvent")]
+    // pub change_event: Option<HashMap<String, serde_json::Value>>,
     pub tracking: TrackingMetadata,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TrackingMetadata {
     pub query: QueryTrackingMetadata,
     pub source: SourceTrackingMetadata,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueryTrackingMetadata {
     pub dequeue_ms: u64,
     #[serde(rename = "queryEnd_ms")]
@@ -46,7 +46,7 @@ pub struct QueryTrackingMetadata {
     pub query_start_ms: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceTrackingMetadata {
     #[serde(rename = "changeDispatcherEnd_ms")]
     pub change_dispatcher_end_ms: u64,
@@ -60,7 +60,7 @@ pub struct SourceTrackingMetadata {
     pub seq: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChangeEvent {
     #[serde(flatten)]
     pub base: BaseResultEvent,
@@ -75,13 +75,13 @@ pub struct ChangeEvent {
     pub deleted_results: Vec<HashMap<String, serde_json::Value>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UpdatePayload {
     pub before: HashMap<String, serde_json::Value>,
     pub after: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ControlEvent {
     #[serde(flatten)]
     pub base: BaseResultEvent,
@@ -90,7 +90,7 @@ pub struct ControlEvent {
     pub control_signal: ControlSignal,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ControlSignal {
     #[serde(rename = "bootstrapStarted")]
@@ -105,27 +105,27 @@ pub enum ControlSignal {
     Deleted(DeletedSignal),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BootstrapStartedSignal {
     // Additional fields can be added if necessary
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BootstrapCompletedSignal {
     // Additional fields can be added if necessary
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunningSignal {
     // Additional fields can be added if necessary
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoppedSignal {
     // Additional fields can be added if necessary
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DeletedSignal {
     // Additional fields can be added if necessary
 }

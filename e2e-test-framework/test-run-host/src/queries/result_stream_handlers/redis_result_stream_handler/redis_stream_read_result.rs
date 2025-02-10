@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::queries::result_stream_handlers::ResultStreamRecord;
+use crate::queries::{result_stream_handlers::ResultStreamRecord, result_stream_record::QueryResultRecord};
 
-use super::{result_stream_record::QueryResultRecord, ResultStreamHandlerError, ResultStreamHandlerMessage};
+use super::{ResultStreamHandlerError, ResultStreamHandlerMessage};
 
 pub struct RedisStreamReadResult {
     pub dequeue_time_ns: u64,
@@ -20,7 +20,7 @@ impl TryInto<ResultStreamHandlerMessage> for RedisStreamReadResult {
         match self.record {
             Some(record) => {
                 let result_stream_record = ResultStreamRecord {
-                    record_data: serde_json::to_value(&record.data).unwrap(),
+                    record_data: record.data,
                     dequeue_time_ns: self.dequeue_time_ns,
                     enqueue_time_ns: self.enqueue_time_ns,
                     id: record.id,

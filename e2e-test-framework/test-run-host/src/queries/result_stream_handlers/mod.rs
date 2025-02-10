@@ -5,6 +5,8 @@ use tokio::sync::mpsc::Receiver;
 
 use test_data_store::{test_repo_storage::models::ResultStreamHandlerDefinition, test_run_storage::TestRunQueryId};
 
+use super::result_stream_record::QueryResultRecord;
+
 pub mod redis_result_stream_handler;
 
 #[derive(Debug, thiserror::Error)]
@@ -54,7 +56,7 @@ pub enum ResultStreamHandlerMessage {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ResultStreamRecord {
-    pub record_data: serde_json::Value,
+    pub record_data: QueryResultRecord,
     pub dequeue_time_ns: u64,
     pub enqueue_time_ns: u64,
     pub id: String,

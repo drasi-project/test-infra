@@ -64,10 +64,10 @@
             "test_repo_id": "local_dev_repo",
             "test_run_id": "test_run_001",
             "test_query_id": "city-population",
-            "start_immediately": false,
+            "start_immediately": true,
             "loggers": [
               {
-                "kind": "Console"
+                "kind": "Profiler"
               },
               {
                 "kind": "JsonlFile",

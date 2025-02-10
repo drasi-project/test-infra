@@ -8,7 +8,7 @@ spec:
       properties:
           PORT: 4002
           SOURCE_ID: "geo-db"
-          TEST_RUN_SOURCE_ID: "az_dev_repo.population_tiny.test_run_001.geo-db"
+          TEST_RUN_SOURCE_ID: "az_dev_repo.population.test_run_001.geo-db"
           TEST_SERVICE_HOST: "drasi-test-service"
           TEST_SERVICE_PORT: 63123
           RUST_LOG: "debug"
@@ -16,7 +16,7 @@ spec:
       properties:
           PORT: 80
           SOURCE_ID: "geo-db"
-          TEST_RUN_SOURCE_ID: "az_dev_repo.population_tiny.test_run_001.geo-db"
+          TEST_RUN_SOURCE_ID: "az_dev_repo.population.test_run_001.geo-db"
           TEST_SERVICE_HOST: "drasi-test-service"
           TEST_SERVICE_PORT: 63123
           RUST_LOG: "debug"

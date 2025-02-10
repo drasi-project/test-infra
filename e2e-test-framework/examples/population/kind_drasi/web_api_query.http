@@ -5,7 +5,7 @@
 @hostname = localhost
 @port = 63123
 @repo_id = az_dev_repo
-@test_id = population_tiny
+@test_id = population
 @test_run_id = test_run_001
 @query_id = city-population
 

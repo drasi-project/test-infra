@@ -9,6 +9,9 @@
       "kind": "Profiler",
       "write_bootstrap_log": false,
       "write_change_log": true
-    }    
+    },
+    {
+      "kind": "OtelTrace"
+    }        
   ]
 }

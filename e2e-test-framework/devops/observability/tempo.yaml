@@ -54,7 +54,7 @@ data:
         otlp:
           protocols:
             grpc:
-              max_recv_msg_size_mib: 10485760  # 10 MB
+              max_recv_msg_size_mib: 26214400  # 10 MB
               endpoint: 0.0.0.0:4317
     metrics_generator:
       storage:
@@ -72,7 +72,7 @@ data:
     overrides:
       defaults:
         global:      
-          max_bytes_per_trace: 10485760
+          max_bytes_per_trace: 26214400
         ingestion:
           burst_size_bytes: 52428800  # 50 MB
           rate_limit_bytes: 20971520  # 20 MB

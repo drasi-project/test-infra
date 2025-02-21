@@ -24,7 +24,6 @@ kubectl apply -f prometheus.yaml
 echo "Waiting for Prometheus..."
 kubectl wait --for=condition=Available deployment/prometheus -n drasi-system --timeout=5m
 
-
 # Deploy Grafana
 kubectl apply -f grafana.yaml
 echo "Waiting for Grafana..."

@@ -363,8 +363,8 @@ impl ProfilerResultStreamLogger {
                     InstrumentKind::ObservableGauge => Aggregation::LastValue,
                     InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
                         boundaries: vec![
-                            0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0,
-                            5000.0, 7500.0, 10000.0, 25000.0, 50000.0, 75000.0, 100000.0, 250000.0, 500000.0, 750000.0, 1000000.0
+                            0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0,
+                            2500.0, 5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0, 
                         ],
                         record_min_max: true,
                     },

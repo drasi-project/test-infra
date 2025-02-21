@@ -2,11 +2,15 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use opentelemetry::metrics::{Counter, Histogram, Meter};
+use opentelemetry::{global, runtime, KeyValue};
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::MeterProvider as SdkMeterProvider;
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File, write}, io::{AsyncWriteExt, BufWriter}};
 
-use test_data_store::test_run_storage::TestRunQueryStorage;
+use test_data_store::test_run_storage::{TestRunQueryId, TestRunQueryStorage};
 
 use crate::queries::{result_stream_handlers::ResultStreamRecord, result_stream_record::{ChangeEvent, QueryResultRecord}};
 
@@ -15,6 +19,7 @@ use super::{ResultStreamLogger, ResultStreamLoggerError};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfilerResultStreamLoggerConfig {
     pub max_lines_per_file: Option<u64>,
+    pub otel_endpoint: Option<String>,
     pub write_bootstrap_log: Option<bool>,
     pub write_change_log: Option<bool>,
 }
@@ -22,22 +27,26 @@ pub struct ProfilerResultStreamLoggerConfig {
 #[derive(Debug)]
 pub struct ProfilerResultStreamLoggerSettings {
     pub bootstrap_log_name: String,
-    pub change_log_name: String,
+    pub change_log_name: String,    
     pub folder_path: PathBuf,
+    pub test_run_query_id: TestRunQueryId,
     pub max_lines_per_file: u64,
+    pub otel_endpoint: String,
     pub write_bootstrap_log: bool,
     pub write_change_log: bool,
 }
 
 impl ProfilerResultStreamLoggerSettings {
-    pub fn new(config: &ProfilerResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(test_run_query_id: TestRunQueryId, config: &ProfilerResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
         let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
 
         return Ok(Self {
             bootstrap_log_name: format!("{}_bootstrap.jsonl", time),
             change_log_name: format!("{}_change.jsonl", time),
             folder_path,
+            test_run_query_id,
             max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
+            otel_endpoint: config.otel_endpoint.clone().unwrap_or("http://otel-collector:4317".to_string()),
             write_bootstrap_log: config.write_bootstrap_log.unwrap_or(false),
             write_change_log: config.write_change_log.unwrap_or(false),
         });
@@ -101,6 +110,117 @@ impl ChangeRecordProfile {
             query_solver,
             result_disp,
             total,
+        }
+    }
+}
+
+struct ProfilerMetrics{
+    pub control_record_count: Counter<u64>,
+    pub bootstrap_record_count: Counter<u64>,
+    pub bootstrap_total_dur: Histogram<f64>,
+    pub change_record_count: Counter<u64>,
+    pub src_change_q_dur: Histogram<f64>,
+    pub src_change_rtr_dur: Histogram<f64>,
+    pub src_disp_q_dur: Histogram<f64>,
+    pub src_change_disp_dur: Histogram<f64>,
+    pub change_disp_dur: Histogram<f64>,
+    pub query_host_dur: Histogram<f64>,
+    pub query_solver_dur: Histogram<f64>,
+    pub result_disp_dur: Histogram<f64>,
+    pub total_dur: Histogram<f64>,
+}
+
+impl ProfilerMetrics {
+    pub fn new(meter: &Meter) -> Self {
+        let control_record_count = meter
+            .u64_counter("drasi.test-run-profiler.control_record_count")
+            .with_description("Number of Query Result Control Records")
+            .init();
+
+        let bootstrap_record_count = meter
+            .u64_counter("drasi.test-run-profiler.bootstrap_record_count")
+            .with_description("Number of Query Result Bootstrap Records")
+            .init();
+
+        let change_record_count = meter
+            .u64_counter("drasi.test-run-profiler.change_record_count")
+            .with_description("Number of Query Result Change Records")
+            .init();
+
+        let bootstrap_total_dur = meter
+            .f64_histogram("drasi.test-run-profiler.bootstrap_total_dur")
+            .with_description("Total time taken to process a bootstrap record")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();
+
+        let src_change_q_dur = meter
+            .f64_histogram("drasi.test-run-profiler.src_change_q_dur")
+            .with_description("Total time Source Change spent in Source Change Queue")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();
+
+        let src_change_rtr_dur = meter
+            .f64_histogram("drasi.test-run-profiler.src_change_rtr_dur")
+            .with_description("Total time Source Change spent in Source Change Router")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();
+
+        let src_disp_q_dur = meter
+            .f64_histogram("drasi.test-run-profiler.src_disp_q_dur")
+            .with_description("Total time Source Change spent in Source Dispatch Queue")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();      
+
+        let src_change_disp_dur = meter
+            .f64_histogram("drasi.test-run-profiler.src_change_disp_dur")
+            .with_description("Total time Source Change spent in Source Change Dispatcher")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();    
+
+        let change_disp_dur = meter
+            .f64_histogram("drasi.test-run-profiler.change_disp_dur")
+            .with_description("Total time Source Change spent being dispatched")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();   
+
+        let query_host_dur = meter
+            .f64_histogram("drasi.test-run-profiler.query_host_dur")
+            .with_description("Total time Source Change spent in Query Host")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();   
+
+        let query_solver_dur = meter
+            .f64_histogram("drasi.test-run-profiler.query_solver_dur")
+            .with_description("Total time Source Change spent in Query Solver")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();   
+
+        let result_disp_dur = meter
+            .f64_histogram("drasi.test-run-profiler.result_disp_dur")
+            .with_description("Total time Source Change spent in Query Result Dispatch Queue")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();              
+
+        let total_dur = meter
+            .f64_histogram("drasi.test-run-profiler.total_dur")
+            .with_description("Total time Source Change spent in Drasi")
+            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .init();  
+
+        Self {
+            control_record_count,
+            bootstrap_record_count,
+            bootstrap_total_dur,
+            change_record_count,
+            src_change_q_dur,
+            src_change_rtr_dur,
+            src_disp_q_dur,
+            src_change_disp_dur,
+            change_disp_dur,
+            query_host_dur,
+            query_solver_dur,
+            result_disp_dur,
+            total_dur,
         }
     }
 }
@@ -186,16 +306,19 @@ impl ProfilerSummary {
 pub struct ProfilerResultStreamLogger {
     bootstrap_log_writer: Option<RecordProfileLogWriter>,
     change_log_writer: Option<RecordProfileLogWriter>,
+    meter_provider: SdkMeterProvider,
+    metrics: ProfilerMetrics,
+    metrics_attributes: Vec<KeyValue>,
     settings: ProfilerResultStreamLoggerSettings,
-    summary: ProfilerSummary,
+    summary: ProfilerSummary,    
 }
 
 impl ProfilerResultStreamLogger {
-    pub async fn new(def:&ProfilerResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!("Creating ProfilerResultStreamLogger from {:?}, ", def);
+    pub async fn new(test_run_query_id: TestRunQueryId, def: &ProfilerResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
+        log::debug!("Creating ProfilerResultStreamLogger for {}, from {:?}, ", test_run_query_id, def);
 
         let folder_path = output_storage.result_change_path.join("profiler");
-        let settings = ProfilerResultStreamLoggerSettings::new(&def, folder_path)?;
+        let settings = ProfilerResultStreamLoggerSettings::new(test_run_query_id, &def, folder_path)?;
         log::trace!("Creating ProfilerResultStreamLogger with settings {:?}, ", settings);
 
         if !std::path::Path::new(&settings.folder_path).exists() {
@@ -217,9 +340,33 @@ impl ProfilerResultStreamLogger {
             None
         };
 
+        // Initialize meter provider using pipeline
+        let meter_provider = opentelemetry_otlp::new_pipeline()
+            .metrics(runtime::Tokio)
+            .with_exporter(opentelemetry_otlp::new_exporter().tonic().with_endpoint(&settings.otel_endpoint) )
+            .build()?;
+        
+        // Set the global meter provider
+        global::set_meter_provider(meter_provider.clone());
+
+        // Get a meter
+        let meter = global::meter("test-run-profiler");
+
+        // Create the metrics:
+        let metrics = ProfilerMetrics::new(&meter);
+
+        let metrics_attributes = vec![
+            KeyValue::new("test_id", settings.test_run_query_id.test_run_id.test_id.to_string()),
+            KeyValue::new("test_run_id", settings.test_run_query_id.test_run_id.to_string()),
+            KeyValue::new("test_run_query_id", settings.test_run_query_id.to_string()),
+        ];
+
         Ok(Box::new( Self { 
             bootstrap_log_writer,
             change_log_writer,
+            meter_provider,
+            metrics,
+            metrics_attributes,
             settings,
             summary: ProfilerSummary::new(),
         }))
@@ -289,6 +436,7 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
 
         write(summary_path, serde_json::to_string_pretty(&self.summary)?).await?;
 
+        self.meter_provider.shutdown()?;
         Ok(())
     }
     
@@ -330,7 +478,19 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
                     self.summary.result_disp_min = std::cmp::min(self.summary.result_disp_min, profile.result_disp);
                     self.summary.total_avg += profile.total as f64;
                     self.summary.total_max = std::cmp::max(self.summary.total_max, profile.total);
-                    self.summary.total_min = std::cmp::min(self.summary.total_min, profile.total);                    
+                    self.summary.total_min = std::cmp::min(self.summary.total_min, profile.total);   
+
+
+                    self.metrics.change_record_count.add(1, &self.metrics_attributes);             
+                    self.metrics.src_change_q_dur.record(profile.src_change_q as f64, &self.metrics_attributes);
+                    self.metrics.src_change_rtr_dur.record(profile.src_change_rtr as f64, &self.metrics_attributes);
+                    self.metrics.src_disp_q_dur.record(profile.src_disp_q as f64, &self.metrics_attributes);
+                    self.metrics.src_change_disp_dur.record(profile.src_change_disp as f64, &self.metrics_attributes);
+                    self.metrics.change_disp_dur.record(profile.change_disp as f64, &self.metrics_attributes);
+                    self.metrics.query_host_dur.record(profile.query_host as f64, &self.metrics_attributes);
+                    self.metrics.query_solver_dur.record(profile.query_solver as f64, &self.metrics_attributes);
+                    self.metrics.result_disp_dur.record(profile.result_disp as f64, &self.metrics_attributes);
+                    self.metrics.total_dur.record(profile.total as f64, &self.metrics_attributes);    
 
                 } else {
                     let profile = BootstrapRecordProfile::new(&record, &change);
@@ -342,11 +502,17 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
                     self.summary.bootstrap_record_count += 1;
                     self.summary.bootstrap_total_avg += profile.total as f64;
                     self.summary.bootstrap_total_max = std::cmp::max(self.summary.bootstrap_total_max, profile.total);
-                    self.summary.bootstrap_total_min = std::cmp::min(self.summary.bootstrap_total_min, profile.total);    
+                    self.summary.bootstrap_total_min = std::cmp::min(self.summary.bootstrap_total_min, profile.total);   
+
+                    self.metrics.bootstrap_record_count.add(1, &self.metrics_attributes);  
+                    self.metrics.bootstrap_total_dur.record(profile.total as f64, &self.metrics_attributes);               
+ 
                 }
             },
             QueryResultRecord::Control(_) => {
                 self.summary.control_record_count += 1;
+
+                self.metrics.control_record_count.add(1, &self.metrics_attributes);                 
             }
         }
 

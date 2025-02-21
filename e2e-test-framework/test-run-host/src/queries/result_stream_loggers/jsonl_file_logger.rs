@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File}, io::{AsyncWriteExt, BufWriter}};
 
-use test_data_store::test_run_storage::TestRunQueryStorage;
+use test_data_store::test_run_storage::{TestRunQueryId, TestRunQueryStorage};
 
 use crate::queries::result_stream_handlers::ResultStreamRecord;
 
@@ -22,14 +22,16 @@ pub struct JsonlFileResultStreamLoggerSettings {
     pub folder_path: PathBuf,
     pub log_name: String,
     pub max_lines_per_file: u64,
+    pub test_run_query_id: TestRunQueryId,
 }
 
 impl JsonlFileResultStreamLoggerSettings {
-    pub fn new(config: &JsonlFileResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(test_run_query_id: TestRunQueryId, config: &JsonlFileResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
         return Ok(Self {
             folder_path,
             log_name: Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
             max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
+            test_run_query_id,
         });
     }
 }
@@ -41,11 +43,11 @@ pub struct JsonlFileResultStreamLogger {
 }
 
 impl JsonlFileResultStreamLogger {
-    pub async fn new(def:&JsonlFileResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!("Creating JsonlFileResultStreamLogger from {:?}, ", def);
+    pub async fn new(test_run_query_id: TestRunQueryId, def:&JsonlFileResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
+        log::debug!("Creating JsonlFileResultStreamLogger for {} from {:?}, ", test_run_query_id, def);
 
         let folder_path = output_storage.result_change_path.join("jsonl_file");
-        let settings = JsonlFileResultStreamLoggerSettings::new(&def, folder_path)?;
+        let settings = JsonlFileResultStreamLoggerSettings::new(test_run_query_id, &def, folder_path)?;
         log::trace!("Creating JsonlFileResultStreamLogger with settings {:?}, ", settings);
 
         if !std::path::Path::new(&settings.folder_path).exists() {

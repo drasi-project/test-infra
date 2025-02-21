@@ -65,7 +65,7 @@ pub struct ResultStreamRecord {
     pub tracestate: Option<String>,
 }
 
-impl opentelemetry::propagation::Extractor for ResultStreamRecord {
+impl opentelemetry_api::propagation::Extractor for ResultStreamRecord {
     fn get(&self, key: &str) -> Option<&str> {
         match key {
             "traceparent" => self.traceparent.as_deref(),

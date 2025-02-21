@@ -6,7 +6,8 @@
   "source_change_generator_start_mode": "manual",
   "test_run_overrides": {
     "source_change_generator": {
-      "spacing_mode": "10m"
+      "spacing_mode": "10m",
+      "time_mode": "live"
     }
   }
 }

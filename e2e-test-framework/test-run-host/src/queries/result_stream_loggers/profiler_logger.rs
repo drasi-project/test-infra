@@ -1,11 +1,14 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 use opentelemetry::{global, runtime, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::MeterProvider as SdkMeterProvider;
+use opentelemetry_sdk::metrics::reader::DefaultTemporalitySelector;
+use opentelemetry_sdk::metrics::{Aggregation, InstrumentKind, MeterProvider as SdkMeterProvider};
+use opentelemetry_sdk::Resource;
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File, write}, io::{AsyncWriteExt, BufWriter}};
@@ -344,6 +347,29 @@ impl ProfilerResultStreamLogger {
         let meter_provider = opentelemetry_otlp::new_pipeline()
             .metrics(runtime::Tokio)
             .with_exporter(opentelemetry_otlp::new_exporter().tonic().with_endpoint(&settings.otel_endpoint) )
+            .with_resource(Resource::new(vec![KeyValue::new(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                "drasi-test-service",
+            )]))
+            .with_period(Duration::from_secs(5))
+            .with_temporality_selector(DefaultTemporalitySelector::new())
+            .with_aggregation_selector(|kind: InstrumentKind| {
+                match kind {
+                    InstrumentKind::Counter
+                    | InstrumentKind::UpDownCounter
+                    | InstrumentKind::ObservableCounter
+                    | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
+                    InstrumentKind::ObservableGauge => Aggregation::LastValue,
+                    InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
+                        boundaries: vec![
+                            0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0,
+                            5000.0, 7500.0, 10000.0, 25000.0, 50000.0, 75000.0, 100000.0, 250000.0, 500000.0, 750000.0, 1000000.0
+                        ],
+                        record_min_max: true,
+                    },
+                }
+
+            })
             .build()?;
         
         // Set the global meter provider

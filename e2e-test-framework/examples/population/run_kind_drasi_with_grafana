@@ -75,4 +75,4 @@ curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run
 echo -e "${GREEN}\n\nPort forwarding Grafana UI...${RESET}"
 kubectl port-forward -n drasi-system services/grafana 3000:3000 &
 
-echo -e "${GREEN}\n\Deployment Complete.${RESET}"
+echo -e "${GREEN}\n\nDeployment Complete.${RESET}"

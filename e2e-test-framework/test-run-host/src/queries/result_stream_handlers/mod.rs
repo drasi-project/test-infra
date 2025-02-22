@@ -9,10 +9,9 @@ use super::result_stream_record::QueryResultRecord;
 
 pub mod redis_result_stream_handler;
 
+
 #[derive(Debug, thiserror::Error)]
 pub enum ResultStreamHandlerError {
-    #[error("Invalid {0} command, reader is currently in state: {1}")]
-    InvalidCommand(String, String),
     #[error("Invalid stream data")]
     InvalidStreamData,
     #[error("IO error: {0}")]
@@ -23,6 +22,30 @@ pub enum ResultStreamHandlerError {
     RedisError(#[from] redis::RedisError),
     #[error("Conversion error")]
     ConversionError,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ResultStreamStatus {
+    Unknown,
+    BootstrapStarted,
+    BootstrapComplete,
+    Running,
+    Stopped,
+    Deleted
+}
+
+impl Serialize for ResultStreamStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: serde::Serializer {
+        match self {
+            ResultStreamStatus::Unknown => serializer.serialize_str("Unknown"),
+            ResultStreamStatus::BootstrapStarted => serializer.serialize_str("BootstrapStarted"),
+            ResultStreamStatus::BootstrapComplete => serializer.serialize_str("BootstrapComplete"),
+            ResultStreamStatus::Running => serializer.serialize_str("Running"),
+            ResultStreamStatus::Stopped => serializer.serialize_str("Stopped"),
+            ResultStreamStatus::Deleted => serializer.serialize_str("Deleted"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,7 +74,6 @@ impl Serialize for ResultStreamHandlerStatus {
 pub enum ResultStreamHandlerMessage {
     Record(ResultStreamRecord),
     Error(ResultStreamHandlerError),
-    TestCompleted
 }
 
 #[derive(Clone, Debug, Serialize)]

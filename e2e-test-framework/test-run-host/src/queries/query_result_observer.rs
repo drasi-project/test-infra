@@ -1,4 +1,4 @@
-use std::{fmt::{self, Debug, Formatter}, sync::Arc, time::SystemTime};
+use std::{cmp::max, fmt::{self, Debug, Display, Formatter}, sync::Arc, time::SystemTime};
 
 use futures::future::join_all;
 use serde::Serialize;
@@ -10,16 +10,15 @@ use test_data_store::{
     test_run_storage::{TestRunQueryId, TestRunQueryStorage}
 };
 
-use crate::queries::result_stream_handlers::create_result_stream_handler;
+use crate::queries::{result_stream_handlers::create_result_stream_handler, result_stream_record::{ControlSignal, QueryResultRecord}, stop_triggers::create_stop_trigger};
 
-use super::{result_stream_handlers::{ResultStreamHandler, ResultStreamHandlerMessage, ResultStreamRecord}, result_stream_loggers::{create_result_stream_logger, ResultStreamLogger}, ResultStreamLoggerConfig};
+use super::{result_stream_handlers::{ResultStreamHandler, ResultStreamHandlerMessage, ResultStreamRecord, ResultStreamStatus}, result_stream_loggers::{create_result_stream_loggers, ResultStreamLogger}, stop_triggers::StopTrigger, ResultStreamLoggerConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum QueryResultObserverStatus {
     Running,
     Paused,
     Stopped,
-    Finished,
     Error
 }
 
@@ -30,7 +29,6 @@ impl Serialize for QueryResultObserverStatus {
             QueryResultObserverStatus::Running => serializer.serialize_str("Running"),
             QueryResultObserverStatus::Paused => serializer.serialize_str("Paused"),
             QueryResultObserverStatus::Stopped => serializer.serialize_str("Stopped"),
-            QueryResultObserverStatus::Finished => serializer.serialize_str("Finished"),
             QueryResultObserverStatus::Error => serializer.serialize_str("Error"),
         }
     }
@@ -51,13 +49,7 @@ pub enum QueryResultObserverError {
 #[derive(Debug)]
 pub struct QueryResultObserverCommandResponse {
     pub result: anyhow::Result<()>,
-    pub state: QueryResultObserverState,
-}
-
-#[derive(Debug, Serialize)]
-pub struct QueryResultObserverState {    
-    state: serde_json::Value,
-    status: QueryResultObserverStatus,
+    pub state: QueryResultObserverExternalState,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -157,10 +149,7 @@ impl QueryResultObserver {
 
                 Ok(QueryResultObserverCommandResponse {
                     result: observer_response.result,
-                    state: super::QueryResultObserverState {
-                        status: observer_response.state.status,
-                        state: serde_json::to_value(observer_response.state).unwrap(),
-                    },
+                    state: observer_response.state,
                 })
             },
             Err(e) => anyhow::bail!("Error sending command to QueryResultObserver: {:?}", e),
@@ -190,64 +179,63 @@ impl QueryResultObserver {
 
 #[derive(Debug, Serialize)]
 pub struct QueryResultObserverExternalState {
-    pub error_messages: Vec<String>,
-    pub result_summary: QueryResultObserverResultSummary,
-    pub stats: QueryResultObserverStats,
     pub status: QueryResultObserverStatus,
+    pub stream_status: ResultStreamStatus,
+    pub error_messages: Vec<String>,
+    pub result_summary: QueryResultObserverSummary,
+    pub settings: QueryResultObserverSettings,
 }
 
 impl From<&QueryResultObserverInternalState> for QueryResultObserverExternalState {
     fn from(state: &QueryResultObserverInternalState) -> Self {
         Self {
-            error_messages: state.error_messages.clone(),
-            result_summary: QueryResultObserverResultSummary::from(state),
-            stats: state.stats.clone(),
             status: state.status,
+            stream_status: state.stream_status,
+            error_messages: state.error_messages.clone(),
+            result_summary: QueryResultObserverSummary::from(state),
+            settings: state.settings.clone(),
         }
     }
 }
 
 pub struct QueryResultObserverInternalState {
-    pub result_stream_handler: Box<dyn ResultStreamHandler + Send + Sync>,
-    pub result_stream_handler_rx_channel: Receiver<ResultStreamHandlerMessage>,
-    pub loggers: Vec<Box<dyn ResultStreamLogger + Send>>,
-    pub error_messages: Vec<String>,
-    pub record_seq_num: u64,
-    pub next_event: Option<ResultStreamRecord>,
-    pub settings: QueryResultObserverSettings,
-    pub status: QueryResultObserverStatus,
-    pub stats: QueryResultObserverStats,
+    result_stream_handler: Box<dyn ResultStreamHandler + Send + Sync>,
+    result_stream_handler_rx_channel: Receiver<ResultStreamHandlerMessage>,
+    loggers: Vec<Box<dyn ResultStreamLogger + Send + Sync>>,
+    error_messages: Vec<String>,
+    settings: QueryResultObserverSettings,
+    status: QueryResultObserverStatus,
+    metrics: QueryResultObserverMetrics,
+    stop_trigger: Box<dyn StopTrigger + Send + Sync>,
+    stream_status: ResultStreamStatus,
 }
+    
 
 impl QueryResultObserverInternalState {
 
     async fn initialize(settings: QueryResultObserverSettings) -> anyhow::Result<Self> {
         log::debug!("Initializing QueryResultObserver using {:?}", settings);
     
+        let metrics = QueryResultObserverMetrics {
+            observer_create_time_ns: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64,
+            ..Default::default()
+        };
+
         let result_stream_handler = create_result_stream_handler(settings.id.clone(), settings.definition.result_stream_handler.clone()).await?;
         let result_stream_handler_rx_channel = result_stream_handler.init().await?;
-        
-        // Create the loggers
-        let mut loggers: Vec<Box<dyn ResultStreamLogger + Send>> = Vec::new();
-        for logger_cfg in settings.loggers.iter() {
-            match create_result_stream_logger(settings.id.clone(), logger_cfg, &settings.output_storage).await {
-                Ok(logger) => loggers.push(logger),
-                Err(e) => {
-                    anyhow::bail!("Error creating ResultStreamLogger: {:?}; Error: {:?}", logger_cfg, e);
-                }
-            }
-        }
-    
+        let loggers = create_result_stream_loggers(settings.id.clone(), &settings.loggers, &settings.output_storage).await?;        
+        let stop_trigger = create_stop_trigger(&settings.definition.stop_trigger).await?;
+
         Ok(Self {
             result_stream_handler,
             result_stream_handler_rx_channel,
             loggers,
             error_messages: Vec::new(),
-            record_seq_num: 0,
-            next_event: None,
             settings,
             status: QueryResultObserverStatus::Paused,
-            stats: QueryResultObserverStats::default(),
+            metrics,
+            stop_trigger,
+            stream_status: ResultStreamStatus::Unknown,
         })
     }
 
@@ -301,26 +289,61 @@ impl QueryResultObserverInternalState {
     
         match message {
             ResultStreamHandlerMessage::Record(record) => {
-                // Update the stats
-                if self.stats.num_result_stream_records == 0 {
-                    self.stats.first_result_time_ns = record.dequeue_time_ns;
-                }
-                self.stats.num_result_stream_records += 1;
-                self.stats.last_result_time_ns = record.dequeue_time_ns;
     
                 self.log_result_stream_record(&record).await;
-    
-                // Increment the record sequence number.
-                self.record_seq_num += 1;
+
+                let record_time_ns = record.dequeue_time_ns as u64;
+                self.metrics.result_stream_record_seq = record.record_data.get_source_seq();
+
+                match record.record_data {
+                    QueryResultRecord::Change(change) => {
+                        if change.base.metadata.is_some() {
+                            self.metrics.try_set_first_change_record_time(record_time_ns);
+                            self.metrics.try_set_last_change_record_time(record_time_ns);
+                            self.metrics.result_stream_change_record_count += 1;
+                        } else {
+                            self.metrics.try_set_first_bootstrap_record_time(record_time_ns);
+                            self.metrics.try_set_last_bootstrap_record_time(record_time_ns);
+                            self.metrics.result_stream_bootstrap_record_count += 1;
+                        }
+                    },
+                    QueryResultRecord::Control(control) => {
+                        self.metrics.control_stream_record_count += 1;
+                        match control.control_signal {
+                            ControlSignal::BootstrapStarted(_) => {
+                                self.stream_status = ResultStreamStatus::BootstrapStarted;
+                                self.metrics.try_set_control_stream_bootstrap_start_time(record_time_ns);
+                            },
+                            ControlSignal::BootstrapCompleted(_) => {
+                                self.stream_status = ResultStreamStatus::BootstrapComplete;
+                                self.metrics.try_set_control_stream_bootstrap_complete_time(record_time_ns);
+                            },
+                            ControlSignal::Running(_) => {
+                                self.stream_status = ResultStreamStatus::Running;
+                                self.metrics.try_set_control_stream_running_time(record_time_ns);
+                            },
+                            ControlSignal::Stopped(_) => {
+                                self.stream_status = ResultStreamStatus::Stopped;
+                                self.metrics.try_set_control_stream_stop_time(record_time_ns);
+                            },
+                            ControlSignal::Deleted(_) => {
+                                self.stream_status = ResultStreamStatus::Deleted;
+                                self.metrics.try_set_control_stream_delete_time(record_time_ns);
+                            }
+                        }
+                    }
+                }
+
+                // Check if we should stop
+                if self.stop_trigger.is_true(&self.stream_status, &self.metrics).await? {
+                    log::info!("Stopping QueryResultObserver for TestRunQuery {} because stop trigger is true.", self.settings.id);
+                    self.transition_to_stopped_state().await;
+                }
             },
             ResultStreamHandlerMessage::Error(error) => {
                 self.transition_to_error_state(&format!("Error in ResultStreamHandler stream: {:?}", error), None);
-            },
-            ResultStreamHandlerMessage::TestCompleted => {
-                self.transition_to_finished_state().await;
-            },
-
-        };
+            }
+        }
     
         Ok(())
     }    
@@ -343,7 +366,6 @@ impl QueryResultObserverInternalState {
                 QueryResultObserverStatus::Running => self.transition_from_running_state(&message.command).await,
                 QueryResultObserverStatus::Paused => self.transition_from_paused_state(&message.command).await,
                 QueryResultObserverStatus::Stopped => self.transition_from_stopped_state(&message.command).await,
-                QueryResultObserverStatus::Finished => self.transition_from_finished_state(&message.command).await,
                 QueryResultObserverStatus::Error => self.transition_from_error_state(&message.command).await,
             };
     
@@ -362,27 +384,19 @@ impl QueryResultObserverInternalState {
     
         Ok(())
     }
-    
+
     async fn reset(&mut self) -> anyhow::Result<()> {
 
-        // Create the new loggers
         self.close_loggers().await;    
-        let mut loggers: Vec<Box<dyn ResultStreamLogger + Send>> = Vec::new();
-        for logger_cfg in self.settings.loggers.iter() {
-            match create_result_stream_logger(self.settings.id.clone(), logger_cfg, &self.settings.output_storage).await {
-                Ok(logger) => loggers.push(logger),
-                Err(e) => {
-                    anyhow::bail!("Error creating ResultStreamLogger: {:?}; Error: {:?}", logger_cfg, e);
-                }
-            }
-        }    
 
-        self.loggers = loggers;
+        self.loggers = create_result_stream_loggers(self.settings.id.clone(), &self.settings.loggers, &self.settings.output_storage).await?;
         self.error_messages = Vec::new();
-        self.record_seq_num = 0;
-        self.next_event = None;
         self.status = QueryResultObserverStatus::Paused;
-        self.stats = QueryResultObserverStats::default();
+        self.stream_status = ResultStreamStatus::Unknown;
+        self.metrics = QueryResultObserverMetrics {
+            observer_create_time_ns: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64,
+            ..Default::default()
+        };
     
         Ok(())
     }
@@ -397,16 +411,6 @@ impl QueryResultObserverInternalState {
         }
     }
     
-    async fn transition_from_finished_state(&mut self, command: &QueryResultObserverCommand) -> anyhow::Result<()> {
-        log::debug!("Attempting to transition from {:?} state via command: {:?}", self.status, command);
-    
-        if let QueryResultObserverCommand::Reset = command {
-            self.reset().await
-        } else {
-            Err(QueryResultObserverError::AlreadyFinished.into())
-        }
-    }
-    
     async fn transition_from_paused_state(&mut self, command: &QueryResultObserverCommand) -> anyhow::Result<()> {
         log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
     
@@ -418,9 +422,8 @@ impl QueryResultObserverInternalState {
                 log::info!("QueryResultObserver Started for TestRunQuery {}", self.settings.id);
                 
                 self.status = QueryResultObserverStatus::Running;
-                if self.stats.actual_start_time_ns == 0 {
-                    self.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-                }
+                self.metrics.try_set_observer_start_time(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64);
+                self.metrics.observer_stop_time_ns = 0;
                 self.result_stream_handler.start().await
             },
             QueryResultObserverCommand::Stop => Ok(self.transition_to_stopped_state().await),
@@ -434,6 +437,7 @@ impl QueryResultObserverInternalState {
             QueryResultObserverCommand::GetState => Ok(()),
             QueryResultObserverCommand::Pause => {
                 self.status = QueryResultObserverStatus::Paused;
+                self.metrics.observer_stop_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
                 self.result_stream_handler.pause().await?;
                 Ok(())
             },
@@ -457,22 +461,11 @@ impl QueryResultObserverInternalState {
         }
     }    
 
-    async fn transition_to_finished_state(&mut self) {
-        log::info!("QueryResultObserver Finished for TestRunQuery {}", self.settings.id);
-    
-        self.status = QueryResultObserverStatus::Finished;
-        self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-        self.result_stream_handler.stop().await.ok();
-        
-        self.close_loggers().await;
-        self.write_result_summary().await.ok();
-    }
-    
     async fn transition_to_stopped_state(&mut self) {
         log::info!("QueryResultObserver Stopped for TestRunQuery {}", self.settings.id);
     
         self.status = QueryResultObserverStatus::Stopped;
-        self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+        self.metrics.observer_stop_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
         self.result_stream_handler.stop().await.ok();
 
         self.close_loggers().await;
@@ -481,7 +474,7 @@ impl QueryResultObserverInternalState {
     
     fn transition_to_error_state(&mut self, error_message: &str, error: Option<&anyhow::Error>) {    
         self.status = QueryResultObserverStatus::Error;
-        self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+        self.metrics.observer_stop_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     
         let msg = match error {
             Some(e) => format!("{}: {:?}", error_message, e),
@@ -494,8 +487,8 @@ impl QueryResultObserverInternalState {
 
     pub async fn write_result_summary(&self) -> anyhow::Result<()> {
 
-        let result_summary: QueryResultObserverResultSummary = self.into();
-        log::info!("Stats for TestRunQuery:\n{:#?}", &result_summary);
+        let result_summary: QueryResultObserverSummary = self.into();
+        log::info!("Summary for TestRunQuery:\n{:#?}", &result_summary);
     
         let result_summary_value = serde_json::to_value(result_summary).unwrap();
         match self.settings.output_storage.write_test_run_summary(&result_summary_value).await {
@@ -513,102 +506,312 @@ impl Debug for QueryResultObserverInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("QueryResultObserverInternalState")
             .field("error_messages", &self.error_messages)
-            .field("next_record", &self.next_event)
             .field("status", &self.status)
-            .field("stats", &self.stats)
+            .field("metrics", &self.metrics)
             .finish()
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct QueryResultObserverStats {
-    pub actual_start_time_ns: u64,
-    pub actual_end_time_ns: u64,
-    pub first_result_time_ns: u64,
-    pub last_result_time_ns: u64,
-    pub num_result_stream_records: u64,
+pub struct QueryResultObserverMetrics {
+    pub observer_create_time_ns: u64,
+    pub observer_start_time_ns: u64,
+    pub observer_stop_time_ns: u64,
+    pub result_stream_bootstrap_record_count: u64,
+    pub result_stream_bootstrap_record_first_ns: u64,
+    pub result_stream_bootstrap_record_last_ns: u64,
+    pub result_stream_change_record_count: u64,
+    pub result_stream_change_record_first_ns: u64,
+    pub result_stream_change_record_last_ns: u64,
+    pub result_stream_record_seq: i64,
+    pub control_stream_record_count: u64,
+    pub control_stream_bootstrap_start_time_ns: u64,
+    pub control_stream_bootstrap_complete_time_ns: u64,
+    pub control_stream_running_time_ns: u64,
+    pub control_stream_stop_time_ns: u64,
+    pub control_stream_delete_time_ns: u64,
 }
 
-impl Default for QueryResultObserverStats {
-    fn default() -> Self {
-        Self {
-            actual_start_time_ns: 0,
-            actual_end_time_ns: 0,
-            first_result_time_ns: 0,
-            last_result_time_ns: 0,
-            num_result_stream_records: 0,
+impl QueryResultObserverMetrics {
+    pub fn get_observer_run_duration_ns(&self, now_ns: Option<u64>) -> u64 {
+
+        match (self.observer_start_time_ns > 0, self.observer_stop_time_ns > 0) {
+            (true, true) => self.observer_stop_time_ns - self.observer_start_time_ns,
+            (true, false) => {
+                let now = now_ns.unwrap_or(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64);
+                now - self.observer_start_time_ns
+            }
+            _ => 0
+        }
+    }
+
+    pub fn get_result_stream_bootstrap_duration_ns(&self, now_ns: Option<u64>) -> u64 {
+        match (self.result_stream_bootstrap_record_first_ns > 0, self.result_stream_bootstrap_record_last_ns > 0) {
+            (true, true) => self.result_stream_bootstrap_record_last_ns - self.result_stream_bootstrap_record_first_ns,
+            (true, false) => {
+                let now = now_ns.unwrap_or(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64);
+                now - self.result_stream_bootstrap_record_first_ns
+            }            
+            _ => 0
+        }
+    }
+
+    pub fn get_result_stream_change_duration_ns(&self, now_ns: Option<u64>) -> u64 {
+        match (self.result_stream_change_record_first_ns > 0, self.result_stream_change_record_last_ns > 0) {
+            (true, true) => self.result_stream_change_record_last_ns - self.result_stream_change_record_first_ns,
+            (true, false) => {
+                let now = now_ns.unwrap_or(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64);
+                now - self.result_stream_change_record_first_ns
+            }            
+            _ => 0
+        }
+    }
+
+    pub fn try_set_observer_start_time(&mut self, time_ns: u64) {
+        if self.observer_start_time_ns == 0 {
+            self.observer_start_time_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_observer_stop_time(&mut self, time_ns: u64) {
+        if self.observer_stop_time_ns == 0 {
+            self.observer_stop_time_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_first_bootstrap_record_time(&mut self, time_ns: u64) {
+        if self.result_stream_bootstrap_record_first_ns == 0 {
+            self.result_stream_bootstrap_record_first_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_last_bootstrap_record_time(&mut self, time_ns: u64) {
+        if self.result_stream_bootstrap_record_last_ns == 0 {
+            self.result_stream_bootstrap_record_last_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_first_change_record_time(&mut self, time_ns: u64) {
+        if self.result_stream_change_record_first_ns == 0 {
+            self.result_stream_change_record_first_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_last_change_record_time(&mut self, time_ns: u64) {
+        if self.result_stream_change_record_last_ns == 0 {
+            self.result_stream_change_record_last_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_control_stream_bootstrap_start_time(&mut self, time_ns: u64) {
+        if self.control_stream_bootstrap_start_time_ns == 0 {
+            self.control_stream_bootstrap_start_time_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_control_stream_bootstrap_complete_time(&mut self, time_ns: u64) {
+        if self.control_stream_bootstrap_complete_time_ns == 0 {
+            self.control_stream_bootstrap_complete_time_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_control_stream_running_time(&mut self, time_ns: u64) {
+        if self.control_stream_running_time_ns == 0 {
+            self.control_stream_running_time_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_control_stream_stop_time(&mut self, time_ns: u64) {
+        if self.control_stream_stop_time_ns == 0 {
+            self.control_stream_stop_time_ns = time_ns;
+        }
+    }
+
+    pub fn try_set_control_stream_delete_time(&mut self, time_ns: u64) {
+        if self.control_stream_delete_time_ns == 0 {
+            self.control_stream_delete_time_ns = time_ns;
         }
     }
 }
 
-#[derive(Clone, Serialize)]
-pub struct QueryResultObserverResultSummary {
-    pub actual_start_time: String,
-    pub actual_start_time_ns: u64,
-    pub actual_end_time: String,
-    pub actual_end_time_ns: u64,
-    pub first_result_time: String,
-    pub first_result_time_ns: u64,
-    pub last_result_time: String,
-    pub last_result_time_ns: u64,
-    pub num_result_stream_records: u64,
-    pub run_duration_ns: u64,
-    pub run_duration_sec: f64,
-    pub processing_rate: f64,
-    pub test_run_query_id: String,
-    pub time_since_last_result_ns: u64,
+impl Default for QueryResultObserverMetrics {
+    fn default() -> Self {
+        Self {
+            observer_create_time_ns: 0,
+            observer_start_time_ns: 0,
+            observer_stop_time_ns: 0,
+            result_stream_bootstrap_record_count: 0,
+            result_stream_bootstrap_record_first_ns: 0,
+            result_stream_bootstrap_record_last_ns: 0,
+            result_stream_change_record_count: 0,
+            result_stream_change_record_first_ns: 0,
+            result_stream_change_record_last_ns: 0,
+            result_stream_record_seq: 0,
+            control_stream_record_count: 0,
+            control_stream_bootstrap_start_time_ns: 0,
+            control_stream_bootstrap_complete_time_ns: 0,
+            control_stream_running_time_ns: 0,
+            control_stream_stop_time_ns: 0,
+            control_stream_delete_time_ns: 0,
+        }
+    }
 }
 
-impl From<&QueryResultObserverInternalState> for QueryResultObserverResultSummary {
+#[derive(Clone, Debug, Serialize)]
+pub struct QueryResultObserverSummary {
+    pub test_run_query_id: TestRunQueryId,
+    pub observer_create_time: String,
+    pub observer_start_time: String,
+    pub observer_stop_time: String,
+    pub observer_run_duration_ns: u64,
+    pub observer_run_duration_sec: f64, 
+    pub bootstrap_start_time: String,
+    pub bootstrap_stop_time: String,
+    pub bootstrap_duration_ns: u64,
+    pub bootstrap_duration_sec: f64,
+    pub bootstrap_processing_rate: f64,
+    pub change_stream_start_time: String,
+    pub change_stream_stop_time: String,
+    pub change_stream_duration_ns: u64,
+    pub change_stream_duration_sec: f64,
+    pub change_stream_processing_rate: f64,
+    pub time_since_last_result_ns: u64,
+    pub time_since_last_result_sec: f64,
+    pub observer_metrics: QueryResultObserverMetrics,
+}
+
+impl From<&QueryResultObserverInternalState> for QueryResultObserverSummary {
     fn from(state: &QueryResultObserverInternalState) -> Self {
         let now_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
 
-        let run_duration_ns = state.stats.last_result_time_ns - state.stats.first_result_time_ns;
-        let run_duration_sec = run_duration_ns as f64 / 1_000_000_000.0;
+        let metrics = state.metrics.clone();
+
+        let observer_create_time = if metrics.observer_create_time_ns > 0 {
+            OffsetDateTime::from_unix_timestamp_nanos(metrics.observer_create_time_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap()
+        } else {
+            "N/A".to_string()
+        };
+
+        let observer_start_time = if metrics.observer_start_time_ns > 0 {
+            OffsetDateTime::from_unix_timestamp_nanos(metrics.observer_start_time_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap()
+        } else {
+            "N/A".to_string()
+        };
+
+        let observer_stop_time = if metrics.observer_stop_time_ns > 0 {
+            OffsetDateTime::from_unix_timestamp_nanos(metrics.observer_stop_time_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap()
+        } else {
+            "N/A".to_string()
+        };
+
+        let observer_run_duration_ns = metrics.get_observer_run_duration_ns(Some(now_ns));
+
+        let bootstrap_start_time = if metrics.result_stream_bootstrap_record_first_ns > 0 {
+            OffsetDateTime::from_unix_timestamp_nanos(metrics.result_stream_bootstrap_record_first_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap()
+        } else {
+            "N/A".to_string()
+        };
+
+        let bootstrap_stop_time = if metrics.result_stream_bootstrap_record_last_ns > 0 {
+            OffsetDateTime::from_unix_timestamp_nanos(metrics.result_stream_bootstrap_record_last_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap()
+        } else {
+            "N/A".to_string()
+        };
+
+        let bootstrap_duration_ns = metrics.get_result_stream_bootstrap_duration_ns(Some(now_ns));
+
+        let change_stream_start_time = if metrics.result_stream_change_record_first_ns > 0 {
+            OffsetDateTime::from_unix_timestamp_nanos(metrics.result_stream_change_record_first_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap()
+        } else {
+            "N/A".to_string()
+        };
+
+        let change_stream_stop_time = if metrics.result_stream_change_record_last_ns > 0 {
+            OffsetDateTime::from_unix_timestamp_nanos(metrics.result_stream_change_record_last_ns as i128).expect("Invalid timestamp")
+                .format(&format_description::well_known::Rfc3339).unwrap()
+        } else {
+            "N/A".to_string()
+        };
+
+        let change_stream_duration_ns = metrics.get_result_stream_change_duration_ns(Some(now_ns));
+
+        let time_since_last_result_ns = now_ns - max(metrics.result_stream_bootstrap_record_last_ns, metrics.result_stream_change_record_last_ns);
 
         Self {
-            actual_start_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.actual_start_time_ns as i128).expect("Invalid timestamp")
-                .format(&format_description::well_known::Rfc3339).unwrap(),
-            actual_start_time_ns: state.stats.actual_start_time_ns,
-            actual_end_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.actual_end_time_ns as i128).expect("Invalid timestamp")
-                .format(&format_description::well_known::Rfc3339).unwrap(),
-            actual_end_time_ns: state.stats.actual_end_time_ns,
-            first_result_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.first_result_time_ns as i128).expect("Invalid timestamp")
-                .format(&format_description::well_known::Rfc3339).unwrap(),
-            first_result_time_ns: state.stats.first_result_time_ns,
-            last_result_time: OffsetDateTime::from_unix_timestamp_nanos(state.stats.last_result_time_ns as i128).expect("Invalid timestamp")
-                .format(&format_description::well_known::Rfc3339).unwrap(),
-            last_result_time_ns: state.stats.last_result_time_ns,
-            num_result_stream_records: state.stats.num_result_stream_records,
-            run_duration_ns,
-            run_duration_sec,
-            processing_rate: state.stats.num_result_stream_records as f64 / run_duration_sec,
-            test_run_query_id: state.settings.id.to_string(),
-            time_since_last_result_ns: now_ns - state.stats.last_result_time_ns,
+            test_run_query_id: state.settings.id.clone(),
+            observer_create_time,
+            observer_start_time,
+            observer_stop_time,
+            observer_run_duration_ns,
+            observer_run_duration_sec: observer_run_duration_ns as f64 / 1_000_000_000.0,
+            bootstrap_start_time,
+            bootstrap_stop_time,
+            bootstrap_duration_ns,
+            bootstrap_duration_sec: bootstrap_duration_ns as f64 / 1_000_000_000.0,
+            bootstrap_processing_rate: metrics.result_stream_bootstrap_record_count as f64 / (bootstrap_duration_ns as f64 / 1_000_000_000.0),
+            change_stream_start_time,
+            change_stream_stop_time,
+            change_stream_duration_ns,
+            change_stream_duration_sec: change_stream_duration_ns as f64 / 1_000_000_000.0,
+            change_stream_processing_rate: metrics.result_stream_change_record_count as f64 / (change_stream_duration_ns as f64 / 1_000_000_000.0),
+            time_since_last_result_ns,
+            time_since_last_result_sec: time_since_last_result_ns as f64 / 1_000_000_000.0,
+            observer_metrics: metrics,
         }
     }
 }
 
-impl Debug for QueryResultObserverResultSummary {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let start_time = format!("{} ({} ns)", self.actual_start_time, self.actual_start_time_ns);
-        let end_time = format!("{} ({} ns)", self.actual_end_time, self.actual_end_time_ns);
-        let first_time = format!("{} ({} ns)", self.first_result_time, self.first_result_time_ns);
-        let last_time = format!("{} ({} ns)", self.last_result_time, self.last_result_time_ns);
-        let run_duration = format!("{} sec ({} ns)", self.run_duration_sec, self.run_duration_ns, );
-        let processing_rate = format!("{:.2} changes / sec", self.processing_rate);
-
-        f.debug_struct("QueryResultObserverResultSummary")
-            .field("test_run_source_id", &self.test_run_query_id)
-            .field("start_time", &start_time)
-            .field("end_time", &end_time)
-            .field("first_result_time", &first_time)
-            .field("last_result_time", &last_time)
-            .field("time_since_last_result_ns", &self.time_since_last_result_ns)
-            .field("run_duration", &run_duration)
-            .field("num_result_stream_records", &self.num_result_stream_records)
-            .field("processing_rate", &processing_rate)            
-            .finish()
+impl Display for QueryResultObserverSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Query Result Observer Summary:")?;
+        writeln!(f, "  Test Run Query ID: {}", self.test_run_query_id.to_string())?;
+        
+        // Observer Timing Section
+        writeln!(f, "\n  Observer Timing:")?;
+        writeln!(f, "    Created: {}", self.observer_create_time)?;
+        writeln!(f, "    Started: {}", self.observer_start_time)?;
+        writeln!(f, "    Stopped: {}", self.observer_stop_time)?;
+        writeln!(f, "    Duration: {:.3} sec ({} ns)", 
+            self.observer_run_duration_sec, 
+            self.observer_run_duration_ns
+        )?;
+        
+        // Bootstrap Timing Section
+        writeln!(f, "\n  Bootstrap Timing:")?;
+        writeln!(f, "    Started: {}", self.bootstrap_start_time)?;
+        writeln!(f, "    Stopped: {}", self.bootstrap_stop_time)?;
+        writeln!(f, "    Duration: {:.3} sec ({} ns)", 
+            self.bootstrap_duration_sec, 
+            self.bootstrap_duration_ns
+        )?;
+        writeln!(f, "    Processing Rate: {:.2}", self.bootstrap_processing_rate)?;
+        
+        // Change Stream Timing Section
+        writeln!(f, "\n  Change Stream Timing:")?;
+        writeln!(f, "    Started: {}", self.change_stream_start_time)?;
+        writeln!(f, "    Stopped: {}", self.change_stream_stop_time)?;
+        writeln!(f, "    Duration: {:.3} sec ({} ns)", 
+            self.change_stream_duration_sec, 
+            self.change_stream_duration_ns
+        )?;
+        writeln!(f, "    Processing Rate: {:.2}", self.change_stream_processing_rate)?;
+        
+        // Time Since Last Result
+        writeln!(f, "\n  Time Since Last Result: {:.3} sec ({} ns)", 
+            self.time_since_last_result_sec, 
+            self.time_since_last_result_ns
+        )?;
+        
+        // Observer Metrics
+        writeln!(f, "\n  Observer Metrics: {:?}", self.observer_metrics)?;
+        
+        Ok(())
     }
 }
 

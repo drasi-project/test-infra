@@ -9,22 +9,22 @@
 @test_run_id = test_run_001
 @query_id = city-population
 
-### GET STATE of test run reaction
+### GET STATE of Test Run Query
 GET http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}
 
-### START test run reaction
+### START Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/start
 Content-Type: application/json
 
-### PAUSE test run reaction
+### PAUSE Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/pause
 Content-Type: application/json
 
-### STOP test run reaction
+### STOP Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/stop
 Content-Type: application/json
 
-### RESET test run reaction
+### RESET Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/reset
 Content-Type: application/json
 

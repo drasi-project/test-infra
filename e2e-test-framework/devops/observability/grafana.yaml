@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: drasi-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:11.5.2
+        env:
+          - name: GF_SECURITY_ADMIN_USER 
+            value: "drasi"        
+          - name: GF_SECURITY_ADMIN_PASSWORD
+            value: "drasi"            
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        ports:
+        - containerPort: 3000
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/grafana/provisioning/datasources
+      volumes:
+      - name: config-volume
+        configMap:
+          name: grafana-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-config
+  namespace: drasi-system
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      url: http://prometheus:9090
+      access: proxy
+      isDefault: true
+      editable: false
+    - name: Tempo
+      type: tempo
+      url: http://tempo:3200
+      access: proxy
+      editable: false      
+      jsonData:
+        tracesToMetrics:
+          datasource: Prometheus
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: drasi-system
+spec:
+  ports:
+  - port: 3000
+    targetPort: 3000
+  type: NodePort  # Expose for Kind
+  selector:
+    app: grafana

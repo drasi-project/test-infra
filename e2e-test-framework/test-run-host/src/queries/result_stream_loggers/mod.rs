@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use console_logger::{ConsoleResultStreamLogger, ConsoleResultStreamLoggerConfig};
 use jsonl_file_logger::{JsonlFileResultStreamLogger, JsonlFileResultStreamLoggerConfig};
-use test_data_store::test_run_storage::TestRunQueryStorage;
+use test_data_store::test_run_storage::{TestRunQueryId, TestRunQueryStorage};
 
 use super::result_stream_handlers::ResultStreamRecord;
 
@@ -56,11 +56,11 @@ impl ResultStreamLogger for Box<dyn ResultStreamLogger + Send + Sync> {
     }
 }
 
-pub async fn create_result_stream_logger(def: &ResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
+pub async fn create_result_stream_logger(test_run_query_id: TestRunQueryId, def: &ResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
     match def {
-        ResultStreamLoggerConfig::Console(def) => ConsoleResultStreamLogger::new(def),
-        ResultStreamLoggerConfig::JsonlFile(def) => JsonlFileResultStreamLogger::new(def, output_storage).await,
-        ResultStreamLoggerConfig::OtelTrace(def) => OtelTraceResultStreamLogger::new(def, output_storage),
-        ResultStreamLoggerConfig::Profiler(def) => ProfilerResultStreamLogger::new(def, output_storage).await,
+        ResultStreamLoggerConfig::Console(def) => ConsoleResultStreamLogger::new(test_run_query_id, def),
+        ResultStreamLoggerConfig::JsonlFile(def) => JsonlFileResultStreamLogger::new(test_run_query_id, def, output_storage).await,
+        ResultStreamLoggerConfig::OtelTrace(def) => OtelTraceResultStreamLogger::new(test_run_query_id, def),
+        ResultStreamLoggerConfig::Profiler(def) => ProfilerResultStreamLogger::new(test_run_query_id, def, output_storage).await,
     }
 }

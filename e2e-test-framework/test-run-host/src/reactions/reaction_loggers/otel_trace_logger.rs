@@ -1,12 +1,12 @@
 use async_trait::async_trait;
-use opentelemetry::{propagation::TextMapPropagator, KeyValue};
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{propagation::TraceContextPropagator, Resource};
+use opentelemetry_sdk::{trace::BatchConfig, Resource};
 use serde::{Deserialize, Serialize};
-
-use test_data_store::test_run_storage::{TestRunReactionId, TestRunReactionStorage};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{layer::SubscriberExt, Registry};
+
+use test_data_store::test_run_storage::{TestRunReactionId, TestRunReactionStorage};
 
 use crate::reactions::reaction_handlers::ReactionOutputRecord;
 
@@ -35,7 +35,7 @@ impl OtelTraceReactionLoggerSettings {
 #[allow(unused)]
 pub struct OtelTraceReactionLogger {
     settings: OtelTraceReactionLoggerSettings,
-    trace_propogator: TraceContextPropagator,
+    // trace_propogator: TraceContextPropagator,
 }
 
 impl OtelTraceReactionLogger {
@@ -45,38 +45,41 @@ impl OtelTraceReactionLogger {
         let settings = OtelTraceReactionLoggerSettings::new(&def, output_storage.id.clone())?;
         log::trace!("Creating OtelTraceReactionLogger with settings {:?}, ", settings);
 
+
+        let batch_config = BatchConfig::default()
+            .with_max_queue_size(8192) // Increase queue size
+            .with_max_export_batch_size(100) // Match with collector
+            .with_scheduled_delay(std::time::Duration::from_secs(2));
+
         let tracer = opentelemetry_otlp::new_pipeline()
             .tracing()
+            .with_batch_config(batch_config)
             .with_exporter(
                 opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_endpoint(settings.otel_endpoint.clone()),
             )
             .with_trace_config(
-                opentelemetry::sdk::trace::config().with_resource(Resource::new(vec![KeyValue::new(
+                opentelemetry_sdk::trace::config().with_resource(Resource::new(vec![KeyValue::new(
                     opentelemetry_semantic_conventions::resource::SERVICE_NAME,
                     format!("drasi-reaction-observer-{}", settings.test_run_reaction_id),
                 )])),
             )
-            .install_batch(opentelemetry_sdk::runtime::Tokio);
+            .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 
-        match tracer {
-            Ok(tracer) => {
-                let telemetry = tracing_opentelemetry::layer()
-                    .with_tracer(tracer)
-                    .with_exception_fields(true)
-                    .with_location(true);
-                let subscriber = Registry::default().with(telemetry);
-                tracing::subscriber::set_global_default(subscriber)
-                    .expect("setting tracing default failed");
+        let telemetry = tracing_opentelemetry::layer()
+            .with_tracer(tracer)
+            .with_exception_fields(true)
+            .with_location(true);
+        let subscriber = Registry::default().with(telemetry);
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting tracing default failed");
 
-                Ok(Box::new(Self { 
-                    settings,
-                    trace_propogator: TraceContextPropagator::new(),
-                }))
-            }
-            Err(err) => Err(err.into()),
-        }
+        Ok(Box::new(Self {
+            settings,
+            // trace_propagator: TraceContextPropagator::new(), // Fixed typo
+        }))        
+    
     }
 }  
 
@@ -88,14 +91,17 @@ impl ReactionLogger for OtelTraceReactionLogger {
     }
 
     async fn log_reaction_record(&mut self, record: &ReactionOutputRecord) -> anyhow::Result<()> {
-        create_span(&self.settings, &self.trace_propogator, record);
+        create_span(&self.settings, record);
         Ok(())
     }
 }
 
-fn create_span(setings: &OtelTraceReactionLoggerSettings, trace_propogator: &TraceContextPropagator, record: &ReactionOutputRecord) {
-    let parent_context = trace_propogator.extract(record);
-    let span = tracing::span!(tracing::Level::INFO, "reaction_observer");
+fn create_span(setings: &OtelTraceReactionLoggerSettings, record: &ReactionOutputRecord) {
+
+    // Extract the context using the API's global propagator
+    let parent_context = opentelemetry_api::global::get_text_map_propagator(|propagator| propagator.extract(record));
+
+    let span = tracing::span!(tracing::Level::INFO, "query_result");
     span.set_parent(parent_context);
     span.set_attribute("test_id", setings.test_run_reaction_id.test_run_id.test_id.to_string());
     span.set_attribute("test_run_id", setings.test_run_reaction_id.test_run_id.to_string());

@@ -230,7 +230,7 @@ impl QueryResultObserverInternalState {
         // Create the loggers
         let mut loggers: Vec<Box<dyn ResultStreamLogger + Send>> = Vec::new();
         for logger_cfg in settings.loggers.iter() {
-            match create_result_stream_logger(logger_cfg, &settings.output_storage).await {
+            match create_result_stream_logger(settings.id.clone(), logger_cfg, &settings.output_storage).await {
                 Ok(logger) => loggers.push(logger),
                 Err(e) => {
                     anyhow::bail!("Error creating ResultStreamLogger: {:?}; Error: {:?}", logger_cfg, e);
@@ -369,7 +369,7 @@ impl QueryResultObserverInternalState {
         self.close_loggers().await;    
         let mut loggers: Vec<Box<dyn ResultStreamLogger + Send>> = Vec::new();
         for logger_cfg in self.settings.loggers.iter() {
-            match create_result_stream_logger(logger_cfg, &self.settings.output_storage).await {
+            match create_result_stream_logger(self.settings.id.clone(), logger_cfg, &self.settings.output_storage).await {
                 Ok(logger) => loggers.push(logger),
                 Err(e) => {
                     anyhow::bail!("Error creating ResultStreamLogger: {:?}; Error: {:?}", logger_cfg, e);

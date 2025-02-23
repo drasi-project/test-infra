@@ -181,7 +181,7 @@ impl QueryResultObserver {
 pub struct QueryResultObserverExternalState {
     pub status: QueryResultObserverStatus,
     pub stream_status: ResultStreamStatus,
-    pub error_messages: Vec<String>,
+    pub error_message: Option<String>,
     pub result_summary: QueryResultObserverSummary,
     pub settings: QueryResultObserverSettings,
 }
@@ -191,7 +191,7 @@ impl From<&QueryResultObserverInternalState> for QueryResultObserverExternalStat
         Self {
             status: state.status,
             stream_status: state.stream_status,
-            error_messages: state.error_messages.clone(),
+            error_message: state.error_message.clone(),
             result_summary: QueryResultObserverSummary::from(state),
             settings: state.settings.clone(),
         }
@@ -202,7 +202,7 @@ pub struct QueryResultObserverInternalState {
     result_stream_handler: Box<dyn ResultStreamHandler + Send + Sync>,
     result_stream_handler_rx_channel: Receiver<ResultStreamHandlerMessage>,
     loggers: Vec<Box<dyn ResultStreamLogger + Send + Sync>>,
-    error_messages: Vec<String>,
+    error_message: Option<String>,
     settings: QueryResultObserverSettings,
     status: QueryResultObserverStatus,
     metrics: QueryResultObserverMetrics,
@@ -230,7 +230,7 @@ impl QueryResultObserverInternalState {
             result_stream_handler,
             result_stream_handler_rx_channel,
             loggers,
-            error_messages: Vec::new(),
+            error_message: None,
             settings,
             status: QueryResultObserverStatus::Paused,
             metrics,
@@ -257,14 +257,6 @@ impl QueryResultObserverInternalState {
         let _ = join_all(futures).await;
     }
 
-    fn log_observer_state(&self, msg: &str) {
-        match log::max_level() {
-            log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, self),
-            log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, self),
-            _ => {}
-        }
-    }
-
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) {
         let loggers = &mut self.loggers;
 
@@ -288,6 +280,10 @@ impl QueryResultObserverInternalState {
         log::trace!("Received ResultStreamHandlerMessage: {:?}", message);
     
         match message {
+            ResultStreamHandlerMessage::StreamStopping => {
+                self.stream_status = ResultStreamStatus::Stopped;
+                self.metrics.try_set_control_stream_stop_time(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64);
+            },
             ResultStreamHandlerMessage::Record(record) => {
     
                 self.log_result_stream_record(&record).await;
@@ -298,12 +294,10 @@ impl QueryResultObserverInternalState {
                 match record.record_data {
                     QueryResultRecord::Change(change) => {
                         if change.base.metadata.is_some() {
-                            self.metrics.try_set_first_change_record_time(record_time_ns);
-                            self.metrics.try_set_last_change_record_time(record_time_ns);
+                            self.metrics.update_change_record_time(record_time_ns);
                             self.metrics.result_stream_change_record_count += 1;
                         } else {
-                            self.metrics.try_set_first_bootstrap_record_time(record_time_ns);
-                            self.metrics.try_set_last_bootstrap_record_time(record_time_ns);
+                            self.metrics.update_bootstrap_record_time(record_time_ns);
                             self.metrics.result_stream_bootstrap_record_count += 1;
                         }
                     },
@@ -390,7 +384,7 @@ impl QueryResultObserverInternalState {
         self.close_loggers().await;    
 
         self.loggers = create_result_stream_loggers(self.settings.id.clone(), &self.settings.loggers, &self.settings.output_storage).await?;
-        self.error_messages = Vec::new();
+        self.error_message = None;
         self.status = QueryResultObserverStatus::Paused;
         self.stream_status = ResultStreamStatus::Unknown;
         self.metrics = QueryResultObserverMetrics {
@@ -466,36 +460,48 @@ impl QueryResultObserverInternalState {
     
         self.status = QueryResultObserverStatus::Stopped;
         self.metrics.observer_stop_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-        self.result_stream_handler.stop().await.ok();
+        
+        match self.result_stream_handler.stop().await {
+            Ok(_) => {
+                self.stream_status = ResultStreamStatus::Stopped;
+            },
+            Err(e) => {
+                self.transition_to_error_state("Error stopping ResultStreamHandler", Some(&e));
+            }
+        }
 
         self.close_loggers().await;
-        self.write_result_summary().await.ok();
+        self.write_result_summary().await;
     }
     
-    fn transition_to_error_state(&mut self, error_message: &str, error: Option<&anyhow::Error>) {    
-        self.status = QueryResultObserverStatus::Error;
-        self.metrics.observer_stop_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-    
+    fn transition_to_error_state(&mut self, error_message: &str, error: Option<&anyhow::Error>) {   
+
         let msg = match error {
             Some(e) => format!("{}: {:?}", error_message, e),
             None => error_message.to_string(),
         };
-        self.error_messages.push(msg.clone());
-    
-        self.log_observer_state(&msg);
+
+        if self.status == QueryResultObserverStatus::Error {
+            log::error!("QueryResultObserver is already in an Error state. Received error: {}", msg);
+        } else {
+            log::error!("QueryResultObserver transitioned to an Error state. Received error: {}", msg);
+            self.status = QueryResultObserverStatus::Error;
+            self.metrics.observer_stop_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+            self.error_message = Some(msg);
+        }
     }    
 
-    pub async fn write_result_summary(&self) -> anyhow::Result<()> {
+    pub async fn write_result_summary(&self) {
 
         let result_summary: QueryResultObserverSummary = self.into();
         log::info!("Summary for TestRunQuery:\n{:#?}", &result_summary);
     
         let result_summary_value = serde_json::to_value(result_summary).unwrap();
+
         match self.settings.output_storage.write_test_run_summary(&result_summary_value).await {
-            Ok(_) => Ok(()),
+            Ok(_) => {},
             Err(e) => {
                 log::error!("Error writing result summary to output storage: {:?}", e);
-                Err(e)
             }
         }
     }    
@@ -505,7 +511,7 @@ impl QueryResultObserverInternalState {
 impl Debug for QueryResultObserverInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("QueryResultObserverInternalState")
-            .field("error_messages", &self.error_messages)
+            .field("error_messages", &self.error_message)
             .field("status", &self.status)
             .field("metrics", &self.metrics)
             .finish()
@@ -579,26 +585,21 @@ impl QueryResultObserverMetrics {
         }
     }
 
-    pub fn try_set_first_bootstrap_record_time(&mut self, time_ns: u64) {
+    pub fn update_bootstrap_record_time(&mut self, time_ns: u64) {
+
         if self.result_stream_bootstrap_record_first_ns == 0 {
             self.result_stream_bootstrap_record_first_ns = time_ns;
-        }
-    }
-
-    pub fn try_set_last_bootstrap_record_time(&mut self, time_ns: u64) {
-        if self.result_stream_bootstrap_record_last_ns == 0 {
+            self.result_stream_bootstrap_record_last_ns = time_ns;
+        } else {
             self.result_stream_bootstrap_record_last_ns = time_ns;
         }
     }
 
-    pub fn try_set_first_change_record_time(&mut self, time_ns: u64) {
+    pub fn update_change_record_time(&mut self, time_ns: u64) {
         if self.result_stream_change_record_first_ns == 0 {
             self.result_stream_change_record_first_ns = time_ns;
-        }
-    }
-
-    pub fn try_set_last_change_record_time(&mut self, time_ns: u64) {
-        if self.result_stream_change_record_last_ns == 0 {
+            self.result_stream_change_record_last_ns = time_ns;
+        } else {
             self.result_stream_change_record_last_ns = time_ns;
         }
     }
@@ -741,7 +742,11 @@ impl From<&QueryResultObserverInternalState> for QueryResultObserverSummary {
 
         let change_stream_duration_ns = metrics.get_result_stream_change_duration_ns(Some(now_ns));
 
-        let time_since_last_result_ns = now_ns - max(metrics.result_stream_bootstrap_record_last_ns, metrics.result_stream_change_record_last_ns);
+        let mut time_since_last_result_ns = max(metrics.result_stream_bootstrap_record_last_ns, metrics.result_stream_change_record_last_ns);
+        if time_since_last_result_ns > 0 {
+            time_since_last_result_ns = now_ns - time_since_last_result_ns;
+        }
+        let time_since_last_result_sec = time_since_last_result_ns as f64 / 1_000_000_000.0;
 
         Self {
             test_run_query_id: state.settings.id.clone(),
@@ -761,7 +766,7 @@ impl From<&QueryResultObserverInternalState> for QueryResultObserverSummary {
             change_stream_duration_sec: change_stream_duration_ns as f64 / 1_000_000_000.0,
             change_stream_processing_rate: metrics.result_stream_change_record_count as f64 / (change_stream_duration_ns as f64 / 1_000_000_000.0),
             time_since_last_result_ns,
-            time_since_last_result_sec: time_since_last_result_ns as f64 / 1_000_000_000.0,
+            time_since_last_result_sec,
             observer_metrics: metrics,
         }
     }
@@ -822,8 +827,6 @@ pub async fn observer_thread(mut command_rx_channel: Receiver<QueryResultObserve
 
     // Loop to process commands sent to the QueryResultObserver or read from the Change Stream.
     loop {
-        state.log_observer_state("Top of QueryResultObserver processor loop");
-
         tokio::select! {
             // Always process all messages in the command channel and act on them first.
             biased;
@@ -836,14 +839,16 @@ pub async fn observer_thread(mut command_rx_channel: Receiver<QueryResultObserve
                             .inspect_err(|e| state.transition_to_error_state("Error calling process_command_message.", Some(e))).ok();
                     }
                     None => {
-                        state.transition_to_error_state("Command channel closed.", None);
+                        // Unrecoverable error.
+                        log::error!("Command channel closed. Exiting QueryResultObserver: {:?}", state);
+                        // state.transition_to_error_state("Command channel closed.", None);
                         break;
                     }
                 }
             },
 
             // Process messages from the Result Stream Handler.
-            result_stream_handler_message = state.result_stream_handler_rx_channel.recv() => {
+            result_stream_handler_message = state.result_stream_handler_rx_channel.recv(), if state.status == QueryResultObserverStatus::Running => {
                 match result_stream_handler_message {
                     Some(msg) => {
                         // log::trace!("Received ResultStreamHandler message: {:?}", msg);
@@ -851,7 +856,9 @@ pub async fn observer_thread(mut command_rx_channel: Receiver<QueryResultObserve
                             .inspect_err(|e| state.transition_to_error_state("Error calling process_result_stream_handler_message", Some(e))).ok();
                     }
                     None => {
-                        state.transition_to_error_state("ResultStreamHandler channel closed.", None);
+                        // Unrecoverable error.
+                        log::error!("ResultStreamHandler channel closed. Exiting QueryResultObserver: {:?}", state);
+                        // state.transition_to_error_state("ResultStreamHandler channel closed.", None);
                         break;
                     }
                 }

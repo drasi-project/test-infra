@@ -72,8 +72,9 @@ impl Serialize for ResultStreamHandlerStatus {
 
 #[derive(Debug)]
 pub enum ResultStreamHandlerMessage {
-    Record(ResultStreamRecord),
     Error(ResultStreamHandlerError),
+    Record(ResultStreamRecord),
+    StreamStopping,
 }
 
 #[derive(Clone, Debug, Serialize)]

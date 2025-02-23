@@ -182,8 +182,8 @@ async fn reader_thread(
     seq: Arc<AtomicUsize>, 
     settings: RedisResultStreamHandlerSettings, 
     status: Arc<RwLock<ResultStreamHandlerStatus>>, 
-    notify: Arc<Notify>, result_stream_handler_tx_channel: 
-    Sender<ResultStreamHandlerMessage>) 
+    notify: Arc<Notify>, 
+    result_stream_handler_tx_channel: Sender<ResultStreamHandlerMessage>) 
 {
     log::debug!("Starting RedisResultStreamHandler Reader Thread");
 
@@ -248,13 +248,23 @@ async fn reader_thread(
 
         match current_status {
             ResultStreamHandlerStatus::Uninitialized 
-            | ResultStreamHandlerStatus::Stopped
             | ResultStreamHandlerStatus::Error => {
-                log::debug!("Uninitialized, Stopped, or Error, exiting");
+                log::error!("Reader thread Uninitialized or Error, shutting down");
+                return;
+            },
+            ResultStreamHandlerStatus::Stopped => {
+                log::debug!("Reader thread Stopped, sending StreamStopping message and shutting down");
+
+                match result_stream_handler_tx_channel.send(ResultStreamHandlerMessage::StreamStopping).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        log::error!("Reader thread error sending StreamStopping message: {:?}", e);
+                    }
+                }                
                 return;
             },
             ResultStreamHandlerStatus::Paused => {
-                log::debug!("Paused, waiting for notify");
+                log::debug!("Reader thread Paused, waiting to be notified");
                 notify.notified().await;
                 log::debug!("Notified");
             },

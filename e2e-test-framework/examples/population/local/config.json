@@ -26,7 +26,7 @@
                             },
                             "stop_trigger": {
                               "kind": "RecordSequenceNumber",
-                              "record_sequence_number": 265
+                              "record_sequence_number": 12411
                             }
                           }
                         ],

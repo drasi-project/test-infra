@@ -11,6 +11,9 @@
       "write_change_log": true
     },
     {
+      "kind": "OtelMetric"
+    },
+    {
       "kind": "OtelTrace"
     }        
   ]

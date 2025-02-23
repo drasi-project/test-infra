@@ -1,14 +1,7 @@
 use std::path::PathBuf;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use opentelemetry::metrics::{Counter, Histogram};
-use opentelemetry::{global, runtime, KeyValue};
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::reader::DefaultTemporalitySelector;
-use opentelemetry_sdk::metrics::{Aggregation, InstrumentKind, MeterProvider as SdkMeterProvider};
-use opentelemetry_sdk::Resource;
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File, write}, io::{AsyncWriteExt, BufWriter}};
@@ -22,7 +15,6 @@ use super::{ResultStreamLogger, ResultStreamLoggerError};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfilerResultStreamLoggerConfig {
     pub max_lines_per_file: Option<u64>,
-    pub otel_endpoint: Option<String>,
     pub write_bootstrap_log: Option<bool>,
     pub write_change_log: Option<bool>,
 }
@@ -34,7 +26,6 @@ pub struct ProfilerResultStreamLoggerSettings {
     pub folder_path: PathBuf,
     pub test_run_query_id: TestRunQueryId,
     pub max_lines_per_file: u64,
-    pub otel_endpoint: String,
     pub write_bootstrap_log: bool,
     pub write_change_log: bool,
 }
@@ -49,7 +40,6 @@ impl ProfilerResultStreamLoggerSettings {
             folder_path,
             test_run_query_id,
             max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
-            otel_endpoint: config.otel_endpoint.clone().unwrap_or("http://otel-collector:4317".to_string()),
             write_bootstrap_log: config.write_bootstrap_log.unwrap_or(false),
             write_change_log: config.write_change_log.unwrap_or(false),
         });
@@ -107,127 +97,6 @@ impl ChangeRecordProfile {
     }
 }
 
-struct ProfilerMetrics {
-    pub bootstrap_rec_count: Counter<u64>,
-    pub bootstrap_rec_time_total: Histogram<f64>,
-    pub change_rec_count: Counter<u64>,
-    pub change_rec_time_in_src_change_q: Histogram<f64>,
-    pub change_rec_time_in_src_change_rtr: Histogram<f64>,
-    pub change_rec_time_in_src_disp_q: Histogram<f64>,
-    pub change_rec_time_in_src_change_disp: Histogram<f64>,
-    pub change_rec_time_in_change_pub: Histogram<f64>,
-    pub change_rec_time_in_query_host: Histogram<f64>,
-    pub change_rec_time_in_query_solver: Histogram<f64>,
-    pub change_rec_time_in_result_disp_q: Histogram<f64>,
-    pub change_rec_time_total: Histogram<f64>,
-    pub control_rec_count: Counter<u64>,
-}
-
-impl ProfilerMetrics {
-    pub fn new() -> Self {
-
-        // Get a Bootstrap Record meter
-        let bootstrap_rec_meter = global::meter("query-result-profiler-bootstrap-meter");
-
-        let bootstrap_rec_count = bootstrap_rec_meter
-            .u64_counter("drasi.query-result-profiler.bootstrap_rec_count")
-            .with_description("Count of Query Result Bootstrap Records")
-            .init();
-
-        let bootstrap_rec_time_total = bootstrap_rec_meter
-            .f64_histogram("drasi.query-result-profiler.bootstrap_rec_time_total")
-            .with_description("Total time taken to process a Bootstrap Record")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();
-
-        // Get a Change Record meter
-        let change_rec_meter = global::meter("query-result-profiler-change-meter");
-
-        let change_rec_count = change_rec_meter
-            .u64_counter("drasi.query-result-profiler.change_rec_count")
-            .with_description("Count of Query Result Change Records")
-            .init();
-
-        let change_rec_time_in_src_change_q = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_q")
-            .with_description("Total time Query Result Change spent in Source Change Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();
-
-        let change_rec_time_in_src_change_rtr = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_rtr")
-            .with_description("Total time Query Result Change spent in Source Change Router")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();
-
-        let change_rec_time_in_src_disp_q = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_disp_q")
-            .with_description("Total time Query Result Change spent in Source Dispatch Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();      
-
-        let change_rec_time_in_src_change_disp = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_disp")
-            .with_description("Total time Query Result Change spent in Source Change Dispatcher")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();    
-
-        let change_rec_time_in_change_pub = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_change_pub")
-            .with_description("Total time Query Result Change spent being dispatched")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();   
-
-        let change_rec_time_in_query_host = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_host")
-            .with_description("Total time Query Result Change spent in Query Host")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();   
-
-        let change_rec_time_in_query_solver = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_solver")
-            .with_description("Total time Query Result Change spent in Query Solver")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();   
-
-        let change_rec_time_in_result_disp_q = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_result_disp_q")
-            .with_description("Total time Query Result Change spent in Query Result Dispatch Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();              
-
-        let change_rec_time_total = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_total")
-            .with_description("Total time Query Result Change took to process")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
-            .init();  
-
-        // Get a Control Record meter
-        let control_rec_meter = global::meter("query-result-profiler-control-meter");
-
-        let control_rec_count = control_rec_meter
-            .u64_counter("drasi.query-result-profiler.control_rec_count")
-            .with_description("Count of Query Result Control Records")
-            .init();
-
-        Self {
-            bootstrap_rec_count,
-            bootstrap_rec_time_total,
-            change_rec_count,
-            change_rec_time_in_src_change_q,
-            change_rec_time_in_src_change_rtr,
-            change_rec_time_in_src_disp_q,
-            change_rec_time_in_src_change_disp,
-            change_rec_time_in_change_pub,
-            change_rec_time_in_query_host,
-            change_rec_time_in_query_solver,
-            change_rec_time_in_result_disp_q,
-            change_rec_time_total,
-            control_rec_count,
-        }
-    }
-}
-
 #[derive(Debug, Serialize)]
 struct ProfilerSummary{
     pub bootstrap_rec_count: usize,
@@ -263,7 +132,6 @@ struct ProfilerSummary{
     pub change_rec_time_total_max: u64,
     pub change_rec_time_total_min: u64,
     pub control_rec_count: usize,
-
 }
 
 impl Default for ProfilerSummary {
@@ -310,9 +178,6 @@ impl Default for ProfilerSummary {
 pub struct ProfilerResultStreamLogger {
     bootstrap_log_writer: Option<RecordProfileLogWriter>,
     change_log_writer: Option<RecordProfileLogWriter>,
-    meter_provider: SdkMeterProvider,
-    metrics: ProfilerMetrics,
-    metrics_attributes: Vec<KeyValue>,
     settings: ProfilerResultStreamLoggerSettings,
     summary: ProfilerSummary,    
 }
@@ -344,53 +209,9 @@ impl ProfilerResultStreamLogger {
             None
         };
 
-        // Initialize meter provider using pipeline
-        let meter_provider = opentelemetry_otlp::new_pipeline()
-            .metrics(runtime::Tokio)
-            .with_exporter(opentelemetry_otlp::new_exporter().tonic().with_endpoint(&settings.otel_endpoint) )
-            .with_resource(Resource::new(vec![KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                "query-result-profiler",
-            )]))
-            .with_period(Duration::from_secs(5))
-            .with_temporality_selector(DefaultTemporalitySelector::new())
-            .with_aggregation_selector(|kind: InstrumentKind| {
-                match kind {
-                    InstrumentKind::Counter
-                    | InstrumentKind::UpDownCounter
-                    | InstrumentKind::ObservableCounter
-                    | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
-                    InstrumentKind::ObservableGauge => Aggregation::LastValue,
-                    InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
-                        boundaries: vec![
-                            0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0,
-                            2500.0, 5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0, 
-                        ],
-                        record_min_max: true,
-                    },
-                }
-
-            })
-            .build()?;
-        
-        // Set the global meter provider
-        global::set_meter_provider(meter_provider.clone());
-
-        // Create the metrics:
-        let metrics = ProfilerMetrics::new();
-
-        let metrics_attributes = vec![
-            KeyValue::new("test_id", settings.test_run_query_id.test_run_id.test_id.to_string()),
-            KeyValue::new("test_run_id", settings.test_run_query_id.test_run_id.to_string()),
-            KeyValue::new("test_run_query_id", settings.test_run_query_id.to_string()),
-        ];
-
         Ok(Box::new( Self { 
             bootstrap_log_writer,
             change_log_writer,
-            meter_provider,
-            metrics,
-            metrics_attributes,
             settings,
             summary: ProfilerSummary::default(),
         }))
@@ -460,7 +281,6 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
 
         write(summary_path, serde_json::to_string_pretty(&self.summary)?).await?;
 
-        self.meter_provider.shutdown()?;
         Ok(())
     }
     
@@ -503,19 +323,6 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
                     self.summary.change_rec_time_total_avg += profile.time_total as f64;
                     self.summary.change_rec_time_total_max = std::cmp::max(self.summary.change_rec_time_total_max, profile.time_total);
                     self.summary.change_rec_time_total_min = std::cmp::min(self.summary.change_rec_time_total_min, profile.time_total);   
-
-
-                    self.metrics.change_rec_count.add(1, &self.metrics_attributes);             
-                    self.metrics.change_rec_time_in_src_change_q.record(profile.time_in_src_change_q as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_src_change_rtr.record(profile.time_in_src_change_rtr as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_src_disp_q.record(profile.time_in_src_disp_q as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_src_change_disp.record(profile.time_in_src_change_disp as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_change_pub.record(profile.time_in_src_change_pub as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_query_host.record(profile.time_in_query_host as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_query_solver.record(profile.time_in_query_solver as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_result_disp_q.record(profile.time_in_result_disp_q as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_total.record(profile.time_total as f64, &self.metrics_attributes);    
-
                 } else {
                     let profile = BootstrapRecordProfile::new(&record, &change);
 
@@ -527,16 +334,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
                     self.summary.bootstrap_rec_time_total_avg += profile.time_total as f64;
                     self.summary.bootstrap_rec_time_total_max = std::cmp::max(self.summary.bootstrap_rec_time_total_max, profile.time_total);
                     self.summary.bootstrap_rec_time_total_min = std::cmp::min(self.summary.bootstrap_rec_time_total_min, profile.time_total);   
-
-                    self.metrics.bootstrap_rec_count.add(1, &self.metrics_attributes);  
-                    self.metrics.bootstrap_rec_time_total.record(profile.time_total as f64, &self.metrics_attributes);               
- 
                 }
             },
             QueryResultRecord::Control(_) => {
                 self.summary.control_rec_count += 1;
-
-                self.metrics.control_rec_count.add(1, &self.metrics_attributes);                 
             }
         }
 

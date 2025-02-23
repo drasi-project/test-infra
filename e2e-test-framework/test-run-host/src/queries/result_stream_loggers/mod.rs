@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use otel_metric_logger::{OtelMetricResultStreamLogger, OtelMetricResultStreamLoggerConfig};
 use otel_trace_logger::{OtelTraceResultStreamLogger, OtelTraceResultStreamLoggerConfig};
 use profiler_logger::{ProfilerResultStreamLogger, ProfilerResultStreamLoggerConfig};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use super::result_stream_handlers::ResultStreamRecord;
 
 pub mod console_logger;
 pub mod jsonl_file_logger;
+pub mod otel_metric_logger;
 pub mod otel_trace_logger;
 pub mod profiler_logger;
 
@@ -19,6 +21,7 @@ pub mod profiler_logger;
 pub enum ResultStreamLoggerConfig {
     Console(ConsoleResultStreamLoggerConfig),
     JsonlFile(JsonlFileResultStreamLoggerConfig),
+    OtelMetric(OtelMetricResultStreamLoggerConfig),
     OtelTrace(OtelTraceResultStreamLoggerConfig),
     Profiler(ProfilerResultStreamLoggerConfig)
 }
@@ -60,6 +63,7 @@ pub async fn create_result_stream_logger(test_run_query_id: TestRunQueryId, conf
     match config {
         ResultStreamLoggerConfig::Console(cfg) => ConsoleResultStreamLogger::new(test_run_query_id, cfg),
         ResultStreamLoggerConfig::JsonlFile(cfg) => JsonlFileResultStreamLogger::new(test_run_query_id, cfg, output_storage).await,
+        ResultStreamLoggerConfig::OtelMetric(cfg) => OtelMetricResultStreamLogger::new(test_run_query_id, cfg).await,
         ResultStreamLoggerConfig::OtelTrace(cfg) => OtelTraceResultStreamLogger::new(test_run_query_id, cfg),
         ResultStreamLoggerConfig::Profiler(cfg) => ProfilerResultStreamLogger::new(test_run_query_id, cfg, output_storage).await,
     }

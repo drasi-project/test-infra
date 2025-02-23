@@ -23,6 +23,10 @@
                               "port": 6379,
                               "stream_name": "city-population-results",
                               "process_old_entries": true
+                            },
+                            "stop_trigger": {
+                              "kind": "RecordSequenceNumber",
+                              "record_sequence_number": 265
                             }
                           }
                         ],
@@ -64,7 +68,7 @@
             "test_repo_id": "local_dev_repo",
             "test_run_id": "test_run_001",
             "test_query_id": "city-population",
-            "start_immediately": true,
+            "start_immediately": false,
             "loggers": [
               {
                 "kind": "Profiler",

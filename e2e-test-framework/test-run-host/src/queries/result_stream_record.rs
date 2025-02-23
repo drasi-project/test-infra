@@ -11,6 +11,19 @@ pub enum QueryResultRecord {
     Control(ControlEvent),
 }
 
+impl QueryResultRecord {
+    pub fn get_source_seq(&self) -> i64 {
+        match self {
+            QueryResultRecord::Change(change) => {
+                change.base.sequence
+            },
+            QueryResultRecord::Control(control) => {
+                control.base.sequence
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BaseResultEvent {
     #[serde(rename = "queryId")]

@@ -4,13 +4,14 @@ use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 
 use result_stream_loggers::ResultStreamLoggerConfig;
-use query_result_observer::{QueryResultObserver, QueryResultObserverCommandResponse, QueryResultObserverState};
+use query_result_observer::{QueryResultObserver, QueryResultObserverCommandResponse, QueryResultObserverExternalState};
 use test_data_store::{test_repo_storage::models::TestQueryDefinition, test_run_storage::{ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId, TestRunQueryStorage}};
 
 pub mod query_result_observer;
 mod result_stream_handlers;
 mod result_stream_loggers;
 mod result_stream_record;
+mod stop_triggers;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunQueryConfig {
@@ -80,7 +81,7 @@ impl TestRunQueryDefinition {
 #[derive(Debug, Serialize)]
 pub struct TestRunQueryState {
     pub id: TestRunQueryId,
-    pub query_observer: QueryResultObserverState,
+    pub query_observer: QueryResultObserverExternalState,
     pub start_immediately: bool,
 }
 
@@ -123,7 +124,7 @@ impl TestRunQuery {
         })
     }
 
-    pub async fn get_query_result_observer_state(&self) -> anyhow::Result<QueryResultObserverState> {
+    pub async fn get_query_result_observer_state(&self) -> anyhow::Result<QueryResultObserverExternalState> {
         Ok(self.query_result_observer.get_state().await?.state)
     }
 

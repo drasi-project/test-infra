@@ -304,7 +304,8 @@ pub struct SignalRTestReactionDefinition {
 pub struct TestQueryDefinition {
     #[serde(default)]
     pub test_query_id: String,
-    pub result_stream_handler: ResultStreamHandlerDefinition
+    pub result_stream_handler: ResultStreamHandlerDefinition,
+    pub stop_trigger: StopTriggerDefinition,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -328,6 +329,17 @@ pub struct RedisStreamResultStreamHandlerDefinition {
     pub port: Option<u16>,
     pub stream_name: Option<String>,
     pub process_old_entries: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum StopTriggerDefinition {
+    RecordSequenceNumber(RecordSequenceNumberStopTriggerDefinition),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecordSequenceNumberStopTriggerDefinition {
+    pub record_sequence_number: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

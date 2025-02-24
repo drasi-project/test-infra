@@ -45,9 +45,9 @@ impl OtelTraceResultStreamLogger {
         log::trace!("Creating OtelTraceResultStreamLogger with settings {:?}, ", settings);
 
         let batch_config = BatchConfig::default()
-            .with_max_queue_size(8192) // Increase queue size
-            .with_max_export_batch_size(100) // Match with collector
-            .with_scheduled_delay(std::time::Duration::from_secs(2));
+            .with_max_queue_size(16384) // Increase queue size
+            .with_max_export_batch_size(512) // Match with collector
+            .with_scheduled_delay(std::time::Duration::from_secs(1));
 
         let tracer = opentelemetry_otlp::new_pipeline()
             .tracing()

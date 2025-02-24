@@ -309,7 +309,7 @@ impl OtelMetricResultStreamLogger {
                 opentelemetry_semantic_conventions::resource::SERVICE_NAME,
                 "query-result-profiler",
             )]))
-            .with_period(Duration::from_secs(5))
+            .with_period(Duration::from_millis(100))
             .with_temporality_selector(DefaultTemporalitySelector::new())
             .with_aggregation_selector(|kind: InstrumentKind| {
                 match kind {

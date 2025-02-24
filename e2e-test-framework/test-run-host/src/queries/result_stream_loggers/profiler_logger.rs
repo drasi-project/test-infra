@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use std::{cmp::max, path::PathBuf};
 
 use async_trait::async_trait;
-use chrono::Utc;
+use image::{Rgb, RgbImage};
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File, write}, io::{AsyncWriteExt, BufWriter}};
@@ -14,33 +14,42 @@ use super::{ResultStreamLogger, ResultStreamLoggerError};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfilerResultStreamLoggerConfig {
+    pub bootstrap_log_name: Option<String>,
+    pub change_image_name: Option<String>,
+    pub change_log_name: Option<String>,    
+    pub image_width: Option<u32>,
     pub max_lines_per_file: Option<u64>,
     pub write_bootstrap_log: Option<bool>,
+    pub write_change_image: Option<bool>,
     pub write_change_log: Option<bool>,
 }
 
 #[derive(Debug)]
 pub struct ProfilerResultStreamLoggerSettings {
     pub bootstrap_log_name: String,
+    pub change_image_name: String,
     pub change_log_name: String,    
     pub folder_path: PathBuf,
+    pub image_width: u32,
     pub test_run_query_id: TestRunQueryId,
     pub max_lines_per_file: u64,
     pub write_bootstrap_log: bool,
+    pub write_change_image: bool,
     pub write_change_log: bool,
 }
 
 impl ProfilerResultStreamLoggerSettings {
     pub fn new(test_run_query_id: TestRunQueryId, config: &ProfilerResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
-        let time = Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-
         return Ok(Self {
-            bootstrap_log_name: format!("{}_bootstrap.jsonl", time),
-            change_log_name: format!("{}_change.jsonl", time),
+            bootstrap_log_name: config.bootstrap_log_name.clone().unwrap_or("bootstrap".to_string()),
+            change_image_name: config.change_image_name.clone().unwrap_or("change".to_string()),
+            change_log_name: config.change_log_name.clone().unwrap_or("change".to_string()),
+            image_width: config.image_width.unwrap_or(1000),
             folder_path,
             test_run_query_id,
             max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
             write_bootstrap_log: config.write_bootstrap_log.unwrap_or(false),
+            write_change_image: config.write_change_image.unwrap_or(false),
             write_change_log: config.write_change_log.unwrap_or(false),
         });
     }
@@ -175,9 +184,10 @@ impl Default for ProfilerSummary {
     
 }
 
-pub struct ProfilerResultStreamLogger {
-    bootstrap_log_writer: Option<RecordProfileLogWriter>,
-    change_log_writer: Option<RecordProfileLogWriter>,
+pub struct ProfilerResultStreamLogger {    
+    bootstrap_log_writer: Option<ProfileLogWriter>,
+    change_image_writer: Option<ProfileImageWriter>,
+    change_log_writer: Option<ProfileLogWriter>,
     settings: ProfilerResultStreamLoggerSettings,
     summary: ProfilerSummary,    
 }
@@ -198,19 +208,26 @@ impl ProfilerResultStreamLogger {
         }        
 
         let bootstrap_log_writer = if settings.write_bootstrap_log {
-            Some(RecordProfileLogWriter::new(settings.folder_path.clone(), settings.bootstrap_log_name.clone(), settings.max_lines_per_file).await?)
+            Some(ProfileLogWriter::new(settings.folder_path.clone(), settings.bootstrap_log_name.clone(), settings.max_lines_per_file).await?)
         } else {
             None
         };
 
         let change_log_writer = if settings.write_change_log {
-            Some(RecordProfileLogWriter::new(settings.folder_path.clone(), settings.change_log_name.clone(), settings.max_lines_per_file).await?)
+            Some(ProfileLogWriter::new(settings.folder_path.clone(), settings.change_log_name.clone(), settings.max_lines_per_file).await?)
         } else {
             None
         };
 
+        let change_image_writer = if settings.write_change_image {
+            Some(ProfileImageWriter::new(settings.folder_path.clone(), settings.change_image_name.clone(), settings.image_width).await?)
+        } else {
+            None
+        };        
+
         Ok(Box::new( Self { 
             bootstrap_log_writer,
+            change_image_writer,
             change_log_writer,
             settings,
             summary: ProfilerSummary::default(),
@@ -227,7 +244,7 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
         }
         if let Some(writer) = &mut self.change_log_writer {
             writer.close().await?;
-        }
+        }        
 
         let summary_path = self.settings.folder_path.join("test_run_summary.json");
 
@@ -281,6 +298,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
 
         write(summary_path, serde_json::to_string_pretty(&self.summary)?).await?;
 
+        if let Some(writer) = &mut self.change_image_writer {
+            writer.generate_image(self.summary.change_rec_count).await?;
+        }
+
         Ok(())
     }
     
@@ -293,6 +314,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
 
                     if let Some(writer) = &mut self.change_log_writer {
                         writer.write_change_profile(&profile).await?;
+                    }
+
+                    if let Some(writer) = &mut self.change_image_writer {
+                        writer.write_change_profile(&profile).await?;    
                     }
 
                     self.summary.change_rec_count += 1;
@@ -345,15 +370,220 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
     }
 }
 
+struct ProfileImageWriter {
+    all_file_path: PathBuf,
+    all_image_spans: Vec<u32>,
+    drasi_file_path: PathBuf,
+    drasi_image_spans: Vec<u32>,
+    width: u32,
+}
+
+impl ProfileImageWriter {
+    pub async fn new(folder_path: PathBuf, file_name: String, width: u32) -> anyhow::Result<Self> {
+
+        Ok(Self {
+            all_file_path: folder_path.join(format!("{}_all.png", file_name)),
+            drasi_file_path: folder_path.join(format!("{}_drasi.png", file_name)),
+            all_image_spans: Vec::new(),
+            drasi_image_spans: Vec::new(),
+            width
+        })
+    }
+
+    pub async fn write_change_profile(&mut self, profile: &ChangeRecordProfile) -> anyhow::Result<()> {
+
+        self.write_all_change_profile(profile).await?;
+        self.write_drasi_change_profile(profile).await?;
+        Ok(())
+    }
+
+    async fn write_all_change_profile(&mut self, profile: &ChangeRecordProfile) -> anyhow::Result<()> {
+
+        let total_time = profile.time_total as f64;
+        let pixels_per_unit = self.width as f64 / total_time;
+        let mut total_width = 0;
+
+        // Calculate component span widths
+        let times = [
+            profile.time_in_src_change_q,
+            profile.time_in_src_change_rtr,
+            profile.time_in_src_disp_q,
+            profile.time_in_src_change_disp,
+            profile.time_in_src_change_pub,
+            profile.time_in_query_host - profile.time_in_query_solver,
+            profile.time_in_query_solver,
+            profile.time_in_result_disp_q,
+        ];
+
+        for time in times {
+            let span_width = if time > 0 {
+                (time as f64 * pixels_per_unit).round() as u32
+            } else {
+                0
+            };
+            self.all_image_spans.push(span_width);
+            total_width += span_width;
+        }
+
+        // Calculate shortfall span width
+        let shortfall_width = max(0, self.width as i32 - total_width as i32);
+        self.all_image_spans.push(shortfall_width as u32);
+
+        Ok(())
+    }
+
+    async fn write_drasi_change_profile(&mut self, profile: &ChangeRecordProfile) -> anyhow::Result<()> {
+
+        // Calculate component span widths
+        let times = [
+            profile.time_in_src_change_rtr,
+            profile.time_in_src_change_disp,
+            profile.time_in_query_host - profile.time_in_query_solver,
+            profile.time_in_query_solver,
+        ];
+
+        // Sum the array to get total_time
+        let total_time = times.iter().sum::<u64>() as f64;
+        let pixels_per_unit = self.width as f64 / total_time;
+
+        for time in times {
+            let span_width = if time > 0 {
+                (time as f64 * pixels_per_unit).round() as u32
+            } else {
+                0
+            };
+            self.drasi_image_spans.push(span_width);
+        }
+
+        Ok(())
+    }
+    
+    pub async fn generate_image(&self, record_count: usize) -> anyhow::Result<()> {
+        self.generate_all_image(record_count).await?;
+        self.generate_drasi_image(record_count).await?;
+        Ok(())
+    }
+    
+    async fn generate_all_image(&self, record_count: usize) -> anyhow::Result<()> {
+
+        let colors = [
+            Rgb([255, 0, 0]),   // time_in_src_change_q (red)
+            Rgb([255, 165, 0]), // time_in_src_change_rtr (orange)
+            Rgb([0, 255, 0]),   // time_in_src_disp_q (green)
+            Rgb([0, 0, 0]),     // time_in_src_change_disp (black)
+            Rgb([0, 0, 255]),   // time_in_src_change_pub (blue)
+            Rgb([128, 0, 128]), // time_in_query_host (purple)
+            Rgb([0, 255, 255]), // time_in_query_solver (cyan)
+            Rgb([255, 255, 0]), // time_in_result_disp_q (yellow)
+            Rgb([128, 128, 128]), // shortfall (gray)
+        ];
+
+        let spans_per_profile: usize = 9;
+        let header_height: u32 = 20;
+        let header_span_width = self.width / spans_per_profile as u32; 
+        let height = record_count as u32 + header_height;
+        let mut img = RgbImage::new(self.width, height);
+
+        // Draw the header (equal-length spans for each color)
+        for y in 0..header_height {
+            let mut x = 0;
+            for &color in &colors {
+                for px in x..x + header_span_width {
+                    if px < self.width {
+                        img.put_pixel(px, y, color);
+                    }
+                }
+                x += header_span_width;
+            }
+        }
+
+        // Draw the image from the spans
+        self.all_image_spans
+            .chunks(spans_per_profile)
+            .enumerate()
+            .for_each(|(y, record_spans)| {
+                let mut x = 0;
+                for (i, &width) in record_spans.iter().enumerate() {
+                    if width > 0 {
+                        for px in x..x + width {
+                            if px < self.width {
+                                img.put_pixel(px, y as u32 + header_height, colors[i]);
+                            }
+                        }
+                        x += width;
+                    }
+                }
+            });
+
+        // Save the image
+        img.save(&self.all_file_path)?;
+
+        Ok(())
+    }
+
+    async fn generate_drasi_image(&self, record_count: usize) -> anyhow::Result<()> {
+
+        let colors = [
+            Rgb([255, 165, 0]), // time_in_src_change_rtr (orange)
+            Rgb([0, 0, 0]),     // time_in_src_change_disp (black)
+            Rgb([128, 0, 128]), // time_in_query_host (purple)
+            Rgb([0, 255, 255]), // time_in_query_solver (cyan)
+        ];
+
+        let spans_per_profile: usize = 4;
+        let header_height: u32 = 20;
+        let header_span_width = self.width / spans_per_profile as u32; 
+        let height = record_count as u32 + header_height;
+        let mut img = RgbImage::new(self.width, height);
+
+        // Draw the header (equal-length spans for each color)
+        for y in 0..header_height {
+            let mut x = 0;
+            for &color in &colors {
+                for px in x..x + header_span_width {
+                    if px < self.width {
+                        img.put_pixel(px, y, color);
+                    }
+                }
+                x += header_span_width;
+            }
+        }
+
+        // Draw the image from the spans
+        self.drasi_image_spans
+            .chunks(spans_per_profile)
+            .enumerate()
+            .for_each(|(y, record_spans)| {
+                let mut x = 0;
+                for (i, &width) in record_spans.iter().enumerate() {
+                    if width > 0 {
+                        for px in x..x + width {
+                            if px < self.width {
+                                img.put_pixel(px, y as u32 + header_height, colors[i]);
+                            }
+                        }
+                        x += width;
+                    }
+                }
+            });
+
+        // Save the image
+        img.save(&self.drasi_file_path)?;
+
+        Ok(())
+    }
+
+}
+
 #[derive(Debug, thiserror::Error)]
-pub enum RecordProfileLogWriterError {
+pub enum ProfileLogWriterError {
     #[error("Can't open script file: {0}")]
     CantOpenFile(String),
     #[error("Error writing to file: {0}")]
     FileWriteError(String),
 }
 
-struct RecordProfileLogWriter {
+struct ProfileLogWriter {
     folder_path: PathBuf,
     log_file_name: String,
     next_file_index: usize,
@@ -362,9 +592,9 @@ struct RecordProfileLogWriter {
     current_file_event_count: u64,
 }
 
-impl RecordProfileLogWriter { 
+impl ProfileLogWriter { 
     pub async fn new(folder_path: PathBuf, log_file_name: String, max_size: u64) -> anyhow::Result<Self> {
-        let mut writer = RecordProfileLogWriter {
+        let mut writer = ProfileLogWriter {
             folder_path,
             log_file_name,
             next_file_index: 0,
@@ -379,8 +609,8 @@ impl RecordProfileLogWriter {
 
     pub async fn write_bootstrap_profile(&mut self, profile: &BootstrapRecordProfile) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
-            let json = format!("{}\n", to_string(profile).map_err(|e| RecordProfileLogWriterError::FileWriteError(e.to_string()))?);
-            writer.write_all(json.as_bytes()).await.map_err(|e| RecordProfileLogWriterError::FileWriteError(e.to_string()))?;
+            let json = format!("{}\n", to_string(profile).map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?);
+            writer.write_all(json.as_bytes()).await.map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
 
             self.current_file_event_count += 1;
 
@@ -394,8 +624,8 @@ impl RecordProfileLogWriter {
 
     pub async fn write_change_profile(&mut self, profile: &ChangeRecordProfile) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
-            let json = format!("{}\n", to_string(profile).map_err(|e| RecordProfileLogWriterError::FileWriteError(e.to_string()))?);
-            writer.write_all(json.as_bytes()).await.map_err(|e| RecordProfileLogWriterError::FileWriteError(e.to_string()))?;
+            let json = format!("{}\n", to_string(profile).map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?);
+            writer.write_all(json.as_bytes()).await.map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
 
             self.current_file_event_count += 1;
 
@@ -410,7 +640,7 @@ impl RecordProfileLogWriter {
     async fn open_next_file(&mut self) -> anyhow::Result<()> {
         // If there is a current writer, flush it and close it.
         if let Some(writer) = &mut self.current_writer {
-            writer.flush().await.map_err(|e| RecordProfileLogWriterError::FileWriteError(e.to_string()))?;
+            writer.flush().await.map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
         }
 
         // Construct the next file name using the folder path as a base, the script file name, and the next file index.
@@ -418,7 +648,7 @@ impl RecordProfileLogWriter {
         let file_path = format!("{}/{}_{:05}.jsonl", self.folder_path.to_string_lossy(), self.log_file_name, self.next_file_index);
 
         // Create the file and open it for writing
-        let file = File::create(&file_path).await.map_err(|_| RecordProfileLogWriterError::CantOpenFile(file_path.clone()))?;
+        let file = File::create(&file_path).await.map_err(|_| ProfileLogWriterError::CantOpenFile(file_path.clone()))?;
         self.current_writer = Some(BufWriter::new(file));
 
         // Increment the file index and event count
@@ -430,7 +660,7 @@ impl RecordProfileLogWriter {
 
     pub async fn close(&mut self) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
-            writer.flush().await.map_err(|e| RecordProfileLogWriterError::FileWriteError(e.to_string()))?;
+            writer.flush().await.map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
         }
         self.current_writer = None;
         Ok(())

@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File}, io::{AsyncWriteExt, BufWriter}};
@@ -29,7 +28,7 @@ impl JsonlFileResultStreamLoggerSettings {
     pub fn new(test_run_query_id: TestRunQueryId, config: &JsonlFileResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
         return Ok(Self {
             folder_path,
-            log_name: Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
+            log_name: "results".to_string(),
             max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
             test_run_query_id,
         });

@@ -313,7 +313,7 @@ impl TestRunHost {
                 query.pause_query_result_observer().await
             },
             None => {
-                anyhow::bail!("TestRunReaction not found: {:?}", test_run_query_id);
+                anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id);
             }
         }
     }
@@ -325,7 +325,7 @@ impl TestRunHost {
                 query.reset_query_result_observer().await
             },
             None => {
-                anyhow::bail!("TestRunReaction not found: {:?}", test_run_query_id);
+                anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id);
             }
         }
     }
@@ -337,7 +337,7 @@ impl TestRunHost {
                 query.start_query_result_observer().await
             },
             None => {
-                anyhow::bail!("TestRunReaction not found: {:?}", test_run_query_id);
+                anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id);
             }
         }
     }
@@ -349,7 +349,7 @@ impl TestRunHost {
                 query.stop_query_result_observer().await
             },
             None => {
-                anyhow::bail!("TestRunReaction not found: {:?}", test_run_query_id);
+                anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id);
             }
         }
     }

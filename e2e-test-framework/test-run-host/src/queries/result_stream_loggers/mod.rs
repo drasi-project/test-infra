@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use otel_metric_logger::{OtelMetricResultStreamLogger, OtelMetricResultStreamLoggerConfig};
 use otel_trace_logger::{OtelTraceResultStreamLogger, OtelTraceResultStreamLoggerConfig};
@@ -43,16 +45,23 @@ impl std::fmt::Display for ResultStreamLoggerError {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct ResultStreamLoggerResult {
+    pub has_output: bool,
+    pub logger_name: String,
+    pub output_folder_path: Option<PathBuf>,
+}
+
 #[async_trait]
 pub trait ResultStreamLogger : Send + Sync {
-    async fn close(&mut self) -> anyhow::Result<()>;
+    async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult>;
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()>;
 }
 
 #[async_trait]
 impl ResultStreamLogger for Box<dyn ResultStreamLogger + Send + Sync> {
-    async fn close(&mut self) -> anyhow::Result<()> {
-        (**self).close().await
+    async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult> {
+        (**self).end_test_run().await
     }
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {
         (**self).log_result_stream_record(record).await

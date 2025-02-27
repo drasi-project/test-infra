@@ -1,8 +1,0 @@
-# This file is for use with the REST Client extension for Visual Studio Code to make it easy to manually 
-# test the Test Service Web API.
-# https://marketplace.visualstudio.com/items?itemName=humao.rest-client
-
-@hostname = localhost
-@port = 9411
-
-GET http://{{hostname}}:{{port}}/api/v2/traces?lookback=3600000&limit=1000

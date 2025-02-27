@@ -5,7 +5,7 @@ use test_data_store::test_run_storage::TestRunQueryId;
 
 use crate::queries::result_stream_handlers::ResultStreamRecord;
 
-use super::ResultStreamLogger;
+use super::{ResultStreamLogger, ResultStreamLoggerResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConsoleResultStreamLoggerConfig {
@@ -44,8 +44,12 @@ impl ConsoleResultStreamLogger {
 
 #[async_trait]
 impl ResultStreamLogger for ConsoleResultStreamLogger {
-    async fn close(&mut self) -> anyhow::Result<()> {
-        Ok(())
+    async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult> {
+        Ok(ResultStreamLoggerResult {
+            has_output: false,
+            logger_name: "Console".to_string(),
+            output_folder_path: None,
+        })
     }
 
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {

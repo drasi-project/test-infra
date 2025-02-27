@@ -9,7 +9,7 @@ use test_data_store::{test_repo_storage::models::TestQueryDefinition, test_run_s
 
 pub mod query_result_observer;
 mod result_stream_handlers;
-mod result_stream_loggers;
+pub mod result_stream_loggers;
 mod result_stream_record;
 mod stop_triggers;
 

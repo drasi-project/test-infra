@@ -27,7 +27,7 @@ spec:
             cpu: "2"
         ports:
         - containerPort: 3200  # Tempo HTTP
-        - containerPort: 4317  # OTLP gRPC
+        - containerPort: 4315  # OTLP gRPC
         volumeMounts:
         - name: config-volume
           mountPath: /conf
@@ -55,7 +55,7 @@ data:
           protocols:
             grpc:
               max_recv_msg_size_mib: 26214400  # 10 MB
-              endpoint: 0.0.0.0:4317
+              endpoint: 0.0.0.0:4315
     metrics_generator:
       storage:
         path: /tmp/tempo/metrics              
@@ -75,7 +75,7 @@ data:
           max_bytes_per_trace: 26214400
         ingestion:
           burst_size_bytes: 52428800  # 50 MB
-          rate_limit_bytes: 20971520  # 20 MB
+          rate_limit_bytes: 52428800  # 50 MB
 ---
 apiVersion: v1
 kind: Service
@@ -87,8 +87,8 @@ spec:
   - port: 3200
     targetPort: 3200
     name: http
-  - port: 4317
-    targetPort: 4317
+  - port: 4315
+    targetPort: 4315
     name: otlp-grpc
   selector:
     app: tempo

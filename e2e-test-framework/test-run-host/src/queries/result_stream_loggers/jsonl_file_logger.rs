@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use tokio::{fs::{create_dir_all, File}, io::{AsyncWriteExt, BufWriter}};
@@ -10,7 +9,7 @@ use test_data_store::test_run_storage::{TestRunQueryId, TestRunQueryStorage};
 
 use crate::queries::result_stream_handlers::ResultStreamRecord;
 
-use super::{ResultStreamLogger, ResultStreamLoggerError};
+use super::{ResultStreamLogger, ResultStreamLoggerError, ResultStreamLoggerResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlFileResultStreamLoggerConfig {
@@ -29,7 +28,7 @@ impl JsonlFileResultStreamLoggerSettings {
     pub fn new(test_run_query_id: TestRunQueryId, config: &JsonlFileResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
         return Ok(Self {
             folder_path,
-            log_name: Utc::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
+            log_name: "results".to_string(),
             max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
             test_run_query_id,
         });
@@ -68,8 +67,14 @@ impl JsonlFileResultStreamLogger {
 
 #[async_trait]
 impl ResultStreamLogger for JsonlFileResultStreamLogger {
-    async fn close(&mut self) -> anyhow::Result<()> {
-        self.writer.close().await
+    async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult> {
+        self.writer.close().await?;
+
+        Ok(ResultStreamLoggerResult {
+            has_output: true,
+            logger_name: "JsonlFile".to_string(),
+            output_folder_path: Some(self.settings.folder_path.clone()),
+        })
     }
     
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {

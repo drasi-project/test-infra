@@ -12,7 +12,7 @@ use test_data_store::{
 
 use crate::queries::{result_stream_handlers::create_result_stream_handler, result_stream_record::{ControlSignal, QueryResultRecord}, stop_triggers::create_stop_trigger};
 
-use super::{result_stream_handlers::{ResultStreamHandler, ResultStreamHandlerMessage, ResultStreamRecord, ResultStreamStatus}, result_stream_loggers::{create_result_stream_loggers, ResultStreamLogger}, stop_triggers::StopTrigger, ResultStreamLoggerConfig};
+use super::{result_stream_handlers::{ResultStreamHandler, ResultStreamHandlerMessage, ResultStreamRecord, ResultStreamStatus}, result_stream_loggers::{create_result_stream_loggers, ResultStreamLogger, ResultStreamLoggerResult}, stop_triggers::StopTrigger, ResultStreamLoggerConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum QueryResultObserverStatus {
@@ -184,6 +184,7 @@ pub struct QueryResultObserverExternalState {
     pub error_message: Option<String>,
     pub result_summary: QueryResultObserverSummary,
     pub settings: QueryResultObserverSettings,
+    pub logger_results: Vec<ResultStreamLoggerResult>,
 }
 
 impl From<&QueryResultObserverInternalState> for QueryResultObserverExternalState {
@@ -194,6 +195,7 @@ impl From<&QueryResultObserverInternalState> for QueryResultObserverExternalStat
             error_message: state.error_message.clone(),
             result_summary: QueryResultObserverSummary::from(state),
             settings: state.settings.clone(),
+            logger_results: state.logger_results.clone(),
         }
     }
 }
@@ -202,6 +204,7 @@ pub struct QueryResultObserverInternalState {
     result_stream_handler: Box<dyn ResultStreamHandler + Send + Sync>,
     result_stream_handler_rx_channel: Receiver<ResultStreamHandlerMessage>,
     loggers: Vec<Box<dyn ResultStreamLogger + Send + Sync>>,
+    logger_results: Vec<ResultStreamLoggerResult>,
     error_message: Option<String>,
     settings: QueryResultObserverSettings,
     status: QueryResultObserverStatus,
@@ -230,6 +233,7 @@ impl QueryResultObserverInternalState {
             result_stream_handler,
             result_stream_handler_rx_channel,
             loggers,
+            logger_results: vec![],
             error_message: None,
             settings,
             status: QueryResultObserverStatus::Paused,
@@ -239,22 +243,40 @@ impl QueryResultObserverInternalState {
         })
     }
 
-    async fn close_loggers(&mut self) {
+    // async fn close_loggers(&mut self) {
+    //     let loggers = &mut self.loggers;
+    
+    //     log::debug!("Closing loggers - #loggers:{}", loggers.len());
+    
+    //     let futures: Vec<_> = loggers.iter_mut()
+    //         .map(|logger| {
+    //             async move {
+    //                 let result = logger.end_test_run().await;
+    //             }
+    //         })
+    //         .collect();
+    
+    //     // Wait for all of them to complete
+    //     // TODO - Handle errors properly.
+    //     let _ = join_all(futures).await;
+    // }
+
+    async fn close_loggers(&mut self) -> anyhow::Result<Vec<ResultStreamLoggerResult>> {
+        log::debug!("Closing loggers - #loggers:{}", self.loggers.len());
+
         let loggers = &mut self.loggers;
-    
-        log::debug!("Closing loggers - #loggers:{}", loggers.len());
-    
-        let futures: Vec<_> = loggers.iter_mut()
-            .map(|logger| {
-                async move {
-                    let _ = logger.close().await;
-                }
-            })
-            .collect();
-    
-        // Wait for all of them to complete
-        // TODO - Handle errors properly.
-        let _ = join_all(futures).await;
+
+        let futures = loggers.iter_mut().map(|logger| logger.end_test_run());
+
+        let results = join_all(futures).await;
+
+        let res: anyhow::Result<Vec<ResultStreamLoggerResult>> = results
+            .into_iter()
+            .collect::<Vec<_>>()  
+            .into_iter()
+            .collect();           
+
+        res
     }
 
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) {
@@ -381,9 +403,10 @@ impl QueryResultObserverInternalState {
 
     async fn reset(&mut self) -> anyhow::Result<()> {
 
-        self.close_loggers().await;    
+        self.close_loggers().await?;    
 
         self.loggers = create_result_stream_loggers(self.settings.id.clone(), &self.settings.loggers, &self.settings.output_storage).await?;
+        self.logger_results = vec![];
         self.error_message = None;
         self.status = QueryResultObserverStatus::Paused;
         self.stream_status = ResultStreamStatus::Unknown;
@@ -470,7 +493,15 @@ impl QueryResultObserverInternalState {
             }
         }
 
-        self.close_loggers().await;
+        match self.close_loggers().await {
+            Ok(results) => {
+                self.logger_results = results;
+            },
+            Err(e) => {
+                self.transition_to_error_state("Error closing loggers", Some(&e));
+            }
+        }
+
         self.write_result_summary().await;
     }
     

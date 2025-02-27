@@ -8,33 +8,13 @@ kind create cluster
 
 echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
 drasi init
+drasi init
 
 echo -e "${GREEN}\n\nConfigure observability stack...${RESET}"
 # Delete pre-installed otel collector. This is a workaround.
 kubectl delete deployment otel-collector -n drasi-system
 kubectl delete svc otel-collector -n drasi-system
 kubectl delete configmap otel-collector-conf -n drasi-system
-
-# Deploy the new observability stack
-# Deploy Tempo
-kubectl apply -f ./devops/observability/tempo.yaml
-echo "Waiting for Tempo..."
-kubectl wait --for=condition=Ready pod -l app=tempo -n drasi-system --timeout=5m
-
-# Deploy OTel Collector
-kubectl apply -f ./devops/observability/otel-collector.yaml
-echo "Waiting for OpenTelemetry Collector..."
-kubectl wait --for=condition=Available deployment/otel-collector -n drasi-system --timeout=5m
-
-# Deploy Prometheus
-kubectl apply -f ./devops/observability/prometheus.yaml
-echo "Waiting for Prometheus..."
-kubectl wait --for=condition=Available deployment/prometheus -n drasi-system --timeout=5m
-
-# Deploy Grafana
-kubectl apply -f ./devops/observability/grafana.yaml
-echo "Waiting for Grafana..."
-kubectl wait --for=condition=Available deployment/grafana -n drasi-system --timeout=5m
 
 # Deploy the Test Service and wait for it to be available
 echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"
@@ -71,8 +51,5 @@ curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run
 # Start the Test Run Source 
 echo -e "${GREEN}\n\nStarting the Test Run Source...${RESET}"
 curl -X POST -H "Content-Type: application/json" http://localhost:63123/test_run_host/sources/az_dev_repo.population.test_run_001.geo-db/start
-
-echo -e "${GREEN}\n\nPort forwarding Grafana UI...${RESET}"
-kubectl port-forward -n drasi-system services/grafana 3000:3000 &
 
 echo -e "${GREEN}\n\nDeployment Complete.${RESET}"

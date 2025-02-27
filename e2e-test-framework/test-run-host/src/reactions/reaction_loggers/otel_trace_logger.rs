@@ -77,7 +77,7 @@ impl OtelTraceReactionLogger {
 
         Ok(Box::new(Self {
             settings,
-            // trace_propagator: TraceContextPropagator::new(), // Fixed typo
+            // trace_propagator: TraceContextPropagator::new(), 
         }))        
     
     }

@@ -30,7 +30,7 @@ spec:
             memory: "2Gi"
             cpu: "1"
         ports:
-        - containerPort: 4317  # OTLP gRPC
+        - containerPort: 4315  # OTLP gRPC
         - containerPort: 4318  # OTLP HTTP
         - containerPort: 8889  # Prometheus metrics
         - containerPort: 9411  # Zipkin receiver
@@ -53,7 +53,7 @@ data:
       otlp:
         protocols:
           grpc:
-            endpoint: 0.0.0.0:4317
+            endpoint: 0.0.0.0:4315
           http:
             endpoint: 0.0.0.0:4318
       zipkin:
@@ -61,14 +61,14 @@ data:
     processors:
       batch:
         timeout: 1s
-        send_batch_size: 2000
+        send_batch_size: 4000
       memory_limiter:
         check_interval: 1s
         limit_mib: 1500
         spike_limit_mib: 500
     exporters:
       otlp:
-        endpoint: "tempo:4317"
+        endpoint: "tempo:4315"
         tls:
           insecure: true
       prometheus:
@@ -92,8 +92,8 @@ metadata:
   namespace: drasi-system
 spec:
   ports:
-  - port: 4317
-    targetPort: 4317
+  - port: 4315
+    targetPort: 4315
     name: otlp-grpc
   - port: 4318
     targetPort: 4318

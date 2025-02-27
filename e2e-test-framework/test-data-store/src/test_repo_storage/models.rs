@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{num::NonZeroU32, str::FromStr};
 
 use serde::{Deserialize, Serialize, de::{self, Deserializer}};
 
@@ -57,8 +57,8 @@ impl<'de> Deserialize<'de> for TimeMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum SpacingMode {
     None,
+    Rate(NonZeroU32),
     Recorded,
-    Fixed(u64),
 }
 
 impl Default for SpacingMode {
@@ -67,10 +67,6 @@ impl Default for SpacingMode {
     }
 }
 
-// Implementation of FromStr for ReplayEventSpacingMode.
-// For the Fixed variant, the spacing is specified as a string duration such as '5s' or '100n'.
-// Supported units are seconds ('s'), milliseconds ('m'), microseconds ('u'), and nanoseconds ('n').
-// If the string can't be parsed as a TimeDelta, an error is returned.
 impl FromStr for SpacingMode {
     type Err = anyhow::Error;
 
@@ -79,21 +75,14 @@ impl FromStr for SpacingMode {
             "none" => Ok(Self::None),
             "recorded" => Ok(Self::Recorded),
             _ => {
-                // Parse the string as a number, followed by a time unit character.
-                let (num_str, unit_str) = s.split_at(s.len() - 1);
-                let num = match num_str.parse::<u64>() {
-                    Ok(num) => num,
+                // Parse the string as a NonZero<u32>.
+                match s.parse::<u32>() {
+                    Ok(num) => match NonZeroU32::new(num) {
+                        Some(rate) => Ok(Self::Rate(rate)),
+                        None => anyhow::bail!("Invalid SpacingMode: {}", s),
+                    },
                     Err(e) => {
                         anyhow::bail!("Error parsing SpacingMode: {}", e);
-                    }
-                };
-                match unit_str {
-                    "s" => Ok(Self::Fixed(num * 1000000000)),
-                    "m" => Ok(Self::Fixed(num * 1000000)),
-                    "u" => Ok(Self::Fixed(num * 1000)),
-                    "n" => Ok(Self::Fixed(num)),
-                    _ => {
-                        anyhow::bail!("Invalid SpacingMode: {}", s);
                     }
                 }
             }
@@ -106,7 +95,7 @@ impl std::fmt::Display for SpacingMode {
         match self {
             Self::None => write!(f, "none"),
             Self::Recorded => write!(f, "recorded"),
-            Self::Fixed(d) => write!(f, "{}", d),
+            Self::Rate(r) => write!(f, "{}", r),
         }
     }
 }
@@ -422,7 +411,7 @@ mod tests {
             "kind": "Script",
             "script_file_folder": "source_change_scripts",
             "script_file_list": ["change01.jsonl", "change02.jsonl"],
-            "spacing_mode": "100m",
+            "spacing_mode": "100",
             "time_mode": "recorded"
         }
         "#;
@@ -432,7 +421,7 @@ mod tests {
 
         match source_change_generator {
             SourceChangeGeneratorDefinition::Script { common_config, unique_config } => {
-                assert_eq!(common_config.spacing_mode, SpacingMode::Fixed(100000000));
+                assert_eq!(common_config.spacing_mode, SpacingMode::Rate(NonZeroU32::new(100).unwrap()));
                 assert_eq!(common_config.time_mode, TimeMode::Recorded);
                 assert_eq!(unique_config.script_file_folder, "source_change_scripts");
             }
@@ -556,17 +545,15 @@ mod tests {
     fn test_spacing_mode_from_str() {
         assert_eq!("none".parse::<SpacingMode>().unwrap(), SpacingMode::None);
         assert_eq!("recorded".parse::<SpacingMode>().unwrap(), SpacingMode::Recorded);
-        assert_eq!("100s".parse::<SpacingMode>().unwrap(), SpacingMode::Fixed(100000000000));
-        assert_eq!("100m".parse::<SpacingMode>().unwrap(), SpacingMode::Fixed(100000000));
-        assert_eq!("100u".parse::<SpacingMode>().unwrap(), SpacingMode::Fixed(100000));
-        assert_eq!("100n".parse::<SpacingMode>().unwrap(), SpacingMode::Fixed(100));
+        assert_eq!("100".parse::<SpacingMode>().unwrap(), SpacingMode::Rate(NonZeroU32::new(100).unwrap()));
+        assert_eq!("1000".parse::<SpacingMode>().unwrap(), SpacingMode::Rate(NonZeroU32::new(1000).unwrap()));
     }
 
     #[test]
     fn test_spacing_mode_display() {
         assert_eq!(SpacingMode::None.to_string(), "none");
         assert_eq!(SpacingMode::Recorded.to_string(), "recorded");
-        assert_eq!(SpacingMode::Fixed(100000000000).to_string(), "100000000000");
+        assert_eq!(SpacingMode::Rate(NonZeroU32::new(1000).unwrap()).to_string(), "1000");
     }
 
     #[test]
@@ -579,9 +566,9 @@ mod tests {
         let spacing_mode: SpacingMode = serde_json::from_str(json).unwrap();
         assert_eq!(spacing_mode, SpacingMode::Recorded);
 
-        let json = r#""100s""#;
+        let json = r#""1000""#;
         let spacing_mode: SpacingMode = serde_json::from_str(json).unwrap();
-        assert_eq!(spacing_mode, SpacingMode::Fixed(100000000000));
+        assert_eq!(spacing_mode, SpacingMode::Rate(NonZeroU32::new(1000).unwrap()));
     }
 
     #[test]

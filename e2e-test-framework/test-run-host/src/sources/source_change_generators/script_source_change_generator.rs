@@ -1,10 +1,11 @@
-use std::{fmt::{self, Debug, Formatter}, pin::Pin, sync::Arc, time::SystemTime};
+use std::{fmt::{self, Debug, Formatter}, num::NonZeroU32, pin::Pin, sync::Arc, time::{Duration, SystemTime}, u32};
 
 use async_trait::async_trait;
 use futures::{future::join_all, Stream};
+use governor::{Quota, RateLimiter};
 use serde::Serialize;
 use time::{OffsetDateTime, format_description};
-use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle, time::{sleep, Duration}};
+use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle, time::sleep};
 use tokio_stream::StreamExt;
 
 use test_data_store::{
@@ -282,6 +283,7 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub message_seq_num: u64,
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
+    pub rate_limiter_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
     pub settings: ScriptSourceChangeGeneratorSettings,
     pub skips_remaining: u64,
     pub skips_spacing_mode: Option<SpacingMode>,
@@ -330,11 +332,16 @@ impl ScriptSourceChangeGeneratorInternalState {
             }
         }
 
-        // Create the channels used for message passing.
-        let (change_tx_channel, change_rx_channel) = tokio::sync::mpsc::channel(100);
-        let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(100);
+        // Create the channels and threads used for message passing.
+        let (change_tx_channel, change_rx_channel) = tokio::sync::mpsc::channel(1000);
+
+        let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(1000);
         let _ = tokio::spawn(delayer_thread(settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
-    
+
+        let (rate_limiter_tx_channel, rate_limiter_rx_channel) = tokio::sync::mpsc::channel(1000);
+        let _ = tokio::spawn(rate_limiter_thread(settings.id.clone(), settings.spacing_mode.clone(), rate_limiter_rx_channel, change_tx_channel.clone()));
+
+        
         let state = Self {
             change_stream,
             change_tx_channel,
@@ -345,6 +352,7 @@ impl ScriptSourceChangeGeneratorInternalState {
             message_seq_num: 0,
             next_record,
             previous_record: None,
+            rate_limiter_tx_channel,
             settings,
             skips_remaining: 0,
             skips_spacing_mode: None,
@@ -360,39 +368,38 @@ impl ScriptSourceChangeGeneratorInternalState {
         Ok((state, change_rx_channel))
     }
 
-    fn calculate_record_scheduling_delay(&mut self, next_record: &SequencedChangeScriptRecord
-    ) -> anyhow::Result<u64> {
-        let delay_ns = match self.status {
-            SourceChangeGeneratorStatus::Skipping => {
-                match self.skips_spacing_mode {
-                    Some(SpacingMode::None) => 0,
-                    Some(SpacingMode::Fixed(nanos)) => nanos,
-                    Some(SpacingMode::Recorded) => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset },
-                    None => 0,
-                }
-            },
-            SourceChangeGeneratorStatus::Stepping => {
-                match self.steps_spacing_mode {
-                    Some(SpacingMode::None) => 0,
-                    Some(SpacingMode::Fixed(nanos)) => nanos,
-                    Some(SpacingMode::Recorded) => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
-                    None => match self.settings.spacing_mode {
-                        SpacingMode::None => 0,
-                        SpacingMode::Fixed(nanos) => nanos,
-                        SpacingMode::Recorded => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
-                    },
-                }
-            },
-            SourceChangeGeneratorStatus::Running => match self.settings.spacing_mode {
-                SpacingMode::None => 0,
-                SpacingMode::Fixed(nanos) => nanos,
-                SpacingMode::Recorded => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
-            },
-            _ => anyhow::bail!("Calculating record delay for unexpected status: {:?}", self.status),
-        };
+    // fn calculate_record_scheduling_delay(&mut self, next_record: &SequencedChangeScriptRecord) -> anyhow::Result<u64> {
+    //     let delay_ns = match self.status {
+    //         SourceChangeGeneratorStatus::Skipping => {
+    //             match self.skips_spacing_mode {
+    //                 Some(SpacingMode::None) => 0,
+    //                 Some(SpacingMode::Rate(nanos)) => nanos,
+    //                 Some(SpacingMode::Recorded) => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset },
+    //                 None => 0,
+    //             }
+    //         },
+    //         SourceChangeGeneratorStatus::Stepping => {
+    //             match self.steps_spacing_mode {
+    //                 Some(SpacingMode::None) => 0,
+    //                 Some(SpacingMode::Rate(nanos)) => nanos,
+    //                 Some(SpacingMode::Recorded) => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
+    //                 None => match self.settings.spacing_mode {
+    //                     SpacingMode::None => 0,
+    //                     SpacingMode::Rate(nanos) => nanos,
+    //                     SpacingMode::Recorded => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
+    //                 },
+    //             }
+    //         },
+    //         SourceChangeGeneratorStatus::Running => match self.settings.spacing_mode {
+    //             SpacingMode::None => 0,
+    //             SpacingMode::Rate(nanos) => nanos,
+    //             SpacingMode::Recorded => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
+    //         },
+    //         _ => anyhow::bail!("Calculating record delay for unexpected status: {:?}", self.status),
+    //     };
     
-        Ok(delay_ns)
-    }
+    //     Ok(delay_ns)
+    // }
 
     async fn close_dispatchers(&mut self) {
         let dispatchers = &mut self.dispatchers;
@@ -667,35 +674,85 @@ impl ScriptSourceChangeGeneratorInternalState {
             None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
         };
     
-        let delay_ns = self.calculate_record_scheduling_delay(&next_record)?;
-    
         self.message_seq_num += 1;
-    
-        let sch_msg = ScheduledChangeScriptRecordMessage {
-            delay_ns,
+
+        let mut sch_msg = ScheduledChangeScriptRecordMessage {
+            delay_ns: 0,
             seq_num: self.message_seq_num,
-            virtual_time_ns_replay: self.virtual_time_ns_current + delay_ns,
-        };    
+            virtual_time_ns_replay: self.virtual_time_ns_current
+        };   
+
+        match self.status {
+            SourceChangeGeneratorStatus::Skipping => {},
+            SourceChangeGeneratorStatus::Stepping => {
+                match self.steps_spacing_mode {
+                    Some(SpacingMode::None) => {
+                        if let Err(e) = self.change_tx_channel.send(sch_msg).await {
+                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        }    
+                    },
+                    Some(SpacingMode::Rate(_)) => {
+                        if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
+                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        }   
+                    },
+                    Some(SpacingMode::Recorded) => {
+                        if next_record.offset_ns > self.virtual_time_ns_offset { 
+                            sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
+                            sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
+                        }
+        
+                        if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
+                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        };
+                    },
+                    None => match self.settings.spacing_mode {
+                        SpacingMode::None => {
+                            if let Err(e) = self.change_tx_channel.send(sch_msg).await {
+                                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                            }    
+                        },
+                        SpacingMode::Rate(_) => {
+                            if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
+                                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                            }   
+                        },
+                        SpacingMode::Recorded => {
+                            if next_record.offset_ns > self.virtual_time_ns_offset { 
+                                sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
+                                sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
+                            }
+            
+                            if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
+                                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                            };
+                        }
+                    },
+                }
+            },
+            SourceChangeGeneratorStatus::Running => match self.settings.spacing_mode {
+                SpacingMode::None => {
+                    if let Err(e) = self.change_tx_channel.send(sch_msg).await {
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                    }    
+                },
+                SpacingMode::Rate(_) => {
+                    if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                    }   
+                },
+                SpacingMode::Recorded => {
+                    if next_record.offset_ns > self.virtual_time_ns_offset { 
+                        sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
+                        sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
+                    }
     
-        // Take action based on size of the delay.
-        // It doesn't make sense to delay for trivially small amounts of time, nor does it make sense to send 
-        // a message to the delayer thread for relatively small delays. 
-        // TODO: This figures might need to be adjusted, or made configurable.
-        if delay_ns < 1_000 {
-            // Process the record immediately.
-            if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
-        } else if delay_ns < 10_000_000 {
-            // Sleep inproc, then process the record.
-            sleep(Duration::from_nanos(delay_ns)).await;
-            if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
-        } else {
-            if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
-            }
+                    if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                    };
+                }
+            },
+            _ => anyhow::bail!("Calculating record delay for unexpected status: {:?}", self.status),
         };
     
         Ok(())
@@ -1138,8 +1195,31 @@ pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receive
         match delayer_rx_channel.recv().await {
             Some(message) => {
                 // Sleep for the specified time before sending the message to the change_tx_channel.
-                sleep(Duration::from_nanos(message.delay_ns)).await;
+                sleep(Duration::new(0, message.delay_ns as u32)).await;
+                if let Err(e) = change_tx_channel.send(message).await {
+                    log::error!("Error sending ScheduledChangeScriptRecordMessage to change_tx_channel: {:?}", e);
+                }
+            },
+            None => {
+                log::error!("ChangeScriptRecord delayer channel closed.");
+                break;
+            }
+        }
+    }
+}
 
+pub async fn rate_limiter_thread(id: TestRunSourceId, spacing_mode: SpacingMode, mut delayer_rx_channel: Receiver<ScheduledChangeScriptRecordMessage>, change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>) {
+    log::info!("Rate limiter thread started for TestRunSource {} ...", id);
+
+    let limiter = match spacing_mode {
+        SpacingMode::Rate(rate) => RateLimiter::direct(Quota::per_second(rate)),
+        _ => RateLimiter::direct(Quota::per_second(NonZeroU32::new(u32::MAX).unwrap())),
+    };
+
+    loop {
+        match delayer_rx_channel.recv().await {
+            Some(message) => {
+                limiter.until_ready().await;
                 if let Err(e) = change_tx_channel.send(message).await {
                     log::error!("Error sending ScheduledChangeScriptRecordMessage to change_tx_channel: {:?}", e);
                 }

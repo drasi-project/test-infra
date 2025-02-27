@@ -14,6 +14,7 @@ axum = "0.6.19"
 azure_core = "0.20.0"
 azure_storage = "0.20.0"
 azure_storage_blobs = "0.20.0"
+base64 = "0.21"
 chrono = { version = "0.4.38", features = ["serde"] }
 clap = { version = "4.3.21", features = ["derive", "env"] }
 futures = "0.3.3"

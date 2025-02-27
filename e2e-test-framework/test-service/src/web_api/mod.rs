@@ -22,14 +22,18 @@ mod sources;
 
 #[derive(Debug, Error)]
 pub enum TestServiceWebApiError {
-    #[error("Error: {0}")]
+    #[error("Anyhow Error: {0}")]
     AnyhowError(anyhow::Error),
     #[error("{0} with ID {1} not found")]
     NotFound(String, String),
-    #[error("Error: {0}")]
+    #[error("Serde Error: {0}")]
     SerdeJsonError(serde_json::Error),
     #[error("TestRunHost is in an Error state: {0}")]
     TestRunHostError(String),
+    #[error("NotReady: {0}")]
+    NotReady(String),
+    #[error("IO Error: {0}")]
+    IOError(std::io::Error),
 }
 
 impl From<anyhow::Error> for TestServiceWebApiError {
@@ -41,6 +45,13 @@ impl From<anyhow::Error> for TestServiceWebApiError {
 impl From<serde_json::Error> for TestServiceWebApiError {
     fn from(error: serde_json::Error) -> Self {
         TestServiceWebApiError::SerdeJsonError(error)
+    }
+}
+
+
+impl From<std::io::Error> for TestServiceWebApiError {
+    fn from(error: std::io::Error) -> Self {
+        TestServiceWebApiError::IOError(error)
     }
 }
 
@@ -58,6 +69,12 @@ impl IntoResponse for TestServiceWebApiError {
             },
             TestServiceWebApiError::TestRunHostError(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
+            },
+            TestServiceWebApiError::NotReady(msg) => {
+                (StatusCode::SERVICE_UNAVAILABLE, Json(msg)).into_response()
+            },
+            TestServiceWebApiError::IOError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
             },
         }
     }

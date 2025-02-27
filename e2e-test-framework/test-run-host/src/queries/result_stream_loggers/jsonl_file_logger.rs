@@ -9,7 +9,7 @@ use test_data_store::test_run_storage::{TestRunQueryId, TestRunQueryStorage};
 
 use crate::queries::result_stream_handlers::ResultStreamRecord;
 
-use super::{ResultStreamLogger, ResultStreamLoggerError};
+use super::{ResultStreamLogger, ResultStreamLoggerError, ResultStreamLoggerResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlFileResultStreamLoggerConfig {
@@ -67,8 +67,14 @@ impl JsonlFileResultStreamLogger {
 
 #[async_trait]
 impl ResultStreamLogger for JsonlFileResultStreamLogger {
-    async fn close(&mut self) -> anyhow::Result<()> {
-        self.writer.close().await
+    async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult> {
+        self.writer.close().await?;
+
+        Ok(ResultStreamLoggerResult {
+            has_output: true,
+            logger_name: "JsonlFile".to_string(),
+            output_folder_path: Some(self.settings.folder_path.clone()),
+        })
     }
     
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {

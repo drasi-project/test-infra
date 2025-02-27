@@ -2,10 +2,10 @@ use core::fmt;
 use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use derive_more::Debug;
-use queries::{query_result_observer::QueryResultObserverCommandResponse, TestRunQuery, TestRunQueryConfig, TestRunQueryDefinition, TestRunQueryState};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use queries::{query_result_observer::QueryResultObserverCommandResponse, result_stream_loggers::ResultStreamLoggerResult, TestRunQuery, TestRunQueryConfig, TestRunQueryDefinition, TestRunQueryState};
 use reactions::{reaction_observer::ReactionObserverCommandResponse, TestRunReaction, TestRunReactionConfig, TestRunReactionDefinition, TestRunReactionState};
 use sources::{
     bootstrap_data_generators::BootstrapData, source_change_generators::SourceChangeGeneratorCommandResponse, TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState
@@ -262,6 +262,18 @@ impl TestRunHost {
         match self.queries.read().await.get(&test_run_query_id) {
             Some(query) => {
                 query.get_state().await
+            },
+            None => {
+                anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id);
+            }
+        }
+    }
+
+    pub async fn get_test_query_result_logger_output(&self, test_run_query_id: &str) -> anyhow::Result<Vec<ResultStreamLoggerResult>> {
+        let test_run_query_id = TestRunQueryId::try_from(test_run_query_id)?;
+        match self.queries.read().await.get(&test_run_query_id) {
+            Some(query) => {
+                Ok(query.get_query_result_observer_state().await?.logger_results)
             },
             None => {
                 anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id);

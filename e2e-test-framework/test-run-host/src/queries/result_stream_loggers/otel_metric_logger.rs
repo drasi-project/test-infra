@@ -13,7 +13,7 @@ use test_data_store::test_run_storage::TestRunQueryId;
 
 use crate::queries::{result_stream_handlers::ResultStreamRecord, result_stream_record::{ChangeEvent, QueryResultRecord}};
 
-use super::ResultStreamLogger;
+use super::{ResultStreamLogger, ResultStreamLoggerResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OtelMetricResultStreamLoggerConfig {
@@ -353,9 +353,14 @@ impl OtelMetricResultStreamLogger {
 
 #[async_trait]
 impl ResultStreamLogger for OtelMetricResultStreamLogger {
-    async fn close(&mut self) -> anyhow::Result<()> {
+    async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult> {
         self.meter_provider.shutdown()?;
-        Ok(())
+
+        Ok(ResultStreamLoggerResult {
+            has_output: false,
+            logger_name: "OtelMetric".to_string(),
+            output_folder_path: None,
+        })
     }
     
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {

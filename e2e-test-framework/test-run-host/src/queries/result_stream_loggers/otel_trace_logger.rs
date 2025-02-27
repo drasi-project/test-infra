@@ -10,7 +10,7 @@ use test_data_store::test_run_storage::TestRunQueryId;
 
 use crate::queries::result_stream_handlers::ResultStreamRecord;
 
-use super::ResultStreamLogger;
+use super::{ResultStreamLogger, ResultStreamLoggerResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OtelTraceResultStreamLoggerConfig {
@@ -75,16 +75,20 @@ impl OtelTraceResultStreamLogger {
 
         Ok(Box::new(Self {
             settings,
-            // trace_propagator: TraceContextPropagator::new(), // Fixed typo
+            // trace_propagator: TraceContextPropagator::new(), 
         }))        
     }
 }  
 
 #[async_trait]
 impl ResultStreamLogger for OtelTraceResultStreamLogger {
-    async fn close(&mut self) -> anyhow::Result<()> {
+    async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult> {
         // opentelemetry::global::shutdown_tracer_provider();
-        Ok(())
+        Ok(ResultStreamLoggerResult {
+            has_output: false,
+            logger_name: "OtelTrace".to_string(),
+            output_folder_path: None,
+        })
     }
 
     async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {

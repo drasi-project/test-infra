@@ -164,10 +164,6 @@ pub struct SourceChangeRecord {
     pub source_change_event: SourceChangeEvent,
 }
 
-// The SequencedChangeScriptRecord struct wraps a ChangeScriptRecord and ensures that each record has a 
-// sequence number and an offset_ns field. The sequence number is the order in which the record was read
-// from the script files. The offset_ns field the nanos since the start of the script starting time, 
-// which is the start_time field in the Header record.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SequencedChangeScriptRecord {
     pub seq: u64,

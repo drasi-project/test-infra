@@ -82,4 +82,4 @@ jobs:
             - name: Build
               run: |
                 cd ${{ matrix.component.path }}
-                DOCKERX_OPTS="--output type=docker,dest=${{ github.workspace }}/${{ matrix.component.name }}.tar --cache-to type=local,dest=/tmp/.buildx-cache,mode=max --cache-from type=local,src=/tmp/.buildx-cache" make
+                make

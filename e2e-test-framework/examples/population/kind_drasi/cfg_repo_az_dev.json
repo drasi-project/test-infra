@@ -3,7 +3,7 @@
     "kind": "AzureStorageBlob",
     "force_cache_refresh": false,
     "account_name": "drasidev",
-    "access_key": "0krPTp1hJrkdbxENWhVmysB9WsA2dHyVCdQG2WkdL25D3NFMyd/+QkM7BmQ/wiwpNbzqjoB/a7vR+ASt8LkhtQ==",
+    "access_key": "<your_access_key>",
     "container": "e2etests",
     "root_path": "dev_repo"
 }

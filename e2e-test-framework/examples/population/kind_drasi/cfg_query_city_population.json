@@ -8,13 +8,12 @@
     {
       "kind": "Profiler",
       "write_bootstrap_log": false,
-      "write_change_log": true
+      "write_change_image": true,
+      "write_change_log": false
     },
     {
-      "kind": "OtelMetric"
-    },
-    {
-      "kind": "OtelTrace"
-    }        
+      "kind": "OtelMetric",
+      "otel_endpoint": "http://otel-collector:4315"
+    }
   ]
 }

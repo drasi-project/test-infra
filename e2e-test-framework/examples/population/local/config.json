@@ -68,16 +68,17 @@
             "test_repo_id": "local_dev_repo",
             "test_run_id": "test_run_001",
             "test_query_id": "city-population",
-            "start_immediately": false,
+            "start_immediately": true,
             "loggers": [
               {
                 "kind": "Profiler",
                 "write_bootstrap_log": false,
+                "write_change_image": true,
                 "write_change_log": true
               },
               {
                 "kind": "JsonlFile",
-                "max_lines_per_file": 5000
+                "max_lines_per_file": 12411
               }
             ]
           }          

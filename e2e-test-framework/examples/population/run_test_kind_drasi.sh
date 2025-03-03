@@ -21,7 +21,7 @@ echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"
 kubectl apply -f ./devops/test-service-deployment.yaml
 kubectl wait -n drasi-system --for=condition=available deployment/drasi-test-service --timeout=300s
 
-# Forward the Test Service port and configure the Repository, Source, and Reaction
+# Forward the Test Service port and configure the Repository, Source, and Query
 echo -e "${GREEN}\n\nPort forwarding to enable access the Test Service Web API...${RESET}"
 kubectl port-forward -n drasi-system services/drasi-test-service 63123:63123 &
 sleep 5

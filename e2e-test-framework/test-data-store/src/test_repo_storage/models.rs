@@ -119,8 +119,6 @@ pub struct LocalTestDefinition {
     #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
-    pub reactions: Vec<TestReactionDefinition>,
-    #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
 }
 
@@ -135,8 +133,6 @@ pub struct TestDefinition {
     #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
-    pub reactions: Vec<TestReactionDefinition>,
-    #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,    
 }
 
@@ -149,7 +145,6 @@ impl TestDefinition {
             test_folder: None,
             sources: vec![source],
             queries: Vec::new(),
-            reactions: Vec::new()
         }
     }
 
@@ -246,47 +241,6 @@ pub struct DaprSourceChangeDispatcherDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlFileSourceChangeDispatcherDefinition {
     pub max_events_per_file: Option<u64>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum TestReactionDefinition {
-    AzureEventGrid {
-        #[serde(flatten)]
-        common_def: CommonTestReactionDefinition,
-        #[serde(flatten)]
-        unique_def: AzureEventGridTestReactionDefinition,
-    },
-    SignalR {
-        #[serde(flatten)]
-        common_def: CommonTestReactionDefinition,
-        #[serde(flatten)]
-        unique_def: SignalRTestReactionDefinition,
-    },
-}
-
-impl TestReactionDefinition {
-    pub fn get_id(&self) -> String {
-        match self {
-            TestReactionDefinition::AzureEventGrid { common_def, .. } => common_def.test_reaction_id.clone(),
-            TestReactionDefinition::SignalR { common_def, .. } => common_def.test_reaction_id.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CommonTestReactionDefinition {
-    #[serde(default)]
-    pub queries: Vec<QueryId>,
-    pub test_reaction_id: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AzureEventGridTestReactionDefinition {
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SignalRTestReactionDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -509,7 +463,6 @@ mod tests {
                 }
             ],
             "queries": [],
-            "reactions": [],
             "clients": []
         }
         "#;

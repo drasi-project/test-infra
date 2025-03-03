@@ -30,7 +30,6 @@
                             }
                           }
                         ],
-                        "reactions": [],                      
                         "sources": [
                           {
                             "test_source_id": "geo-db",
@@ -83,7 +82,6 @@
             ]
           }          
         ],
-        "reactions":[],        
         "sources": [
             {
                 "test_id": "population",

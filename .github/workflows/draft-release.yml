@@ -36,6 +36,25 @@ jobs:
     permissions:
       packages: write
       contents: read
+    strategy:
+            matrix:
+                component: [
+                    {
+                        label: 'E2E proxy',
+                        path: 'e2e-test-framework/proxy',
+                        name: 'e2e-proxy'
+                    },
+                    {
+                        label: 'E2E Reactivator',
+                        path: 'e2e-test-framework/reactivator',
+                        name: 'e2e-reactivator'
+                    },
+                    {
+                        label: 'E2E Test Service',
+                        path: 'e2e-test-framework/test-service',
+                        name: 'e2e-test-service'
+                    }
+                ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -57,7 +76,7 @@ jobs:
      
       - name: Build and Push to GHCR
         run: |
-          cd e2e-test-framework
+          cd ${{ matrix.component.path }}
           DOCKER_TAG_VERSION=${{ inputs.tag }} \
           IMAGE_PREFIX=${{ inputs.image_prefix }} \
           DOCKERX_OPTS="--push --platform linux/amd64,linux/arm64 --cache-to type=local,dest=/tmp/.buildx-cache,mode=max --cache-from type=local,src=/tmp/.buildx-cache" \

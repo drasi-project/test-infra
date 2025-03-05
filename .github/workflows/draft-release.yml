@@ -70,7 +70,8 @@ jobs:
       contents: read
     strategy:
       matrix:
-        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        runner: [ubuntu-latest]
+        # runner: [ubuntu-latest, ubuntu-24.04-arm]
         component: ${{ fromJson(needs.setup.outputs.components) }}
     steps:
       - name: Checkout repository

@@ -30,31 +30,48 @@ permissions:
   contents: read  # Required for actions/checkout
   packages: read
 
+env:
+  COMPONENTS: '[
+      {
+        "label": "E2E proxy",
+        "path": "e2e-test-framework/proxy",
+        "name": "e2e-proxy"
+      },
+      {
+        "label": "E2E Reactivator",
+        "path": "e2e-test-framework/reactivator",
+        "name": "e2e-reactivator"
+      },
+      {
+        "label": "E2E Test Service",
+        "path": "e2e-test-framework/test-service",
+        "name": "e2e-test-service"
+      }
+    ]'
 jobs:
-  e2e-test-framework:
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.set-components.outputs.components }}
+    steps:
+      - name: Set Components
+        id: set-components
+        run: |
+          echo "components=$(echo '${{ env.COMPONENTS }}' | jq -c .)" >> $GITHUB_OUTPUT
+      - name: Debug outputs
+        run: |
+          echo "Test components= ${{ steps.set-components.outputs.components }}"
+
+  build-images:
+    runs-on: ${{ matrix.runner }}
+    needs: setup
     permissions:
       packages: write
       contents: read
     strategy:
-            matrix:
-                component: [
-                    {
-                        label: 'E2E proxy',
-                        path: 'e2e-test-framework/proxy',
-                        name: 'e2e-proxy'
-                    },
-                    {
-                        label: 'E2E Reactivator',
-                        path: 'e2e-test-framework/reactivator',
-                        name: 'e2e-reactivator'
-                    },
-                    {
-                        label: 'E2E Test Service',
-                        path: 'e2e-test-framework/test-service',
-                        name: 'e2e-test-service'
-                    }
-                ]
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        component: ${{ fromJson(needs.setup.outputs.components) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -73,11 +90,62 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Determine platform and tag suffix
+        id: platform
+        run: |
+          if [[ "${{ matrix.runner }}" == "ubuntu-latest" ]]; then
+            echo "platform=linux/amd64" >> $GITHUB_OUTPUT
+            echo "suffix=-amd64" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.runner }}" == "ubuntu-24.04-arm" ]]; then
+            echo "platform=linux/arm64" >> $GITHUB_OUTPUT
+            echo "suffix=-arm64" >> $GITHUB_OUTPUT
+          fi
      
       - name: Build and Push to GHCR
+        if: contains(matrix.component.platforms, steps.platform.outputs.platform)
         run: |
           cd ${{ matrix.component.path }}
-          DOCKER_TAG_VERSION=${{ inputs.tag }} \
+          DOCKER_TAG_VERSION=${{ inputs.tag }}${{ steps.platform.outputs.suffix }} \
           IMAGE_PREFIX=${{ inputs.image_prefix }} \
-          DOCKERX_OPTS="--push --platform linux/amd64,linux/arm64 --cache-to type=local,dest=/tmp/.buildx-cache,mode=max --cache-from type=local,src=/tmp/.buildx-cache" \
+          DOCKERX_OPTS="--push --platform ${{ steps.platform.outputs.platform }}" \
           make
+
+  create-multi-arch-manifest:
+    runs-on: ubuntu-latest
+    needs: build-images
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        run: |
+          component_names=($(echo "$COMPONENTS" | jq -r '.[].name'))
+          
+          # Loop over component names using a for loop
+          for name in "${component_names[@]}"; do
+            # Get platforms for this component
+            platforms=$(echo "$COMPONENTS" | jq -r --arg name "$name" '.[] | select(.name == $name) | .platforms | join(" ")')
+            
+            # Build the list of manifest images dynamically
+            manifest_images=()
+            if echo "$platforms" | grep -q "linux/amd64"; then
+              manifest_images+=("${{ inputs.image_prefix }}/${name}:${{ inputs.tag }}-amd64")
+            fi
+            if echo "$platforms" | grep -q "linux/arm64"; then
+              manifest_images+=("${{ inputs.image_prefix }}/${name}:${{ inputs.tag }}-arm64")
+            fi
+
+            # Create and push the manifest if there are images
+            if [ ${#manifest_images[@]} -gt 0 ]; then
+              echo "Creating manifest for ${name} with images: ${manifest_images[*]}"
+              docker manifest create ${{ inputs.image_prefix }}/${name}:${{ inputs.tag }} ${manifest_images[*]}
+              docker manifest push ${{ inputs.image_prefix }}/${name}:${{ inputs.tag }}
+            else
+              echo "No images built for ${name}, skipping manifest creation"
+            fi
+          done

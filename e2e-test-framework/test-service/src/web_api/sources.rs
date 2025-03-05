@@ -358,39 +358,17 @@ pub async fn source_change_generator_stop_handler (
     }
 }
 
-pub async fn post_source_handler(
+
+pub async fn post_source_handler (
     test_run_host: Extension<Arc<TestRunHost>>,
-    body: Bytes, // Temporarily replace Json<TestRunSourceConfig> to capture raw input
+    body: Json<TestRunSourceConfig>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    // Log entry to confirm handler is reached
-    log::info!("Entering post_source_handler");
-
-    // Log the raw body bytes and string representation
-    log::debug!("Raw body bytes: {:?}", body);
-    log::info!("Raw body as string: {}", String::from_utf8_lossy(&body));
-
-    // Attempt to deserialize the body into TestRunSourceConfig
-    let source_config: TestRunSourceConfig = match from_slice(&body) {
-        Ok(config) => {
-            log::info!("Successfully deserialized body into TestRunSourceConfig: {:?}", config);
-            config
-        }
-        Err(e) => {
-            log::error!("Failed to deserialize body: {}", e);
-            return Err(TestServiceWebApiError::AnyhowError(anyhow::anyhow!(e)));
-        }
-    };
-
     log::info!("Processing call - post_source");
-// pub async fn post_source_handler (
-//     test_run_host: Extension<Arc<TestRunHost>>,
-//     body: Json<TestRunSourceConfig>,
-// ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-//     log::info!("Processing call - post_source");
-//     // If the TestRunHost is an Error state, return an error and a description of the error.
-//     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
-//         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
-//     }
+    println!("body: {:?}", body);
+    // If the TestRunHost is an Error state, return an error and a description of the error.
+    if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
+        return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
+    }
 
     let source_config = body.0;
 

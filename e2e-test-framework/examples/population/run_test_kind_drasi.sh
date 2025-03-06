@@ -4,7 +4,7 @@ GREEN="\033[32m"
 RESET="\033[0m"
 
 echo -e "${GREEN}\n\nSetting up Kind cluster...${RESET}"
-kind create cluster
+# kind create cluster
 
 echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
 drasi init

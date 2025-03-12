@@ -30,11 +30,11 @@ spec:
           dapr.io/app-id: drasi-test-service
           dapr.io/config: dapr-config
           dapr.io/enabled: "true"
-          dapr.io/sidecar-image: daprio/daprd:1.9.0
+          dapr.io/sidecar-image: daprio/daprd
     spec:
       containers:
       - name: drasi-test-service
-        image: ghcr.io/drasi-project/e2e-test-service:0.1.8
+        image: ghcr.io/drasi-project/e2e-test-service:0.2.0
         ports:
         - containerPort: 63123
 ---

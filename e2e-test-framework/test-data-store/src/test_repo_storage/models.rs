@@ -151,33 +151,81 @@ pub struct TestDefinition {
 }
 
 impl TestDefinition {
-    pub fn new(test_id: &str, source: TestSourceDefinition) -> Self {
-        Self {
-            test_id: test_id.to_string(),
-            version: 0,
-            description: format!("A local test definition to hold source: {}", source.test_source_id).into(),
-            test_folder: None,
-            sources: vec![source],
-            queries: Vec::new(),
-        }
+    pub fn get_test_query(&self, query_id: &str) -> anyhow::Result<TestQueryDefinition> {
+        let test_query_definition = self.queries.iter()
+            .find(|query| query.test_query_id == query_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("Test Query with ID {:?} not found", query_id)
+            })?;
+
+        Ok(test_query_definition.clone())
     }
 
-    pub fn get_source(&self, source_id: &str) -> Option<TestSourceDefinition> {
-        self.sources.iter().find(|source| source.test_source_id == source_id).cloned()
+    
+    pub fn get_test_source(&self, source_id: &str) -> anyhow::Result<TestSourceDefinition> {
+        let test_source_definition = self.sources.iter().find(|source| {
+            match source {
+                TestSourceDefinition::BuildingEnvironmentModel(def) => { def.common.test_source_id == source_id },
+                TestSourceDefinition::Script(def) => def.common.test_source_id == source_id,
+            }
+        }).ok_or_else(|| {
+            anyhow::anyhow!("Test Source with ID {:?} not found", source_id)
+        })?;        
+
+        Ok(test_source_definition.clone())
     }
+
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TestSourceDefinition {
+// impl TestDefinition {
+//     pub fn new(test_id: &str, source: TestSourceDefinition) -> Self {
+//         Self {
+//             test_id: test_id.to_string(),
+//             version: 0,
+//             description: format!("A local test definition to hold source: {}", source.test_source_id).into(),
+//             test_folder: None,
+//             sources: vec![source],
+//             queries: Vec::new(),
+//         }
+//     }
+
+//     pub fn get_source(&self, source_id: &str) -> Option<TestSourceDefinition> {
+//         self.sources.iter().find(|source| source.test_source_id == source_id).cloned()
+//     }
+// }
+
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+
+pub enum TestSourceDefinition {
+    BuildingEnvironmentModel(BuildingEnvironmentModelTestSourceDefinition),
+    Script(ScriptTestSourceDefinition),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommonTestSourceDefinition {
     pub test_source_id: String,
-    #[serde(alias = "bootstrap_data_generator")]
-    pub bootstrap_data_generator_def: Option<BootstrapDataGeneratorDefinition>,
     #[serde(default, alias = "source_change_dispatchers")]
     pub source_change_dispatcher_defs: Vec<SourceChangeDispatcherDefinition>,
-    #[serde(alias = "source_change_generator")]
-    pub source_change_generator_def: Option<SourceChangeGeneratorDefinition>,
     #[serde(default)]
     pub subscribers: Vec<QueryId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScriptTestSourceDefinition {
+    #[serde(flatten)]
+    pub common: CommonTestSourceDefinition,
+    #[serde(alias = "bootstrap_data_generator")]
+    pub bootstrap_data_generator_def: Option<BootstrapDataGeneratorDefinition>,
+    #[serde(alias = "source_change_generator")]
+    pub source_change_generator_def: Option<SourceChangeGeneratorDefinition>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BuildingEnvironmentModelTestSourceDefinition {
+    #[serde(flatten)]
+    pub common: CommonTestSourceDefinition
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -397,10 +445,11 @@ mod tests {
     }
 
     #[test]
-    fn test_read_source() {
+    fn test_read_script_source() {
         let content = r#"
         {
             "test_source_id": "source1",
+            "kind": "Script",
             "bootstrap_data_generator": {
                 "kind": "Script",
                 "script_file_folder": "bootstrap_data_scripts",
@@ -418,38 +467,50 @@ mod tests {
         let reader = BufReader::new(file);
         let source: TestSourceDefinition = serde_json::from_reader(reader).unwrap();
 
-        assert_eq!(source.test_source_id, "source1");
+        match source {
+            TestSourceDefinition::Script(source) => {
+                assert_eq!(source.common.test_source_id, "source1");
 
-        match source.bootstrap_data_generator_def.as_ref().unwrap() {
-            BootstrapDataGeneratorDefinition::Script { common_config, unique_config } => {
-                assert_eq!(common_config.time_mode, TimeMode::Live);
-                assert_eq!(unique_config.script_file_folder, "bootstrap_data_scripts");
+                match source.bootstrap_data_generator_def.as_ref().unwrap() {
+                    BootstrapDataGeneratorDefinition::Script { common_config, unique_config } => {
+                        assert_eq!(common_config.time_mode, TimeMode::Live);
+                        assert_eq!(unique_config.script_file_folder, "bootstrap_data_scripts");
+                    }
+                }
+        
+                match source.source_change_generator_def.as_ref().unwrap() {
+                    SourceChangeGeneratorDefinition::Script { common_config, unique_config } => {
+                        assert_eq!(common_config.spacing_mode, SpacingMode::Recorded);
+                        assert_eq!(common_config.time_mode, TimeMode::Live);
+                        assert_eq!(unique_config.script_file_folder, "source_change_scripts");
+                    }
+                }
+        
             }
-        }
-
-        match source.source_change_generator_def.as_ref().unwrap() {
-            SourceChangeGeneratorDefinition::Script { common_config, unique_config } => {
-                assert_eq!(common_config.spacing_mode, SpacingMode::Recorded);
-                assert_eq!(common_config.time_mode, TimeMode::Live);
-                assert_eq!(unique_config.script_file_folder, "source_change_scripts");
-            }
+            _ => panic!("Expected ScriptTestSourceDefinition"),
         }
     }
 
     #[test]
-    fn test_read_source_with_no_data_generators() {
+    fn test_read_script_source_with_no_data_generators() {
         let content = r#"
         {
             "test_source_id": "source1"
+            "kind": "Script"
         }
         "#;
         let file = create_test_file(content);
         let reader = BufReader::new(file);
         let source: TestSourceDefinition = serde_json::from_reader(reader).unwrap();
 
-        assert_eq!(source.test_source_id, "source1");
-        assert_eq!(source.bootstrap_data_generator_def.is_none(), true);
-        assert_eq!(source.source_change_generator_def.is_none(), true);
+        match source {
+            TestSourceDefinition::Script(source) => {
+                assert_eq!(source.common.test_source_id, "source1");
+                assert_eq!(source.bootstrap_data_generator_def.is_none(), true);
+                assert_eq!(source.source_change_generator_def.is_none(), true);
+        }
+            _ => panic!("Expected ScriptTestSourceDefinition"),
+        }
     }
 
     #[test]
@@ -463,6 +524,7 @@ mod tests {
             "sources": [
                 {
                     "test_source_id": "source1",
+                    "kind": "Script",
                     "bootstrap_data_generator": {
                         "kind": "Script",
                         "script_file_folder": "bootstrap_data_scripts",
@@ -490,21 +552,27 @@ mod tests {
         assert_eq!(test_definition.test_folder.unwrap(), "test1");
         assert_eq!(test_definition.sources.len(), 1);
         let source = &test_definition.sources[0];
-        assert_eq!(source.test_source_id, "source1");
 
-        match source.bootstrap_data_generator_def.as_ref().unwrap() {
-            BootstrapDataGeneratorDefinition::Script { common_config, unique_config } => {
-                assert_eq!(common_config.time_mode, TimeMode::Live);
-                assert_eq!(unique_config.script_file_folder, "bootstrap_data_scripts");
-            }
-        }
+        match source {
+            TestSourceDefinition::Script(source) => {
+                assert_eq!(source.common.test_source_id, "source1");
 
-        match source.source_change_generator_def.as_ref().unwrap() {
-            SourceChangeGeneratorDefinition::Script { common_config, unique_config } => {
-                assert_eq!(common_config.spacing_mode, SpacingMode::Recorded);
-                assert_eq!(common_config.time_mode, TimeMode::Live);
-                assert_eq!(unique_config.script_file_folder, "source_change_scripts");
+                match source.bootstrap_data_generator_def.as_ref().unwrap() {
+                    BootstrapDataGeneratorDefinition::Script { common_config, unique_config } => {
+                        assert_eq!(common_config.time_mode, TimeMode::Live);
+                        assert_eq!(unique_config.script_file_folder, "bootstrap_data_scripts");
+                    }
+                }
+        
+                match source.source_change_generator_def.as_ref().unwrap() {
+                    SourceChangeGeneratorDefinition::Script { common_config, unique_config } => {
+                        assert_eq!(common_config.spacing_mode, SpacingMode::Recorded);
+                        assert_eq!(common_config.time_mode, TimeMode::Live);
+                        assert_eq!(unique_config.script_file_folder, "source_change_scripts");
+                    }
+                }
             }
+            _ => panic!("Expected ScriptTestSourceDefinition"),
         }
     }
 

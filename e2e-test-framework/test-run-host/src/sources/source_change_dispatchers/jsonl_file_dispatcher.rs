@@ -45,7 +45,7 @@ pub struct JsonlFileSourceChangeDispatcher {
 }
 
 impl JsonlFileSourceChangeDispatcher {
-    pub async fn new(def:&JsonlFileSourceChangeDispatcherDefinition, output_storage: &TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+    pub async fn new(def:&JsonlFileSourceChangeDispatcherDefinition, output_storage: &TestRunSourceStorage) -> anyhow::Result<Self> {
         log::debug!("Creating JsonlFileSourceChangeDispatcher from {:?}, ", def);
 
         let folder_path = output_storage.source_change_path.clone();
@@ -71,10 +71,10 @@ impl JsonlFileSourceChangeDispatcher {
             settings.max_events_per_file
         ).await?;
 
-        Ok(Box::new( Self { 
+        Ok(Self { 
             settings,
             writer,
-        }))
+        })
     }
 }
 

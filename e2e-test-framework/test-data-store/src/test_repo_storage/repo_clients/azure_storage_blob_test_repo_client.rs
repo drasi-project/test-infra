@@ -145,41 +145,46 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
     }
 
     async fn copy_test_source_content(&self, test_data_folder: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
-        log::debug!("Copying Test Source Content for {:?} to {:?}", test_source_def.test_source_id, test_source_data_path);
+        match test_source_def {
+            TestSourceDefinition::Script(def) => {
+                log::debug!("Copying Test Source Content for {:?} to {:?}", def.common.test_source_id, test_source_data_path);
 
-        // Bootstrap Data Script Files
-        match &test_source_def.bootstrap_data_generator_def {
-            Some(BootstrapDataGeneratorDefinition::Script{common_config: _, unique_config}) => {
-                // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
-                let repo_path = format!(
-                    "{}/{}/sources/{}/{}/", 
-                    self.settings.storage_root_path, 
-                    test_data_folder, 
-                    test_source_def.test_source_id, 
-                    &unique_config.script_file_folder
-                );
-                let local_path = test_source_data_path.join(&unique_config.script_file_folder);
-                self.download_bootstrap_script_files(repo_path, local_path).await?
-            },
-            _ => HashMap::new()
-        };
+                // Bootstrap Data Script Files
+                match &def.bootstrap_data_generator_def {
+                    Some(BootstrapDataGeneratorDefinition::Script{common_config: _, unique_config}) => {
+                        // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
+                        let repo_path = format!(
+                            "{}/{}/sources/{}/{}/", 
+                            self.settings.storage_root_path, 
+                            test_data_folder, 
+                            def.common.test_source_id, 
+                            &unique_config.script_file_folder
+                        );
+                        let local_path = test_source_data_path.join(&unique_config.script_file_folder);
+                        self.download_bootstrap_script_files(repo_path, local_path).await?
+                    },
+                    _ => HashMap::new()
+                };
 
-        // Source Change Script Files
-        match &test_source_def.source_change_generator_def {
-            Some(SourceChangeGeneratorDefinition::Script{common_config: _, unique_config}) => {
-                // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
-                let repo_path = format!(
-                    "{}/{}/sources/{}/{}/", 
-                    self.settings.storage_root_path, 
-                    test_data_folder, 
-                    test_source_def.test_source_id, 
-                    &unique_config.script_file_folder
-                );
-                let local_path = test_source_data_path.join(&unique_config.script_file_folder);
-                self.download_change_script_files(repo_path, local_path).await?
+                // Source Change Script Files
+                match &def.source_change_generator_def {
+                    Some(SourceChangeGeneratorDefinition::Script{common_config: _, unique_config}) => {
+                        // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
+                        let repo_path = format!(
+                            "{}/{}/sources/{}/{}/", 
+                            self.settings.storage_root_path, 
+                            test_data_folder, 
+                            def.common.test_source_id, 
+                            &unique_config.script_file_folder
+                        );
+                        let local_path = test_source_data_path.join(&unique_config.script_file_folder);
+                        self.download_change_script_files(repo_path, local_path).await?
+                    },
+                    _ => Vec::new()
+                };
             },
-            _ => Vec::new()
-        };
+            _ => {}
+        }
 
         Ok(())
     }

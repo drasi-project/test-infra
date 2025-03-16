@@ -42,12 +42,12 @@ impl ScriptBootstrapDataGenerator {
         _unique_config: ScriptBootstrapDataGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         _output_storage: TestRunSourceStorage
-    ) -> anyhow::Result<Box<dyn BootstrapDataGenerator + Send + Sync>> {
-        Ok(Box::new(Self {
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
             input_storage,
             test_run_source_id,
             time_mode: common_config.time_mode.clone(),
-        }))
+        })
     }
 }
 

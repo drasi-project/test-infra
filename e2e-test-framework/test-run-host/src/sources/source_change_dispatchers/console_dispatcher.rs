@@ -38,13 +38,13 @@ pub struct ConsoleSourceChangeDispatcher {
 }
 
 impl ConsoleSourceChangeDispatcher {
-    pub fn new(def: &ConsoleSourceChangeDispatcherDefinition, _output_storage: &TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+    pub fn new(def: &ConsoleSourceChangeDispatcherDefinition, _output_storage: &TestRunSourceStorage) -> anyhow::Result<Self> {
         log::debug!("Creating ConsoleSourceChangeDispatcher from {:?}, ", def);
 
         let settings = ConsoleSourceChangeDispatcherSettings::new(&def)?;
         log::trace!("Creating ConsoleSourceChangeDispatcher with settings {:?}, ", settings);
 
-        Ok(Box::new(Self { settings }))
+        Ok(Self { settings })
     }
 }  
 

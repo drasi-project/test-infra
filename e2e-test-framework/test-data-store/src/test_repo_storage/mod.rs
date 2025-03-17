@@ -333,8 +333,8 @@ impl TestSourceStorage {
             models::TestSourceDefinition::Script(def) => {
                 // Read the bootstrap script files.
                 match &def.bootstrap_data_generator_def {
-                    Some(models::BootstrapDataGeneratorDefinition::Script{common_config: _, unique_config}) => {
-                        let bootstrap_data_scripts_repo_path = self.path.join(&unique_config.script_file_folder);
+                    Some(models::BootstrapDataGeneratorDefinition::Script(bsg_def)) => {
+                        let bootstrap_data_scripts_repo_path = self.path.join(&bsg_def.script_file_folder);
 
                         let file_path_list: Vec<PathBuf> = WalkDir::new(&bootstrap_data_scripts_repo_path)
                             .into_iter()
@@ -362,8 +362,8 @@ impl TestSourceStorage {
 
                 // Read the change log script files.
                 match &def.source_change_generator_def {
-                    Some(models::SourceChangeGeneratorDefinition::Script{common_config: _, unique_config}) => {
-                        let source_change_scripts_repo_path = self.path.join(&unique_config.script_file_folder);
+                    Some(models::SourceChangeGeneratorDefinition::Script(scg_def)) => {
+                        let source_change_scripts_repo_path = self.path.join(&scg_def.script_file_folder);
 
                         let mut entries = fs::read_dir(&source_change_scripts_repo_path).await?;
                 

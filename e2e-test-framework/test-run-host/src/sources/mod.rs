@@ -20,27 +20,28 @@ use serde::{Deserialize, Serialize, de::{self, Deserializer}};
 use bootstrap_data_generators::BootstrapData;
 use source_change_generators::{ SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState};
 use test_data_store::{test_repo_storage::{models::{ QueryId, SourceChangeDispatcherDefinition, SpacingMode, TestSourceDefinition, TimeMode}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
-use test_run_sources::{building_environment_test_run_source::BuildingEnvironmentModelTestRunSource, script_test_run_source::ScriptTestRunSource};
+use test_run_sources::{model_test_run_source::ModelTestRunSource, script_test_run_source::ScriptTestRunSource};
 
 pub mod bootstrap_data_generators;
+pub mod model_data_generators;
 pub mod source_change_generators;
 pub mod source_change_dispatchers;
 pub mod test_run_sources;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum SourceChangeGeneratorStartMode {
+pub enum SourceStartMode {
     Auto,
     Bootstrap,
     Manual,
 }
 
-impl Default for SourceChangeGeneratorStartMode {
+impl Default for SourceStartMode {
     fn default() -> Self {
         Self::Bootstrap
     }
 }
 
-impl FromStr for SourceChangeGeneratorStartMode {
+impl FromStr for SourceStartMode {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> anyhow::Result<Self> {
@@ -49,13 +50,13 @@ impl FromStr for SourceChangeGeneratorStartMode {
             "bootstrap" => Ok(Self::Bootstrap),
             "manual" => Ok(Self::Manual),
             _ => {
-                anyhow::bail!("Invalid SourceChangeGeneratorStartMode value:{}", s);
+                anyhow::bail!("Invalid SourceStartMode value:{}", s);
             }
         }
     }
 }
 
-impl std::fmt::Display for SourceChangeGeneratorStartMode {
+impl std::fmt::Display for SourceStartMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Auto => write!(f, "auto"),
@@ -65,19 +66,20 @@ impl std::fmt::Display for SourceChangeGeneratorStartMode {
     }
 }
 
-impl<'de> Deserialize<'de> for SourceChangeGeneratorStartMode {
+impl<'de> Deserialize<'de> for SourceStartMode {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let value: String = Deserialize::deserialize(deserializer)?;
-        value.parse::<SourceChangeGeneratorStartMode>().map_err(de::Error::custom)
+        value.parse::<SourceStartMode>().map_err(de::Error::custom)
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunSourceOverrides {
     pub bootstrap_data_generator: Option<TestRunBootstrapDataGeneratorOverrides>,
+    pub model_data_generator: Option<TestRunModelDataGeneratorOverrides>,
     pub source_change_dispatchers: Option<Vec<SourceChangeDispatcherDefinition>>,
     pub source_change_generator: Option<TestRunSourceChangeGeneratorOverrides>,
     pub subscribers: Option<Vec<QueryId>>,
@@ -90,6 +92,13 @@ pub struct TestRunBootstrapDataGeneratorOverrides {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TestRunModelDataGeneratorOverrides {
+    pub seed: Option<u64>,
+    pub spacing_mode: Option<SpacingMode>,
+    pub time_mode: Option<TimeMode>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunSourceChangeGeneratorOverrides {
     pub spacing_mode: Option<SpacingMode>,
     pub time_mode: Option<TimeMode>,
@@ -97,7 +106,7 @@ pub struct TestRunSourceChangeGeneratorOverrides {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunSourceConfig {
-    pub source_change_generator_start_mode: Option<SourceChangeGeneratorStartMode>,    
+    pub start_mode: Option<SourceStartMode>,    
     pub test_id: String,
     pub test_repo_id: String,
     pub test_run_id: Option<String>,
@@ -131,15 +140,15 @@ impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
 
 impl fmt::Display for TestRunSourceConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TestRunSourceDefinition: Repo: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}", 
-            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id)
+        write!(f, "TestRunSourceConfig: Repo: test_repo_id: {:?}, test_id: {:?}, test_run_id: {:?}, test_source_id: {:?}, start_mode: {:?}", 
+            self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.start_mode)
     }
 }
 #[derive(Debug, Serialize)]
 pub struct TestRunSourceState {
     pub id: TestRunSourceId,
     pub source_change_generator: SourceChangeGeneratorState,
-    pub source_change_generator_start_mode: SourceChangeGeneratorStartMode,
+    pub start_mode: SourceStartMode,
 }
 
 #[async_trait]
@@ -198,7 +207,7 @@ pub async fn create_test_run_source(cfg: &TestRunSourceConfig,  def: &TestSource
 
     match def {
         TestSourceDefinition::BuildingEnvironmentModel(def) => {
-            Ok(Box::new(BuildingEnvironmentModelTestRunSource::new(
+            Ok(Box::new(ModelTestRunSource::new(
                 cfg,
                 def,
                 input_storage,

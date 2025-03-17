@@ -12,7 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod model_test_run_source;
-pub mod building_graph;
-pub mod domain_model_graph;
-pub mod script_test_run_source;
+// use rand::Rng;
+use test_data_store::{test_repo_storage::models::BuildingTemplateDefinition, test_run_storage::TestRunSourceId};
+
+use super::domain_model_graph::DomainModelGraph;
+
+#[derive(Debug)]
+pub struct BuildingGraph {
+    pub domain_graph: DomainModelGraph,
+}
+
+impl BuildingGraph {
+    pub fn new(_id: TestRunSourceId, _seed: u64, _building_templates: Vec<BuildingTemplateDefinition>) -> Self {
+        Self {
+            domain_graph: DomainModelGraph::new(),
+        }
+    }
+}

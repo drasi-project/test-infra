@@ -27,7 +27,7 @@ use test_data_store::{
         change_script_file_reader::ChangeScriptReader, ChangeHeaderRecord, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent
     }, 
     test_repo_storage::{
-        models::{ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
+        models::{BuildingEnvironmentDataGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
         TestSourceStorage
     }, 
     test_run_storage::{
@@ -37,54 +37,48 @@ use test_data_store::{
 
 use crate::sources::source_change_dispatchers::{create_source_change_dispatcher, SourceChangeDispatcher};
 
-use super::{SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStatus};
+use super::{ModelDataGenerator, ModelDataGeneratorCommandResponse, ModelDataGeneratorStatus};
 
 type ChangeStream = Pin<Box<dyn Stream<Item = anyhow::Result<SequencedChangeScriptRecord>> + Send>>;
 
 #[derive(Debug, thiserror::Error)]
-pub enum ScriptSourceChangeGeneratorError {
-    #[error("ScriptSourceChangeGenerator is already finished. Reset to start over.")]
+pub enum BuildingEnvironmentSourceChangeGeneratorError {
+    #[error("BuildingEnvironmentDataGenerator is already finished. Reset to start over.")]
     AlreadyFinished,
-    #[error("ScriptSourceChangeGenerator is already stopped. Reset to start over.")]
+    #[error("BuildingEnvironmentDataGenerator is already stopped. Reset to start over.")]
     AlreadyStopped,
-    #[error("ScriptSourceChangeGenerator is currently Skipping. {0} skips remaining. Pause before Skip, Step, or Reset.")]
-    CurrentlySkipping(u64),
-    #[error("ScriptSourceChangeGenerator is currently Stepping. {0} steps remaining. Pause before Skip, Step, or Reset.")]
+    #[error("BuildingEnvironmentDataGenerator is currently Stepping. {0} steps remaining. Pause before Step or Reset.")]
     CurrentlyStepping(u64),
-    #[error("ScriptSourceChangeGenerator is currently in an Error state - {0:?}")]
-    Error(SourceChangeGeneratorStatus),
-    #[error("ScriptSourceChangeGenerator is currently Running. Pause before trying to Skip.")]
-    PauseToSkip,
-    #[error("ScriptSourceChangeGenerator is currently Running. Pause before trying to Step.")]
+    #[error("BuildingEnvironmentDataGenerator is currently in an Error state - {0:?}")]
+    Error(ModelDataGeneratorStatus),
+    #[error("BuildingEnvironmentDataGenerator is currently Running. Pause before trying to Step.")]
     PauseToStep,
-    #[error("ScriptSourceChangeGenerator is currently Running. Pause before trying to Reset.")]
+    #[error("BuildingEnvironmentDataGenerator is currently Running. Pause before trying to Reset.")]
     PauseToReset,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ScriptSourceChangeGeneratorSettings {
+pub struct BuildingEnvironmentDataGeneratorSettings {
     pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub id: TestRunSourceId,
-    pub ignore_scripted_pause_commands: bool,
     pub input_storage: TestSourceStorage,
     pub output_storage: TestRunSourceStorage,
     pub spacing_mode: SpacingMode,
     pub time_mode: TimeMode,
 }
 
-impl ScriptSourceChangeGeneratorSettings {
+impl BuildingEnvironmentDataGeneratorSettings {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        definition: ScriptSourceChangeGeneratorDefinition, 
+        definition: BuildingEnvironmentDataGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         output_storage: TestRunSourceStorage,
         dispatchers: Vec<SourceChangeDispatcherDefinition>,
     ) -> anyhow::Result<Self> {
 
-        Ok(ScriptSourceChangeGeneratorSettings {
+        Ok(BuildingEnvironmentDataGeneratorSettings {
             dispatchers,
             id: test_run_source_id,
-            ignore_scripted_pause_commands: definition.ignore_scripted_pause_commands,
             input_storage,
             output_storage,
             spacing_mode: definition.common.spacing_mode,
@@ -97,41 +91,39 @@ impl ScriptSourceChangeGeneratorSettings {
     }
 }
 
-// Enum of ScriptSourceChangeGenerator commands sent from Web API handler functions.
+// Enum of BuildingEnvironmentDataGenerator commands sent from Web API handler functions.
 #[derive(Debug)]
-pub enum ScriptSourceChangeGeneratorCommand {
-    // Command to get the current state of the ScriptSourceChangeGenerator.
+pub enum BuildingEnvironmentDataGeneratorCommand {
+    // Command to get the current state of the BuildingEnvironmentDataGenerator.
     GetState,
-    // Command to pause the ScriptSourceChangeGenerator.
+    // Command to pause the BuildingEnvironmentDataGenerator.
     Pause,
-    // Command to reset the ScriptSourceChangeGenerator.
+    // Command to reset the BuildingEnvironmentDataGenerator.
     Reset,
-    // Command to skip the ScriptSourceChangeGenerator forward a specified number of ChangeScriptRecords.
-    Skip{skips: u64, spacing_mode: Option<SpacingMode>},
-    // Command to start the ScriptSourceChangeGenerator.
+    // Command to start the BuildingEnvironmentDataGenerator.
     Start,
-    // Command to step the ScriptSourceChangeGenerator forward a specified number of ChangeScriptRecords.
+    // Command to step the BuildingEnvironmentDataGenerator forward a specified number of ChangeScriptRecords.
     Step{steps: u64, spacing_mode: Option<SpacingMode>},
-    // Command to stop the ScriptSourceChangeGenerator.
+    // Command to stop the BuildingEnvironmentDataGenerator.
     Stop,
 }
 
-// Struct for messages sent to the ScriptSourceChangeGenerator from the functions in the Web API.
+// Struct for messages sent to the BuildingEnvironmentDataGenerator from the functions in the Web API.
 #[derive(Debug,)]
-pub struct ScriptSourceChangeGeneratorMessage {
-    // Command sent to the ScriptSourceChangeGenerator.
-    pub command: ScriptSourceChangeGeneratorCommand,
-    // One-shot channel for ScriptSourceChangeGenerator to send a response back to the caller.
-    pub response_tx: Option<oneshot::Sender<ScriptSourceChangeGeneratorMessageResponse>>,
+pub struct BuildingEnvironmentDataGeneratorMessage {
+    // Command sent to the BuildingEnvironmentDataGenerator.
+    pub command: BuildingEnvironmentDataGeneratorCommand,
+    // One-shot channel for BuildingEnvironmentDataGenerator to send a response back to the caller.
+    pub response_tx: Option<oneshot::Sender<BuildingEnvironmentSourceChangeGeneratorMessageResponse>>,
 }
 
-// A struct for the Response sent back from the ScriptSourceChangeGenerator to the calling Web API handler.
+// A struct for the Response sent back from the BuildingEnvironmentDataGenerator to the calling Web API handler.
 #[derive(Debug)]
-pub struct ScriptSourceChangeGeneratorMessageResponse {
+pub struct BuildingEnvironmentSourceChangeGeneratorMessageResponse {
     // Result of the command.
     pub result: anyhow::Result<()>,
-    // State of the ScriptSourceChangeGenerator after the command.
-    pub state: ScriptSourceChangeGeneratorExternalState,
+    // State of the BuildingEnvironmentDataGenerator after the command.
+    pub state: BuildingEnvironmentChangeGeneratorExternalState,
 }
 
 #[derive(Clone, Debug)]
@@ -143,53 +135,53 @@ pub struct ScheduledChangeScriptRecordMessage {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ProcessedChangeScriptRecord {
-    pub dispatch_status: SourceChangeGeneratorStatus,
+    pub dispatch_status: ModelDataGeneratorStatus,
     pub scripted: SequencedChangeScriptRecord,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ScriptSourceChangeGenerator {
-    settings: ScriptSourceChangeGeneratorSettings,
+pub struct BuildingEnvironmentDataGenerator {
+    settings: BuildingEnvironmentDataGeneratorSettings,
     #[serde(skip_serializing)]
-    script_processor_tx_channel: Sender<ScriptSourceChangeGeneratorMessage>,
+    script_processor_tx_channel: Sender<BuildingEnvironmentDataGeneratorMessage>,
     #[serde(skip_serializing)]
     _script_processor_thread_handle: Arc<Mutex<JoinHandle<anyhow::Result<()>>>>,
 }
 
-impl ScriptSourceChangeGenerator {
+impl BuildingEnvironmentDataGenerator {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        definition: ScriptSourceChangeGeneratorDefinition, 
+        definition: BuildingEnvironmentDataGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         output_storage: TestRunSourceStorage,
         dispatchers: Vec<SourceChangeDispatcherDefinition>,
-    ) -> anyhow::Result<Self> {
-        let settings = ScriptSourceChangeGeneratorSettings::new(
+    ) -> anyhow::Result<Box<dyn ModelDataGenerator + Send + Sync>> {
+        let settings = BuildingEnvironmentDataGeneratorSettings::new(
             test_run_source_id, definition, input_storage, output_storage.clone(), dispatchers).await?;
-        log::debug!("Creating ScriptSourceChangeGenerator from {:?}", &settings);
+        log::debug!("Creating BuildingEnvironmentDataGenerator from {:?}", &settings);
 
         let (script_processor_tx_channel, script_processor_rx_channel) = tokio::sync::mpsc::channel(100);
         let script_processor_thread_handle = tokio::spawn(script_processor_thread(script_processor_rx_channel, settings.clone()));
 
-        Ok(Self {
+        Ok(Box::new(Self {
             settings,
             script_processor_tx_channel,
             _script_processor_thread_handle: Arc::new(Mutex::new(script_processor_thread_handle)),
-        })
+        }))
     }
 
     pub fn get_id(&self) -> TestRunSourceId {
         self.settings.get_id()
     }
 
-    pub fn get_settings(&self) -> ScriptSourceChangeGeneratorSettings {
+    pub fn get_settings(&self) -> BuildingEnvironmentDataGeneratorSettings {
         self.settings.clone()
     }
 
-    async fn send_command(&self, command: ScriptSourceChangeGeneratorCommand) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn send_command(&self, command: BuildingEnvironmentDataGeneratorCommand) -> anyhow::Result<ModelDataGeneratorCommandResponse> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        let r = self.script_processor_tx_channel.send(ScriptSourceChangeGeneratorMessage {
+        let r = self.script_processor_tx_channel.send(BuildingEnvironmentDataGeneratorMessage {
             command,
             response_tx: Some(response_tx),
         }).await;
@@ -198,61 +190,54 @@ impl ScriptSourceChangeGenerator {
             Ok(_) => {
                 let player_response = response_rx.await?;
 
-                Ok(SourceChangeGeneratorCommandResponse {
+                Ok(ModelDataGeneratorCommandResponse {
                     result: player_response.result,
-                    state: super::SourceChangeGeneratorState {
+                    state: super::ModelDataGeneratorState {
                         status: player_response.state.status,
                         state: serde_json::to_value(player_response.state).unwrap(),
                     },
                 })
             },
-            Err(e) => anyhow::bail!("Error sending command to ScriptSourceChangeGenerator: {:?}", e),
+            Err(e) => anyhow::bail!("Error sending command to BuildingEnvironmentDataGenerator: {:?}", e),
         }
     }
 }
 
 #[async_trait]
-impl SourceChangeGenerator for ScriptSourceChangeGenerator {
-    async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        self.send_command(ScriptSourceChangeGeneratorCommand::GetState).await
+impl ModelDataGenerator for BuildingEnvironmentDataGenerator {
+    async fn get_state(&self) -> anyhow::Result<ModelDataGeneratorCommandResponse> {
+        self.send_command(BuildingEnvironmentDataGeneratorCommand::GetState).await
     }
 
-    async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Pause).await
+    async fn pause(&self) -> anyhow::Result<ModelDataGeneratorCommandResponse>  {
+        self.send_command(BuildingEnvironmentDataGeneratorCommand::Pause).await
     }
 
-    async fn reset(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Reset).await
+    async fn reset(&self) -> anyhow::Result<ModelDataGeneratorCommandResponse> {
+        self.send_command(BuildingEnvironmentDataGeneratorCommand::Reset).await
     }
 
-    async fn skip(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Skip{skips, spacing_mode}).await
+    async fn start(&self) -> anyhow::Result<ModelDataGeneratorCommandResponse> {
+        self.send_command(BuildingEnvironmentDataGeneratorCommand::Start).await
     }
 
-    async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Start).await
+    async fn step(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<ModelDataGeneratorCommandResponse>  {
+        self.send_command(BuildingEnvironmentDataGeneratorCommand::Step{steps, spacing_mode}).await
     }
 
-    async fn step(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Step{steps, spacing_mode}).await
-    }
-
-    async fn stop(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>  {
-        self.send_command(ScriptSourceChangeGeneratorCommand::Stop).await
+    async fn stop(&self) -> anyhow::Result<ModelDataGeneratorCommandResponse>  {
+        self.send_command(BuildingEnvironmentDataGeneratorCommand::Stop).await
     }
 }
 
 #[derive(Debug, Serialize)]
-pub struct ScriptSourceChangeGeneratorExternalState {
+pub struct BuildingEnvironmentChangeGeneratorExternalState {
     pub error_messages: Vec<String>,
-    pub ignore_scripted_pause_commands: bool,
     pub header_record: ChangeHeaderRecord,
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
-    pub skips_remaining: u64,
-    pub skips_spacing_mode: Option<SpacingMode>,
     pub spacing_mode: SpacingMode,
-    pub status: SourceChangeGeneratorStatus,
+    pub status: ModelDataGeneratorStatus,
     pub steps_remaining: u64,
     pub steps_spacing_mode: Option<SpacingMode>,
     pub test_run_source_id: TestRunSourceId,
@@ -262,16 +247,13 @@ pub struct ScriptSourceChangeGeneratorExternalState {
     pub virtual_time_ns_start: u64,
 }
 
-impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeGeneratorExternalState {
-    fn from(state: &mut ScriptSourceChangeGeneratorInternalState) -> Self {
+impl From<&mut BuildingEnvironmentChangeGeneratorInternalState> for BuildingEnvironmentChangeGeneratorExternalState {
+    fn from(state: &mut BuildingEnvironmentChangeGeneratorInternalState) -> Self {
         Self {
             error_messages: state.error_messages.clone(),
-            ignore_scripted_pause_commands: state.settings.ignore_scripted_pause_commands,
             header_record: state.header_record.clone(),
             next_record: state.next_record.clone(),
             previous_record: state.previous_record.clone(),
-            skips_remaining: state.skips_remaining,
-            skips_spacing_mode: state.skips_spacing_mode.clone(),
             spacing_mode: state.settings.spacing_mode.clone(),
             status: state.status,
             steps_remaining: state.steps_remaining,
@@ -285,7 +267,7 @@ impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeG
     }
 }
 
-pub struct ScriptSourceChangeGeneratorInternalState {
+pub struct BuildingEnvironmentChangeGeneratorInternalState {
     pub change_stream: Pin<Box<dyn Stream<Item = Result<SequencedChangeScriptRecord, anyhow::Error>> + Send>>,
     pub change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
     pub delayer_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
@@ -296,11 +278,9 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
     pub rate_limiter_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
-    pub settings: ScriptSourceChangeGeneratorSettings,
-    pub skips_remaining: u64,
-    pub skips_spacing_mode: Option<SpacingMode>,
-    pub status: SourceChangeGeneratorStatus,
-    pub stats: ScriptSourceChangeGeneratorStats,
+    pub settings: BuildingEnvironmentDataGeneratorSettings,
+    pub status: ModelDataGeneratorStatus,
+    pub stats: BuildingEnvironmentSourceChangeGeneratorStats,
     pub steps_remaining: u64,
     pub steps_spacing_mode: Option<SpacingMode>,
     pub virtual_time_ns_current: u64,
@@ -308,9 +288,9 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub virtual_time_ns_start: u64,
 }
 
-impl ScriptSourceChangeGeneratorInternalState {
+impl BuildingEnvironmentChangeGeneratorInternalState {
 
-    async fn initialize(settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<(Self, Receiver<ScheduledChangeScriptRecordMessage>)> {
+    async fn initialize(settings: BuildingEnvironmentDataGeneratorSettings) -> anyhow::Result<(Self, Receiver<ScheduledChangeScriptRecordMessage>)> {
         log::debug!("Initializing ScriptSourceChangeGenerator using {:?}", settings);
     
         // Get the list of script files from the input storage.
@@ -366,10 +346,8 @@ impl ScriptSourceChangeGeneratorInternalState {
             previous_record: None,
             rate_limiter_tx_channel,
             settings,
-            skips_remaining: 0,
-            skips_spacing_mode: None,
-            status: SourceChangeGeneratorStatus::Paused,
-            stats: ScriptSourceChangeGeneratorStats::default(),
+            status: ModelDataGeneratorStatus::Paused,
+            stats: BuildingEnvironmentSourceChangeGeneratorStats::default(),
             steps_remaining: 0,
             steps_spacing_mode: None,
             virtual_time_ns_current: 0,
@@ -379,39 +357,6 @@ impl ScriptSourceChangeGeneratorInternalState {
     
         Ok((state, change_rx_channel))
     }
-
-    // fn calculate_record_scheduling_delay(&mut self, next_record: &SequencedChangeScriptRecord) -> anyhow::Result<u64> {
-    //     let delay_ns = match self.status {
-    //         SourceChangeGeneratorStatus::Skipping => {
-    //             match self.skips_spacing_mode {
-    //                 Some(SpacingMode::None) => 0,
-    //                 Some(SpacingMode::Rate(nanos)) => nanos,
-    //                 Some(SpacingMode::Recorded) => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset },
-    //                 None => 0,
-    //             }
-    //         },
-    //         SourceChangeGeneratorStatus::Stepping => {
-    //             match self.steps_spacing_mode {
-    //                 Some(SpacingMode::None) => 0,
-    //                 Some(SpacingMode::Rate(nanos)) => nanos,
-    //                 Some(SpacingMode::Recorded) => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
-    //                 None => match self.settings.spacing_mode {
-    //                     SpacingMode::None => 0,
-    //                     SpacingMode::Rate(nanos) => nanos,
-    //                     SpacingMode::Recorded => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
-    //                 },
-    //             }
-    //         },
-    //         SourceChangeGeneratorStatus::Running => match self.settings.spacing_mode {
-    //             SpacingMode::None => 0,
-    //             SpacingMode::Rate(nanos) => nanos,
-    //             SpacingMode::Recorded => if self.virtual_time_ns_offset > next_record.offset_ns { 0 } else { next_record.offset_ns - self.virtual_time_ns_offset }
-    //         },
-    //         _ => anyhow::bail!("Calculating record delay for unexpected status: {:?}", self.status),
-    //     };
-    
-    //     Ok(delay_ns)
-    // }
 
     async fn close_dispatchers(&mut self) {
         let dispatchers = &mut self.dispatchers;
@@ -498,13 +443,13 @@ impl ScriptSourceChangeGeneratorInternalState {
                 self.stats.num_source_change_records += 1;
     
                 match &self.status {
-                    SourceChangeGeneratorStatus::Running => {
+                    ModelDataGeneratorStatus::Running => {
                         // Dispatch the SourceChangeEvent.
                         self.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
                         self.load_next_change_stream_record().await?;  
                         self.schedule_next_change_stream_record().await?;
                     },
-                    SourceChangeGeneratorStatus::Stepping => {
+                    ModelDataGeneratorStatus::Stepping => {
                         if self.steps_remaining > 0 {
                             // Dispatch the SourceChangeEvent.
                             self.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
@@ -513,7 +458,7 @@ impl ScriptSourceChangeGeneratorInternalState {
     
                             self.steps_remaining -= 1;
                             if self.steps_remaining == 0 {
-                                self.status = SourceChangeGeneratorStatus::Paused;
+                                self.status = ModelDataGeneratorStatus::Paused;
                                 self.steps_spacing_mode = None;
                             } else {
                                 self.schedule_next_change_stream_record().await?;
@@ -521,26 +466,6 @@ impl ScriptSourceChangeGeneratorInternalState {
                         } else {
                             // Transition to an error state.
                             self.transition_to_error_state("Stepping with no steps remaining", None);
-                        }
-                    },
-                    SourceChangeGeneratorStatus::Skipping => {
-                        if self.skips_remaining > 0 {
-                            // DON'T dispatch the SourceChangeEvent.
-                            log::trace!("Skipping ChangeScriptRecord: {:?}", change_record);
-                            self.stats.num_skipped_source_change_records += 1;
-    
-                            self.load_next_change_stream_record().await?;  
-    
-                            self.skips_remaining -= 1;
-                            if self.skips_remaining == 0 {
-                                self.status = SourceChangeGeneratorStatus::Paused;
-                                self.skips_spacing_mode = None;
-                            } else {
-                                self.schedule_next_change_stream_record().await?;
-                            }
-                        } else {
-                            // Transition to an error state.
-                            self.transition_to_error_state("Skipping with no skips remaining", None);
                         }
                     },
                     _ => {
@@ -551,13 +476,7 @@ impl ScriptSourceChangeGeneratorInternalState {
             },
             ChangeScriptRecord::PauseCommand(_) => {
                 self.stats.num_pause_records += 1;
-    
-                // Process the PauseCommand only if the Player is not configured to ignore them.
-                if self.settings.ignore_scripted_pause_commands {
-                    log::debug!("Ignoring Change Script Pause Command: {:?}", shifted_record);
-                } else {
-                    self.status = SourceChangeGeneratorStatus::Paused;
-                }
+                self.status = ModelDataGeneratorStatus::Paused;
             },
             ChangeScriptRecord::Label(label_record) => {
                 self.stats.num_label_records += 1;
@@ -580,11 +499,11 @@ impl ScriptSourceChangeGeneratorInternalState {
         Ok(())
     }    
 
-    async fn process_command_message(&mut self, message: ScriptSourceChangeGeneratorMessage) -> anyhow::Result<()> {
+    async fn process_command_message(&mut self, message: BuildingEnvironmentDataGeneratorMessage) -> anyhow::Result<()> {
         log::debug!("Received command message: {:?}", message.command);
     
-        if let ScriptSourceChangeGeneratorCommand::GetState = message.command {
-            let message_response = ScriptSourceChangeGeneratorMessageResponse {
+        if let BuildingEnvironmentDataGeneratorCommand::GetState = message.command {
+            let message_response = BuildingEnvironmentSourceChangeGeneratorMessageResponse {
                 result: Ok(()),
                 state: self.into(),
             };
@@ -595,17 +514,16 @@ impl ScriptSourceChangeGeneratorInternalState {
             }
         } else {
             let transition_response = match self.status {
-                SourceChangeGeneratorStatus::Running => self.transition_from_running_state(&message.command).await,
-                SourceChangeGeneratorStatus::Stepping => self.transition_from_stepping_state(&message.command).await,
-                SourceChangeGeneratorStatus::Skipping => self.transition_from_skipping_state(&message.command).await,
-                SourceChangeGeneratorStatus::Paused => self.transition_from_paused_state(&message.command).await,
-                SourceChangeGeneratorStatus::Stopped => self.transition_from_stopped_state(&message.command).await,
-                SourceChangeGeneratorStatus::Finished => self.transition_from_finished_state(&message.command).await,
-                SourceChangeGeneratorStatus::Error => self.transition_from_error_state(&message.command).await,
+                ModelDataGeneratorStatus::Running => self.transition_from_running_state(&message.command).await,
+                ModelDataGeneratorStatus::Stepping => self.transition_from_stepping_state(&message.command).await,
+                ModelDataGeneratorStatus::Paused => self.transition_from_paused_state(&message.command).await,
+                ModelDataGeneratorStatus::Stopped => self.transition_from_stopped_state(&message.command).await,
+                ModelDataGeneratorStatus::Finished => self.transition_from_finished_state(&message.command).await,
+                ModelDataGeneratorStatus::Error => self.transition_from_error_state(&message.command).await,
             };
     
             if message.response_tx.is_some() {
-                let message_response = ScriptSourceChangeGeneratorMessageResponse {
+                let message_response = BuildingEnvironmentSourceChangeGeneratorMessageResponse {
                     result: transition_response,
                     state: self.into(),
                 };
@@ -665,10 +583,8 @@ impl ScriptSourceChangeGeneratorInternalState {
         self.message_seq_num = 0;
         self.next_record = next_record;
         self.previous_record = None;
-        self.skips_remaining = 0;
-        self.skips_spacing_mode = None;
-        self.status = SourceChangeGeneratorStatus::Paused;
-        self.stats = ScriptSourceChangeGeneratorStats::default();
+        self.status = ModelDataGeneratorStatus::Paused;
+        self.stats = BuildingEnvironmentSourceChangeGeneratorStats::default();
         self.steps_remaining = 0;
         self.steps_spacing_mode = None;
         self.virtual_time_ns_current = 0;
@@ -695,8 +611,7 @@ impl ScriptSourceChangeGeneratorInternalState {
         };   
 
         match self.status {
-            SourceChangeGeneratorStatus::Skipping => {},
-            SourceChangeGeneratorStatus::Stepping => {
+            ModelDataGeneratorStatus::Stepping => {
                 match self.steps_spacing_mode {
                     Some(SpacingMode::None) => {
                         if let Err(e) = self.change_tx_channel.send(sch_msg).await {
@@ -742,7 +657,7 @@ impl ScriptSourceChangeGeneratorInternalState {
                     },
                 }
             },
-            SourceChangeGeneratorStatus::Running => match self.settings.spacing_mode {
+            ModelDataGeneratorStatus::Running => match self.settings.spacing_mode {
                 SpacingMode::None => {
                     if let Err(e) = self.change_tx_channel.send(sch_msg).await {
                         anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
@@ -822,35 +737,33 @@ impl ScriptSourceChangeGeneratorInternalState {
         Ok(shifted_record)
     }
         
-    async fn transition_from_error_state(&mut self, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    async fn transition_from_error_state(&mut self, command: &BuildingEnvironmentDataGeneratorCommand) -> anyhow::Result<()> {
         log::debug!("Attempting to transition from {:?} state via command: {:?}", self.status, command);
     
-        if let ScriptSourceChangeGeneratorCommand::Reset = command {
+        if let BuildingEnvironmentDataGeneratorCommand::Reset = command {
             self.reset().await
         } else {
-            Err(ScriptSourceChangeGeneratorError::Error(self.status).into())
+            Err(BuildingEnvironmentSourceChangeGeneratorError::Error(self.status).into())
         }
     }
     
-    async fn transition_from_finished_state(&mut self, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    async fn transition_from_finished_state(&mut self, command: &BuildingEnvironmentDataGeneratorCommand) -> anyhow::Result<()> {
         log::debug!("Attempting to transition from {:?} state via command: {:?}", self.status, command);
     
-        if let ScriptSourceChangeGeneratorCommand::Reset = command {
+        if let BuildingEnvironmentDataGeneratorCommand::Reset = command {
             self.reset().await
         } else {
-            Err(ScriptSourceChangeGeneratorError::AlreadyFinished.into())
+            Err(BuildingEnvironmentSourceChangeGeneratorError::AlreadyFinished.into())
         }
     }
     
-    async fn transition_from_paused_state(&mut self, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    async fn transition_from_paused_state(&mut self, command: &BuildingEnvironmentDataGeneratorCommand) -> anyhow::Result<()> {
         log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
     
         // If we are unpausing for the first time, we need to initialize the start times based on time_mode config.
         if self.previous_record.is_none() && 
-            matches!(command, ScriptSourceChangeGeneratorCommand::Start 
-                | ScriptSourceChangeGeneratorCommand::Step { .. }
-                | ScriptSourceChangeGeneratorCommand::Skip { .. }
-            ) {
+            matches!(command, BuildingEnvironmentDataGeneratorCommand::Start | BuildingEnvironmentDataGeneratorCommand::Step { .. }) 
+        {
             self.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
     
             self.virtual_time_ns_start = match self.settings.time_mode {
@@ -864,117 +777,83 @@ impl ScriptSourceChangeGeneratorInternalState {
         }
     
         match command {
-            ScriptSourceChangeGeneratorCommand::GetState => Ok(()),
-            ScriptSourceChangeGeneratorCommand::Pause => Ok(()),
-            ScriptSourceChangeGeneratorCommand::Reset => self.reset().await,
-            ScriptSourceChangeGeneratorCommand::Skip{skips, spacing_mode} => {
-                log::info!("Script Skipping {} skips for TestRunSource {}", skips, self.settings.id);
-    
-                self.status = SourceChangeGeneratorStatus::Skipping;
-                self.skips_remaining = *skips;
-                self.skips_spacing_mode = spacing_mode.clone();
-                self.schedule_next_change_stream_record().await
-            },
-            ScriptSourceChangeGeneratorCommand::Start => {
+            BuildingEnvironmentDataGeneratorCommand::GetState => Ok(()),
+            BuildingEnvironmentDataGeneratorCommand::Pause => Ok(()),
+            BuildingEnvironmentDataGeneratorCommand::Reset => self.reset().await,
+            BuildingEnvironmentDataGeneratorCommand::Start => {
                 log::info!("Script Started for TestRunSource {}", self.settings.id);
                 
-                self.status = SourceChangeGeneratorStatus::Running;
+                self.status = ModelDataGeneratorStatus::Running;
                 self.schedule_next_change_stream_record().await
             },
-            ScriptSourceChangeGeneratorCommand::Step{steps, spacing_mode} => {
+            BuildingEnvironmentDataGeneratorCommand::Step{steps, spacing_mode} => {
                 log::info!("Script Stepping {} steps for TestRunSource {}", steps, self.settings.id);
     
-                self.status = SourceChangeGeneratorStatus::Stepping;
+                self.status = ModelDataGeneratorStatus::Stepping;
                 self.steps_remaining = *steps;
                 self.steps_spacing_mode = spacing_mode.clone();
                 self.schedule_next_change_stream_record().await
             },
-            ScriptSourceChangeGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            BuildingEnvironmentDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
         }
     }
     
-    async fn transition_from_running_state(&mut self, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    async fn transition_from_running_state(&mut self, command: &BuildingEnvironmentDataGeneratorCommand) -> anyhow::Result<()> {
         log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
     
         match command {
-            ScriptSourceChangeGeneratorCommand::GetState => Ok(()),
-            ScriptSourceChangeGeneratorCommand::Pause => {
-                self.status = SourceChangeGeneratorStatus::Paused;
+            BuildingEnvironmentDataGeneratorCommand::GetState => Ok(()),
+            BuildingEnvironmentDataGeneratorCommand::Pause => {
+                self.status = ModelDataGeneratorStatus::Paused;
                 Ok(())
             },
-            ScriptSourceChangeGeneratorCommand::Reset => {
-                Err(ScriptSourceChangeGeneratorError::PauseToReset.into())
+            BuildingEnvironmentDataGeneratorCommand::Reset => {
+                Err(BuildingEnvironmentSourceChangeGeneratorError::PauseToReset.into())
             },
-            ScriptSourceChangeGeneratorCommand::Skip{..} => {
-                Err(ScriptSourceChangeGeneratorError::PauseToSkip.into())
+            BuildingEnvironmentDataGeneratorCommand::Start => Ok(()),
+            BuildingEnvironmentDataGeneratorCommand::Step{..} => {
+                Err(BuildingEnvironmentSourceChangeGeneratorError::PauseToStep.into())
             },
-            ScriptSourceChangeGeneratorCommand::Start => Ok(()),
-            ScriptSourceChangeGeneratorCommand::Step{..} => {
-                Err(ScriptSourceChangeGeneratorError::PauseToStep.into())
-            },
-            ScriptSourceChangeGeneratorCommand::Stop => {
+            BuildingEnvironmentDataGeneratorCommand::Stop => {
                 Ok(self.transition_to_stopped_state().await)
             },
         }
     }
-    
-    async fn transition_from_skipping_state(&mut self, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+        
+    async fn transition_from_stepping_state(&mut self, command: &BuildingEnvironmentDataGeneratorCommand) -> anyhow::Result<()> {
         log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
     
         match command {
-            ScriptSourceChangeGeneratorCommand::GetState => Ok(()),
-            ScriptSourceChangeGeneratorCommand::Pause => {
-                self.status = SourceChangeGeneratorStatus::Paused;
-                self.skips_remaining = 0;
-                self.skips_spacing_mode = None;
-                Ok(())
-            },
-            ScriptSourceChangeGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
-            ScriptSourceChangeGeneratorCommand::Reset
-            | ScriptSourceChangeGeneratorCommand::Skip {..}
-            | ScriptSourceChangeGeneratorCommand::Start
-            | ScriptSourceChangeGeneratorCommand::Step {..}
-                => Err(ScriptSourceChangeGeneratorError::CurrentlySkipping(self.skips_remaining).into())
-        }
-    }
-    
-    async fn transition_from_stepping_state(&mut self, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
-        log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
-    
-        match command {
-            ScriptSourceChangeGeneratorCommand::GetState => Ok(()),
-            ScriptSourceChangeGeneratorCommand::Pause => {
-                self.status = SourceChangeGeneratorStatus::Paused;
+            BuildingEnvironmentDataGeneratorCommand::GetState => Ok(()),
+            BuildingEnvironmentDataGeneratorCommand::Pause => {
+                self.status = ModelDataGeneratorStatus::Paused;
                 self.steps_remaining = 0;
                 self.steps_spacing_mode = None;
                 Ok(())
             },
-            ScriptSourceChangeGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
-            ScriptSourceChangeGeneratorCommand::Reset
-            | ScriptSourceChangeGeneratorCommand::Skip {..}
-            | ScriptSourceChangeGeneratorCommand::Start
-            | ScriptSourceChangeGeneratorCommand::Step {..}
-                => Err(ScriptSourceChangeGeneratorError::CurrentlyStepping(self.steps_remaining).into())
+            BuildingEnvironmentDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            BuildingEnvironmentDataGeneratorCommand::Reset
+            | BuildingEnvironmentDataGeneratorCommand::Start
+            | BuildingEnvironmentDataGeneratorCommand::Step {..}
+                => Err(BuildingEnvironmentSourceChangeGeneratorError::CurrentlyStepping(self.steps_remaining).into())
         }
     }
     
-    async fn transition_from_stopped_state(&mut self, command: &ScriptSourceChangeGeneratorCommand) -> anyhow::Result<()> {
+    async fn transition_from_stopped_state(&mut self, command: &BuildingEnvironmentDataGeneratorCommand) -> anyhow::Result<()> {
         log::debug!("Attempting to transition from {:?} state via command: {:?}", self.status, command);
     
-        if let ScriptSourceChangeGeneratorCommand::Reset = command {
+        if let BuildingEnvironmentDataGeneratorCommand::Reset = command {
             self.reset().await
         } else {
-            Err(ScriptSourceChangeGeneratorError::AlreadyStopped.into())
+            Err(BuildingEnvironmentSourceChangeGeneratorError::AlreadyStopped.into())
         }
     }    
 
     async fn transition_to_finished_state(&mut self) {
         log::info!("Script Finished for TestRunSource {}", self.settings.id);
     
-        self.status = SourceChangeGeneratorStatus::Finished;
+        self.status = ModelDataGeneratorStatus::Finished;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-        self.skips_remaining = 0;
-        self.skips_spacing_mode = None;
         self.steps_remaining = 0;
         self.steps_spacing_mode = None;
         
@@ -985,10 +864,8 @@ impl ScriptSourceChangeGeneratorInternalState {
     async fn transition_to_stopped_state(&mut self) {
         log::info!("Script Stopped for TestRunSource {}", self.settings.id);
     
-        self.status = SourceChangeGeneratorStatus::Stopped;
+        self.status = ModelDataGeneratorStatus::Stopped;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-        self.skips_remaining = 0;
-        self.skips_spacing_mode = None;
         self.steps_remaining = 0;
         self.steps_spacing_mode = None;
 
@@ -997,7 +874,7 @@ impl ScriptSourceChangeGeneratorInternalState {
     }
     
     fn transition_to_error_state(&mut self, error_message: &str, error: Option<&anyhow::Error>) {    
-        self.status = SourceChangeGeneratorStatus::Error;
+        self.status = ModelDataGeneratorStatus::Error;
     
         let msg = match error {
             Some(e) => format!("{}: {:?}", error_message, e),
@@ -1011,7 +888,7 @@ impl ScriptSourceChangeGeneratorInternalState {
 
     pub async fn write_result_summary(&mut self) -> anyhow::Result<()> {
 
-        let result_summary: ScriptSourceChangeGeneratorResultSummary = self.into();
+        let result_summary: BuildingEnvironmentSourceChangeGeneratorResultSummary = self.into();
         log::info!("Stats for TestRunSource:\n{:#?}", &result_summary);
     
         let result_summary_value = serde_json::to_value(result_summary).unwrap();
@@ -1026,16 +903,13 @@ impl ScriptSourceChangeGeneratorInternalState {
 }
 
 
-impl Debug for ScriptSourceChangeGeneratorInternalState {
+impl Debug for BuildingEnvironmentChangeGeneratorInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ScriptSourceChangeGeneratorInternalState")
             .field("error_messages", &self.error_messages)
-            .field("ignore_scripted_pause_commands", &self.settings.ignore_scripted_pause_commands)
             .field("header_record", &self.header_record)
             .field("next_record", &self.next_record)
             .field("previous_record", &self.previous_record)
-            .field("skips_remaining", &self.skips_remaining)
-            .field("skips_spacing_mode", &self.skips_spacing_mode)
             .field("spacing_mode", &self.settings.spacing_mode)
             .field("status", &self.status)
             .field("stats", &self.stats)
@@ -1050,22 +924,20 @@ impl Debug for ScriptSourceChangeGeneratorInternalState {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ScriptSourceChangeGeneratorStats {
+pub struct BuildingEnvironmentSourceChangeGeneratorStats {
     pub actual_start_time_ns: u64,
     pub actual_end_time_ns: u64,
     pub num_source_change_records: u64,
-    pub num_skipped_source_change_records: u64,
     pub num_label_records: u64,
     pub num_pause_records: u64,
 }
 
-impl Default for ScriptSourceChangeGeneratorStats {
+impl Default for BuildingEnvironmentSourceChangeGeneratorStats {
     fn default() -> Self {
         Self {
             actual_start_time_ns: 0,
             actual_end_time_ns: 0,
             num_source_change_records: 0,
-            num_skipped_source_change_records: 0,
             num_label_records: 0,
             num_pause_records: 0,
         }
@@ -1073,7 +945,7 @@ impl Default for ScriptSourceChangeGeneratorStats {
 }
 
 #[derive(Clone, Serialize)]
-pub struct ScriptSourceChangeGeneratorResultSummary {
+pub struct BuildingEnvironmentSourceChangeGeneratorResultSummary {
     pub actual_start_time: String,
     pub actual_start_time_ns: u64,
     pub actual_end_time: String,
@@ -1081,15 +953,14 @@ pub struct ScriptSourceChangeGeneratorResultSummary {
     pub run_duration_ns: u64,
     pub run_duration_sec: f64,
     pub num_source_change_records: u64,
-    pub num_skipped_source_change: u64,
     pub num_label_records: u64,
     pub num_pause_records: u64,
     pub processing_rate: f64,
     pub test_run_source_id: String,
 }
 
-impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeGeneratorResultSummary {
-    fn from(state: &mut ScriptSourceChangeGeneratorInternalState) -> Self {
+impl From<&mut BuildingEnvironmentChangeGeneratorInternalState> for BuildingEnvironmentSourceChangeGeneratorResultSummary {
+    fn from(state: &mut BuildingEnvironmentChangeGeneratorInternalState) -> Self {
         let run_duration_ns = state.stats.actual_end_time_ns - state.stats.actual_start_time_ns;
         let run_duration_sec = run_duration_ns as f64 / 1_000_000_000.0;
 
@@ -1103,7 +974,6 @@ impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeG
             run_duration_ns,
             run_duration_sec,
             num_source_change_records: state.stats.num_source_change_records,
-            num_skipped_source_change: state.stats.num_skipped_source_change_records,
             num_label_records: state.stats.num_label_records,
             num_pause_records: state.stats.num_pause_records,
             processing_rate: state.stats.num_source_change_records as f64 / run_duration_sec,
@@ -1112,16 +982,16 @@ impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeG
     }
 }
 
-impl Debug for ScriptSourceChangeGeneratorResultSummary {
+impl Debug for BuildingEnvironmentSourceChangeGeneratorResultSummary {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let start_time = format!("{} ({} ns)", self.actual_start_time, self.actual_start_time_ns);
         let end_time = format!("{} ({} ns)", self.actual_end_time, self.actual_end_time_ns);
         let run_duration = format!("{} sec ({} ns)", self.run_duration_sec, self.run_duration_ns, );
-        let source_change_records = format!("{} (skipped:{}, label:{}, pause:{})", 
-            self.num_source_change_records, self.num_skipped_source_change, self.num_label_records, self.num_pause_records);
+        let source_change_records = format!("{} (label:{}, pause:{})", 
+            self.num_source_change_records, self.num_label_records, self.num_pause_records);
         let processing_rate = format!("{:.2} changes / sec", self.processing_rate);
 
-        f.debug_struct("ScriptSourceChangeGeneratorResultSummary")
+        f.debug_struct("BuildingEnvironmentSourceChangeGeneratorResultSummary")
             .field("test_run_source_id", &self.test_run_source_id)
             .field("start_time", &start_time)
             .field("end_time", &end_time)
@@ -1133,24 +1003,24 @@ impl Debug for ScriptSourceChangeGeneratorResultSummary {
 }
 
 
-// Function that defines the operation of the ScriptSourceChangeGenerator thread.
-// The ScriptSourceChangeGenerator thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
-// The Web API function communicate via a channel and provide oneshot channels for the ScriptSourceChangeGenerator to send responses back.
-pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSourceChangeGeneratorMessage>, settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<()>{
+// Function that defines the operation of the BuildingEnvironmentDataGenerator thread.
+// The BuildingEnvironmentDataGenerator thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
+// The Web API function communicate via a channel and provide oneshot channels for the BuildingEnvironmentDataGenerator to send responses back.
+pub async fn script_processor_thread(mut command_rx_channel: Receiver<BuildingEnvironmentDataGeneratorMessage>, settings: BuildingEnvironmentDataGeneratorSettings) -> anyhow::Result<()>{
     log::info!("Script processor thread started for TestRunSource {} ...", settings.id);
 
-    // The ScriptSourceChangeGenerator always starts with the first script record loaded and Paused.
-    let (mut state, mut change_rx_channel) = match ScriptSourceChangeGeneratorInternalState::initialize(settings).await {
+    // The BuildingEnvironmentDataGenerator always starts with the first script record loaded and Paused.
+    let (mut state, mut change_rx_channel) = match BuildingEnvironmentChangeGeneratorInternalState::initialize(settings).await {
         Ok((state, change_rx_channel)) => (state, change_rx_channel),
         Err(e) => {
             // If initialization fails, don't dont transition to an error state, just log an error and exit the thread.
-            let msg = format!("Error initializing ScriptSourceChangeGenerator: {:?}", e);
+            let msg = format!("Error initializing BuildingEnvironmentDataGenerator: {:?}", e);
             log::error!("{}", msg);
             anyhow::bail!(msg);
         }
     };
 
-    // Loop to process commands sent to the ScriptSourceChangeGenerator or read from the Change Stream.
+    // Loop to process commands sent to the BuildingEnvironmentDataGenerator or read from the Change Stream.
     loop {
         state.log_state("Top of script processor loop");
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::{self, Debug, Formatter}, num::NonZeroU32, pin::Pin, sync::Arc, time::{Duration, SystemTime}, u32};
+use std::{collections::HashSet, fmt::{self, Debug, Formatter}, num::NonZeroU32, pin::Pin, sync::Arc, time::{Duration, SystemTime}, u32};
 
 use async_trait::async_trait;
 use futures::{future::join_all, Stream};
@@ -27,7 +27,7 @@ use test_data_store::{
         change_script_file_reader::ChangeScriptReader, ChangeHeaderRecord, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent
     }, 
     test_repo_storage::{
-        models::{ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
+        models::{BuildingEnvironmentDataGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
         TestSourceStorage
     }, 
     test_run_storage::{
@@ -35,9 +35,9 @@ use test_data_store::{
     }
 };
 
-use crate::sources::source_change_dispatchers::{create_source_change_dispatcher, SourceChangeDispatcher};
+use crate::sources::{bootstrap_data_generators::{BootstrapData, BootstrapDataGenerator}, source_change_dispatchers::{create_source_change_dispatcher, SourceChangeDispatcher}, source_change_generators::{SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState, SourceChangeGeneratorStatus}};
 
-use super::{SourceChangeGenerator, SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStatus};
+use super::ModelDataGenerator;
 
 type ChangeStream = Pin<Box<dyn Stream<Item = anyhow::Result<SequencedChangeScriptRecord>> + Send>>;
 
@@ -62,29 +62,27 @@ pub enum ScriptSourceChangeGeneratorError {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ScriptSourceChangeGeneratorSettings {
+pub struct BuildingEnvironmentDataGeneratorSettings {
     pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub id: TestRunSourceId,
-    pub ignore_scripted_pause_commands: bool,
     pub input_storage: TestSourceStorage,
     pub output_storage: TestRunSourceStorage,
     pub spacing_mode: SpacingMode,
     pub time_mode: TimeMode,
 }
 
-impl ScriptSourceChangeGeneratorSettings {
+impl BuildingEnvironmentDataGeneratorSettings {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        definition: ScriptSourceChangeGeneratorDefinition, 
+        definition: BuildingEnvironmentDataGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         output_storage: TestRunSourceStorage,
         dispatchers: Vec<SourceChangeDispatcherDefinition>,
     ) -> anyhow::Result<Self> {
 
-        Ok(ScriptSourceChangeGeneratorSettings {
+        Ok(BuildingEnvironmentDataGeneratorSettings {
             dispatchers,
             id: test_run_source_id,
-            ignore_scripted_pause_commands: definition.ignore_scripted_pause_commands,
             input_storage,
             output_storage,
             spacing_mode: definition.common.spacing_mode,
@@ -148,25 +146,25 @@ pub struct ProcessedChangeScriptRecord {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ScriptSourceChangeGenerator {
-    settings: ScriptSourceChangeGeneratorSettings,
+pub struct BuildingEnvironmentDataGenerator {
+    settings: BuildingEnvironmentDataGeneratorSettings,
     #[serde(skip_serializing)]
     script_processor_tx_channel: Sender<ScriptSourceChangeGeneratorMessage>,
     #[serde(skip_serializing)]
     _script_processor_thread_handle: Arc<Mutex<JoinHandle<anyhow::Result<()>>>>,
 }
 
-impl ScriptSourceChangeGenerator {
+impl BuildingEnvironmentDataGenerator {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        definition: ScriptSourceChangeGeneratorDefinition, 
+        definition: BuildingEnvironmentDataGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         output_storage: TestRunSourceStorage,
         dispatchers: Vec<SourceChangeDispatcherDefinition>,
     ) -> anyhow::Result<Self> {
-        let settings = ScriptSourceChangeGeneratorSettings::new(
+        let settings = BuildingEnvironmentDataGeneratorSettings::new(
             test_run_source_id, definition, input_storage, output_storage.clone(), dispatchers).await?;
-        log::debug!("Creating ScriptSourceChangeGenerator from {:?}", &settings);
+        log::debug!("Creating BuildingEnvironmentDataGenerator from {:?}", &settings);
 
         let (script_processor_tx_channel, script_processor_rx_channel) = tokio::sync::mpsc::channel(100);
         let script_processor_thread_handle = tokio::spawn(script_processor_thread(script_processor_rx_channel, settings.clone()));
@@ -182,7 +180,7 @@ impl ScriptSourceChangeGenerator {
         self.settings.get_id()
     }
 
-    pub fn get_settings(&self) -> ScriptSourceChangeGeneratorSettings {
+    pub fn get_settings(&self) -> BuildingEnvironmentDataGeneratorSettings {
         self.settings.clone()
     }
 
@@ -200,7 +198,7 @@ impl ScriptSourceChangeGenerator {
 
                 Ok(SourceChangeGeneratorCommandResponse {
                     result: player_response.result,
-                    state: super::SourceChangeGeneratorState {
+                    state: SourceChangeGeneratorState {
                         status: player_response.state.status,
                         state: serde_json::to_value(player_response.state).unwrap(),
                     },
@@ -212,7 +210,18 @@ impl ScriptSourceChangeGenerator {
 }
 
 #[async_trait]
-impl SourceChangeGenerator for ScriptSourceChangeGenerator {
+impl BootstrapDataGenerator for BuildingEnvironmentDataGenerator {
+    async fn get_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
+        log::debug!("Node labels: [{:?}], Rel labels: [{:?}]", node_labels, rel_labels);
+
+        let bootstrap_data = BootstrapData::new();
+
+        Ok(bootstrap_data)
+    }
+}
+
+#[async_trait]
+impl SourceChangeGenerator for BuildingEnvironmentDataGenerator {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         self.send_command(ScriptSourceChangeGeneratorCommand::GetState).await
     }
@@ -242,10 +251,12 @@ impl SourceChangeGenerator for ScriptSourceChangeGenerator {
     }
 }
 
+#[async_trait]
+impl ModelDataGenerator for BuildingEnvironmentDataGenerator {}
+
 #[derive(Debug, Serialize)]
 pub struct ScriptSourceChangeGeneratorExternalState {
     pub error_messages: Vec<String>,
-    pub ignore_scripted_pause_commands: bool,
     pub header_record: ChangeHeaderRecord,
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
@@ -262,11 +273,10 @@ pub struct ScriptSourceChangeGeneratorExternalState {
     pub virtual_time_ns_start: u64,
 }
 
-impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeGeneratorExternalState {
-    fn from(state: &mut ScriptSourceChangeGeneratorInternalState) -> Self {
+impl From<&mut BuildingEnvironmentDataGeneratorInternalState> for ScriptSourceChangeGeneratorExternalState {
+    fn from(state: &mut BuildingEnvironmentDataGeneratorInternalState) -> Self {
         Self {
             error_messages: state.error_messages.clone(),
-            ignore_scripted_pause_commands: state.settings.ignore_scripted_pause_commands,
             header_record: state.header_record.clone(),
             next_record: state.next_record.clone(),
             previous_record: state.previous_record.clone(),
@@ -285,7 +295,7 @@ impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeG
     }
 }
 
-pub struct ScriptSourceChangeGeneratorInternalState {
+pub struct BuildingEnvironmentDataGeneratorInternalState {
     pub change_stream: Pin<Box<dyn Stream<Item = Result<SequencedChangeScriptRecord, anyhow::Error>> + Send>>,
     pub change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
     pub delayer_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
@@ -296,7 +306,7 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub next_record: Option<SequencedChangeScriptRecord>,
     pub previous_record: Option<ProcessedChangeScriptRecord>,
     pub rate_limiter_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
-    pub settings: ScriptSourceChangeGeneratorSettings,
+    pub settings: BuildingEnvironmentDataGeneratorSettings,
     pub skips_remaining: u64,
     pub skips_spacing_mode: Option<SpacingMode>,
     pub status: SourceChangeGeneratorStatus,
@@ -308,9 +318,9 @@ pub struct ScriptSourceChangeGeneratorInternalState {
     pub virtual_time_ns_start: u64,
 }
 
-impl ScriptSourceChangeGeneratorInternalState {
+impl BuildingEnvironmentDataGeneratorInternalState {
 
-    async fn initialize(settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<(Self, Receiver<ScheduledChangeScriptRecordMessage>)> {
+    async fn initialize(settings: BuildingEnvironmentDataGeneratorSettings) -> anyhow::Result<(Self, Receiver<ScheduledChangeScriptRecordMessage>)> {
         log::debug!("Initializing ScriptSourceChangeGenerator using {:?}", settings);
     
         // Get the list of script files from the input storage.
@@ -551,13 +561,7 @@ impl ScriptSourceChangeGeneratorInternalState {
             },
             ChangeScriptRecord::PauseCommand(_) => {
                 self.stats.num_pause_records += 1;
-    
-                // Process the PauseCommand only if the Player is not configured to ignore them.
-                if self.settings.ignore_scripted_pause_commands {
-                    log::debug!("Ignoring Change Script Pause Command: {:?}", shifted_record);
-                } else {
-                    self.status = SourceChangeGeneratorStatus::Paused;
-                }
+                self.status = SourceChangeGeneratorStatus::Paused;
             },
             ChangeScriptRecord::Label(label_record) => {
                 self.stats.num_label_records += 1;
@@ -1026,11 +1030,10 @@ impl ScriptSourceChangeGeneratorInternalState {
 }
 
 
-impl Debug for ScriptSourceChangeGeneratorInternalState {
+impl Debug for BuildingEnvironmentDataGeneratorInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("ScriptSourceChangeGeneratorInternalState")
             .field("error_messages", &self.error_messages)
-            .field("ignore_scripted_pause_commands", &self.settings.ignore_scripted_pause_commands)
             .field("header_record", &self.header_record)
             .field("next_record", &self.next_record)
             .field("previous_record", &self.previous_record)
@@ -1088,8 +1091,8 @@ pub struct ScriptSourceChangeGeneratorResultSummary {
     pub test_run_source_id: String,
 }
 
-impl From<&mut ScriptSourceChangeGeneratorInternalState> for ScriptSourceChangeGeneratorResultSummary {
-    fn from(state: &mut ScriptSourceChangeGeneratorInternalState) -> Self {
+impl From<&mut BuildingEnvironmentDataGeneratorInternalState> for ScriptSourceChangeGeneratorResultSummary {
+    fn from(state: &mut BuildingEnvironmentDataGeneratorInternalState) -> Self {
         let run_duration_ns = state.stats.actual_end_time_ns - state.stats.actual_start_time_ns;
         let run_duration_sec = run_duration_ns as f64 / 1_000_000_000.0;
 
@@ -1132,15 +1135,14 @@ impl Debug for ScriptSourceChangeGeneratorResultSummary {
     }
 }
 
-
 // Function that defines the operation of the ScriptSourceChangeGenerator thread.
 // The ScriptSourceChangeGenerator thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
 // The Web API function communicate via a channel and provide oneshot channels for the ScriptSourceChangeGenerator to send responses back.
-pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSourceChangeGeneratorMessage>, settings: ScriptSourceChangeGeneratorSettings) -> anyhow::Result<()>{
+pub async fn script_processor_thread(mut command_rx_channel: Receiver<ScriptSourceChangeGeneratorMessage>, settings: BuildingEnvironmentDataGeneratorSettings) -> anyhow::Result<()>{
     log::info!("Script processor thread started for TestRunSource {} ...", settings.id);
 
     // The ScriptSourceChangeGenerator always starts with the first script record loaded and Paused.
-    let (mut state, mut change_rx_channel) = match ScriptSourceChangeGeneratorInternalState::initialize(settings).await {
+    let (mut state, mut change_rx_channel) = match BuildingEnvironmentDataGeneratorInternalState::initialize(settings).await {
         Ok((state, change_rx_channel)) => (state, change_rx_channel),
         Err(e) => {
             // If initialization fails, don't dont transition to an error state, just log an error and exit the thread.

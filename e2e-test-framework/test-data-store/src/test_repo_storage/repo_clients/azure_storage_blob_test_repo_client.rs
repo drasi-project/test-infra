@@ -151,16 +151,16 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
 
                 // Bootstrap Data Script Files
                 match &def.bootstrap_data_generator_def {
-                    Some(BootstrapDataGeneratorDefinition::Script{common_config: _, unique_config}) => {
+                    Some(BootstrapDataGeneratorDefinition::Script(bs_def)) => {
                         // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
                         let repo_path = format!(
                             "{}/{}/sources/{}/{}/", 
                             self.settings.storage_root_path, 
                             test_data_folder, 
                             def.common.test_source_id, 
-                            &unique_config.script_file_folder
+                            &bs_def.script_file_folder
                         );
-                        let local_path = test_source_data_path.join(&unique_config.script_file_folder);
+                        let local_path = test_source_data_path.join(&bs_def.script_file_folder);
                         self.download_bootstrap_script_files(repo_path, local_path).await?
                     },
                     _ => HashMap::new()
@@ -168,16 +168,16 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
 
                 // Source Change Script Files
                 match &def.source_change_generator_def {
-                    Some(SourceChangeGeneratorDefinition::Script{common_config: _, unique_config}) => {
+                    Some(SourceChangeGeneratorDefinition::Script(sc_def)) => {
                         // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
                         let repo_path = format!(
                             "{}/{}/sources/{}/{}/", 
                             self.settings.storage_root_path, 
                             test_data_folder, 
                             def.common.test_source_id, 
-                            &unique_config.script_file_folder
+                            &sc_def.script_file_folder
                         );
-                        let local_path = test_source_data_path.join(&unique_config.script_file_folder);
+                        let local_path = test_source_data_path.join(&sc_def.script_file_folder);
                         self.download_change_script_files(repo_path, local_path).await?
                     },
                     _ => Vec::new()

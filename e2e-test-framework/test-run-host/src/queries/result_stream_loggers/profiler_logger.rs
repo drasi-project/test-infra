@@ -107,15 +107,15 @@ impl ChangeRecordProfile {
 
         Self {
             seq: change.base.sequence,
-            time_in_src_change_q: metadata.source.change_svc_start_ms - metadata.source.reactivator_ms,
-            time_in_src_change_rtr: metadata.source.change_svc_end_ms - metadata.source.change_svc_start_ms,
-            time_in_src_disp_q: metadata.source.change_dispatcher_start_ms - metadata.source.change_svc_end_ms,
-            time_in_src_change_disp: metadata.source.change_dispatcher_end_ms - metadata.source.change_dispatcher_start_ms,
-            time_in_src_change_pub: metadata.query.dequeue_ms - metadata.source.change_dispatcher_end_ms,
-            time_in_query_host: metadata.query.query_end_ms - metadata.query.dequeue_ms,
-            time_in_query_solver: metadata.query.query_end_ms - metadata.query.query_start_ms,
-            time_in_result_disp_q: record_dequeue_time_ms - metadata.query.query_end_ms,
-            time_total: record_dequeue_time_ms - metadata.source.reactivator_ms,
+            time_in_src_change_q: metadata.source.change_router_start_ns - metadata.source.source_ns,
+            time_in_src_change_rtr: metadata.source.change_router_end_ns - metadata.source.change_router_start_ns,
+            time_in_src_disp_q: metadata.source.change_dispatcher_start_ns - metadata.source.change_router_end_ns,
+            time_in_src_change_disp: metadata.source.change_dispatcher_end_ns - metadata.source.change_dispatcher_start_ns,
+            time_in_src_change_pub: metadata.query.dequeue_ns - metadata.source.change_dispatcher_end_ns,
+            time_in_query_host: metadata.query.query_end_ns - metadata.query.dequeue_ns,
+            time_in_query_solver: metadata.query.query_end_ns - metadata.query.query_start_ns,
+            time_in_result_disp_q: record_dequeue_time_ms - metadata.query.query_end_ns,
+            time_total: record_dequeue_time_ms - metadata.source.source_ns,
         }
     }
 }

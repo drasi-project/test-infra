@@ -16,12 +16,13 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 
-use building_environment_model::BuildingEnvironmentDataGenerator;
+use building_hierarchy::BuildingHierarchyDataGenerator;
 use test_data_store::{test_repo_storage::{models::{ModelDataGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
 
 use super::{bootstrap_data_generators::{BootstrapData, BootstrapDataGenerator}, source_change_generators::{SourceChangeGenerator, SourceChangeGeneratorCommandResponse}};
 
-pub mod building_environment_model;
+pub mod building_hierarchy;
+pub mod domain_model_graph;
 
 #[async_trait]
 pub trait ModelDataGenerator : SourceChangeGenerator + BootstrapDataGenerator + Send + Sync + std::fmt::Debug {}
@@ -76,8 +77,8 @@ pub async fn create_model_data_generator(
 ) -> anyhow::Result<Option<Box<dyn ModelDataGenerator + Send + Sync>>> {
     match definition {
         None => Ok(None),
-        Some(ModelDataGeneratorDefinition::BuildingEnvironment(definition)) => {
-            Ok(Some(Box::new(BuildingEnvironmentDataGenerator::new(
+        Some(ModelDataGeneratorDefinition::BuildingHierarchy(definition)) => {
+            Ok(Some(Box::new(BuildingHierarchyDataGenerator::new(
                 id, 
                 definition,
                 input_storage, 

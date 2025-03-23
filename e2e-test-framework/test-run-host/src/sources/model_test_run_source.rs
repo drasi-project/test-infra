@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::Rng;
 use std::collections::HashSet;
 
 use async_trait::async_trait;
@@ -22,12 +21,9 @@ use test_data_store::{test_repo_storage::{models::{ModelDataGeneratorDefinition,
 
 use crate::sources::{bootstrap_data_generators::BootstrapData, model_data_generators::{create_model_data_generator, ModelDataGenerator}, source_change_generators::{ SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState}, SourceStartMode, TestRunSource, TestRunSourceConfig, TestRunSourceState};
 
-// use super::{building_graph::BuildingGraph, domain_model_graph::DomainModelGraph};
-
 #[derive(Clone, Debug)]
 pub struct ModelTestRunSourceSettings {
     pub id: TestRunSourceId,
-    pub seed: u64,
     pub source_change_dispatcher_defs: Vec<SourceChangeDispatcherDefinition>,
     pub model_data_generator_def: Option<ModelDataGeneratorDefinition>,
     pub start_mode: SourceStartMode,    
@@ -39,9 +35,8 @@ impl ModelTestRunSourceSettings {
             
         let mut settings = Self {
             id: TestRunSourceId::try_from(cfg)?,
-            seed: def.seed.unwrap_or(rand::thread_rng().gen()),
-            source_change_dispatcher_defs: def.common.source_change_dispatcher_defs.clone(),
-            model_data_generator_def: def.model_data_generator_def.clone(),
+            source_change_dispatcher_defs: def.common.source_change_dispatchers.clone(),
+            model_data_generator_def: def.model_data_generator.clone(),
             start_mode: cfg.start_mode.clone().unwrap_or_default(),
             subscribers: def.common.subscribers.clone(),
         };
@@ -49,7 +44,7 @@ impl ModelTestRunSourceSettings {
         if let Some(overrides) = &cfg.test_run_overrides {
             if let Some(mdg_overrides) = &overrides.model_data_generator {
                 match &mut settings.model_data_generator_def {
-                    Some(ModelDataGeneratorDefinition::BuildingEnvironment(mdg_def)) => {
+                    Some(ModelDataGeneratorDefinition::BuildingHierarchy(mdg_def)) => {
                         if let Some(spacing_mode) = &mdg_overrides.spacing_mode {
                             mdg_def.common.spacing_mode = spacing_mode.clone();
                         }

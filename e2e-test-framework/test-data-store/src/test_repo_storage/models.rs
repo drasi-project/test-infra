@@ -165,7 +165,7 @@ impl TestDefinition {
     pub fn get_test_source(&self, source_id: &str) -> anyhow::Result<TestSourceDefinition> {
         let test_source_definition = self.sources.iter().find(|source| {
             match source {
-                TestSourceDefinition::BuildingEnvironmentModel(def) => { def.common.test_source_id == source_id },
+                TestSourceDefinition::Model(def) => { def.common.test_source_id == source_id },
                 TestSourceDefinition::Script(def) => def.common.test_source_id == source_id,
             }
         }).ok_or_else(|| {
@@ -181,36 +181,33 @@ impl TestDefinition {
 #[serde(tag = "kind")]
 
 pub enum TestSourceDefinition {
-    BuildingEnvironmentModel(ModelTestSourceDefinition),
+    Model(ModelTestSourceDefinition),
     Script(ScriptTestSourceDefinition),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonTestSourceDefinition {
     pub test_source_id: String,
-    #[serde(default, alias = "source_change_dispatchers")]
-    pub source_change_dispatcher_defs: Vec<SourceChangeDispatcherDefinition>,
+    #[serde(default)]
+    pub source_change_dispatchers: Vec<SourceChangeDispatcherDefinition>,
     #[serde(default)]
     pub subscribers: Vec<QueryId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScriptTestSourceDefinition {
-    #[serde(alias = "bootstrap_data_generator")]
-    pub bootstrap_data_generator_def: Option<BootstrapDataGeneratorDefinition>,
+    pub bootstrap_data_generator: Option<BootstrapDataGeneratorDefinition>,
     #[serde(flatten)]
     pub common: CommonTestSourceDefinition,
-    #[serde(alias = "source_change_generator")]
-    pub source_change_generator_def: Option<SourceChangeGeneratorDefinition>,
+    pub source_change_generator: Option<SourceChangeGeneratorDefinition>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelTestSourceDefinition {
     #[serde(flatten)]
     pub common: CommonTestSourceDefinition,
-    #[serde(alias = "model_data_generator")]
-    pub model_data_generator_def: Option<ModelDataGeneratorDefinition>,
-    pub seed: Option<u64>,
+    pub model_data_generator: Option<ModelDataGeneratorDefinition>,
+    pub start_time_ns: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -235,11 +232,13 @@ pub struct ScriptBootstrapDataGeneratorDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ModelDataGeneratorDefinition {
-    BuildingEnvironment(BuildingEnvironmentDataGeneratorDefinition),
+    BuildingHierarchy(BuildingHierarchyDataGeneratorDefinition),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonModelDataGeneratorDefinition {
+    pub change_count: Option<u128>,
+    pub seed: Option<u64>,
     #[serde(default)]
     pub spacing_mode: SpacingMode,
     #[serde(default)]
@@ -247,20 +246,23 @@ pub struct CommonModelDataGeneratorDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BuildingTemplateDefinition {
-    pub count_min: u32,
-    pub count_max: u32,
-    pub floors_min: u32,
-    pub floors_max: u32,
-    pub rooms_min: u32,
-    pub rooms_max: u32,
+pub struct BuildingHierarchyDataGeneratorDefinition {
+    #[serde(flatten)]
+    pub common: CommonModelDataGeneratorDefinition,
+    pub initialization: BuildingHierarchyDataGeneratorInitializationDefinition,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BuildingEnvironmentDataGeneratorDefinition {
-    #[serde(flatten)]
-    pub common: CommonModelDataGeneratorDefinition,
-    pub building_templates: Vec<BuildingTemplateDefinition>,
+pub struct BuildingHierarchyDataGeneratorInitializationDefinition {
+    pub building_count: Option<(u32, f64)>,
+    pub floor_count: Option<(u32, f64)>,
+    pub room_count: Option<(u32, f64)>,
+    pub sensor_co2: Option<(f64, f64)>,
+    pub sensor_humidity: Option<(f64, f64)>,
+    pub sensor_light: Option<(f64, f64)>,
+    pub sensor_noise: Option<(f64, f64)>,
+    pub sensor_temperature: Option<(f64, f64)>,
+    pub sensor_occupancy: Option<(u32, f64)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -478,14 +480,14 @@ mod tests {
             TestSourceDefinition::Script(source) => {
                 assert_eq!(source.common.test_source_id, "source1");
 
-                match source.bootstrap_data_generator_def.as_ref().unwrap() {
+                match source.bootstrap_data_generator.as_ref().unwrap() {
                     BootstrapDataGeneratorDefinition::Script(definition)=> {
                         assert_eq!(definition.common.time_mode, TimeMode::Live);
                         assert_eq!(definition.script_file_folder, "bootstrap_data_scripts");
                     }
                 }
         
-                match source.source_change_generator_def.as_ref().unwrap() {
+                match source.source_change_generator.as_ref().unwrap() {
                     SourceChangeGeneratorDefinition::Script(definition) => {
                         assert_eq!(definition.common.spacing_mode, SpacingMode::Recorded);
                         assert_eq!(definition.common.time_mode, TimeMode::Live);
@@ -513,8 +515,8 @@ mod tests {
         match source {
             TestSourceDefinition::Script(source) => {
                 assert_eq!(source.common.test_source_id, "source1");
-                assert_eq!(source.bootstrap_data_generator_def.is_none(), true);
-                assert_eq!(source.source_change_generator_def.is_none(), true);
+                assert_eq!(source.bootstrap_data_generator.is_none(), true);
+                assert_eq!(source.source_change_generator.is_none(), true);
         }
             _ => panic!("Expected ScriptTestSourceDefinition"),
         }
@@ -564,14 +566,14 @@ mod tests {
             TestSourceDefinition::Script(source) => {
                 assert_eq!(source.common.test_source_id, "source1");
 
-                match source.bootstrap_data_generator_def.as_ref().unwrap() {
+                match source.bootstrap_data_generator.as_ref().unwrap() {
                     BootstrapDataGeneratorDefinition::Script(definition) => {
                         assert_eq!(definition.common.time_mode, TimeMode::Live);
                         assert_eq!(definition.script_file_folder, "bootstrap_data_scripts");
                     }
                 }
         
-                match source.source_change_generator_def.as_ref().unwrap() {
+                match source.source_change_generator.as_ref().unwrap() {
                     SourceChangeGeneratorDefinition::Script(definition) => {
                         assert_eq!(definition.common.spacing_mode, SpacingMode::Recorded);
                         assert_eq!(definition.common.time_mode, TimeMode::Live);

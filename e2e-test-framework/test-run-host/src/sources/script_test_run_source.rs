@@ -34,10 +34,10 @@ impl ScriptTestRunSourceSettings {
     pub fn new( cfg: &TestRunSourceConfig, def: &ScriptTestSourceDefinition) -> anyhow::Result<Self> {
             
         let mut settings = Self {
-            bootstrap_data_generator_def: def.bootstrap_data_generator_def.clone(),
+            bootstrap_data_generator_def: def.bootstrap_data_generator.clone(),
             id: TestRunSourceId::try_from(cfg)?,
-            source_change_dispatcher_defs: def.common.source_change_dispatcher_defs.clone(),
-            source_change_generator_def: def.source_change_generator_def.clone(),
+            source_change_dispatcher_defs: def.common.source_change_dispatchers.clone(),
+            source_change_generator_def: def.source_change_generator.clone(),
             start_mode: cfg.start_mode.clone().unwrap_or_default(),
             subscribers: def.common.subscribers.clone(),
         };

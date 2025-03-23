@@ -150,7 +150,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
                 log::debug!("Copying Test Source Content for {:?} to {:?}", def.common.test_source_id, test_source_data_path);
 
                 // Bootstrap Data Script Files
-                match &def.bootstrap_data_generator_def {
+                match &def.bootstrap_data_generator {
                     Some(BootstrapDataGeneratorDefinition::Script(bs_def)) => {
                         // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
                         let repo_path = format!(
@@ -167,7 +167,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
                 };
 
                 // Source Change Script Files
-                match &def.source_change_generator_def {
+                match &def.source_change_generator {
                     Some(SourceChangeGeneratorDefinition::Script(sc_def)) => {
                         // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
                         let repo_path = format!(

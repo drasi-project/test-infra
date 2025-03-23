@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Copyright 2025 The Drasi Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +15,12 @@
 
 use generational_arena::{Arena, Index};
 use std::collections::{BTreeMap, HashMap};
+
+// Define a type alias for a NodeId
+pub type NodeId = String;
+
+// Define a type alias for a RelationId
+pub type RelationId = String;
 
 #[derive(Debug, Clone)]
 pub enum PropertyValue {
@@ -34,6 +41,7 @@ pub enum GraphChangeResult<T> {
     Delete { element: T },
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub enum GraphError {
     InvalidNodeId { id: NodeId },
@@ -70,9 +78,6 @@ impl GraphIds {
     }
 }
 
-// Define a type alias for a NodeId
-pub type NodeId = String;
-
 // Define a Node struct
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -102,9 +107,6 @@ impl Node {
         }
     }
 }
-
-// Define a type alias for a RelationId
-pub type RelationId = String;
 
 // Define a Relation struct
 #[derive(Debug, Clone)]
@@ -141,7 +143,6 @@ impl Relation {
 // The DomainModelGraph struct contains two Arenas, one for Nodes and one for Relations.
 // The Node Arena is used to store Node structs and the Relation Arena is used to store Relation structs.
 // The DomainModelGraph struct also contains a HashMap that maps NodeIds to NodeIndexs and a HashMap that maps RelationIds to RelationIndexs.
-#[derive(Debug)]
 pub struct DomainModelGraph {
     nodes: Arena<Node>,
     relations: Arena<Relation>,

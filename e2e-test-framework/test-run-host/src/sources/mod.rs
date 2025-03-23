@@ -18,15 +18,17 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize, de::{self, Deserializer}};
 
 use bootstrap_data_generators::BootstrapData;
+use model_test_run_source::ModelTestRunSource;
+use script_test_run_source::ScriptTestRunSource;
 use source_change_generators::{ SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState};
 use test_data_store::{test_repo_storage::{models::{ QueryId, SourceChangeDispatcherDefinition, SpacingMode, TestSourceDefinition, TimeMode}, TestSourceStorage}, test_run_storage::{ParseTestRunIdError, ParseTestRunSourceIdError, TestRunId, TestRunSourceId, TestRunSourceStorage}};
-use test_run_sources::{model_test_run_source::ModelTestRunSource, script_test_run_source::ScriptTestRunSource};
 
 pub mod bootstrap_data_generators;
 pub mod model_data_generators;
+pub mod model_test_run_source;
+pub mod script_test_run_source;
 pub mod source_change_generators;
 pub mod source_change_dispatchers;
-pub mod test_run_sources;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum SourceStartMode {
@@ -144,6 +146,7 @@ impl fmt::Display for TestRunSourceConfig {
             self.test_repo_id, self.test_id, self.test_run_id, self.test_source_id, self.start_mode)
     }
 }
+
 #[derive(Debug, Serialize)]
 pub struct TestRunSourceState {
     pub id: TestRunSourceId,
@@ -206,7 +209,7 @@ impl TestRunSource for Box<dyn TestRunSource + Send + Sync> {
 pub async fn create_test_run_source(cfg: &TestRunSourceConfig,  def: &TestSourceDefinition, input_storage: TestSourceStorage, output_storage: TestRunSourceStorage) -> anyhow::Result<Box<dyn TestRunSource + Send + Sync>> {
 
     match def {
-        TestSourceDefinition::BuildingEnvironmentModel(def) => {
+        TestSourceDefinition::Model(def) => {
             Ok(Box::new(ModelTestRunSource::new(
                 cfg,
                 def,

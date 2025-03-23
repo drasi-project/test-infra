@@ -262,7 +262,7 @@ impl TestStorage {
 
         let test_source_definition = self.test_definition.sources.iter().find(|source| {
             match source {
-                TestSourceDefinition::BuildingEnvironmentModel(def) => { def.common.test_source_id == id },
+                TestSourceDefinition::Model(def) => { def.common.test_source_id == id },
                 TestSourceDefinition::Script(def) => def.common.test_source_id == id,
             }
         }).ok_or_else(|| {
@@ -332,7 +332,7 @@ impl TestSourceStorage {
         match &self.test_source_definition {
             models::TestSourceDefinition::Script(def) => {
                 // Read the bootstrap script files.
-                match &def.bootstrap_data_generator_def {
+                match &def.bootstrap_data_generator {
                     Some(models::BootstrapDataGeneratorDefinition::Script(bsg_def)) => {
                         let bootstrap_data_scripts_repo_path = self.path.join(&bsg_def.script_file_folder);
 
@@ -361,7 +361,7 @@ impl TestSourceStorage {
                 }
 
                 // Read the change log script files.
-                match &def.source_change_generator_def {
+                match &def.source_change_generator {
                     Some(models::SourceChangeGeneratorDefinition::Script(scg_def)) => {
                         let source_change_scripts_repo_path = self.path.join(&scg_def.script_file_folder);
 

@@ -207,7 +207,6 @@ pub struct ModelTestSourceDefinition {
     #[serde(flatten)]
     pub common: CommonTestSourceDefinition,
     pub model_data_generator: Option<ModelDataGeneratorDefinition>,
-    pub start_time_ns: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -237,7 +236,7 @@ pub enum ModelDataGeneratorDefinition {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonModelDataGeneratorDefinition {
-    pub change_count: Option<u128>,
+    pub change_count: Option<u64>,
     pub seed: Option<u64>,
     #[serde(default)]
     pub spacing_mode: SpacingMode,

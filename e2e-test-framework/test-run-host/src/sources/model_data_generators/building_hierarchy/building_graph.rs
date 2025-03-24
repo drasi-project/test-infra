@@ -18,6 +18,7 @@ use anyhow::Context;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Normal};
+use serde::Serialize;
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::BuildingHierarchyDataGeneratorSettings;
@@ -191,17 +192,20 @@ impl FromStr for Location {
 
 
 // Structs for building, floor, and room
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BuildingNode {
+    #[serde(skip_serializing)]
     pub effective_from: u64, 
     pub id: String,
+    pub labels: Vec<String>,    
 }
 
 impl From<&Building> for BuildingNode {
     fn from(building: &Building) -> Self {
         BuildingNode {
-            effective_from: building.effective_from,
             id: building.id.to_string(),
+            effective_from: building.effective_from,
+            labels: vec![ElementType::BUILDING.to_string()],
         }
     }
 }
@@ -209,9 +213,9 @@ impl From<&Building> for BuildingNode {
 // Structs for building, floor, and room
 #[derive(Debug, Clone)]
 pub struct Building {
-    pub effective_from: u64, // Timestamp of creation or last update
+    pub effective_from: u64, 
     pub floors: HashMap<Location, Floor>, 
-    pub id: Location,      // Location::Building(n)
+    pub id: Location, 
     pub next_floor: u32, 
 }
 
@@ -273,31 +277,34 @@ impl Building {
         }
     }
     
-    pub fn update_random_room(&mut self, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<Vec<ModelChange>> {
+    pub fn update_random_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<Option<ModelChange>> {
 
         match self.floors.len() {
-            0 => return Ok(Vec::new()),
+            0 => return Ok(None),
             len => {
-                let idx = sim_settings.get_usize_in_range(0, len, false);
+                let idx = change_generator.get_usize_in_range(0, len, false);
                 let floor = self.floors.values_mut().nth(idx).unwrap();
 
-                Ok(floor.update_random_room(effective_from, sim_settings)?)
+                Ok(floor.update_random_room(effective_from, change_generator)?)
             }
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FloorNode {
-    pub id: String,       // Location::Floor(building, floor)
-    pub effective_from: u64,  // Timestamp of creation or last update
+    #[serde(skip_serializing)]
+    pub effective_from: u64,  
+    pub id: String,      
+    pub labels: Vec<String>,    
 }
 
 impl From<&Floor> for FloorNode {
     fn from(floor: &Floor) -> Self {
         FloorNode {
-            effective_from: floor.effective_from,
             id: floor.id.to_string(),
+            effective_from: floor.effective_from,
+            labels: vec![ElementType::FLOOR.to_string()],
         }
     }
 }
@@ -322,7 +329,7 @@ impl Floor {
 
         let mut changes = Vec::new();
         changes.push(ModelChange::FloorAdded((&floor).into()));
-        changes.push(ModelChange::BuildingFloorRelationAdded(BuildingFloorRelation::new(&id)?));
+        changes.push(ModelChange::BuildingFloorRelationAdded(BuildingFloorRelation::new(effective_from,&id)?));
 
         // Create Rooms
         for _ in 0..sim_settings.get_random_room_count() {
@@ -353,25 +360,27 @@ impl Floor {
         }
     }
     
-    pub fn update_random_room(&mut self, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<Vec<ModelChange>> {
+    pub fn update_random_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<Option<ModelChange>> {
 
         match self.rooms.len() {
-            0 => return Ok(Vec::new()),
+            0 => return Ok(None),
             len => {
-                let idx = sim_settings.get_usize_in_range(0, len, false);
+                let idx = change_generator.get_usize_in_range(0, len, false);
                 let room = self.rooms.values_mut().nth(idx).unwrap();
 
-                Ok(room.update_sensor_values(effective_from, sim_settings)?)
+                Ok(Some(room.update_sensor_values(effective_from, change_generator)?))
             }
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RoomNode {
-    pub id: String,
-    pub sensor_values: SensorValues,
+    #[serde(skip_serializing)]
     pub effective_from: u64,
+    pub id: String,
+    pub labels: Vec<String>,    
+    pub properties: SensorValues,
 }
 
 impl From<&Room> for RoomNode {
@@ -379,7 +388,8 @@ impl From<&Room> for RoomNode {
         RoomNode {
             effective_from: room.effective_from,
             id: room.id.to_string(),
-            sensor_values: room.sensor_values.clone(),
+            labels: vec![ElementType::ROOM.to_string()],
+            properties: room.sensor_values.clone(),
         }
     }
 }
@@ -402,46 +412,45 @@ impl Room {
 
         let mut changes = Vec::new();
         changes.push(ModelChange::RoomAdded((&room).into()));
-        changes.push(ModelChange::FloorRoomRelationAdded(FloorRoomRelation::new(&id)?));
+        changes.push(ModelChange::FloorRoomRelationAdded(FloorRoomRelation::new(effective_from, &id)?));
 
         Ok((room, changes))
     }
 
-    pub fn update_sensor_values(&mut self, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<Vec<ModelChange>> {
-
-        let mut changes = Vec::new();
+    pub fn update_sensor_values(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<ModelChange> {
 
         let old_room_node: RoomNode = (&*self).into();
 
         self.effective_from = effective_from;
-        self.sensor_values = sim_settings.get_initial_sensor_values();
+        self.sensor_values = change_generator.update_sensor_values(&self.sensor_values);
 
-        changes.push(ModelChange::RoomUpdated(old_room_node, (&*self).into()));
-
-        Ok(changes)
+        Ok(ModelChange::RoomUpdated(old_room_node, (&*self).into()))
     }
 }
 
 // Environmental values for rooms
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SensorValues {
     pub co2: f32,         // ppm
     pub humidity: f32,    // Percentage
     pub light: f32,       // Lux
     pub noise: f32,       // dB
     pub temperature: f32, // Celsius
+    pub occupancy: u32,   // Count of people
 }
 
 #[derive(Debug, Clone)]
 pub struct BuildingFloorRelation {
     pub id: String,
+    pub effective_from: u64,
     pub building_id: String,
     pub floor_id: String,
+    pub labels: Vec<String>,
 }
 
 impl BuildingFloorRelation {
-    pub fn new(floor_id: &Location) -> anyhow::Result<Self> {
+    pub fn new(effective_from: u64, floor_id: &Location) -> anyhow::Result<Self> {
 
         match floor_id {
             Location::Building(_) => anyhow::bail!("Floor ID must be a Floor or Room location"),
@@ -450,8 +459,10 @@ impl BuildingFloorRelation {
 
                 Ok(BuildingFloorRelation {
                     id: format!("BFR_{}_{}", building_id, floor_id),
+                    effective_from,
                     building_id: building_id.to_string(),
                     floor_id: floor_id.to_string(),
+                    labels: vec![ElementType::BUILDING_FLOOR.to_string()],
                 })        
             }
         }
@@ -461,12 +472,14 @@ impl BuildingFloorRelation {
 #[derive(Debug, Clone)]
 pub struct FloorRoomRelation {
     pub id: String,
+    pub effective_from: u64,
     pub floor_id: String,
     pub room_id: String,
+    pub labels: Vec<String>,
 }
 
 impl FloorRoomRelation {
-    pub fn new(room_id: &Location) -> anyhow::Result<Self> {
+    pub fn new(effective_from: u64, room_id: &Location) -> anyhow::Result<Self> {
 
         match room_id {
             Location::Room(_, _, _) => {
@@ -474,8 +487,10 @@ impl FloorRoomRelation {
 
                 Ok(FloorRoomRelation {
                     id: format!("BFR_{}_{}", floor_id, room_id),
+                    effective_from,
                     floor_id: floor_id.to_string(),
                     room_id: room_id.to_string(),
+                    labels: vec![ElementType::FLOOR_ROOM.to_string()],
                 })        
             },
             _ => anyhow::bail!("Room ID must be a Room location"),
@@ -523,7 +538,13 @@ impl GraphChangeGenerator {
             light: self.sensor_light_distribution.sample(rng).max(0.0) as f32,
             noise: self.sensor_noise_distribution.sample(rng).max(0.0) as f32,
             temperature: self.sensor_temperature_distribution.sample(rng) as f32,
+            occupancy: self.sensor_occupancy_distribution.sample(rng).max(0.0) as u32,
         }
+    }
+
+    pub fn get_random_building_count(&mut self) -> u32 {
+        let value = self.building_count_distribution.sample(&mut self.rng);
+        value.max(1.0) as u32
     }
 
     pub fn get_random_floor_count(&mut self) -> u32 {
@@ -543,7 +564,7 @@ impl GraphChangeGenerator {
         }   
     }
 
-    pub fn update_sensor_values(&mut self, _sensor_values: SensorValues) -> SensorValues {
+    pub fn update_sensor_values(&mut self, _sensor_values: &SensorValues) -> SensorValues {
         
         // TODO - update sensor values based on some logic
         // For now, just return new values
@@ -561,13 +582,19 @@ pub struct BuildingGraph {
 }
 
 impl BuildingGraph {
-    pub fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> Self {
-        
-        BuildingGraph {
+    pub async fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> anyhow::Result<Self> {
+
+        let mut building_graph = BuildingGraph {
             buildings: Mutex::new(HashMap::new()),
             change_generator: GraphChangeGenerator::new(settings),
             next_building_num: 0,
-        }
+        };
+
+        for _ in 0..building_graph.change_generator.get_random_building_count() {
+            building_graph.add_building(0).await?;
+        };
+
+        Ok(building_graph)
     }
 
     pub async fn add_building(&mut self, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
@@ -619,6 +646,21 @@ impl BuildingGraph {
                 buildings,
             },
             included_types: included_types.clone(),
+        }
+    }
+
+    pub async fn update_random_room(&mut self, effective_from: u64) -> anyhow::Result<Option<ModelChange>> {
+
+        let mut buildings = self.buildings.lock().await;
+
+        match buildings.len() {
+            0 => Ok(None),
+            _ => {
+                let idx = self.change_generator.get_usize_in_range(0, buildings.len(), false);
+                let building = buildings.values_mut().nth(idx).unwrap();
+
+                Ok(building.update_random_room(effective_from, &mut self.change_generator)?)
+            }
         }
     }
 }
@@ -798,7 +840,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     if self.included_types.contains(ElementType::BUILDING_FLOOR) {
                         let floor_id = floor_id_str.parse::<Location>().unwrap();
                         return Some(ModelChange::BuildingFloorRelationAdded(
-                            BuildingFloorRelation::new(&floor_id).unwrap()
+                            BuildingFloorRelation::new(0, &floor_id).unwrap()
                         ));
                     } else {
                         // Skip to next relation if not included
@@ -831,7 +873,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     if self.included_types.contains(ElementType::FLOOR_ROOM) {
                         let room_id = room_id_str.parse::<Location>().unwrap();
                         return Some(ModelChange::FloorRoomRelationAdded(
-                            FloorRoomRelation::new(&room_id).unwrap()
+                            FloorRoomRelation::new(0, &room_id).unwrap()
                         ));
                     } else {
                         // Skip to next relation if not included

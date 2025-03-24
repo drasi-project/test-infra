@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashSet, fmt::{self, Debug, Formatter}, num::NonZeroU32, pin::Pin, sync::Arc, time::{Duration, SystemTime}, u32};
+use std::{collections::HashSet, fmt::{self, Debug, Formatter}, num::NonZeroU32, sync::Arc, time::{Duration, SystemTime}, u32};
 
 use async_trait::async_trait;
-use building_graph::{BuildingGraph, ModelChange, SensorValues};
-use futures::{future::join_all, Stream};
+use building_graph::{BuildingGraph, ElementType, ModelChange};
+use futures::future::join_all;
 use governor::{Quota, RateLimiter};
 use rand::Rng;
 use serde::Serialize;
-use time::{OffsetDateTime, format_description};
+use time::{format_description, OffsetDateTime};
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle, time::sleep};
 
 use test_data_store::{
     scripts::{
-        ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent, SourceChangeEventAfter, SourceChangeEventBefore, SourceChangeEventPayload, SourceChangeEventSourceInfo
+        NodeRecord, RelationRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo
     }, 
     test_repo_storage::{
         models::{BuildingHierarchyDataGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
@@ -41,8 +41,6 @@ use crate::sources::{bootstrap_data_generators::{BootstrapData, BootstrapDataGen
 use super::ModelDataGenerator;
 
 mod building_graph;
-
-type ChangeStream = Pin<Box<dyn Stream<Item = anyhow::Result<SequencedChangeScriptRecord>> + Send>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildingHierarchyDataGeneratorError {
@@ -66,7 +64,7 @@ pub enum BuildingHierarchyDataGeneratorError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BuildingHierarchyDataGeneratorSettings {
-    pub change_count: u128,
+    pub change_count: u64,
     pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub id: TestRunSourceId,
     pub initialization_settings: BuildingHierarchyDataGeneratorInitializationSettings,
@@ -75,19 +73,6 @@ pub struct BuildingHierarchyDataGeneratorSettings {
     pub seed: u64,
     pub spacing_mode: SpacingMode,
     pub time_mode: TimeMode,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct BuildingHierarchyDataGeneratorInitializationSettings {
-    pub building_count: (u32, f64),
-    pub floor_count: (u32, f64),
-    pub room_count: (u32, f64),
-    pub sensor_co2: (f64, f64),
-    pub sensor_humidity: (f64, f64),
-    pub sensor_light: (f64, f64),
-    pub sensor_noise: (f64, f64),
-    pub sensor_temperature: (f64, f64),
-    pub sensor_occupancy: (u32, f64),
 }
 
 impl BuildingHierarchyDataGeneratorSettings {
@@ -129,6 +114,20 @@ impl BuildingHierarchyDataGeneratorSettings {
     }
 }
 
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BuildingHierarchyDataGeneratorInitializationSettings {
+    pub building_count: (u32, f64),
+    pub floor_count: (u32, f64),
+    pub room_count: (u32, f64),
+    pub sensor_co2: (f64, f64),
+    pub sensor_humidity: (f64, f64),
+    pub sensor_light: (f64, f64),
+    pub sensor_noise: (f64, f64),
+    pub sensor_temperature: (f64, f64),
+    pub sensor_occupancy: (u32, f64),
+}
+
 // Enum of BuildingHierarchyDataGenerator commands sent from Web API handler functions.
 #[derive(Debug)]
 pub enum BuildingHierarchyDataGeneratorCommand {
@@ -167,22 +166,22 @@ pub struct BuildingHierarchyDataGeneratorMessageResponse {
 }
 
 #[derive(Clone, Debug)]
-pub struct ScheduledChangeScriptRecordMessage {
+pub struct ScheduledChangeEventMessage {
     pub delay_ns: u64,
     pub seq_num: u64,
-    pub virtual_time_ns_replay: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ProcessedChangeScriptRecord {
+pub struct ProcessedChangeEvent {
     pub dispatch_status: SourceChangeGeneratorStatus,
-    pub scripted: SequencedChangeScriptRecord,
+    pub event: SourceChangeEvent,
+    pub seq: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BuildingHierarchyDataGenerator {
     #[serde(skip_serializing)]
-    building_graph: Arc<BuildingGraph>,
+    building_graph: Arc<Mutex<BuildingGraph>>,
     settings: BuildingHierarchyDataGeneratorSettings,
     #[serde(skip_serializing)]
     model_host_tx_channel: Sender<BuildingHierarchyDataGeneratorMessage>,
@@ -202,13 +201,13 @@ impl BuildingHierarchyDataGenerator {
             test_run_source_id, definition, input_storage, output_storage.clone(), dispatchers).await?;
         log::debug!("Creating BuildingHierarchyDataGenerator from {:?}", &settings);
 
-        let building_graph = Arc::new(BuildingGraph::new(&settings));
+        let building_graph = Arc::new(Mutex::new(BuildingGraph::new(&settings).await?));
 
         let (model_host_tx_channel, model_host_rx_channel) = tokio::sync::mpsc::channel(500);
         let model_host_thread_handle = tokio::spawn(model_host_thread(model_host_rx_channel, settings.clone(), building_graph.clone()));
 
         Ok(Self {
-            building_graph: building_graph,
+            building_graph,
             settings,
             model_host_tx_channel,
             _model_host_thread_handle: Arc::new(Mutex::new(model_host_thread_handle)),
@@ -253,21 +252,38 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
     async fn get_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
         log::debug!("Node labels: [{:?}], Rel labels: [{:?}]", node_labels, rel_labels);
         
-        let bootstrap_data = BootstrapData::new();
+        let mut building_nodes = Vec::new();
+        let mut floor_nodes = Vec::new();
+        let mut room_nodes = Vec::new();
+        let mut building_floor_rels = Vec::new();
+        let mut floor_room_rels = Vec::new();
 
-        for change in self.building_graph.get_current_state(node_labels).await {
+        let building_graph = self.building_graph.lock().await;
+        for change in building_graph.get_current_state(node_labels).await {
             match change {
                 ModelChange::BuildingAdded(building) => {
-                    log::debug!("Building added: {:?}", building);
-                    bootstrap_data.add_building(building);
+                    let node_record = NodeRecord {
+                        id: building.id.into(),
+                        labels: building.labels.clone(),                        
+                        properties: serde_json::json!({}),
+                    };
+                    building_nodes.push(node_record);
                 },
                 ModelChange::FloorAdded(floor) => {
-                    log::debug!("Floor added: {:?}", floor);
-                    bootstrap_data.add_floor(floor);
+                    let node_record = NodeRecord {
+                        id: floor.id.into(),
+                        labels: floor.labels.clone(),                        
+                        properties: serde_json::json!({}),
+                    };
+                    floor_nodes.push(node_record);
                 },
                 ModelChange::RoomAdded(room) => {
-                    log::debug!("Room added: {:?}", room);
-                    bootstrap_data.add_room(room);
+                    let node_record = NodeRecord {
+                        id: room.id.into(),
+                        labels: room.labels.clone(),                        
+                        properties: serde_json::json!(room.properties),
+                    };
+                    room_nodes.push(node_record);
                 },
                 _ => {
                     log::debug!("Other change: {:?}", change);
@@ -275,20 +291,53 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
             }
         }
 
-        for change in self.building_graph.get_current_state(rel_labels).await {
+        for change in building_graph.get_current_state(rel_labels).await {
             match change {
                 ModelChange::BuildingFloorRelationAdded(relation) => {
-                    log::debug!("BuildingFloorRelation added: {:?}", relation);
-                    bootstrap_data.add_building_floor_relation(relation);
+                    let rel_record = RelationRecord {
+                        id: relation.id.into(),
+                        labels: relation.labels.clone(),
+                        properties: serde_json::json!({}),
+                        start_id: relation.building_id.into(),
+                        start_label: Some(ElementType::BUILDING.to_string()),
+                        end_id: relation.floor_id.into(),
+                        end_label: Some(ElementType::FLOOR.to_string()),
+                    };
+                    building_floor_rels.push(rel_record);
                 },
                 ModelChange::FloorRoomRelationAdded(relation) => {
-                    log::debug!("FloorRoomRelation added: {:?}", relation);
-                    bootstrap_data.add_floor_room_relation(relation);
-                },
+                    let rel_record = RelationRecord {
+                        id: relation.id.into(),
+                        labels: relation.labels.clone(),
+                        properties: serde_json::json!({}),
+                        start_id: relation.floor_id.into(),
+                        start_label: Some(ElementType::FLOOR.to_string()),
+                        end_id: relation.room_id.into(),
+                        end_label: Some(ElementType::ROOM.to_string()),
+                    };
+                    floor_room_rels.push(rel_record);                },
                 _ => {
                     log::debug!("Other change: {:?}", change);
                 }
             }
+        }
+
+        let mut bootstrap_data = BootstrapData::new();
+
+        if building_nodes.len() > 0 {
+            bootstrap_data.nodes.insert("Building".to_string(), building_nodes);
+        }   
+        if floor_nodes.len() > 0 {
+            bootstrap_data.nodes.insert("Floor".to_string(), floor_nodes);
+        }
+        if room_nodes.len() > 0 {
+            bootstrap_data.nodes.insert("Room".to_string(), room_nodes);
+        }
+        if building_floor_rels.len() > 0 {
+            bootstrap_data.rels.insert("BuildingFloor".to_string(), building_floor_rels);
+        }
+        if floor_room_rels.len() > 0 {
+            bootstrap_data.rels.insert("FloorRoom".to_string(), floor_room_rels);
         }
 
         Ok(bootstrap_data)
@@ -332,8 +381,7 @@ impl ModelDataGenerator for BuildingHierarchyDataGenerator {}
 #[derive(Debug, Serialize)]
 pub struct BuildingHierarchyDataGeneratorExternalState {
     pub error_messages: Vec<String>,
-    pub next_record: Option<SequencedChangeScriptRecord>,
-    pub previous_record: Option<ProcessedChangeScriptRecord>,
+    pub previous_event: Option<ProcessedChangeEvent>,
     pub skips_remaining: u64,
     pub skips_spacing_mode: Option<SpacingMode>,
     pub spacing_mode: SpacingMode,
@@ -343,6 +391,7 @@ pub struct BuildingHierarchyDataGeneratorExternalState {
     pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
     pub virtual_time_ns_current: u64,
+    pub virtual_time_ns_next: u64,
     pub virtual_time_ns_offset: u64,
     pub virtual_time_ns_start: u64,
 }
@@ -351,8 +400,7 @@ impl From<&mut BuildingHierarchyDataGeneratorInternalState> for BuildingHierarch
     fn from(state: &mut BuildingHierarchyDataGeneratorInternalState) -> Self {
         Self {
             error_messages: state.error_messages.clone(),
-            next_record: state.next_record.clone(),
-            previous_record: state.previous_record.clone(),
+            previous_event: state.previous_event.clone(),
             skips_remaining: state.skips_remaining,
             skips_spacing_mode: state.skips_spacing_mode.clone(),
             spacing_mode: state.settings.spacing_mode.clone(),
@@ -362,6 +410,7 @@ impl From<&mut BuildingHierarchyDataGeneratorInternalState> for BuildingHierarch
             test_run_source_id: state.settings.id.clone(),
             time_mode: state.settings.time_mode.clone(),
             virtual_time_ns_current: state.virtual_time_ns_current,
+            virtual_time_ns_next: state.virtual_time_ns_next,
             virtual_time_ns_offset: state.virtual_time_ns_offset,
             virtual_time_ns_start: state.virtual_time_ns_start,
         }
@@ -369,15 +418,14 @@ impl From<&mut BuildingHierarchyDataGeneratorInternalState> for BuildingHierarch
 }
 
 pub struct BuildingHierarchyDataGeneratorInternalState {
-    pub building_graph: Arc<BuildingGraph>,
-    pub change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
-    pub delayer_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
+    pub building_graph: Arc<Mutex<BuildingGraph>>,
+    pub change_tx_channel: Sender<ScheduledChangeEventMessage>,
+    pub delayer_tx_channel: Sender<ScheduledChangeEventMessage>,
     pub dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>>,
     pub error_messages: Vec<String>,
     pub message_seq_num: u64,
-    pub next_record: Option<SequencedChangeScriptRecord>,
-    pub previous_record: Option<ProcessedChangeScriptRecord>,
-    pub rate_limiter_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
+    pub previous_event: Option<ProcessedChangeEvent>,
+    pub rate_limiter_tx_channel: Sender<ScheduledChangeEventMessage>,
     pub settings: BuildingHierarchyDataGeneratorSettings,
     pub skips_remaining: u64,
     pub skips_spacing_mode: Option<SpacingMode>,
@@ -386,15 +434,16 @@ pub struct BuildingHierarchyDataGeneratorInternalState {
     pub steps_remaining: u64,
     pub steps_spacing_mode: Option<SpacingMode>,
     pub virtual_time_ns_current: u64,
+    pub virtual_time_ns_next: u64,
     pub virtual_time_ns_offset: u64,
     pub virtual_time_ns_start: u64,
 }
 
 impl BuildingHierarchyDataGeneratorInternalState {
 
-    async fn initialize(settings: BuildingHierarchyDataGeneratorSettings, building_graph: Arc<BuildingGraph>) -> anyhow::Result<(Self, Receiver<ScheduledChangeScriptRecordMessage>)> {
+    async fn initialize(settings: BuildingHierarchyDataGeneratorSettings, building_graph: Arc<Mutex<BuildingGraph>>) -> anyhow::Result<(Self, Receiver<ScheduledChangeEventMessage>)> {
         log::debug!("Initializing BuildingHierarchyDataGenerator using {:?}", settings);
-    
+
         // Create the dispatchers
         let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
         for def in settings.dispatchers.iter() {
@@ -415,15 +464,14 @@ impl BuildingHierarchyDataGeneratorInternalState {
         let (rate_limiter_tx_channel, rate_limiter_rx_channel) = tokio::sync::mpsc::channel(1000);
         let _ = tokio::spawn(rate_limiter_thread(settings.id.clone(), settings.spacing_mode.clone(), rate_limiter_rx_channel, change_tx_channel.clone()));
 
-        let mut state = Self {
+        let state = Self {
             building_graph,
             change_tx_channel,
             delayer_tx_channel,
             dispatchers,
             error_messages: Vec::new(),
             message_seq_num: 0,
-            next_record,
-            previous_record: None,
+            previous_event: None,
             rate_limiter_tx_channel,
             settings,
             skips_remaining: 0,
@@ -433,21 +481,12 @@ impl BuildingHierarchyDataGeneratorInternalState {
             steps_remaining: 0,
             steps_spacing_mode: None,
             virtual_time_ns_current: 0,
+            virtual_time_ns_next: 0,
             virtual_time_ns_offset: 0,
             virtual_time_ns_start: 0,
         };
     
-        trs.initialize_building_graph().await?;
-
         Ok((state, change_rx_channel))
-    }
-
-    async fn initialize_building_graph(&mut self) -> anyhow::Result<()> {
-        let mut building_graph = self.building_graph.lock().await;
-
-        // TODO - Initialize the BuildingGraph.
-
-        Ok(())
     }
 
     async fn close_dispatchers(&mut self) {
@@ -487,43 +526,6 @@ impl BuildingHierarchyDataGeneratorInternalState {
         let _ = join_all(futures).await;
     }
 
-    async fn create_next_source_change_event(&mut self) -> anyhow::Result<()> {
-
-        let building_graph = self.building_graph.lock().await;
-
-        if self.message_seq_num self.settings.change_count 
-
-        match building_graph.get_random_room().await {
-            Some(room) => {
-                log::debug!("Random room: {:?}", room);
-
-                
-            },
-            None => {
-                log::debug!("No random room found");
-            }
-        };
-
-         lock().await?.next().await {
-            Some(Ok(seq_record)) => {
-                self.previous_record = Some(ProcessedChangeScriptRecord {
-                    dispatch_status: self.status,
-                    scripted: self.next_record.clone().unwrap(),
-                });
-    
-                self.next_record = Some(seq_record);
-            },
-            Some(Err(e)) => {
-                anyhow::bail!(format!("Error reading ChangeScriptRecord: {:?}", e));
-            },
-            None => {
-                anyhow::bail!("ChangeScriptReader.next() returned None, shouldn't be seeing this.");
-            }
-        };
-    
-        Ok(())
-    }
-
     // Function to log the Player State at varying levels of detail.
     fn log_state(&self, msg: &str) {
         match log::max_level() {
@@ -533,97 +535,111 @@ impl BuildingHierarchyDataGeneratorInternalState {
         }
     }
 
-    async fn process_change_stream_message(&mut self, message: ScheduledChangeScriptRecordMessage) -> anyhow::Result<()> {
-        log::trace!("Received change stream message: {:?}", message);
+    async fn process_next_source_change_event(&mut self, message: ScheduledChangeEventMessage) -> anyhow::Result<()> {
+        log::trace!("Processing next source change event: {:?}", message);
     
-        // Get the next record from the player state. Error if it is None.
-        let next_record = match self.next_record.as_ref() {
-            Some(record) => record.clone(),
-            None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
+        let update = {
+            let building_graph = &mut self.building_graph.lock().await;
+            building_graph.update_random_room(self.virtual_time_ns_next).await?
         };
-    
-        // Time Shift.
-        let shifted_record = self.time_shift(next_record)?;
-    
-        // Process the record.
-        match &shifted_record.record {
-            ChangeScriptRecord::SourceChange(change_record) => {
-                self.stats.num_source_change_records += 1;
-    
-                match &self.status {
-                    SourceChangeGeneratorStatus::Running => {
-                        // Dispatch the SourceChangeEvent.
-                        self.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
-                        self.create_next_source_change_event().await?;  
-                        self.schedule_next_change_stream_record().await?;
-                    },
-                    SourceChangeGeneratorStatus::Stepping => {
-                        if self.steps_remaining > 0 {
-                            // Dispatch the SourceChangeEvent.
-                            self.dispatch_source_change_events(vec!(&change_record.source_change_event)).await;
-                            
-                            self.create_next_source_change_event().await?;  
-    
-                            self.steps_remaining -= 1;
-                            if self.steps_remaining == 0 {
-                                self.status = SourceChangeGeneratorStatus::Paused;
-                                self.steps_spacing_mode = None;
-                            } else {
-                                self.schedule_next_change_stream_record().await?;
+
+        // Update the virtual time.
+        self.virtual_time_ns_current = self.virtual_time_ns_next;
+
+        let source_change_event = match update {
+            Some(model_change) => {
+                match model_change {
+                    ModelChange::RoomUpdated(room_before, room_after) => {
+                        SourceChangeEvent {
+                            op: "u".to_string(),
+                            ts_ms: self.virtual_time_ns_current / 1_000_000,
+                            schema: "".to_string(),
+                            payload: SourceChangeEventPayload {
+                                source: SourceChangeEventSourceInfo {
+                                    db: self.settings.id.test_source_id.to_string(),
+                                    table: "node".to_string(),
+                                    ts_ms: self.virtual_time_ns_current / 1_000_000,
+                                    ts_sec: self.virtual_time_ns_current / 1_000_000_000,
+                                    lsn: message.seq_num,
+                                },
+                                before: serde_json::json!(room_before),
+                                after: serde_json::json!(room_after),
                             }
-                        } else {
-                            // Transition to an error state.
-                            self.transition_to_error_state("Stepping with no steps remaining", None);
-                        }
-                    },
-                    SourceChangeGeneratorStatus::Skipping => {
-                        if self.skips_remaining > 0 {
-                            // DON'T dispatch the SourceChangeEvent.
-                            log::trace!("Skipping ChangeScriptRecord: {:?}", change_record);
-                            self.stats.num_skipped_source_change_records += 1;
-    
-                            self.create_next_source_change_event().await?;  
-    
-                            self.skips_remaining -= 1;
-                            if self.skips_remaining == 0 {
-                                self.status = SourceChangeGeneratorStatus::Paused;
-                                self.skips_spacing_mode = None;
-                            } else {
-                                self.schedule_next_change_stream_record().await?;
-                            }
-                        } else {
-                            // Transition to an error state.
-                            self.transition_to_error_state("Skipping with no skips remaining", None);
                         }
                     },
                     _ => {
-                        // Transition to an error state.
-                        self.transition_to_error_state("Unexpected status for SourceChange processing", None);
-                    },
+                        log::debug!("Unexpected model change: {:?}", model_change);
+                        return Ok(());
+                    }
                 }
             },
-            ChangeScriptRecord::PauseCommand(_) => {
-                self.stats.num_pause_records += 1;
-                self.status = SourceChangeGeneratorStatus::Paused;
-            },
-            ChangeScriptRecord::Label(label_record) => {
-                self.stats.num_label_records += 1;
-    
-                log::debug!("Reached Source Change Script Label: {:?}", label_record);
-            },
-            ChangeScriptRecord::Finish(_) => {
-                self.transition_to_finished_state().await;
-            },
-            ChangeScriptRecord::Header(header_record) => {
-                // Transition to an error state.
-                self.transition_to_error_state(&format!("Unexpected Change Script Header: {:?}", header_record), None);
-            },
-            ChangeScriptRecord::Comment(comment_record) => {
-                // Transition to an error state.
-                self.transition_to_error_state(&format!("Unexpected Change Script Comment: {:?}", comment_record), None);
-            },
+            None => {
+                self.stats.num_source_change_events += 1;
+
+                if self.stats.num_source_change_events >= self.settings.change_count {
+                    self.transition_to_finished_state().await;
+                } else {
+                    self.schedule_next_change_event().await?;
+                }
+
+                return Ok(());
+                }
         };
-    
+
+        match &self.status {
+            SourceChangeGeneratorStatus::Running => {
+                // Dispatch the SourceChangeEvent.
+                self.dispatch_source_change_events(vec!(&source_change_event)).await;
+                self.schedule_next_change_event().await?;
+            },
+            SourceChangeGeneratorStatus::Stepping => {
+                if self.steps_remaining > 0 {
+                    // Dispatch the SourceChangeEvent.
+                    self.dispatch_source_change_events(vec!(&source_change_event)).await;
+
+                    self.steps_remaining -= 1;
+                    if self.steps_remaining == 0 {
+                        self.status = SourceChangeGeneratorStatus::Paused;
+                        self.steps_spacing_mode = None;
+                    } else {
+                        self.schedule_next_change_event().await?;
+                    }
+                } else {
+                    // Transition to an error state.
+                    self.transition_to_error_state("Stepping with no steps remaining", None);
+                }
+            },
+            SourceChangeGeneratorStatus::Skipping => {
+                if self.skips_remaining > 0 {
+                    // DON'T dispatch the SourceChangeEvent.
+                    log::trace!("Skipping ChangeScriptRecord: {:?}", source_change_event);
+                    self.stats.num_skipped_source_change_events += 1;
+
+                    self.skips_remaining -= 1;
+                    if self.skips_remaining == 0 {
+                        self.status = SourceChangeGeneratorStatus::Paused;
+                        self.skips_spacing_mode = None;
+                    } else {
+                        self.schedule_next_change_event().await?;
+                    }
+                } else {
+                    // Transition to an error state.
+                    self.transition_to_error_state("Skipping with no skips remaining", None);
+                }
+            },
+            _ => {
+                // Transition to an error state.
+                self.transition_to_error_state("Unexpected status for SourceChange processing", None);
+            },
+        }
+
+        // Process the event.
+        self.stats.num_source_change_events += 1;
+
+        if self.stats.num_source_change_events >= self.settings.change_count {
+            self.transition_to_finished_state().await;
+        }
+
         Ok(())
     }    
 
@@ -687,10 +703,8 @@ impl BuildingHierarchyDataGeneratorInternalState {
     
         self.dispatchers = dispatchers;
         self.error_messages = Vec::new();
-        self.header_record = header_record;
         self.message_seq_num = 0;
-        self.next_record = next_record;
-        self.previous_record = None;
+        self.previous_event = None;
         self.skips_remaining = 0;
         self.skips_spacing_mode = None;
         self.status = SourceChangeGeneratorStatus::Paused;
@@ -704,65 +718,60 @@ impl BuildingHierarchyDataGeneratorInternalState {
         Ok(())
     }
 
-    async fn schedule_next_change_stream_record(&mut self) -> anyhow::Result<()> {
+    async fn schedule_next_change_event(&mut self) -> anyhow::Result<()> {
 
-        // Get the next record from the player state. Error if it is None.
-        let next_record = match self.next_record.as_ref() {
-            Some(record) => record.clone(),
-            None => anyhow::bail!("Received ScheduledChangeScriptRecordMessage when player_state.next_record is None")
+        self.virtual_time_ns_next = if self.message_seq_num == 0 {
+            // First event after start, fire immediately.
+            self.virtual_time_ns_current
+        } else {
+            // Calculate the next event time based on the current time and the delay.
+            self.virtual_time_ns_current + 1_000_000
         };
-    
+
         self.message_seq_num += 1;
 
-        let mut sch_msg = ScheduledChangeScriptRecordMessage {
-            delay_ns: 0,
+        let sch_msg = ScheduledChangeEventMessage {
+            delay_ns: self.virtual_time_ns_next - self.virtual_time_ns_current,
             seq_num: self.message_seq_num,
-            virtual_time_ns_replay: self.virtual_time_ns_current
         };   
 
         match self.status {
-            SourceChangeGeneratorStatus::Skipping => {},
+            SourceChangeGeneratorStatus::Skipping => {
+                if let Err(e) = self.change_tx_channel.send(sch_msg).await {
+                    anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
+                }    
+            },
             SourceChangeGeneratorStatus::Stepping => {
                 match self.steps_spacing_mode {
                     Some(SpacingMode::None) => {
                         if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                            anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                         }    
                     },
                     Some(SpacingMode::Rate(_)) => {
                         if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                            anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                         }   
                     },
                     Some(SpacingMode::Recorded) => {
-                        if next_record.offset_ns > self.virtual_time_ns_offset { 
-                            sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
-                            sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
-                        }
-        
                         if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                            anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                         };
                     },
                     None => match self.settings.spacing_mode {
                         SpacingMode::None => {
                             if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                             }    
                         },
                         SpacingMode::Rate(_) => {
                             if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
-                                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                             }   
                         },
                         SpacingMode::Recorded => {
-                            if next_record.offset_ns > self.virtual_time_ns_offset { 
-                                sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
-                                sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
-                            }
-            
                             if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                                anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                             };
                         }
                     },
@@ -771,22 +780,17 @@ impl BuildingHierarchyDataGeneratorInternalState {
             SourceChangeGeneratorStatus::Running => match self.settings.spacing_mode {
                 SpacingMode::None => {
                     if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                     }    
                 },
                 SpacingMode::Rate(_) => {
                     if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                     }   
                 },
                 SpacingMode::Recorded => {
-                    if next_record.offset_ns > self.virtual_time_ns_offset { 
-                        sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
-                        sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
-                    }
-    
                     if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
                     };
                 }
             },
@@ -820,7 +824,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
         log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
     
         // If we are unpausing for the first time, we need to initialize the start times based on time_mode config.
-        if self.previous_record.is_none() && 
+        if self.previous_event.is_none() && 
             matches!(command, BuildingHierarchyDataGeneratorCommand::Start 
                 | BuildingHierarchyDataGeneratorCommand::Step { .. }
                 | BuildingHierarchyDataGeneratorCommand::Skip { .. }
@@ -829,11 +833,12 @@ impl BuildingHierarchyDataGeneratorInternalState {
     
             self.virtual_time_ns_start = match self.settings.time_mode {
                 TimeMode::Live => self.stats.actual_start_time_ns,
-                TimeMode::Recorded => self.header_record.start_time.timestamp_nanos_opt().unwrap() as u64,
-                TimeMode::Rebased(nanos) => nanos,
+                TimeMode::Recorded => self.stats.actual_start_time_ns,
+                TimeMode::Rebased(ns) => ns,
             };
     
             self.virtual_time_ns_current = self.virtual_time_ns_start;
+            self.virtual_time_ns_next = self.virtual_time_ns_start;
             self.virtual_time_ns_offset = 0;
         }
     
@@ -847,13 +852,13 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 self.status = SourceChangeGeneratorStatus::Skipping;
                 self.skips_remaining = *skips;
                 self.skips_spacing_mode = spacing_mode.clone();
-                self.schedule_next_change_stream_record().await
+                self.schedule_next_change_event().await
             },
             BuildingHierarchyDataGeneratorCommand::Start => {
                 log::info!("Script Started for TestRunSource {}", self.settings.id);
                 
                 self.status = SourceChangeGeneratorStatus::Running;
-                self.schedule_next_change_stream_record().await
+                self.schedule_next_change_event().await
             },
             BuildingHierarchyDataGeneratorCommand::Step{steps, spacing_mode} => {
                 log::info!("Script Stepping {} steps for TestRunSource {}", steps, self.settings.id);
@@ -861,7 +866,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 self.status = SourceChangeGeneratorStatus::Stepping;
                 self.steps_remaining = *steps;
                 self.steps_spacing_mode = spacing_mode.clone();
-                self.schedule_next_change_stream_record().await
+                self.schedule_next_change_event().await
             },
             BuildingHierarchyDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
         }
@@ -1004,9 +1009,7 @@ impl Debug for BuildingHierarchyDataGeneratorInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("BuildingHierarchyDataGeneratorInternalState")
             .field("error_messages", &self.error_messages)
-            .field("header_record", &self.header_record)
-            .field("next_record", &self.next_record)
-            .field("previous_record", &self.previous_record)
+            .field("previous_record", &self.previous_event)
             .field("skips_remaining", &self.skips_remaining)
             .field("skips_spacing_mode", &self.skips_spacing_mode)
             .field("spacing_mode", &self.settings.spacing_mode)
@@ -1016,6 +1019,7 @@ impl Debug for BuildingHierarchyDataGeneratorInternalState {
             .field("steps_spacing_mode", &self.steps_spacing_mode)
             .field("time_mode", &self.settings.time_mode)
             .field("virtual_time_ns_current", &self.virtual_time_ns_current)
+            .field("virtual_time_ns_next", &self.virtual_time_ns_next)
             .field("virtual_time_ns_offset", &self.virtual_time_ns_offset)
             .field("virtual_time_ns_start", &self.virtual_time_ns_start)
             .finish()
@@ -1026,10 +1030,8 @@ impl Debug for BuildingHierarchyDataGeneratorInternalState {
 pub struct BuildingHierarchyDataGeneratorStats {
     pub actual_start_time_ns: u64,
     pub actual_end_time_ns: u64,
-    pub num_source_change_records: u64,
-    pub num_skipped_source_change_records: u64,
-    pub num_label_records: u64,
-    pub num_pause_records: u64,
+    pub num_source_change_events: u64,
+    pub num_skipped_source_change_events: u64,
 }
 
 impl Default for BuildingHierarchyDataGeneratorStats {
@@ -1037,10 +1039,8 @@ impl Default for BuildingHierarchyDataGeneratorStats {
         Self {
             actual_start_time_ns: 0,
             actual_end_time_ns: 0,
-            num_source_change_records: 0,
-            num_skipped_source_change_records: 0,
-            num_label_records: 0,
-            num_pause_records: 0,
+            num_source_change_events: 0,
+            num_skipped_source_change_events: 0,
         }
     }
 }
@@ -1053,10 +1053,8 @@ pub struct BuildingHierarchyDataGeneratorResultSummary {
     pub actual_end_time_ns: u64,
     pub run_duration_ns: u64,
     pub run_duration_sec: f64,
-    pub num_source_change_records: u64,
-    pub num_skipped_source_change: u64,
-    pub num_label_records: u64,
-    pub num_pause_records: u64,
+    pub num_source_change_events: u64,
+    pub num_skipped_source_events: u64,
     pub processing_rate: f64,
     pub test_run_source_id: String,
 }
@@ -1075,11 +1073,9 @@ impl From<&mut BuildingHierarchyDataGeneratorInternalState> for BuildingHierarch
             actual_end_time_ns: state.stats.actual_end_time_ns,
             run_duration_ns,
             run_duration_sec,
-            num_source_change_records: state.stats.num_source_change_records,
-            num_skipped_source_change: state.stats.num_skipped_source_change_records,
-            num_label_records: state.stats.num_label_records,
-            num_pause_records: state.stats.num_pause_records,
-            processing_rate: state.stats.num_source_change_records as f64 / run_duration_sec,
+            num_source_change_events: state.stats.num_source_change_events,
+            num_skipped_source_events: state.stats.num_skipped_source_change_events,
+            processing_rate: state.stats.num_source_change_events as f64 / run_duration_sec,
             test_run_source_id: state.settings.id.to_string(),
         }
     }
@@ -1090,8 +1086,7 @@ impl Debug for BuildingHierarchyDataGeneratorResultSummary {
         let start_time = format!("{} ({} ns)", self.actual_start_time, self.actual_start_time_ns);
         let end_time = format!("{} ({} ns)", self.actual_end_time, self.actual_end_time_ns);
         let run_duration = format!("{} sec ({} ns)", self.run_duration_sec, self.run_duration_ns, );
-        let source_change_records = format!("{} (skipped:{}, label:{}, pause:{})", 
-            self.num_source_change_records, self.num_skipped_source_change, self.num_label_records, self.num_pause_records);
+        let source_change_events = format!("{} (skipped:{})", self.num_source_change_events, self.num_skipped_source_events);
         let processing_rate = format!("{:.2} changes / sec", self.processing_rate);
 
         f.debug_struct("BuildingHierarchyDataGeneratorResultSummary")
@@ -1099,7 +1094,7 @@ impl Debug for BuildingHierarchyDataGeneratorResultSummary {
             .field("start_time", &start_time)
             .field("end_time", &end_time)
             .field("run_duration", &run_duration)
-            .field("source_change_records", &source_change_records)
+            .field("source_change_events", &source_change_events)
             .field("processing_rate", &processing_rate)
             .finish()
     }
@@ -1108,7 +1103,7 @@ impl Debug for BuildingHierarchyDataGeneratorResultSummary {
 // Function that defines the operation of the BuildingHierarchyDataGenerator thread.
 // The BuildingHierarchyDataGenerator thread processes ChangeScriptPlayerCommands sent to it from the Web API handler functions.
 // The Web API function communicate via a channel and provide oneshot channels for the BuildingHierarchyDataGenerator to send responses back.
-pub async fn model_host_thread(mut command_rx_channel: Receiver<BuildingHierarchyDataGeneratorMessage>, settings: BuildingHierarchyDataGeneratorSettings, building_graph: Arc<BuildingGraph>) -> anyhow::Result<()>{
+pub async fn model_host_thread(mut command_rx_channel: Receiver<BuildingHierarchyDataGeneratorMessage>, settings: BuildingHierarchyDataGeneratorSettings, building_graph: Arc<Mutex<BuildingGraph>>) -> anyhow::Result<()>{
     log::info!("Script processor thread started for TestRunSource {} ...", settings.id);
 
     // The BuildingHierarchyDataGenerator always starts with the first script record loaded and Paused.
@@ -1151,7 +1146,7 @@ pub async fn model_host_thread(mut command_rx_channel: Receiver<BuildingHierarch
                         // Only process the message if the seq_num matches the expected one.
                         // This avoids dealing with delayed messages from the delayer thread that are no longer relevant.
                         if change_stream_message.seq_num == state.message_seq_num && state.status.is_processing() {
-                            state.process_change_stream_message(change_stream_message).await
+                            state.process_next_source_change_event(change_stream_message).await
                                 .inspect_err(|e| state.transition_to_error_state("Error calling process_change_stream_message", Some(e))).ok();
                         }
                     }
@@ -1172,7 +1167,7 @@ pub async fn model_host_thread(mut command_rx_channel: Receiver<BuildingHierarch
     Ok(())
 }
 
-pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receiver<ScheduledChangeScriptRecordMessage>, change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>) {
+pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receiver<ScheduledChangeEventMessage>, change_tx_channel: Sender<ScheduledChangeEventMessage>) {
     log::info!("Delayer thread started for TestRunSource {} ...", id);
 
     loop {
@@ -1181,7 +1176,7 @@ pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receive
                 // Sleep for the specified time before sending the message to the change_tx_channel.
                 sleep(Duration::new(0, message.delay_ns as u32)).await;
                 if let Err(e) = change_tx_channel.send(message).await {
-                    log::error!("Error sending ScheduledChangeScriptRecordMessage to change_tx_channel: {:?}", e);
+                    log::error!("Error sending ScheduledChangeEventMessage to change_tx_channel: {:?}", e);
                 }
             },
             None => {
@@ -1192,7 +1187,7 @@ pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receive
     }
 }
 
-pub async fn rate_limiter_thread(id: TestRunSourceId, spacing_mode: SpacingMode, mut delayer_rx_channel: Receiver<ScheduledChangeScriptRecordMessage>, change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>) {
+pub async fn rate_limiter_thread(id: TestRunSourceId, spacing_mode: SpacingMode, mut delayer_rx_channel: Receiver<ScheduledChangeEventMessage>, change_tx_channel: Sender<ScheduledChangeEventMessage>) {
     log::info!("Rate limiter thread started for TestRunSource {} ...", id);
 
     let limiter = match spacing_mode {
@@ -1205,205 +1200,13 @@ pub async fn rate_limiter_thread(id: TestRunSourceId, spacing_mode: SpacingMode,
             Some(message) => {
                 limiter.until_ready().await;
                 if let Err(e) = change_tx_channel.send(message).await {
-                    log::error!("Error sending ScheduledChangeScriptRecordMessage to change_tx_channel: {:?}", e);
+                    log::error!("Error sending ScheduledChangeEventMessage to change_tx_channel: {:?}", e);
                 }
             },
             None => {
                 log::error!("ChangeScriptRecord delayer channel closed.");
                 break;
             }
-        }
-    }
-}
-
-// Settings for BuildingModelChangeGenerator
-#[derive(Debug, Clone)]
-pub struct BuildingModelChangeGeneratorSettings {
-    pub seed: u64,
-    pub timestamp: u64,
-    pub time_step_ns_range: (u64, u64), // (min, max) nanoseconds to increment timestamp
-    pub add_building_prob: f64,
-    pub delete_building_prob: f64,
-    pub add_room_prob: f64,
-    pub delete_room_prob: f64,
-    pub update_room_prob: f64,
-    pub max_floors_per_building: usize,
-    pub max_rooms_per_floor: usize,
-}
-
-// BuildingModelChangeGenerator
-pub struct BuildingModelChangeGenerator {
-    graph: Arc<Mutex<BuildingGraph>>,
-    settings: BuildingModelChangeGeneratorSettings,
-    weights: WeightedIndex<f64>,
-    rng: StdRng,
-}
-
-impl BuildingModelChangeGenerator {
-    pub fn new(graph: Arc<Mutex<BuildingGraph>>, settings: BuildingModelChangeGeneratorSettings) -> Self {
-        let weights = WeightedIndex::new(vec![
-            settings.add_building_prob,
-            settings.delete_building_prob,
-            settings.add_room_prob,
-            settings.delete_room_prob,
-            settings.update_room_prob,
-        ]).expect("Invalid probabilities");
-        
-        let rng = StdRng::seed_from_u64(settings.seed);
-
-        BuildingModelChangeGenerator {
-            graph,
-            settings,
-            weights,
-            rng,
-        }
-    }
-
-    pub async fn get_next_change(&mut self) -> Vec<SourceChangeEvent> {
-        let mut graph = self.graph.lock().await;
-        
-        // Increment timestamp
-        let time_step = self.rng.gen_range(self.settings.time_step_ns_range.0..=self.settings.time_step_ns_range.1);
-        self.settings.timestamp += time_step;
-        let ts_ms = self.settings.timestamp / 1_000_000; // Convert ns to ms for event
-        
-        match self.weights.sample(&mut self.rng) {
-            0 => self.add_building(&mut graph, ts_ms, &mut events),
-            1 => self.delete_building(&mut graph, ts_ms, &mut events),
-            2 => self.add_room(&mut graph, ts_ms, &mut events),
-            3 => self.delete_room(&mut graph, ts_ms, &mut events),
-            4 => self.update_room(&mut graph, ts_ms, &mut events),
-            _ => unreachable!(),
-        }
-        
-        events
-    }
-
-    async fn add_building(&self, graph: &mut BuildingGraph, effective_from_ns: u64) -> Vec<SourceChangeEvent>  {
-
-        let mut events = Vec::new();
-        let ts_ms = effective_from_ns / 1_000_000;
-
-        if let Ok(building) = graph.add_building(ts_ms).await {
-            events.push(self.create_event("INSERT", ts_ms, "building", None, Some(&building)));
-            let floors = self.rng.gen_range(1..=self.settings.max_floors_per_building);
-            for _ in 0..floors {
-                if let Ok(floor) = graph.add_floor(building.id.clone(), ts_ms).block_on() {
-                    events.push(self.create_event("INSERT", ts_ms, "floor", None, Some(&floor)));
-                    let rooms = self.rng.gen_range(1..=self.settings.max_rooms_per_floor);
-                    for _ in 0..rooms {
-                        let env = self.random_env();
-                        if let Ok(room) = graph.add_room(floor.id.clone(), env.clone(), ts_ms).block_on() {
-                            events.push(self.create_event("INSERT", ts_ms, "room", None, Some(&room)));
-                        }
-                    }
-                }
-            }
-        }
-
-        events
-    }
-
-    async fn delete_building(&self, graph: &mut BuildingGraph, effective_from_ns: u64) -> anyhow::Result<Vec<SourceChangeEvent>>  {
-
-        let mut events = Vec::new();
-        let ts_ms = effective_from_ns / 1_000_000;
-
-        if let Some(building) = graph.get_random_building(&mut self.rng).await {
-            let floor_ids = graph.get_floor_ids(&building.id).await?;
-            for floor_id in floor_ids {
-                let room_ids = graph.get_room_ids(&floor_id).await?;
-                for room_id in room_ids {
-                    if let Ok(deleted_room) = graph.delete_room(&room_id).await? {
-                        events.push(self.create_event("DELETE", ts_ms, "room", Some(&deleted_room), None));
-                    }
-                }
-                if let Ok(deleted_floor) = graph.delete_floor(floor_id).block_on() {
-                    events.push(self.create_event("DELETE", ts_ms, "floor", Some(&deleted_floor), None));
-                }
-            }
-            if let Ok(deleted_building) = graph.delete_building(building_id).block_on() {
-                events.push(self.create_event("DELETE", ts_ms, "building", Some(&deleted_building), None));
-            }
-        }
-
-        events
-    }
-
-    fn add_room(&self, graph: &mut BuildingGraph, effective_from_ns: u64) -> Vec<SourceChangeEvent>  {
-
-        let mut events = Vec::new();
-        let ts_ms = effective_from_ns / 1_000_000;
-
-        if let Some(floor_id) = graph.floor_indices.keys().choose(&mut self.rng) {
-            let env = self.random_env();
-            if let Ok(room) = graph.add_room(floor_id.clone(), env.clone(), ts_ms).block_on() {
-                events.push(self.create_event("INSERT", ts_ms, "room", None, Some(&room)));
-            }
-        }
-
-        events
-    }
-
-    fn delete_room(&self, graph: &mut BuildingGraph, effective_from_ns: u64) -> Vec<SourceChangeEvent>  {
-
-        let mut events = Vec::new();
-        let ts_ms = effective_from_ns / 1_000_000;
-
-        if let Some(room_id) = graph.room_indices.keys().choose(&mut self.rng) {
-            if let Ok(deleted_room) = graph.delete_room(room_id.clone()).block_on() {
-                events.push(self.create_event("DELETE", ts_ms, "room", Some(&deleted_room), None));
-            }
-        }
-
-        events
-    }
-
-    fn update_room(&self, graph: &mut BuildingGraph, effective_from_ns: u64) -> Vec<SourceChangeEvent>  {
-
-        let mut events = Vec::new();
-        let ts_ms = effective_from_ns / 1_000_000;
-
-        if let Some(room_id) = graph.room_indices.keys().choose(&mut self.rng) {
-            let env = self.random_env();
-            if let Ok((old_room, new_room)) = graph.update_room(room_id.clone(), env.clone(), ts_ms).block_on() {
-                events.push(self.create_event("UPDATE", ts_ms, "room", Some(&old_room), Some(&new_room)));
-            }
-        }
-
-        events
-    }
-
-    fn random_env(&self) -> SensorValues {
-        SensorValues {
-            temperature: self.rng.gen_range(18.0..28.0),
-            humidity: self.rng.gen_range(30.0..70.0),
-            co2: self.rng.gen_range(300.0..1000.0),
-            noise: self.rng.gen_range(20.0..60.0),
-            light: self.rng.gen_range(200.0..1000.0),
-        }
-    }
-
-    fn create_event<T: Serialize>(&self, op: &str, ts_ms: u64, table: &str, before: Option<&T>, after: Option<&T>) -> SourceChangeEvent {
-        SourceChangeEvent {
-            op: op.to_string(),
-            ts_ms,
-            schema: "building_model".to_string(),
-            payload: SourceChangeEventPayload {
-                source: SourceChangeEventSourceInfo {
-                    db: "building_db".to_string(),
-                    table: table.to_string(),
-                    ts_ms,
-                    ts_sec: ts_ms / 1000,
-                    lsn: 0,
-                },
-                before: SourceChangeEventBefore {
-                    data: before.map(|b| serde_json::to_value(b).unwrap_or_default()),
-                },
-                after: SourceChangeEventAfter {
-                    data: after.map(|a| serde_json::to_value(a).unwrap_or_default()),
-                },
-            },
         }
     }
 }

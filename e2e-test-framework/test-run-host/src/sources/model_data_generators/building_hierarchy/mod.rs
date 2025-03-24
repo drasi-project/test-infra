@@ -201,7 +201,7 @@ impl BuildingHierarchyDataGenerator {
             test_run_source_id, definition, input_storage, output_storage.clone(), dispatchers).await?;
         log::debug!("Creating BuildingHierarchyDataGenerator from {:?}", &settings);
 
-        let building_graph = Arc::new(Mutex::new(BuildingGraph::new(&settings).await?));
+        let building_graph = Arc::new(Mutex::new(BuildingGraph::new(&settings)?));
 
         let (model_host_tx_channel, model_host_rx_channel) = tokio::sync::mpsc::channel(500);
         let model_host_thread_handle = tokio::spawn(model_host_thread(model_host_rx_channel, settings.clone(), building_graph.clone()));
@@ -259,7 +259,7 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
         let mut floor_room_rels = Vec::new();
 
         let building_graph = self.building_graph.lock().await;
-        for change in building_graph.get_current_state(node_labels).await {
+        for change in building_graph.get_current_state(node_labels) {
             match change {
                 ModelChange::BuildingAdded(building) => {
                     let node_record = NodeRecord {
@@ -291,7 +291,7 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
             }
         }
 
-        for change in building_graph.get_current_state(rel_labels).await {
+        for change in building_graph.get_current_state(rel_labels) {
             match change {
                 ModelChange::BuildingFloorRelationAdded(relation) => {
                     let rel_record = RelationRecord {
@@ -540,7 +540,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
     
         let update = {
             let building_graph = &mut self.building_graph.lock().await;
-            building_graph.update_random_room(self.virtual_time_ns_next).await?
+            building_graph.update_random_room(self.virtual_time_ns_next)?
         };
 
         // Update the virtual time.

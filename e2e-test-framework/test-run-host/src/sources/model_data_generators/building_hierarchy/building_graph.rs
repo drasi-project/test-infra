@@ -15,11 +15,11 @@
 use std::{collections::{HashMap, HashSet}, fmt, str::FromStr};
 
 use anyhow::Context;
+use parking_lot::{Mutex, MutexGuard};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Normal};
 use serde::Serialize;
-use tokio::sync::{Mutex, MutexGuard};
 
 use super::BuildingHierarchyDataGeneratorSettings;
 
@@ -514,7 +514,7 @@ pub struct GraphChangeGenerator {
 
 impl GraphChangeGenerator {
     pub fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> Self {
-        GraphChangeGenerator {
+        let mut g = GraphChangeGenerator {
             building_count_distribution: Normal::new(settings.initialization_settings.building_count.0 as f64, settings.initialization_settings.building_count.1).unwrap(),
             floor_count_distribution: Normal::new(settings.initialization_settings.floor_count.0 as f64, settings.initialization_settings.floor_count.1).unwrap(),
             room_count_distribution: Normal::new(settings.initialization_settings.room_count.0 as f64, settings.initialization_settings.room_count.1).unwrap(),
@@ -525,7 +525,16 @@ impl GraphChangeGenerator {
             sensor_temperature_distribution: Normal::new(settings.initialization_settings.sensor_temperature.0 as f64, settings.initialization_settings.sensor_temperature.1).unwrap(),
             sensor_occupancy_distribution: Normal::new(settings.initialization_settings.sensor_occupancy.0 as f64, settings.initialization_settings.sensor_occupancy.1).unwrap(),
             rng: ChaCha8Rng::seed_from_u64(settings.seed)
-        }
+        };
+
+        log::error!("RNG initialized with seed: {}", settings.seed);
+        log::error!("RNG test: {}", g.rng.random_range(0..100));
+        log::error!("RNG test: {}", g.rng.random_range(0..100));
+        log::error!("RNG test: {}", g.rng.random_range(0..100));
+        log::error!("RNG test: {}", g.rng.random_range(0..100));
+        log::error!("RNG test: {}", g.rng.random_range(0..100));
+
+        g
     }
     
     pub fn get_initial_sensor_values(&mut self) -> SensorValues {
@@ -582,7 +591,7 @@ pub struct BuildingGraph {
 }
 
 impl BuildingGraph {
-    pub async fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> anyhow::Result<Self> {
+    pub fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> anyhow::Result<Self> {
 
         let mut building_graph = BuildingGraph {
             buildings: Mutex::new(HashMap::new()),
@@ -591,15 +600,15 @@ impl BuildingGraph {
         };
 
         for _ in 0..building_graph.change_generator.get_random_building_count() {
-            building_graph.add_building(0).await?;
+            building_graph.add_building(0)?;
         };
 
         Ok(building_graph)
     }
 
-    pub async fn add_building(&mut self, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
+    pub fn add_building(&mut self, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
 
-        let mut buildings = self.buildings.lock().await;
+        let mut buildings = self.buildings.lock();
 
         let building_id = Location::Building(self.next_building_num);
 
@@ -611,9 +620,9 @@ impl BuildingGraph {
     }        
 
     // Add a floor with auto-generated ID
-    pub async fn add_floor(&mut self, building_id: &Location, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
+    pub fn add_floor(&mut self, building_id: &Location, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
 
-        let mut buildings = self.buildings.lock().await;
+        let mut buildings = self.buildings.lock();
 
         let building = buildings.get_mut(building_id).unwrap();
 
@@ -621,18 +630,18 @@ impl BuildingGraph {
     }
 
     // Add a room with auto-generated ID, requiring only floor_id
-    pub async fn add_room(&mut self, floor_id: &Location, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
+    pub fn add_room(&mut self, floor_id: &Location, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
 
-        let mut buildings = self.buildings.lock().await;
+        let mut buildings = self.buildings.lock();
 
         let building = buildings.get_mut(&floor_id.get_building_location().unwrap()).unwrap();
 
         Ok(building.add_room(floor_id, effective_from, &mut self.change_generator)?)
     }
 
-    pub async fn get_current_state(&self, included_types: &HashSet<String>) -> CurrentStateIterator<'_> {
+    pub fn get_current_state(&self, included_types: &HashSet<String>) -> CurrentStateIterator<'_> {
         // Lock the buildings mutex for the duration of the iteration
-        let buildings_guard = self.buildings.lock().await;
+        let buildings_guard = self.buildings.lock();
         
         // Collect all building IDs for initial state
         let buildings = buildings_guard.keys()
@@ -649,9 +658,9 @@ impl BuildingGraph {
         }
     }
 
-    pub async fn update_random_room(&mut self, effective_from: u64) -> anyhow::Result<Option<ModelChange>> {
+    pub fn update_random_room(&mut self, effective_from: u64) -> anyhow::Result<Option<ModelChange>> {
 
-        let mut buildings = self.buildings.lock().await;
+        let mut buildings = self.buildings.lock();
 
         match buildings.len() {
             0 => Ok(None),

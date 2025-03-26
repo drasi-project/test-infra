@@ -15,7 +15,7 @@
 use std::{collections::HashSet, fmt::{self, Debug, Formatter}, num::NonZeroU32, sync::Arc, time::{Duration, SystemTime}, u32};
 
 use async_trait::async_trait;
-use building_graph::{BuildingGraph, ElementType, ModelChange};
+use building_graph::{BuildingGraph, GraphElementType, ModelChange};
 use futures::future::join_all;
 use governor::{Quota, RateLimiter};
 use rand::Rng;
@@ -299,9 +299,9 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
                         labels: relation.labels.clone(),
                         properties: serde_json::json!({}),
                         start_id: relation.building_id.into(),
-                        start_label: Some(ElementType::BUILDING.to_string()),
+                        start_label: Some(GraphElementType::BUILDING.to_string()),
                         end_id: relation.floor_id.into(),
-                        end_label: Some(ElementType::FLOOR.to_string()),
+                        end_label: Some(GraphElementType::FLOOR.to_string()),
                     };
                     building_floor_rels.push(rel_record);
                 },
@@ -311,9 +311,9 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
                         labels: relation.labels.clone(),
                         properties: serde_json::json!({}),
                         start_id: relation.floor_id.into(),
-                        start_label: Some(ElementType::FLOOR.to_string()),
+                        start_label: Some(GraphElementType::FLOOR.to_string()),
                         end_id: relation.room_id.into(),
-                        end_label: Some(ElementType::ROOM.to_string()),
+                        end_label: Some(GraphElementType::ROOM.to_string()),
                     };
                     floor_room_rels.push(rel_record);                },
                 _ => {

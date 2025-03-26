@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::{HashMap, HashSet}, fmt, str::FromStr};
+use std::{collections::{BTreeMap, HashSet}, fmt, str::FromStr};
 
 use anyhow::Context;
 use parking_lot::{Mutex, MutexGuard};
@@ -22,17 +22,6 @@ use rand_distr::{Distribution, Normal};
 use serde::Serialize;
 
 use super::BuildingHierarchyDataGeneratorSettings;
-
-// Define element types as constants for consistency
-pub struct ElementType;
-
-impl ElementType {
-    pub const BUILDING: &'static str = "Building";
-    pub const FLOOR: &'static str = "Floor";
-    pub const ROOM: &'static str = "Room";
-    pub const BUILDING_FLOOR: &'static str = "BuildingFloor";
-    pub const FLOOR_ROOM: &'static str = "FloorRoom";
-}
 
 #[derive(Debug)]
 pub enum ModelChange {
@@ -52,7 +41,7 @@ pub enum ModelChange {
 }
 
 // Compound key for locations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Location {
     Building(u32),           // e.g., Building(0) -> "B_000"
     Floor(u32, u32),       // e.g., Floor(0, 1) -> "F_000_001"
@@ -76,23 +65,35 @@ impl Location {
         }
     }
 
-    pub fn is_in_location(&self, other: &Location) -> bool {
+    pub fn is_building(&self) -> bool {
+        matches!(self, Location::Building(_))
+    }
+
+    pub fn is_floor(&self) -> bool {
+        matches!(self, Location::Floor(_, _))
+    }
+
+    pub fn is_room(&self) -> bool {
+        matches!(self, Location::Room(_, _, _))
+    }
+
+    pub fn contains(&self, other: &Location) -> bool {
+
+        if self == other {
+            return true;
+        };
+
         match self {
             Location::Building(b) => match other {
-                Location::Building(b2) => b == b2,
-                Location::Floor(b2, _) => b == b2,
-                Location::Room(b2, _, _) => b == b2,
+                Location::Floor(b_other, _) => b == b_other,
+                Location::Room(b_other, _, _) => b == b_other,             
+                _ => false,   
             },
             Location::Floor(b, f) => match other {
-                Location::Building(b2) => b == b2,
-                Location::Floor(b2, f2) => b == b2 && f == f2,
-                Location::Room(b2, f2, _) => b == b2 && f == f2,
+                Location::Room(b_other, f_other, _) => b == b_other && f == f_other,
+                _ => false,
             },
-            Location::Room(b, f, r) => match other {
-                Location::Building(b2) => b == b2,
-                Location::Floor(b2, f2) => b == b2 && f == f2,
-                Location::Room(b2, f2, r2) => b == b2 && f == f2 && r == r2,
-            },
+            _ => false,
         }
     }
 
@@ -112,39 +113,6 @@ impl Location {
         }
     }
 }
-
-// Implement Hash and PartialEq manually
-impl std::hash::Hash for Location {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Location::Building(b) => {
-                b.hash(state);
-            }
-            Location::Floor(b, f) => {
-                b.hash(state);
-                f.hash(state);
-            }
-            Location::Room(b, f, r) => {
-                b.hash(state);
-                f.hash(state);
-                r.hash(state);
-            }
-        }
-    }
-}
-
-impl PartialEq for Location {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Location::Building(b1), Location::Building(b2)) => b1 == b2,
-            (Location::Floor(b1, f1), Location::Floor(b2, f2)) => b1 == b2 && f1 == f2,
-            (Location::Room(b1, f1, r1), Location::Room(b2, f2, r2)) => b1 == b2 && f1 == f2 && r1 == r2,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Location {}
 
 // Implement Display for Location
 impl fmt::Display for Location {
@@ -190,6 +158,16 @@ impl FromStr for Location {
     }
 }
 
+// Define graph element types as constants for consistency
+pub struct GraphElementType;
+
+impl GraphElementType {
+    pub const BUILDING: &'static str = "Building";
+    pub const FLOOR: &'static str = "Floor";
+    pub const ROOM: &'static str = "Room";
+    pub const BUILDING_FLOOR: &'static str = "BuildingFloor";
+    pub const FLOOR_ROOM: &'static str = "FloorRoom";
+}
 
 // Structs for building, floor, and room
 #[derive(Debug, Clone, Serialize)]
@@ -205,7 +183,7 @@ impl From<&Building> for BuildingNode {
         BuildingNode {
             id: building.id.to_string(),
             effective_from: building.effective_from,
-            labels: vec![ElementType::BUILDING.to_string()],
+            labels: vec![GraphElementType::BUILDING.to_string()],
         }
     }
 }
@@ -214,18 +192,18 @@ impl From<&Building> for BuildingNode {
 #[derive(Debug, Clone)]
 pub struct Building {
     pub effective_from: u64, 
-    pub floors: HashMap<Location, Floor>, 
+    pub floors: BTreeMap<Location, Floor>, 
     pub id: Location, 
     pub next_floor: u32, 
 }
 
 impl Building {
-    pub fn new(id: Location, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
+    pub fn new(id: Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
 
         let mut building = Building {
             id,
             effective_from,
-            floors: HashMap::new(),
+            floors: BTreeMap::new(),
             next_floor: 0,
         };
 
@@ -233,46 +211,46 @@ impl Building {
         changes.push(ModelChange::BuildingAdded((&building).into()));
 
         // Create initial floors
-        for _ in 0..sim_settings.get_random_floor_count() {
-            let (_, floor_changes) = building.add_floor(effective_from, sim_settings)?;
+        for _ in 0..change_generator.get_random_floor_count() {
+            let (_, floor_changes) = building.add_floor(effective_from, change_generator)?;
             changes.extend(floor_changes);
         }
 
         Ok((building, changes))
     }
 
-    pub fn add_floor(&mut self, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
-        let id = self.id.with_floor(self.next_floor);
+    pub fn add_floor(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
+        let floor_id = self.id.with_floor(self.next_floor);
 
-        let (floor, changes) = Floor::new(id.clone(), effective_from, sim_settings)?;
-        self.floors.insert(id.clone(), floor);
+        let (floor, changes) = Floor::new(floor_id.clone(), effective_from, change_generator)?;
+        self.floors.insert(floor_id.clone(), floor);
 
         self.next_floor += 1;
 
-        Ok((id, changes))
+        Ok((floor_id, changes))
     }        
 
-    pub fn add_room(&mut self, floor_id: &Location, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
+    pub fn add_room(&mut self, floor_id: &Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
 
         let floor = self.floors.get_mut(floor_id)
             .context(format!("Floor {} not found in building {}", floor_id, self.id))?;
 
-        Ok(floor.add_room(effective_from, sim_settings)?)
+        Ok(floor.add_room(effective_from, change_generator)?)
     }    
 
-    pub fn get_floor(&self, id: &Location) -> Option<&Floor> {
+    pub fn get_floor(&self, floor_id: &Location) -> Option<&Floor> {
 
-        if id.is_in_location(&self.id) {
-            self.floors.get(id)
+        if self.id.contains(floor_id) {
+            self.floors.get(floor_id)
         } else {
             None
         }
     }
 
-    pub fn get_room(&self, id: &Location) -> Option<&Room> {
+    pub fn get_room(&self, room_id: &Location) -> Option<&Room> {
         
-        match self.get_floor(id) {
-            Some(floor) => floor.get_room(id),
+        match self.get_floor(room_id) {
+            Some(floor) => floor.get_room(room_id),
             None => None,
         }
     }
@@ -283,7 +261,7 @@ impl Building {
             0 => return Ok(None),
             len => {
                 let idx = change_generator.get_usize_in_range(0, len, false);
-                let floor = self.floors.values_mut().nth(idx).unwrap();
+                let (_, floor) = self.floors.iter_mut().nth(idx).unwrap();
 
                 Ok(floor.update_random_room(effective_from, change_generator)?)
             }
@@ -304,7 +282,7 @@ impl From<&Floor> for FloorNode {
         FloorNode {
             id: floor.id.to_string(),
             effective_from: floor.effective_from,
-            labels: vec![ElementType::FLOOR.to_string()],
+            labels: vec![GraphElementType::FLOOR.to_string()],
         }
     }
 }
@@ -313,17 +291,17 @@ impl From<&Floor> for FloorNode {
 pub struct Floor {
     pub id: Location,       // Location::Floor(building, floor)
     pub effective_from: u64,  // Timestamp of creation or last update
-    pub rooms: HashMap<Location, Room>, // Maps room IDs to Room objects
+    pub rooms: BTreeMap<Location, Room>, // Maps room IDs to Room objects
     pub next_room: u32
 }
 
 impl Floor {
-    pub fn new(id: Location, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
+    pub fn new(id: Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
 
         let mut floor = Floor {
             id: id.clone(),
             effective_from,
-            rooms: HashMap::new(),
+            rooms: BTreeMap::new(),
             next_room: 0,
         };
 
@@ -332,29 +310,29 @@ impl Floor {
         changes.push(ModelChange::BuildingFloorRelationAdded(BuildingFloorRelation::new(effective_from,&id)?));
 
         // Create Rooms
-        for _ in 0..sim_settings.get_random_room_count() {
-            let (_, room_changes) = floor.add_room(effective_from, sim_settings)?;
+        for _ in 0..change_generator.get_random_room_count() {
+            let (_, room_changes) = floor.add_room(effective_from, change_generator)?;
             changes.extend(room_changes);
         }
 
         Ok((floor, changes))
     }
 
-    pub fn add_room(&mut self, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
+    pub fn add_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
         
-        let id = self.id.with_room(self.next_room);
+        let room_id = self.id.with_room(self.next_room);
 
-        let (room, changes) = Room::new(id.clone(), effective_from, sim_settings)?;
-        self.rooms.insert(id.clone(), room);
+        let (room, changes) = Room::new(room_id.clone(), effective_from, change_generator)?;
+        self.rooms.insert(room_id.clone(), room);
 
         self.next_room += 1;
 
-        Ok((id, changes))
+        Ok((room_id, changes))
     }
 
-    pub fn get_room(&self, id: &Location) -> Option<&Room> {
-        if id.is_in_location(&self.id) {
-            self.rooms.get(id)
+    pub fn get_room(&self, room_id: &Location) -> Option<&Room> {
+        if self.id.contains(room_id) {
+            self.rooms.get(room_id)
         } else {
             None
         }
@@ -366,7 +344,7 @@ impl Floor {
             0 => return Ok(None),
             len => {
                 let idx = change_generator.get_usize_in_range(0, len, false);
-                let room = self.rooms.values_mut().nth(idx).unwrap();
+                let (_, room) = self.rooms.iter_mut().nth(idx).unwrap();
 
                 Ok(Some(room.update_sensor_values(effective_from, change_generator)?))
             }
@@ -388,7 +366,7 @@ impl From<&Room> for RoomNode {
         RoomNode {
             effective_from: room.effective_from,
             id: room.id.to_string(),
-            labels: vec![ElementType::ROOM.to_string()],
+            labels: vec![GraphElementType::ROOM.to_string()],
             properties: room.sensor_values.clone(),
         }
     }
@@ -402,11 +380,11 @@ pub struct Room {
 }
 
 impl Room {
-    pub fn new(id: Location, effective_from: u64, sim_settings: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
+    pub fn new(id: Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
 
         let room = Room {
             id: id.clone(),
-            sensor_values: sim_settings.get_initial_sensor_values(),
+            sensor_values: change_generator.get_initial_sensor_values(),
             effective_from,
         };
 
@@ -422,7 +400,7 @@ impl Room {
         let old_room_node: RoomNode = (&*self).into();
 
         self.effective_from = effective_from;
-        self.sensor_values = change_generator.update_sensor_values(&self.sensor_values);
+        self.sensor_values = change_generator.update_sensor_values(&self.id, &self.sensor_values);
 
         Ok(ModelChange::RoomUpdated(old_room_node, (&*self).into()))
     }
@@ -462,7 +440,7 @@ impl BuildingFloorRelation {
                     effective_from,
                     building_id: building_id.to_string(),
                     floor_id: floor_id.to_string(),
-                    labels: vec![ElementType::BUILDING_FLOOR.to_string()],
+                    labels: vec![GraphElementType::BUILDING_FLOOR.to_string()],
                 })        
             }
         }
@@ -490,7 +468,7 @@ impl FloorRoomRelation {
                     effective_from,
                     floor_id: floor_id.to_string(),
                     room_id: room_id.to_string(),
-                    labels: vec![ElementType::FLOOR_ROOM.to_string()],
+                    labels: vec![GraphElementType::FLOOR_ROOM.to_string()],
                 })        
             },
             _ => anyhow::bail!("Room ID must be a Room location"),
@@ -514,7 +492,9 @@ pub struct GraphChangeGenerator {
 
 impl GraphChangeGenerator {
     pub fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> Self {
-        let mut g = GraphChangeGenerator {
+        log::debug!("Initialized GraphChangeGenerator with seed: {}", settings.seed);
+
+        GraphChangeGenerator {
             building_count_distribution: Normal::new(settings.initialization_settings.building_count.0 as f64, settings.initialization_settings.building_count.1).unwrap(),
             floor_count_distribution: Normal::new(settings.initialization_settings.floor_count.0 as f64, settings.initialization_settings.floor_count.1).unwrap(),
             room_count_distribution: Normal::new(settings.initialization_settings.room_count.0 as f64, settings.initialization_settings.room_count.1).unwrap(),
@@ -525,16 +505,7 @@ impl GraphChangeGenerator {
             sensor_temperature_distribution: Normal::new(settings.initialization_settings.sensor_temperature.0 as f64, settings.initialization_settings.sensor_temperature.1).unwrap(),
             sensor_occupancy_distribution: Normal::new(settings.initialization_settings.sensor_occupancy.0 as f64, settings.initialization_settings.sensor_occupancy.1).unwrap(),
             rng: ChaCha8Rng::seed_from_u64(settings.seed)
-        };
-
-        log::error!("RNG initialized with seed: {}", settings.seed);
-        log::error!("RNG test: {}", g.rng.random_range(0..100));
-        log::error!("RNG test: {}", g.rng.random_range(0..100));
-        log::error!("RNG test: {}", g.rng.random_range(0..100));
-        log::error!("RNG test: {}", g.rng.random_range(0..100));
-        log::error!("RNG test: {}", g.rng.random_range(0..100));
-
-        g
+        }
     }
     
     pub fn get_initial_sensor_values(&mut self) -> SensorValues {
@@ -573,19 +544,54 @@ impl GraphChangeGenerator {
         }   
     }
 
-    pub fn update_sensor_values(&mut self, _sensor_values: &SensorValues) -> SensorValues {
-        
-        // TODO - update sensor values based on some logic
-        // For now, just return new values
-        self.get_initial_sensor_values()
-    }
+    pub fn update_sensor_values(&mut self, location_id: &Location, sensor_values: &SensorValues) -> SensorValues {
+        log::trace!("Update Sensor values for Location: {}", location_id);
+            
+        // Create a clone of the current values to modify
+        let mut new_values = sensor_values.clone();        
+        log::trace!("Sensors before: {:#?}", new_values);
 
+        let sensor_to_update = self.get_usize_in_range(0, 6, false);
+
+        // Update only the randomly selected sensor
+        match sensor_to_update {
+            0 => {
+                // Update CO2
+                new_values.co2 = self.sensor_co2_distribution.sample(&mut self.rng).max(0.0) as f32;
+            },
+            1 => {
+                // Update humidity
+                new_values.humidity = self.sensor_humidity_distribution.sample(&mut self.rng).max(0.0) as f32;
+            },
+            2 => {
+                // Update light
+                new_values.light = self.sensor_light_distribution.sample(&mut self.rng).max(0.0) as f32;
+            },
+            3 => {
+                // Update noise
+                new_values.noise = self.sensor_noise_distribution.sample(&mut self.rng).max(0.0) as f32;
+            },
+            4 => {
+                // Update temperature
+                new_values.temperature = self.sensor_temperature_distribution.sample(&mut self.rng) as f32;
+            },
+            5 => {
+                // Update occupancy
+                new_values.occupancy = self.sensor_occupancy_distribution.sample(&mut self.rng).max(0.0) as u32;
+            },
+            _ => unreachable!("Random range should only return 0-5")
+        }
+        
+        log::trace!("Sensors after: {:#?}", new_values);
+
+        new_values
+    }
 }
 
 // Thread-safe graph structure
 #[derive(Debug)]
 pub struct BuildingGraph {
-    buildings: Mutex<HashMap<Location, Building>>,
+    buildings: Mutex<BTreeMap<Location, Building>>,
     change_generator: GraphChangeGenerator,             
     next_building_num: u32,         
 }
@@ -594,7 +600,7 @@ impl BuildingGraph {
     pub fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> anyhow::Result<Self> {
 
         let mut building_graph = BuildingGraph {
-            buildings: Mutex::new(HashMap::new()),
+            buildings: Mutex::new(BTreeMap::new()),
             change_generator: GraphChangeGenerator::new(settings),
             next_building_num: 0,
         };
@@ -641,18 +647,18 @@ impl BuildingGraph {
 
     pub fn get_current_state(&self, included_types: &HashSet<String>) -> CurrentStateIterator<'_> {
         // Lock the buildings mutex for the duration of the iteration
-        let buildings_guard = self.buildings.lock();
+        let buildings = self.buildings.lock();
         
         // Collect all building IDs for initial state
-        let buildings = buildings_guard.keys()
+        let building_ids = buildings.keys()
             .map(|k| k.to_string())
             .collect::<Vec<_>>();
         
         CurrentStateIterator {
-            buildings_guard,
+            buildings_guard: buildings,
             state: IterationState::Buildings {
                 building_index: 0,
-                buildings,
+                buildings: building_ids,
             },
             included_types: included_types.clone(),
         }
@@ -666,7 +672,7 @@ impl BuildingGraph {
             0 => Ok(None),
             _ => {
                 let idx = self.change_generator.get_usize_in_range(0, buildings.len(), false);
-                let building = buildings.values_mut().nth(idx).unwrap();
+                let (_, building) = buildings.iter_mut().nth(idx).unwrap();
 
                 Ok(building.update_random_room(effective_from, &mut self.change_generator)?)
             }
@@ -677,8 +683,8 @@ impl BuildingGraph {
 // Define the possible iteration states
 enum IterationState {
     Buildings { building_index: usize, buildings: Vec<String> },
-    Floors { building_index: usize, floor_index: usize, buildings: Vec<String>, building_floors: HashMap<String, Vec<String>> },
-    Rooms { building_index: usize, floor_index: usize, room_index: usize, buildings: Vec<String>, building_floors: HashMap<String, Vec<String>>, floor_rooms: HashMap<String, Vec<String>> },
+    Floors { building_index: usize, floor_index: usize, buildings: Vec<String>, building_floors: BTreeMap<String, Vec<String>> },
+    Rooms { building_index: usize, floor_index: usize, room_index: usize, buildings: Vec<String>, building_floors: BTreeMap<String, Vec<String>>, floor_rooms: BTreeMap<String, Vec<String>> },
     BuildingFloorRelations { relation_index: usize, relations: Vec<(String, String)> },
     FloorRoomRelations { relation_index: usize, relations: Vec<(String, String)> },
     Done,
@@ -687,7 +693,7 @@ enum IterationState {
 // Define a new iterator structure that will hold the MutexGuard and current state
 pub struct CurrentStateIterator<'a> {
     // Hold the mutex guard to ensure the data doesn't change during iteration
-    buildings_guard: MutexGuard<'a, HashMap<Location, Building>>,
+    buildings_guard: MutexGuard<'a, BTreeMap<Location, Building>>,
     // Current state of iteration
     state: IterationState,
     // Set of element types to include
@@ -706,7 +712,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     *building_index += 1;
                     
                     // If buildings are included, return a BuildingNode
-                    if self.included_types.contains(ElementType::BUILDING) {
+                    if self.included_types.contains(GraphElementType::BUILDING) {
                         let building_node = BuildingNode::from(building);
                         return Some(ModelChange::BuildingAdded(building_node));
                     } else {
@@ -715,7 +721,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     }
                 } else {
                     // Prepare for next state: floors
-                    let mut building_floors = HashMap::new();
+                    let mut building_floors = BTreeMap::new();
                     for (building_id, building) in self.buildings_guard.iter() {
                         let building_id_str = building_id.to_string();
                         let floor_ids = building.floors.keys()
@@ -747,7 +753,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                         *floor_index += 1;
                         
                         // If floors are included, return a FloorNode
-                        if self.included_types.contains(ElementType::FLOOR) {
+                        if self.included_types.contains(GraphElementType::FLOOR) {
                             let floor_node = FloorNode::from(floor);
                             return Some(ModelChange::FloorAdded(floor_node));
                         } else {
@@ -762,7 +768,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     }
                 } else {
                     // Prepare for next state: rooms
-                    let mut floor_rooms = HashMap::new();
+                    let mut floor_rooms = BTreeMap::new();
                     for (_, building) in self.buildings_guard.iter() {
                         for (floor_id, floor) in building.floors.iter() {
                             let floor_id_str = floor_id.to_string();
@@ -804,7 +810,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                             *room_index += 1;
                             
                             // If rooms are included, return a RoomNode
-                            if self.included_types.contains(ElementType::ROOM) {
+                            if self.included_types.contains(GraphElementType::ROOM) {
                                 let room_node = RoomNode::from(room);
                                 return Some(ModelChange::RoomAdded(room_node));
                             } else {
@@ -846,7 +852,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     *relation_index += 1;
                     
                     // If building-floor relations are included, return one
-                    if self.included_types.contains(ElementType::BUILDING_FLOOR) {
+                    if self.included_types.contains(GraphElementType::BUILDING_FLOOR) {
                         let floor_id = floor_id_str.parse::<Location>().unwrap();
                         return Some(ModelChange::BuildingFloorRelationAdded(
                             BuildingFloorRelation::new(0, &floor_id).unwrap()
@@ -879,7 +885,7 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     *relation_index += 1;
                     
                     // If floor-room relations are included, return one
-                    if self.included_types.contains(ElementType::FLOOR_ROOM) {
+                    if self.included_types.contains(GraphElementType::FLOOR_ROOM) {
                         let room_id = room_id_str.parse::<Location>().unwrap();
                         return Some(ModelChange::FloorRoomRelationAdded(
                             FloorRoomRelation::new(0, &room_id).unwrap()

@@ -85,21 +85,21 @@ impl ModelTestRunSource {
         output_storage: TestRunSourceStorage      
     ) -> anyhow::Result<Self> {
 
-        let definition = ModelTestRunSourceSettings::new(cfg, def)?;
+        let settings = ModelTestRunSourceSettings::new(cfg, def)?;
 
         let model_data_generator = create_model_data_generator(
-            definition.id.clone(),
-            definition.model_data_generator_def,
+            settings.id.clone(),
+            settings.model_data_generator_def,
             input_storage,
             output_storage,
-            definition.source_change_dispatcher_defs
+            settings.source_change_dispatcher_defs
         ).await?;
 
         let trs = Self { 
-            id: definition.id.clone(),
+            id: settings.id.clone(),
             model_data_generator,
-            start_mode: definition.start_mode,
-            subscribers: definition.subscribers,
+            start_mode: settings.start_mode,
+            subscribers: settings.subscribers,
         };
 
         if trs.start_mode == SourceStartMode::Auto {

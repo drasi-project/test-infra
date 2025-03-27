@@ -28,7 +28,7 @@ use test_data_store::{
         NodeRecord, RelationRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo
     }, 
     test_repo_storage::{
-        models::{BuildingHierarchyDataGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
+        models::{BuildingHierarchyDataGeneratorDefinition, SensorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
         TestSourceStorage
     }, 
     test_run_storage::{
@@ -64,12 +64,15 @@ pub enum BuildingHierarchyDataGeneratorError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BuildingHierarchyDataGeneratorSettings {
+    pub building_count: (u32, f64),
+    pub floor_count: (u32, f64),
+    pub room_count: (u32, f64),
     pub change_count: u64,
     pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub id: TestRunSourceId,
-    pub initialization_settings: BuildingHierarchyDataGeneratorInitializationSettings,
     pub input_storage: TestSourceStorage,
     pub output_storage: TestRunSourceStorage,
+    pub room_sensors: Vec<SensorDefinition>,
     pub seed: u64,
     pub spacing_mode: SpacingMode,
     pub time_mode: TimeMode,
@@ -84,25 +87,16 @@ impl BuildingHierarchyDataGeneratorSettings {
         dispatchers: Vec<SourceChangeDispatcherDefinition>,
     ) -> anyhow::Result<Self> {
 
-        let initialization_settings = BuildingHierarchyDataGeneratorInitializationSettings {
-            building_count: definition.initialization.building_count.unwrap_or((1, 0.0)),
-            floor_count: definition.initialization.floor_count.unwrap_or((5, 0.0)),
-            room_count: definition.initialization.room_count.unwrap_or((10, 0.0)),
-            sensor_co2: definition.initialization.sensor_co2.unwrap_or((50.0, 5.0)),
-            sensor_humidity: definition.initialization.sensor_humidity.unwrap_or((60.0, 5.0)),
-            sensor_light: definition.initialization.sensor_light.unwrap_or((100.0, 5.0)),
-            sensor_noise: definition.initialization.sensor_noise.unwrap_or((50.0, 3.0)),
-            sensor_temperature: definition.initialization.sensor_temperature.unwrap_or((70.0, 5.0)),
-            sensor_occupancy: definition.initialization.sensor_occupancy.unwrap_or((2, 1.0)),                        
-        };
-
         Ok(BuildingHierarchyDataGeneratorSettings {
+            building_count: definition.building_count.unwrap_or((1, 0.0)),
+            floor_count: definition.floor_count.unwrap_or((5, 0.0)),
+            room_count: definition.room_count.unwrap_or((10, 0.0)),
             change_count: definition.common.change_count.unwrap_or(100000),
             dispatchers,
             id: test_run_source_id,
             input_storage,
-            initialization_settings,
             output_storage,
+            room_sensors: definition.room_sensors,
             seed: definition.common.seed.unwrap_or(rand::rng().random()),
             spacing_mode: definition.common.spacing_mode,
             time_mode: definition.common.time_mode,
@@ -112,20 +106,6 @@ impl BuildingHierarchyDataGeneratorSettings {
     pub fn get_id(&self) -> TestRunSourceId {
         self.id.clone()
     }
-}
-
-
-#[derive(Clone, Debug, Serialize)]
-pub struct BuildingHierarchyDataGeneratorInitializationSettings {
-    pub building_count: (u32, f64),
-    pub floor_count: (u32, f64),
-    pub room_count: (u32, f64),
-    pub sensor_co2: (f64, f64),
-    pub sensor_humidity: (f64, f64),
-    pub sensor_light: (f64, f64),
-    pub sensor_noise: (f64, f64),
-    pub sensor_temperature: (f64, f64),
-    pub sensor_occupancy: (u32, f64),
 }
 
 // Enum of BuildingHierarchyDataGenerator commands sent from Web API handler functions.

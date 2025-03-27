@@ -20,6 +20,8 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Normal};
 use serde::Serialize;
+use serde_json::{Map, Value};
+use test_data_store::test_repo_storage::models::SensorDefinition;
 
 use super::BuildingHierarchyDataGeneratorSettings;
 
@@ -46,6 +48,7 @@ pub enum Location {
     Building(u32),           // e.g., Building(0) -> "B_000"
     Floor(u32, u32),       // e.g., Floor(0, 1) -> "F_000_001"
     Room(u32, u32, u32), // e.g., Room(0, 1, 2) -> "R_000_001_002"
+    Sensor(u32, u32, u32, String), // e.g., Sensor(0, 1, 2, "CO2".to_string()) -> "R_000_001_002_CO2"
 }
 
 impl Location {
@@ -54,6 +57,7 @@ impl Location {
             Location::Building(_) => Some(self.clone()),
             Location::Floor(b, _) => Some(Location::Building(*b)),
             Location::Room(b, _, _) => Some(Location::Building(*b)),
+            Location::Sensor(b, _, _, _) => Some(Location::Building(*b)),
         }
     }
 
@@ -62,6 +66,25 @@ impl Location {
             Location::Building(_) => None,
             Location::Floor(_, _) => Some(self.clone()),
             Location::Room(b, f, _) => Some(Location::Floor(*b,*f)),
+            Location::Sensor(b, f, _, _) => Some(Location::Floor(*b,*f)),
+        }
+    }
+
+    pub fn get_room_location(&self) -> Option<Location> {
+        match self {
+            Location::Building(_) => None,
+            Location::Floor(_, _) => None,
+            Location::Room(_, _, _) => Some(self.clone()),
+            Location::Sensor(b, f, r, _) => Some(Location::Room(*b,*f,*r)),
+        }
+    }
+
+    pub fn get_sensor_id(&self) -> Option<String> {
+        match self {
+            Location::Building(_) => None,
+            Location::Floor(_, _) => None,
+            Location::Room(_, _, _) => None,
+            Location::Sensor(_, _, _, s) => Some(s.clone()),
         }
     }
 
@@ -75,6 +98,10 @@ impl Location {
 
     pub fn is_room(&self) -> bool {
         matches!(self, Location::Room(_, _, _))
+    }
+
+    pub fn is_sensor(&self) -> bool {
+        matches!(self, Location::Sensor(_, _, _, _))
     }
 
     pub fn contains(&self, other: &Location) -> bool {
@@ -93,23 +120,38 @@ impl Location {
                 Location::Room(b_other, f_other, _) => b == b_other && f == f_other,
                 _ => false,
             },
+            Location::Room(b, f, r) => match other {
+                Location::Sensor(b_other, f_other, r_other, _) => b == b_other && f == f_other && r == r_other,
+                _ => false,
+            },
             _ => false,
         }
     }
 
-    pub fn with_floor(&self, floor: u32) -> Location {
+    pub fn with_floor(&self, floor: u32) -> anyhow::Result<Location> {
         match self {
-            Location::Building(b) => Location::Floor(*b, floor),
-            Location::Floor(b, _) => Location::Floor(*b, floor),
-            Location::Room(b, _, _) => Location::Floor(*b, floor),
+            Location::Building(b) => Ok(Location::Floor(*b, floor)),
+            _ => {
+                anyhow::bail!("Cannot set floor on non-building location: {}", self);
+            }
         }
     }
 
-    pub fn with_room(&self, room: u32) -> Location {
+    pub fn with_room(&self, room: u32) -> anyhow::Result<Location> {
         match self {
-            Location::Building(b) => Location::Room(*b, 0, room),
-            Location::Floor(b, f) => Location::Room(*b, *f, room),
-            Location::Room(b, f, _) => Location::Room(*b, *f, room),
+            Location::Floor(b, f) => Ok(Location::Room(*b, *f, room)),
+            _ => {
+                anyhow::bail!("Cannot set room on non-floor location: {}", self);
+            }
+        }
+    }
+
+    pub fn with_sensor(&self, sensor: String) -> anyhow::Result<Location> {
+        match self {
+            Location::Room(b, f, r) => Ok(Location::Sensor(*b, *f, *r, sensor)),
+            _ => {
+                anyhow::bail!("Cannot set sensor on non-room location: {}", self);
+            }
         }
     }
 }
@@ -121,6 +163,7 @@ impl fmt::Display for Location {
             Location::Building(b) => write!(f, "B_{:03}", b),
             Location::Floor(b, fl) => write!(f, "F_{:03}_{:03}", b, fl),
             Location::Room(b, fl, r) => write!(f, "R_{:03}_{:03}_{:03}", b, fl, r),
+            Location::Sensor(b, fl, r, sensor) => write!(f, "R_{:03}_{:03}_{:03}_{}", b, fl, r, sensor),
         }
     }
 }
@@ -152,8 +195,17 @@ impl FromStr for Location {
                 let r_num = r.parse::<u32>()
                     .context(format!("Invalid room number in '{}'", s))?;
                 Ok(Location::Room(b_num, f_num, r_num))
+            },
+            ["S", b, f, r, sensor] => {
+                let b_num = b.parse::<u32>()
+                    .context(format!("Invalid building number in '{}'", s))?;
+                let f_num = f.parse::<u32>()
+                    .context(format!("Invalid floor number in '{}'", s))?;
+                let r_num = r.parse::<u32>()
+                    .context(format!("Invalid room number in '{}'", s))?;
+                Ok(Location::Sensor(b_num, f_num, r_num, sensor.to_string()))
             }
-            _ => anyhow::bail!("Invalid location format: '{}'. Expected 'B_xxx', 'F_xxx_yyy', or 'R_xxx_yyy_zzz'", s),
+            _ => anyhow::bail!("Invalid location format: '{}'. Expected 'B_xxx', 'F_xxx_yyy', 'R_xxx_yyy_zzz', or 'S_xxx_yyy_zzz_sss'", s),
         }
     }
 }
@@ -220,7 +272,8 @@ impl Building {
     }
 
     pub fn add_floor(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
-        let floor_id = self.id.with_floor(self.next_floor);
+        
+        let floor_id = self.id.with_floor(self.next_floor)?;
 
         let (floor, changes) = Floor::new(floor_id.clone(), effective_from, change_generator)?;
         self.floors.insert(floor_id.clone(), floor);
@@ -320,7 +373,7 @@ impl Floor {
 
     pub fn add_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
         
-        let room_id = self.id.with_room(self.next_room);
+        let room_id = self.id.with_room(self.next_room)?;
 
         let (room, changes) = Room::new(room_id.clone(), effective_from, change_generator)?;
         self.rooms.insert(room_id.clone(), room);
@@ -358,34 +411,48 @@ pub struct RoomNode {
     pub effective_from: u64,
     pub id: String,
     pub labels: Vec<String>,    
-    pub properties: SensorValues,
+    pub properties: Map<String, Value>
 }
 
 impl From<&Room> for RoomNode {
     fn from(room: &Room) -> Self {
+
+        let mut properties = Map::new();
+
+        for sensor_value in &room.sensor_values {
+            match sensor_value {
+                SensorValue::NormalFloat(sensor) => {
+                    properties.insert(sensor.id.get_sensor_id().unwrap(), Value::Number(serde_json::Number::from_f64(sensor.value).unwrap()));
+                },
+                SensorValue::NormalInt(sensor) => {
+                    properties.insert(sensor.id.get_sensor_id().unwrap(), Value::Number(serde_json::Number::from(sensor.value)));
+                }
+            }
+        }
+
         RoomNode {
             effective_from: room.effective_from,
             id: room.id.to_string(),
             labels: vec![GraphElementType::ROOM.to_string()],
-            properties: room.sensor_values.clone(),
+            properties
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Room {
-    pub id: Location,           // Location::Room(building, floor, room)
-    pub sensor_values: SensorValues,
-    pub effective_from: u64,      // Timestamp of creation or last update
+    pub effective_from: u64,      
+    pub id: Location,           
+    pub sensor_values: Vec<SensorValue>, 
 }
 
 impl Room {
     pub fn new(id: Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
 
         let room = Room {
-            id: id.clone(),
-            sensor_values: change_generator.get_initial_sensor_values(),
             effective_from,
+            id: id.clone(),
+            sensor_values: change_generator.initialize_sensor_values(&id, effective_from)?
         };
 
         let mut changes = Vec::new();
@@ -400,22 +467,10 @@ impl Room {
         let old_room_node: RoomNode = (&*self).into();
 
         self.effective_from = effective_from;
-        self.sensor_values = change_generator.update_sensor_values(&self.id, &self.sensor_values);
+        change_generator.update_sensor_values(effective_from, &mut self.sensor_values);
 
         Ok(ModelChange::RoomUpdated(old_room_node, (&*self).into()))
     }
-}
-
-// Environmental values for rooms
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize)]
-pub struct SensorValues {
-    pub co2: f32,         // ppm
-    pub humidity: f32,    // Percentage
-    pub light: f32,       // Lux
-    pub noise: f32,       // dB
-    pub temperature: f32, // Celsius
-    pub occupancy: u32,   // Count of people
 }
 
 #[derive(Debug, Clone)]
@@ -477,63 +532,130 @@ impl FloorRoomRelation {
 }
 
 #[derive(Debug, Clone)]
+pub enum SensorValue {
+    NormalFloat(FloatNormalDistSensorValue),
+    NormalInt(IntNormalDistSensorValue),
+}
+
+#[derive(Debug, Clone)]
+pub struct FloatNormalDistSensorValue {
+    pub effective_from: u64,
+    pub id: Location,
+    pub momentum: i32,
+    pub value: f64,    
+}
+
+#[derive(Debug, Clone)]
+pub struct IntNormalDistSensorValue {
+    pub effective_from: u64,
+    pub id: Location,
+    pub momentum: i32,
+    pub value: i64,    
+}
+
+#[derive(Debug, Clone)]
+pub enum SensorValueGenerator {
+    NormalFloat(FloatNormalDistSensorValueGenerator),
+    NormalInt(IntNormalDistSensorValueGenerator),
+}
+
+#[derive(Debug, Clone)]
+pub struct FloatNormalDistSensorValueGenerator {
+    pub id: String,
+    pub momentum_init_dist: Normal<f64>,
+    pub momentum_reverse_prob: f64,
+    pub value_change_dist: Normal<f64>,
+    pub value_init_dist: Normal<f64>,
+    pub value_range: (f64, f64),
+}
+
+#[derive(Debug, Clone)]
+pub struct IntNormalDistSensorValueGenerator {
+    pub id: String,
+    pub momentum_init_dist: Normal<f64>,
+    pub momentum_reverse_prob: f64,
+    pub value_change_dist: Normal<f64>,
+    pub value_init_dist: Normal<f64>,
+    pub value_range: (i64, i64),
+}
+
+#[derive(Debug, Clone)]
 pub struct GraphChangeGenerator {
-    pub building_count_distribution: Normal<f64>,
-    pub floor_count_distribution: Normal<f64>,
-    pub room_count_distribution: Normal<f64>,
-    pub sensor_co2_distribution: Normal<f64>,
-    pub sensor_humidity_distribution: Normal<f64>,
-    pub sensor_light_distribution: Normal<f64>,
-    pub sensor_noise_distribution: Normal<f64>,
-    pub sensor_temperature_distribution: Normal<f64>,
-    pub sensor_occupancy_distribution: Normal<f64>,
-    pub rng: ChaCha8Rng
+    pub building_count_dist: Normal<f64>,
+    pub floor_count_dist: Normal<f64>,
+    pub rng: ChaCha8Rng,
+    pub room_count_dist: Normal<f64>,
+    pub room_sensor_value_generators: Vec<SensorValueGenerator>
 }
 
 impl GraphChangeGenerator {
     pub fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> Self {
         log::debug!("Initialized GraphChangeGenerator with seed: {}", settings.seed);
 
-        GraphChangeGenerator {
-            building_count_distribution: Normal::new(settings.initialization_settings.building_count.0 as f64, settings.initialization_settings.building_count.1).unwrap(),
-            floor_count_distribution: Normal::new(settings.initialization_settings.floor_count.0 as f64, settings.initialization_settings.floor_count.1).unwrap(),
-            room_count_distribution: Normal::new(settings.initialization_settings.room_count.0 as f64, settings.initialization_settings.room_count.1).unwrap(),
-            sensor_co2_distribution: Normal::new(settings.initialization_settings.sensor_co2.0 as f64, settings.initialization_settings.sensor_co2.1).unwrap(),
-            sensor_humidity_distribution: Normal::new(settings.initialization_settings.sensor_humidity.0 as f64, settings.initialization_settings.sensor_humidity.1).unwrap(),
-            sensor_light_distribution: Normal::new(settings.initialization_settings.sensor_light.0 as f64, settings.initialization_settings.sensor_light.1).unwrap(),
-            sensor_noise_distribution: Normal::new(settings.initialization_settings.sensor_noise.0 as f64, settings.initialization_settings.sensor_noise.1).unwrap(),
-            sensor_temperature_distribution: Normal::new(settings.initialization_settings.sensor_temperature.0 as f64, settings.initialization_settings.sensor_temperature.1).unwrap(),
-            sensor_occupancy_distribution: Normal::new(settings.initialization_settings.sensor_occupancy.0 as f64, settings.initialization_settings.sensor_occupancy.1).unwrap(),
-            rng: ChaCha8Rng::seed_from_u64(settings.seed)
-        }
+        let mut change_generator = GraphChangeGenerator {
+            building_count_dist: Normal::new(settings.building_count.0 as f64, settings.building_count.1).unwrap(),
+            floor_count_dist: Normal::new(settings.floor_count.0 as f64, settings.floor_count.1).unwrap(),
+            rng: ChaCha8Rng::seed_from_u64(settings.seed),
+            room_count_dist: Normal::new(settings.room_count.0 as f64, settings.room_count.1).unwrap(),
+            room_sensor_value_generators: Vec::new()
+        };
+
+        for sensor in &settings.room_sensors {
+            match sensor {
+                SensorDefinition::NormalFloat(def) => {
+                    let (change_mean, change_std_dev) = def.value_change.unwrap_or((3.0, 5.0));
+                    let (init_mean, init_std_dev) = def.value_init.unwrap_or((0.0, 1.0));
+                    let (momentum_mean, momentum_std_dev, momentum_reverse_prob) = def.momentum_init.unwrap_or((3, 1.0, 0.5));
+                    let (range_min, range_max) = def.value_range.unwrap_or((0.0, 100.0));
+
+                    let svg = FloatNormalDistSensorValueGenerator {
+                        id: def.id.clone(),
+                        momentum_init_dist: Normal::new(momentum_mean as f64, momentum_std_dev).unwrap(),
+                        momentum_reverse_prob,
+                        value_change_dist: Normal::new(change_mean, change_std_dev).unwrap(),
+                        value_init_dist: Normal::new(init_mean, init_std_dev).unwrap(),
+                        value_range: (range_min, range_max),
+                    };
+                    change_generator.room_sensor_value_generators.push(SensorValueGenerator::NormalFloat(svg));
+                },
+                SensorDefinition::NormalInt(def) => {
+                    let (change_mean, change_std_dev) = def.value_change.unwrap_or((3, 5.0));
+                    let (init_mean, init_std_dev) = def.value_init.unwrap_or((0, 1.0));
+                    let (momentum_mean, momentum_std_dev, momentum_reverse_prob) = def.momentum_init.unwrap_or((3, 1.0, 0.5));
+                    let (range_min, range_max) = def.value_range.unwrap_or((0, 100));
+
+                    let svg = IntNormalDistSensorValueGenerator {
+                        id: def.id.clone(),
+                        momentum_init_dist: Normal::new(momentum_mean as f64, momentum_std_dev).unwrap(),
+                        momentum_reverse_prob,
+                        value_change_dist: Normal::new(change_mean as f64, change_std_dev).unwrap(),
+                        value_init_dist: Normal::new(init_mean as f64, init_std_dev).unwrap(),
+                        value_range: (range_min, range_max),
+                    };
+                    change_generator.room_sensor_value_generators.push(SensorValueGenerator::NormalInt(svg));
+                }
+            }
+        };
+
+        change_generator
     }
     
-    pub fn get_initial_sensor_values(&mut self) -> SensorValues {
-
-        let rng = &mut self.rng;
-
-        SensorValues {
-            co2: self.sensor_co2_distribution.sample(rng).max(0.0) as f32,
-            humidity: self.sensor_humidity_distribution.sample(rng).max(0.0) as f32,
-            light: self.sensor_light_distribution.sample(rng).max(0.0) as f32,
-            noise: self.sensor_noise_distribution.sample(rng).max(0.0) as f32,
-            temperature: self.sensor_temperature_distribution.sample(rng) as f32,
-            occupancy: self.sensor_occupancy_distribution.sample(rng).max(0.0) as u32,
-        }
+    pub fn get_random_boolean(&mut self) -> bool {
+        self.rng.random_bool(0.5)
     }
 
     pub fn get_random_building_count(&mut self) -> u32 {
-        let value = self.building_count_distribution.sample(&mut self.rng);
+        let value = self.building_count_dist.sample(&mut self.rng);
         value.max(1.0) as u32
     }
 
     pub fn get_random_floor_count(&mut self) -> u32 {
-        let value = self.floor_count_distribution.sample(&mut self.rng);
+        let value = self.floor_count_dist.sample(&mut self.rng);
         value.max(1.0) as u32
     }
 
     pub fn get_random_room_count(&mut self) -> u32 {
-        let value = self.room_count_distribution.sample(&mut self.rng);
+        let value = self.room_count_dist.sample(&mut self.rng);
         value.max(1.0) as u32
     }
 
@@ -544,47 +666,90 @@ impl GraphChangeGenerator {
         }   
     }
 
-    pub fn update_sensor_values(&mut self, location_id: &Location, sensor_values: &SensorValues) -> SensorValues {
-        log::trace!("Update Sensor values for Location: {}", location_id);
-            
-        // Create a clone of the current values to modify
-        let mut new_values = sensor_values.clone();        
-        log::trace!("Sensors before: {:#?}", new_values);
+    pub fn initialize_sensor_values(&mut self, room_id: &Location, effective_from: u64) -> anyhow::Result<Vec<SensorValue>> {
+        let mut sensor_values = Vec::new();
 
-        let sensor_to_update = self.get_usize_in_range(0, 6, false);
+        for sensor in &self.room_sensor_value_generators {
+            match sensor {
+                SensorValueGenerator::NormalFloat(svg) => {
+                    let mut val = FloatNormalDistSensorValue {
+                        effective_from,
+                        id: room_id.with_sensor(svg.id.clone())?,
+                        momentum: (svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1),
+                        value: svg.value_init_dist.sample(&mut self.rng).clamp(svg.value_range.0, svg.value_range.1),
+                    };
 
-        // Update only the randomly selected sensor
-        match sensor_to_update {
-            0 => {
-                // Update CO2
-                new_values.co2 = self.sensor_co2_distribution.sample(&mut self.rng).max(0.0) as f32;
-            },
-            1 => {
-                // Update humidity
-                new_values.humidity = self.sensor_humidity_distribution.sample(&mut self.rng).max(0.0) as f32;
-            },
-            2 => {
-                // Update light
-                new_values.light = self.sensor_light_distribution.sample(&mut self.rng).max(0.0) as f32;
-            },
-            3 => {
-                // Update noise
-                new_values.noise = self.sensor_noise_distribution.sample(&mut self.rng).max(0.0) as f32;
-            },
-            4 => {
-                // Update temperature
-                new_values.temperature = self.sensor_temperature_distribution.sample(&mut self.rng) as f32;
-            },
-            5 => {
-                // Update occupancy
-                new_values.occupancy = self.sensor_occupancy_distribution.sample(&mut self.rng).max(0.0) as u32;
-            },
-            _ => unreachable!("Random range should only return 0-5")
+                    if self.rng.random_bool(svg.momentum_reverse_prob) { val.momentum = -val.momentum; }
+
+                    sensor_values.push(SensorValue::NormalFloat(val));
+                },
+                SensorValueGenerator::NormalInt(svg) => {
+                    let mut val = IntNormalDistSensorValue {
+                        effective_from,
+                        id: room_id.with_sensor(svg.id.clone())?,
+                        momentum: (svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1),
+                        value: (svg.value_init_dist.sample(&mut self.rng) as i64).clamp(svg.value_range.0, svg.value_range.1)
+                    };
+
+                    if self.rng.random_bool(svg.momentum_reverse_prob) { val.momentum = -val.momentum; }
+
+                    sensor_values.push(SensorValue::NormalInt(val));
+                }
+            }
         }
-        
-        log::trace!("Sensors after: {:#?}", new_values);
 
-        new_values
+        Ok(sensor_values)
+    }
+
+    pub fn update_sensor_values(&mut self, effective_from: u64, sensor_values: &mut Vec<SensorValue>) {
+
+        let sensor_to_update = self.get_usize_in_range(0, self.room_sensor_value_generators.len(), false);
+
+        match &mut self.room_sensor_value_generators[sensor_to_update] {
+            SensorValueGenerator::NormalFloat(svg) => {
+                if let SensorValue::NormalFloat(ref mut sensor_value) = sensor_values[sensor_to_update] {
+
+                    let value_change = svg.value_change_dist.sample(&mut self.rng);
+
+                    if sensor_value.momentum > 0 {
+                        sensor_value.value = (sensor_value.value + value_change).clamp(svg.value_range.0, svg.value_range.1);
+
+                        if sensor_value.momentum > 1 {
+                            sensor_value.momentum -= 1;
+                        } else {
+                            sensor_value.momentum = (svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1);
+                            if self.rng.random_bool(svg.momentum_reverse_prob) { sensor_value.momentum = -sensor_value.momentum; }
+                        }
+                    } else if sensor_value.momentum < 0 {
+                        sensor_value.value = (sensor_value.value - value_change).clamp(svg.value_range.0, svg.value_range.1);
+
+                        if sensor_value.momentum < -1 {
+                            sensor_value.momentum += 1;
+                        } else {
+                            sensor_value.momentum = -(svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1);
+                            if self.rng.random_bool(svg.momentum_reverse_prob) { sensor_value.momentum = -sensor_value.momentum; }
+                        }
+                    }                    
+
+                    sensor_value.effective_from = effective_from;
+                }
+            },
+            SensorValueGenerator::NormalInt(svg) => {
+                if let SensorValue::NormalInt(ref mut sensor_value) = sensor_values[sensor_to_update] {
+
+                    let value_change = svg.value_change_dist.sample(&mut self.rng) as i64;
+
+                    if sensor_value.momentum > 0 {
+                        sensor_value.value = (sensor_value.value + value_change).clamp(svg.value_range.0, svg.value_range.1);
+                        sensor_value.momentum -= 1;
+                    } else {
+                        sensor_value.value = (sensor_value.value - value_change).clamp(svg.value_range.0, svg.value_range.1);
+                        sensor_value.momentum += 1;
+                    }
+                    sensor_value.effective_from = effective_from;
+                }
+            }
+        }
     }
 }
 
@@ -593,7 +758,7 @@ impl GraphChangeGenerator {
 pub struct BuildingGraph {
     buildings: Mutex<BTreeMap<Location, Building>>,
     change_generator: GraphChangeGenerator,             
-    next_building_num: u32,         
+    next_building_num: u32
 }
 
 impl BuildingGraph {

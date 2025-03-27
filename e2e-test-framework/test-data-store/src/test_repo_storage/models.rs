@@ -248,20 +248,35 @@ pub struct CommonModelDataGeneratorDefinition {
 pub struct BuildingHierarchyDataGeneratorDefinition {
     #[serde(flatten)]
     pub common: CommonModelDataGeneratorDefinition,
-    pub initialization: BuildingHierarchyDataGeneratorInitializationDefinition,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BuildingHierarchyDataGeneratorInitializationDefinition {
     pub building_count: Option<(u32, f64)>,
     pub floor_count: Option<(u32, f64)>,
     pub room_count: Option<(u32, f64)>,
-    pub sensor_co2: Option<(f64, f64)>,
-    pub sensor_humidity: Option<(f64, f64)>,
-    pub sensor_light: Option<(f64, f64)>,
-    pub sensor_noise: Option<(f64, f64)>,
-    pub sensor_temperature: Option<(f64, f64)>,
-    pub sensor_occupancy: Option<(u32, f64)>,
+    pub room_sensors: Vec<SensorDefinition>
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum SensorDefinition {
+    NormalFloat(FloatNormalDistSensorDefinition),
+    NormalInt(IntNormalDistSensorDefinition),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FloatNormalDistSensorDefinition {
+    pub id: String,
+    pub momentum_init: Option<(i32, f64, f64)>,  // mean, std_dev, reversal probability
+    pub value_change: Option<(f64, f64)>, // mean, std_dev
+    pub value_init: Option<(f64, f64)>, // mean, std_dev
+    pub value_range: Option<(f64, f64)>, // min, max
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IntNormalDistSensorDefinition {
+    pub id: String,
+    pub momentum_init: Option<(i32, f64, f64)>, // mean, std_dev, reversal probability
+    pub value_change: Option<(i64, f64)>, // mean, std_dev
+    pub value_init: Option<(i64, f64)>, // mean, std_dev
+    pub value_range: Option<(i64, i64)>, // min, max
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -89,7 +89,7 @@
                 "test_repo_id": "local_dev_repo",                
                 "test_run_id": "test_run_001",
                 "test_source_id": "geo-db",
-                "source_change_generator_start_mode": "auto",
+                "start_mode": "auto",
                 "test_run_overrides" : {
                   "source_change_generator": {
                     "spacing_mode": "none",

@@ -14,7 +14,7 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
-use models::{LocalTestDefinition, TestDefinition};
+use models::{LocalTestDefinition, TestDefinition, TestSourceDefinition};
 use serde::Serialize;
 use tokio::fs;
 use walkdir::WalkDir;
@@ -260,10 +260,14 @@ impl TestStorage {
     pub async fn get_test_source(&self, id: &str, replace: bool) -> anyhow::Result<TestSourceStorage> {
         log::debug!("Getting (replace = {}) TestSourceStorage for ID {:?}", replace, &id);
 
-        let test_source_definition = match self.test_definition.sources.iter().find(|source| source.test_source_id == id) {
-            Some(source) => source,
-            None => anyhow::bail!("Test Source with ID {:?} not found in Test ID {:?}", &id, &self.id),
-        };
+        let test_source_definition = self.test_definition.sources.iter().find(|source| {
+            match source {
+                TestSourceDefinition::Model(def) => { def.common.test_source_id == id },
+                TestSourceDefinition::Script(def) => def.common.test_source_id == id,
+            }
+        }).ok_or_else(|| {
+            anyhow::anyhow!("Test Source with ID {:?} not found", &id)
+        })?;
 
         let test_source_data_path = self.sources_path.join(&id);
 
@@ -325,56 +329,61 @@ impl TestSourceStorage {
         let mut bootstrap_data_script_files = HashMap::new();
         let mut source_change_script_files = Vec::new();
 
-        // Read the bootstrap script files.
-        match &self.test_source_definition.bootstrap_data_generator_def {
-            Some(models::BootstrapDataGeneratorDefinition::Script{common_config: _, unique_config}) => {
-                let bootstrap_data_scripts_repo_path = self.path.join(&unique_config.script_file_folder);
+        match &self.test_source_definition {
+            models::TestSourceDefinition::Script(def) => {
+                // Read the bootstrap script files.
+                match &def.bootstrap_data_generator {
+                    Some(models::BootstrapDataGeneratorDefinition::Script(bsg_def)) => {
+                        let bootstrap_data_scripts_repo_path = self.path.join(&bsg_def.script_file_folder);
 
-                let file_path_list: Vec<PathBuf> = WalkDir::new(&bootstrap_data_scripts_repo_path)
-                    .into_iter()
-                    .filter_map(|entry| {
-                        let entry = entry.ok()?; // Skip over any errors
-                        let path = entry.path().to_path_buf();
-                        if path.is_file() {
-                            Some(path)
-                        } else {
-                            None
+                        let file_path_list: Vec<PathBuf> = WalkDir::new(&bootstrap_data_scripts_repo_path)
+                            .into_iter()
+                            .filter_map(|entry| {
+                                let entry = entry.ok()?; // Skip over any errors
+                                let path = entry.path().to_path_buf();
+                                if path.is_file() {
+                                    Some(path)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        for file_path in file_path_list {
+                            let data_type_name = file_path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string();
+                            if !bootstrap_data_script_files.contains_key(&data_type_name) {
+                                bootstrap_data_script_files.insert(data_type_name.clone(), vec![]);
+                            }
+                            bootstrap_data_script_files.get_mut(&data_type_name).unwrap().push(file_path);
                         }
-                    })
-                    .collect();
-
-                for file_path in file_path_list {
-                    let data_type_name = file_path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string();
-                    if !bootstrap_data_script_files.contains_key(&data_type_name) {
-                        bootstrap_data_script_files.insert(data_type_name.clone(), vec![]);
-                    }
-                    bootstrap_data_script_files.get_mut(&data_type_name).unwrap().push(file_path);
+                    },
+                    _ => {}
                 }
+
+                // Read the change log script files.
+                match &def.source_change_generator {
+                    Some(models::SourceChangeGeneratorDefinition::Script(scg_def)) => {
+                        let source_change_scripts_repo_path = self.path.join(&scg_def.script_file_folder);
+
+                        let mut entries = fs::read_dir(&source_change_scripts_repo_path).await?;
+                
+                        while let Some(entry) = entries.next_entry().await? {
+                            let file_path = entry.path();
+                    
+                            // Check if it's a file
+                            if file_path.is_file() {
+                                source_change_script_files.push(file_path);
+                            }
+                        }
+                    },
+                    _ => {}
+                }
+
+                // Sort the list of files by the file name to get them in the correct order for processing.
+                source_change_script_files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
             },
             _ => {}
         }
-
-        // Read the change log script files.
-        match &self.test_source_definition.source_change_generator_def {
-            Some(models::SourceChangeGeneratorDefinition::Script{common_config: _, unique_config}) => {
-                let source_change_scripts_repo_path = self.path.join(&unique_config.script_file_folder);
-
-                let mut entries = fs::read_dir(&source_change_scripts_repo_path).await?;
-        
-                while let Some(entry) = entries.next_entry().await? {
-                    let file_path = entry.path();
-            
-                    // Check if it's a file
-                    if file_path.is_file() {
-                        source_change_script_files.push(file_path);
-                    }
-                }
-            },
-            _ => {}
-        }
-
-        // Sort the list of files by the file name to get them in the correct order for processing.
-        source_change_script_files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
         Ok(TestSourceScriptSet {
             bootstrap_data_script_files,

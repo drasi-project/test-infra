@@ -46,7 +46,7 @@ pub struct DaprSourceChangeDispatcher {
 }
 
 impl DaprSourceChangeDispatcher {
-    pub fn new(def: &DaprSourceChangeDispatcherDefinition, output_storage: &TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
+    pub fn new(def: &DaprSourceChangeDispatcherDefinition, output_storage: &TestRunSourceStorage) -> anyhow::Result<Self> {
         log::debug!("Creating DaprSourceChangeDispatcher from {:?}, ", def);
 
         let source_id = output_storage.id.test_source_id.clone();
@@ -60,10 +60,10 @@ impl DaprSourceChangeDispatcher {
             settings.pubsub_topic.clone(),
         );
 
-        Ok(Box::new(DaprSourceChangeDispatcher {
+        Ok(DaprSourceChangeDispatcher {
             _settings: settings,
             publisher,
-        }))
+        })
     }
 }  
 

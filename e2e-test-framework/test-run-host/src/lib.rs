@@ -21,7 +21,7 @@ use tokio::sync::RwLock;
 
 use queries::{query_result_observer::QueryResultObserverCommandResponse, result_stream_loggers::ResultStreamLoggerResult, TestRunQuery, TestRunQueryConfig, TestRunQueryDefinition, TestRunQueryState};
 use sources::{
-    bootstrap_data_generators::BootstrapData, source_change_generators::SourceChangeGeneratorCommandResponse, TestRunSource, TestRunSourceConfig, TestRunSourceDefinition, TestRunSourceState
+    bootstrap_data_generators::BootstrapData, create_test_run_source, source_change_generators::SourceChangeGeneratorCommandResponse, TestRunSource, TestRunSourceConfig, TestRunSourceState
 };
 use test_data_store::{test_repo_storage::models::SpacingMode, test_run_storage::{TestRunQueryId, TestRunSourceId}, TestDataStore};
 
@@ -70,7 +70,7 @@ impl fmt::Display for TestRunHostStatus {
 pub struct TestRunHost {
     data_store: Arc<TestDataStore>,
     queries: Arc<RwLock<HashMap<TestRunQueryId, TestRunQuery>>>,
-    sources: Arc<RwLock<HashMap<TestRunSourceId, TestRunSource>>>,
+    sources: Arc<RwLock<HashMap<TestRunSourceId, Box<dyn TestRunSource + Send + Sync>>>>,
     status: Arc<RwLock<TestRunHostStatus>>,
 }
 
@@ -176,9 +176,6 @@ impl TestRunHost {
         repo.add_remote_test(&test_run_config.test_id, false).await?;
         let test_source_definition = self.data_store.get_test_source_definition_for_test_run_source(&id).await?;
 
-        let definition = TestRunSourceDefinition::new(test_run_config, test_source_definition)?;
-        log::trace!("TestRunSourceDefinition: {:?}", &definition);
-
         // Get the INPUT Test Data storage for the TestRunSource.
         // This is where the TestRunSource will read the Test Data from.
         let input_storage = self.data_store.get_test_source_storage_for_test_run_source(&id).await?;
@@ -188,8 +185,7 @@ impl TestRunHost {
         let output_storage = self.data_store.get_test_run_source_storage(&id).await?;
 
         // Create the TestRunSource and add it to the TestRunHost.
-        let test_run_source = TestRunSource::new(definition, input_storage, output_storage).await?;        
-
+        let test_run_source = create_test_run_source(&test_run_config, &test_source_definition, input_storage, output_storage).await?;
         sources_lock.insert(id.clone(), test_run_source);
 
         Ok(id)

@@ -17,14 +17,11 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use serde::Serialize;
 use test_data_store::{
-    scripts::{
-        bootstrap_script_file_reader::BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord
-    }, 
-    test_repo_storage::{models::{
-        CommonBootstrapDataGeneratorDefinition, ScriptBootstrapDataGeneratorDefinition, TimeMode
-    }, 
+    scripts::{bootstrap_script_file_reader::BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, 
+    test_repo_storage::{models::{ ScriptBootstrapDataGeneratorDefinition, TimeMode }, 
     TestSourceStorage}, 
-    test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+    test_run_storage::{TestRunSourceId, TestRunSourceStorage}
+};
 
 use super::{BootstrapData, BootstrapDataGenerator};
 
@@ -38,16 +35,15 @@ pub struct ScriptBootstrapDataGenerator {
 impl ScriptBootstrapDataGenerator {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        common_config: CommonBootstrapDataGeneratorDefinition, 
-        _unique_config: ScriptBootstrapDataGeneratorDefinition, 
+        definition: ScriptBootstrapDataGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         _output_storage: TestRunSourceStorage
-    ) -> anyhow::Result<Box<dyn BootstrapDataGenerator + Send + Sync>> {
-        Ok(Box::new(Self {
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
             input_storage,
             test_run_source_id,
-            time_mode: common_config.time_mode.clone(),
-        }))
+            time_mode: definition.common.time_mode.clone(),
+        })
     }
 }
 

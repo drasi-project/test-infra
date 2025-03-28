@@ -97,12 +97,12 @@ pub struct SourceChangeGeneratorCommandResponse {
 
 #[derive(Debug, Serialize)]
 pub struct SourceChangeGeneratorState {    
-    state: serde_json::Value,
-    status: SourceChangeGeneratorStatus,
+    pub state: serde_json::Value,
+    pub status: SourceChangeGeneratorStatus,
 }
 
 #[async_trait]
-pub trait SourceChangeGenerator : Send + Sync {
+pub trait SourceChangeGenerator : Send + Sync + std::fmt::Debug {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn reset(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
@@ -152,15 +152,14 @@ pub async fn create_source_change_generator(
 ) -> anyhow::Result<Option<Box<dyn SourceChangeGenerator + Send + Sync>>> {
     match definition {
         None => Ok(None),
-        Some(SourceChangeGeneratorDefinition::Script{common_config, unique_config}) => {
+        Some(SourceChangeGeneratorDefinition::Script(definition)) => {
             Ok(Some(Box::new(ScriptSourceChangeGenerator::new(
                 id, 
-                common_config, 
-                unique_config, 
+                definition, 
                 input_storage, 
                 output_storage,
                 dispatchers,
-            ).await?)))
+            ).await?) as Box<dyn SourceChangeGenerator + Send + Sync> ))
         }
     }
 }

@@ -33,6 +33,7 @@
                         "sources": [
                           {
                             "test_source_id": "geo-db",
+                            "kind": "Script",
                             "bootstrap_data_generator": {
                               "kind": "Script",
                               "script_file_folder": "bootstrap_scripts",
@@ -88,8 +89,13 @@
                 "test_repo_id": "local_dev_repo",                
                 "test_run_id": "test_run_001",
                 "test_source_id": "geo-db",
-                "source_change_generator_start_mode": "bootstrap",
-                "test_run_overrides" : {}
+                "start_mode": "auto",
+                "test_run_overrides" : {
+                  "source_change_generator": {
+                    "spacing_mode": "none",
+                    "time_mode": "live"
+                  }              
+                }
             }
         ]
     }

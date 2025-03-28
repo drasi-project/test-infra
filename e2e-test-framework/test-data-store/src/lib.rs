@@ -215,29 +215,19 @@ impl TestDataStore {
     }
 
     pub async fn get_test_query_definition_for_test_run_query(&self, test_run_query_id: &TestRunQueryId) -> anyhow::Result<TestQueryDefinition> {
-        let test_definition = self.get_test_definition(
+        self.get_test_definition(
             &test_run_query_id.test_run_id.test_repo_id, 
             &test_run_query_id.test_run_id.test_id
-        ).await?;
-
-        match test_definition.queries.iter().find(|query| query.test_query_id == test_run_query_id.test_query_id)
-        {
-            Some(query_definition) => Ok(query_definition.clone()),
-            None => anyhow::bail!("TestQueryDefinition not found for TestRunQueryId: {:?}", &test_run_query_id)
-        }
+        ).await?
+        .get_test_query(&test_run_query_id.test_query_id)
     }
 
     pub async fn get_test_source_definition_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceDefinition> {
-        let test_definition = self.get_test_definition(
+        self.get_test_definition(
             &test_run_source_id.test_run_id.test_repo_id, 
             &test_run_source_id.test_run_id.test_id
-        ).await?;
-
-        match test_definition.sources.iter().find(|source| source.test_source_id == test_run_source_id.test_source_id)
-        {
-            Some(source_definition) => Ok(source_definition.clone()),
-            None => anyhow::bail!("TestSourceDefinition not found for TestRunSourceId: {:?}", &test_run_source_id)
-        }
+        ).await?
+        .get_test_source(&test_run_source_id.test_source_id)
     }
 
     pub async fn get_test_source_scripts_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestSourceScriptSet> {

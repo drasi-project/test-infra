@@ -53,8 +53,14 @@ impl SourceChangeDispatcher for Box<dyn SourceChangeDispatcher + Send + Sync> {
 
 pub async fn create_source_change_dispatcher(def: &SourceChangeDispatcherDefinition, output_storage: &TestRunSourceStorage) -> anyhow::Result<Box<dyn SourceChangeDispatcher + Send + Sync>> {
     match def {
-        SourceChangeDispatcherDefinition::Console(def) => console_dispatcher::ConsoleSourceChangeDispatcher::new(def, output_storage),
-        SourceChangeDispatcherDefinition::Dapr(def) => dapr_dispatcher::DaprSourceChangeDispatcher::new(def, output_storage),
-        SourceChangeDispatcherDefinition::JsonlFile(def) => jsonl_file_dispatcher::JsonlFileSourceChangeDispatcher::new(def, output_storage).await,
+        SourceChangeDispatcherDefinition::Console(def) => {
+            Ok(Box::new(console_dispatcher::ConsoleSourceChangeDispatcher::new(def, output_storage)?) as Box<dyn SourceChangeDispatcher + Send + Sync>)
+        },
+        SourceChangeDispatcherDefinition::Dapr(def) => {
+            Ok(Box::new(dapr_dispatcher::DaprSourceChangeDispatcher::new(def, output_storage)?) as Box<dyn SourceChangeDispatcher + Send + Sync>)
+        },
+        SourceChangeDispatcherDefinition::JsonlFile(def) => {
+            Ok(Box::new(jsonl_file_dispatcher::JsonlFileSourceChangeDispatcher::new(def, output_storage).await?) as Box<dyn SourceChangeDispatcher + Send + Sync>)
+        },
     }
 }

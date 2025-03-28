@@ -27,7 +27,7 @@ use test_data_store::{
         change_script_file_reader::ChangeScriptReader, ChangeHeaderRecord, ChangeScriptRecord, SequencedChangeScriptRecord, SourceChangeEvent
     }, 
     test_repo_storage::{
-        models::{CommonSourceChangeGeneratorDefinition, ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
+        models::{ScriptSourceChangeGeneratorDefinition, SourceChangeDispatcherDefinition, SpacingMode, TimeMode}, 
         TestSourceStorage
     }, 
     test_run_storage::{
@@ -75,8 +75,7 @@ pub struct ScriptSourceChangeGeneratorSettings {
 impl ScriptSourceChangeGeneratorSettings {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        common_config: CommonSourceChangeGeneratorDefinition, 
-        unique_config: ScriptSourceChangeGeneratorDefinition, 
+        definition: ScriptSourceChangeGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         output_storage: TestRunSourceStorage,
         dispatchers: Vec<SourceChangeDispatcherDefinition>,
@@ -85,11 +84,11 @@ impl ScriptSourceChangeGeneratorSettings {
         Ok(ScriptSourceChangeGeneratorSettings {
             dispatchers,
             id: test_run_source_id,
-            ignore_scripted_pause_commands: unique_config.ignore_scripted_pause_commands,
+            ignore_scripted_pause_commands: definition.ignore_scripted_pause_commands,
             input_storage,
             output_storage,
-            spacing_mode: common_config.spacing_mode,
-            time_mode: common_config.time_mode,
+            spacing_mode: definition.common.spacing_mode,
+            time_mode: definition.common.time_mode,
         })
     }
 
@@ -160,24 +159,23 @@ pub struct ScriptSourceChangeGenerator {
 impl ScriptSourceChangeGenerator {
     pub async fn new(
         test_run_source_id: TestRunSourceId, 
-        common_config: CommonSourceChangeGeneratorDefinition, 
-        unique_config: ScriptSourceChangeGeneratorDefinition, 
+        definition: ScriptSourceChangeGeneratorDefinition, 
         input_storage: TestSourceStorage, 
         output_storage: TestRunSourceStorage,
         dispatchers: Vec<SourceChangeDispatcherDefinition>,
-    ) -> anyhow::Result<Box<dyn SourceChangeGenerator + Send + Sync>> {
+    ) -> anyhow::Result<Self> {
         let settings = ScriptSourceChangeGeneratorSettings::new(
-            test_run_source_id, common_config, unique_config, input_storage, output_storage.clone(), dispatchers).await?;
+            test_run_source_id, definition, input_storage, output_storage.clone(), dispatchers).await?;
         log::debug!("Creating ScriptSourceChangeGenerator from {:?}", &settings);
 
         let (script_processor_tx_channel, script_processor_rx_channel) = tokio::sync::mpsc::channel(100);
         let script_processor_thread_handle = tokio::spawn(script_processor_thread(script_processor_rx_channel, settings.clone()));
 
-        Ok(Box::new(Self {
+        Ok(Self {
             settings,
             script_processor_tx_channel,
             _script_processor_thread_handle: Arc::new(Mutex::new(script_processor_thread_handle)),
-        }))
+        })
     }
 
     pub fn get_id(&self) -> TestRunSourceId {

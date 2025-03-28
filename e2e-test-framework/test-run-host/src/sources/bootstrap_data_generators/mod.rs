@@ -56,7 +56,7 @@ impl BootstrapData {
 }
 
 #[async_trait]
-pub trait BootstrapDataGenerator : Send + Sync {
+pub trait BootstrapDataGenerator : Send + Sync + std::fmt::Debug {
     async fn get_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData>;
 }
 
@@ -75,13 +75,12 @@ pub async fn create_bootstrap_data_generator(
 ) -> anyhow::Result<Option<Box<dyn BootstrapDataGenerator + Send + Sync>>> {
     match definition {
         None => Ok(None),
-        Some(BootstrapDataGeneratorDefinition::Script{common_config, unique_config}) => {
+        Some(BootstrapDataGeneratorDefinition::Script(definition)) => {
             Ok(Some(Box::new(ScriptBootstrapDataGenerator::new(
                 id, 
-                common_config, 
-                unique_config, 
+                definition, 
                 input_storage, 
-                output_storage).await?)))
+                output_storage).await?) as Box<dyn BootstrapDataGenerator + Send + Sync>))
         }
     }
 }

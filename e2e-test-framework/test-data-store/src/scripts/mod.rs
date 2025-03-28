@@ -20,8 +20,8 @@ pub mod bootstrap_script_file_writer;
 pub mod change_script_file_reader;
 pub mod change_script_file_writer;
 
-type SourceChangeEventBefore = serde_json::Value; // Arbitrary JSON object for before
-type SourceChangeEventAfter = serde_json::Value; // Arbitrary JSON object for after
+pub type SourceChangeEventBefore = serde_json::Value; // Arbitrary JSON object for before
+pub type SourceChangeEventAfter = serde_json::Value; // Arbitrary JSON object for after
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceChangeEvent {

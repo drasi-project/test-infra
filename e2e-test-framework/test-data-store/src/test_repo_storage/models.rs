@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::{num::NonZeroU32, str::FromStr};
+use chrono::{DateTime, Utc};
 
-use serde::{Deserialize, Serialize, de::{self, Deserializer}};
+use serde::{Deserialize, Serialize, Serializer, de::{self, Deserializer}};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimeMode {
     Live,
     Recorded,
@@ -68,7 +69,26 @@ impl<'de> Deserialize<'de> for TimeMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+impl Serialize for TimeMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Live => serializer.serialize_str("live"),
+            Self::Recorded => serializer.serialize_str("recorded"),
+            Self::Rebased(timestamp) => {
+                // Convert the timestamp to a DateTime
+                let datetime = DateTime::<Utc>::from_timestamp_nanos(*timestamp as i64);
+                
+                // Format to RFC 3339 and serialize as a string
+                serializer.serialize_str(&datetime.to_rfc3339())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpacingMode {
     None,
     Rate(NonZeroU32),
@@ -109,7 +129,7 @@ impl std::fmt::Display for SpacingMode {
         match self {
             Self::None => write!(f, "none"),
             Self::Recorded => write!(f, "recorded"),
-            Self::Rate(r) => write!(f, "{}", r),
+            Self::Rate(rate) => write!(f, "{}", rate),
         }
     }
 }
@@ -121,6 +141,21 @@ impl<'de> Deserialize<'de> for SpacingMode {
     {
         let value: String = Deserialize::deserialize(deserializer)?;
         value.parse::<SpacingMode>().map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for SpacingMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::None => serializer.serialize_str("none"),
+            Self::Recorded => serializer.serialize_str("recorded"),
+            Self::Rate(rate) => {
+                serializer.serialize_str(&rate.to_string())
+            }
+        }
     }
 }
 

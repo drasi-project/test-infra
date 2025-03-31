@@ -81,7 +81,7 @@ struct ChangeRecordProfile {
 impl ChangeRecordProfile {
     pub fn new(record: &ResultStreamRecord, change: &ChangeEvent) -> Self {
 
-        let record_dequeue_time_ms = record.dequeue_time_ns / 1_000_000;
+        let record_dequeue_time_ns = record.dequeue_time_ns;
 
         let metadata = &change.base.metadata.as_ref().unwrap().tracking;
 
@@ -94,8 +94,8 @@ impl ChangeRecordProfile {
             time_in_src_change_pub: metadata.query.dequeue_ns - metadata.source.change_dispatcher_end_ns,
             time_in_query_host: metadata.query.query_end_ns - metadata.query.dequeue_ns,
             time_in_query_solver: metadata.query.query_end_ns - metadata.query.query_start_ns,
-            time_in_result_disp_q: record_dequeue_time_ms - metadata.query.query_end_ns,
-            time_total: record_dequeue_time_ms - metadata.source.source_ns,
+            time_in_result_disp_q: record_dequeue_time_ns - metadata.query.query_end_ns,
+            time_total: record_dequeue_time_ns - metadata.source.source_ns,
         }
     }
 }

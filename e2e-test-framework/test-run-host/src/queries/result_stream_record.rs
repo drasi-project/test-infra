@@ -66,24 +66,28 @@ pub struct TrackingMetadata {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueryTrackingMetadata {
-    pub dequeue_ms: u64,
-    #[serde(rename = "queryEnd_ms")]
-    pub query_end_ms: u64,
-    #[serde(rename = "queryStart_ms")]
-    pub query_start_ms: u64,
+    pub dequeue_ns: u64,
+    #[serde(rename = "queryEnd_ns")]
+    pub query_end_ns: u64,
+    #[serde(rename = "queryStart_ns")]
+    pub query_start_ns: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceTrackingMetadata {
-    #[serde(rename = "changeDispatcherEnd_ms")]
-    pub change_dispatcher_end_ms: u64,
-    #[serde(rename = "changeDispatcherStart_ms")]
-    pub change_dispatcher_start_ms: u64,
-    #[serde(rename = "changeSvcEnd_ms")]
-    pub change_svc_end_ms: u64,
-    #[serde(rename = "changeSvcStart_ms")]
-    pub change_svc_start_ms: u64,
-    pub reactivator_ms: u64,
+    #[serde(rename = "changeDispatcherEnd_ns")]
+    pub change_dispatcher_end_ns: u64,
+    #[serde(rename = "changeDispatcherStart_ns")]
+    pub change_dispatcher_start_ns: u64,
+    #[serde(rename = "changeRouterEnd_ns")]
+    pub change_router_end_ns: u64,
+    #[serde(rename = "changeRouterStart_ms")]
+    pub change_router_start_ns: u64,
+    #[serde(rename = "reactivatorStart_ns")]
+    pub reactivator_start_ns: u64,
+    #[serde(rename = "reactivatorEnd_ns")]
+    pub reactivator_end_ns: u64,
+    pub source_ns: u64,
     pub seq: u64,
 }
 

@@ -67,6 +67,7 @@ pub struct TrackingMetadata {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueryTrackingMetadata {
     pub dequeue_ns: u64,
+    pub enqueue_ns: u64,
     #[serde(rename = "queryEnd_ns")]
     pub query_end_ns: u64,
     #[serde(rename = "queryStart_ns")]
@@ -81,14 +82,14 @@ pub struct SourceTrackingMetadata {
     pub change_dispatcher_start_ns: u64,
     #[serde(rename = "changeRouterEnd_ns")]
     pub change_router_end_ns: u64,
-    #[serde(rename = "changeRouterStart_ms")]
+    #[serde(rename = "changeRouterStart_ns")]
     pub change_router_start_ns: u64,
-    #[serde(rename = "reactivatorStart_ns")]
-    pub reactivator_start_ns: u64,
     #[serde(rename = "reactivatorEnd_ns")]
     pub reactivator_end_ns: u64,
-    pub source_ns: u64,
+    #[serde(rename = "reactivatorStart_ns")]
+    pub reactivator_start_ns: u64,
     pub seq: u64,
+    pub source_ns: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

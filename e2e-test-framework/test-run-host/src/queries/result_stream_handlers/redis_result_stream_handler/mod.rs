@@ -355,7 +355,7 @@ async fn read_stream(con: &mut MultiplexedConnection, seq: Arc<AtomicUsize>, str
                                             records.push(RedisStreamReadResult {
                                                 id,
                                                 seq: seq.fetch_add(1, Ordering::SeqCst),
-                                                enqueue_time_ns: enqueue_time_ns * 1_000_000,
+                                                enqueue_time_ns: enqueue_time_ns,
                                                 dequeue_time_ns,
                                                 record: Some(record),
                                                 error: None,

@@ -1,0 +1,15 @@
+{
+  "test_id": "building_comfort",
+  "test_repo_id": "az_dev_repo",
+  "test_run_id": "test_run_001",
+  "test_query_id": "room-comfort-level",
+  "start_immediately": true,
+  "loggers": [
+    {
+      "kind": "Profiler",
+      "write_bootstrap_log": false,
+      "write_change_image": true,
+      "write_change_log": false
+    }
+  ]
+}

@@ -532,19 +532,18 @@ impl BuildingHierarchyDataGeneratorInternalState {
                     ModelChange::RoomUpdated(room_before, room_after) => {
                         SourceChangeEvent {
                             op: "u".to_string(),
-                            ts_ms: self.virtual_time_ns_current / 1_000_000,
-                            schema: "".to_string(),
                             payload: SourceChangeEventPayload {
                                 source: SourceChangeEventSourceInfo {
                                     db: self.settings.id.test_source_id.to_string(),
-                                    table: "node".to_string(),
-                                    ts_ms: self.virtual_time_ns_current / 1_000_000,
-                                    ts_sec: self.virtual_time_ns_current / 1_000_000_000,
                                     lsn: message.seq_num,
+                                    table: "node".to_string(),
+                                    ts_ns: self.virtual_time_ns_current,
                                 },
                                 before: serde_json::json!(room_before),
                                 after: serde_json::json!(room_after),
-                            }
+                            },
+                            reactivator_end_ns: self.virtual_time_ns_current + 1,
+                            reactivator_start_ns: self.virtual_time_ns_current
                         }
                     },
                     _ => {

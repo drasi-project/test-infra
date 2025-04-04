@@ -797,9 +797,9 @@ impl ScriptSourceChangeGeneratorInternalState {
             ChangeScriptRecord::SourceChange(change_record) => {
                 let mut shifted_change_record = change_record.clone();
     
-                shifted_change_record.source_change_event.ts_ms = self.virtual_time_ns_current / 1_000_000;
-                shifted_change_record.source_change_event.payload.source.ts_ms = self.virtual_time_ns_current / 1_000_000;
-                shifted_change_record.source_change_event.payload.source.ts_sec = self.virtual_time_ns_current / 1_000_000_000;
+                shifted_change_record.source_change_event.reactivator_start_ns = self.virtual_time_ns_current;
+                shifted_change_record.source_change_event.reactivator_end_ns = self.virtual_time_ns_current + 1;
+                shifted_change_record.source_change_event.payload.source.ts_ns = self.virtual_time_ns_current;
     
                 // TODO: Modify internal date times.
     

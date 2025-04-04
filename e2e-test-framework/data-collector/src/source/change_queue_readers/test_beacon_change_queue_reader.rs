@@ -198,19 +198,18 @@ async fn reader_thread(settings: TestBeaconSourceChangeQueueReaderSettings, stat
 
                         let sce = SourceChangeEvent {  
                             op: "u".to_string(), 
-                            ts_ms: 1724694923060, 
-                            schema: "".to_string(), 
                             payload: SourceChangeEventPayload { 
                                 source: SourceChangeEventSourceInfo {  
-                                    lsn: 2, 
-                                    ts_ms: 1724694923060, 
-                                    ts_sec: 1724694923, 
                                     db: "facilities".to_string(), 
-                                    table: "node".to_string()
+                                    lsn: 2, 
+                                    table: "node".to_string(),  
+                                    ts_ns: 1724694923060000000
                                 }, 
                                 before: serde_json::from_str(r#"{ "id": "room_01_01_02", "labels": ["Room"], "properties": { "name": "Room 01_01_02",  "temp": 72, "humidity": 42, "co2": 500}"#).unwrap(), 
                                 after: serde_json::from_str(r#"{ "id": "room_01_01_02", "labels": ["Room"], "properties": { "name": "Room 01_01_02", "temp": 71, "humidity": 40, "co2": 495}}"#).unwrap()
-                            }
+                            },
+                            reactivator_end_ns: 1724694923070000000,
+                            reactivator_start_ns: 1724694923060000000
                         };
 
                         let scr = SourceChangeQueueRecord {

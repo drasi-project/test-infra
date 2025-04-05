@@ -17,6 +17,11 @@
 GREEN="\033[32m"
 RESET="\033[0m"
 
+echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
+drasi init
+# This is a workaround for the issue with the init command regularly failing.
+drasi init 
+
 echo -e "${GREEN}\n\nConfigure observability stack...${RESET}"
 # Delete pre-installed otel collector. This is a workaround.
 kubectl delete deployment otel-collector -n drasi-system

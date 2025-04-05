@@ -23,6 +23,9 @@
 @test_run_id = test_run_001
 @query_id = room-comfort-level
 
+### Homepage
+GET http://{{hostname}}:{{port}}
+
 ### GET STATE of Test Run Query
 GET http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}
 
@@ -41,6 +44,3 @@ Content-Type: application/json
 ### RESET Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/reset
 Content-Type: application/json
-
-### Homepage
-GET http://{{hostname}}:{{port}}

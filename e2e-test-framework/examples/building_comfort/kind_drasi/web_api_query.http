@@ -18,30 +18,27 @@
 
 @hostname = localhost
 @port = 63123
-@repo_id = local_dev_repo
-@test_id = building-comfort
+@repo_id = az_dev_repo
+@test_id = building_comfort
 @test_run_id = test_run_001
-@query_id = building-comfort
+@query_id = room-comfort-level
 
-### GET STATE of test run query
+### GET STATE of Test Run Query
 GET http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}
 
-### GET RESULT PROFILE of test run query
-GET http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/profile
-
-### START test run query
+### START Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/start
 Content-Type: application/json
 
-### PAUSE test run query
+### PAUSE Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/pause
 Content-Type: application/json
 
-### STOP test run query
+### STOP Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/stop
 Content-Type: application/json
 
-### RESET test run query
+### RESET Test Run Query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/reset
 Content-Type: application/json
 

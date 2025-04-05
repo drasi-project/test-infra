@@ -1,11 +1,11 @@
 {
-  "test_id": "population",
+  "test_id": "building_comfort",
   "test_repo_id": "az_dev_repo",                
   "test_run_id": "test_run_001",
-  "test_source_id": "geo-db",
+  "test_source_id": "facilities-db",
   "start_mode": "bootstrap",
   "test_run_overrides": {
-    "source_change_generator": {
+    "model_data_generator": {
       "spacing_mode": "none",
       "time_mode": "live"
     }

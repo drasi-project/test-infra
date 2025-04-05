@@ -1,0 +1,22 @@
+kind: Source
+apiVersion: v1
+name: facilities-db
+spec:
+  kind: E2ETestSource
+  services:
+    proxy:
+      properties:
+          PORT: 4002
+          SOURCE_ID: "facilities-db"
+          TEST_RUN_SOURCE_ID: "az_dev_repo.building_comfort.test_run_001.facilities-db"
+          TEST_SERVICE_HOST: "drasi-test-service"
+          TEST_SERVICE_PORT: 63123
+          RUST_LOG: "debug"
+    reactivator:
+      properties:
+          PORT: 80
+          SOURCE_ID: "facilities-db"
+          TEST_RUN_SOURCE_ID: "az_dev_repo.building_comfort.test_run_001.facilities-db"
+          TEST_SERVICE_HOST: "drasi-test-service"
+          TEST_SERVICE_PORT: 63123
+          RUST_LOG: "debug"

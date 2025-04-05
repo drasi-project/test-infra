@@ -1,3 +1,10 @@
+echo -e "${GREEN}\n\nAdding Test Repository, Test Source, and Test Query...${RESET}"
+curl -i -X POST -H "Content-Type: application/json" -d @examples/building_comfort/kind_drasi/cfg_repo_az_dev.json http://localhost:63123/test_repos
+curl -i -X POST -H "Content-Type: application/json" -d @examples/building_comfort/kind_drasi/cfg_source.json http://localhost:63123/test_run_host/sources
+curl -i -X POST -H "Content-Type: application/json" -d @examples/building_comfort/kind_drasi/cfg_query.json http://localhost:63123/test_run_host/queries
+
+
+
 # Introduction
 
 The TestRunHost is a a component of the Drasi E2E Test Framework. It allows developers and testers to create and use Drasi E2E Test Scripts. The TestRunHost supports multiple modes for event timing, including recorded, rebased, and live, providing flexibility in how tests are conducted. Additionally, it offers options for controlling the speed of event replay, ensuring that the system under test can handle different pacing scenarios effectively.

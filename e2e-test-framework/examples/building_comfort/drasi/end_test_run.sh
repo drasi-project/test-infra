@@ -32,6 +32,7 @@ fi
 # SHORTCUT FOR NOW
 drasi uninstall -y
 kubectl wait --for=delete namespace/drasi-system --timeout=5m
+dapr uninstall -k -n dapr-system
 exit
 
 

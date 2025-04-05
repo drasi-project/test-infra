@@ -12,6 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ConfigMap for the service configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drasi-test-config
+  namespace: drasi-system
+data:
+  e2e_test_config.json: |
+    {
+        "data_store": {},
+        "test_run_host": {
+            "queries": [],
+            "sources": []
+        }
+    }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -37,6 +53,16 @@ spec:
         image: ghcr.io/drasi-project/e2e-test-service:0.2.1
         ports:
         - containerPort: 63123
+        env:
+        - name: DRASI_CONFIG_FILE
+          value: "/etc/drasi/e2e_test_config.json"        
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/drasi      
+      volumes:
+      - name: config-volume
+        configMap:
+          name: drasi-test-config    
 ---
 apiVersion: v1
 kind: Service

@@ -518,6 +518,8 @@ impl BuildingHierarchyDataGeneratorInternalState {
     async fn process_next_source_change_event(&mut self, message: ScheduledChangeEventMessage) -> anyhow::Result<()> {
         log::trace!("Processing next source change event: {:?}", message);
     
+        let reactivator_start_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+
         let update = {
             let building_graph = &mut self.building_graph.lock().await;
             building_graph.update_random_room(self.virtual_time_ns_next)?
@@ -526,12 +528,14 @@ impl BuildingHierarchyDataGeneratorInternalState {
         // Update the virtual time.
         self.virtual_time_ns_current = self.virtual_time_ns_next;
 
-        let source_change_event = match update {
+        let mut source_change_event = match update {
             Some(model_change) => {
                 match model_change {
                     ModelChange::RoomUpdated(room_before, room_after) => {
                         SourceChangeEvent {
                             op: "u".to_string(),
+                            reactivator_start_ns,
+                            reactivator_end_ns: 0,
                             payload: SourceChangeEventPayload {
                                 source: SourceChangeEventSourceInfo {
                                     db: self.settings.id.test_source_id.to_string(),
@@ -540,10 +544,8 @@ impl BuildingHierarchyDataGeneratorInternalState {
                                     ts_ns: self.virtual_time_ns_current,
                                 },
                                 before: serde_json::json!(room_before),
-                                after: serde_json::json!(room_after),
-                            },
-                            reactivator_end_ns: self.virtual_time_ns_current + 1,
-                            reactivator_start_ns: self.virtual_time_ns_current
+                                after: serde_json::json!(room_after)
+                            }
                         }
                     },
                     _ => {
@@ -568,12 +570,14 @@ impl BuildingHierarchyDataGeneratorInternalState {
         match &self.status {
             SourceChangeGeneratorStatus::Running => {
                 // Dispatch the SourceChangeEvent.
+                source_change_event.reactivator_end_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
                 self.dispatch_source_change_events(vec!(&source_change_event)).await;
                 self.schedule_next_change_event().await?;
             },
             SourceChangeGeneratorStatus::Stepping => {
                 if self.steps_remaining > 0 {
                     // Dispatch the SourceChangeEvent.
+                    source_change_event.reactivator_end_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
                     self.dispatch_source_change_events(vec!(&source_change_event)).await;
 
                     self.steps_remaining -= 1;

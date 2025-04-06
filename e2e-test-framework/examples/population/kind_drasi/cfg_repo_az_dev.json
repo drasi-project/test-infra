@@ -1,9 +1,0 @@
-{
-    "id": "az_dev_repo",
-    "kind": "AzureStorageBlob",
-    "force_cache_refresh": false,
-    "account_name": "drasidev",
-    "access_key": "<your_access_key>",
-    "container": "e2etests",
-    "root_path": "dev_repo"
-}

@@ -25,11 +25,11 @@ pub type SourceChangeEventAfter = serde_json::Value; // Arbitrary JSON object fo
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceChangeEvent {
-    #[serde(rename = "reactivatorEnd_ns")]
-    pub reactivator_end_ns: u64,
     pub op: String,
     #[serde(rename = "reactivatorStart_ns")]
     pub reactivator_start_ns: u64,
+    #[serde(rename = "reactivatorEnd_ns")]
+    pub reactivator_end_ns: u64,
     pub payload: SourceChangeEventPayload,
 }
 

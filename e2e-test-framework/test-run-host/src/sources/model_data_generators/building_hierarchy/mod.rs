@@ -522,7 +522,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
 
         let update = {
             let building_graph = &mut self.building_graph.lock().await;
-            building_graph.update_random_room(self.virtual_time_ns_next)?
+            building_graph.generate_update(self.virtual_time_ns_next)?
         };
 
         // Update the virtual time.
@@ -1089,7 +1089,7 @@ impl Debug for BuildingHierarchyDataGeneratorResultSummary {
 pub async fn model_host_thread(mut command_rx_channel: Receiver<BuildingHierarchyDataGeneratorMessage>, settings: BuildingHierarchyDataGeneratorSettings, building_graph: Arc<Mutex<BuildingGraph>>) -> anyhow::Result<()>{
     log::info!("Script processor thread started for TestRunSource {} ...", settings.id);
 
-    // The BuildingHierarchyDataGenerator always starts with the first script record loaded and Paused.
+    // The BuildingHierarchyDataGenerator always starts with the model initialized and Paused.
     let (mut state, mut change_rx_channel) = match BuildingHierarchyDataGeneratorInternalState::initialize(settings, building_graph).await {
         Ok((state, change_rx_channel)) => (state, change_rx_channel),
         Err(e) => {

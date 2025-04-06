@@ -829,13 +829,16 @@ impl BuildingGraph {
         }
     }
 
-    pub fn update_random_room(&mut self, effective_from: u64) -> anyhow::Result<Option<ModelChange>> {
+    pub fn generate_update(&mut self, effective_from: u64) -> anyhow::Result<Option<ModelChange>> {
 
         let mut buildings = self.buildings.lock();
 
         match buildings.len() {
             0 => Ok(None),
             _ => {
+                // For now, we will only update a random room in a random building.
+                // Will add more update types later.
+
                 let idx = self.change_generator.get_usize_in_range(0, buildings.len(), false);
                 let (_, building) = buildings.iter_mut().nth(idx).unwrap();
 

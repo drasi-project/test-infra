@@ -18,7 +18,9 @@ use async_trait::async_trait;
 use building_graph::{BuildingGraph, GraphElementType, ModelChange};
 use futures::future::join_all;
 use governor::{Quota, RateLimiter};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
+use rand_distr::{Distribution, Normal};
 use serde::Serialize;
 use time::{format_description, OffsetDateTime};
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle, time::sleep};
@@ -68,6 +70,7 @@ pub struct BuildingHierarchyDataGeneratorSettings {
     pub floor_count: (u32, f64),
     pub room_count: (u32, f64),
     pub change_count: u64,
+    pub change_interval: (u64, f64, u64, u64),
     pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub id: TestRunSourceId,
     pub input_storage: TestSourceStorage,
@@ -92,6 +95,7 @@ impl BuildingHierarchyDataGeneratorSettings {
             floor_count: definition.floor_count.unwrap_or((5, 0.0)),
             room_count: definition.room_count.unwrap_or((10, 0.0)),
             change_count: definition.common.change_count.unwrap_or(100000),
+            change_interval: definition.common.change_interval.unwrap_or((1000000000, 0.0, u64::MIN, u64::MAX)),
             dispatchers,
             id: test_run_source_id,
             input_storage,
@@ -355,6 +359,38 @@ impl SourceChangeGenerator for BuildingHierarchyDataGenerator {
     }
 }
 
+struct ChangeIntervalGenerator {
+    interval_dist: Normal<f64>,     
+    interval_range: (u64, u64),
+    rng: ChaCha8Rng,
+}
+
+impl ChangeIntervalGenerator {
+    fn new(seed: u64, change_interval: (u64, f64, u64, u64)) -> anyhow::Result<Self> {
+
+        let (mean, std_dev, range_min, range_max) = change_interval;
+
+        Ok(Self { 
+            interval_dist: Normal::new(mean as f64, std_dev).unwrap(),
+            interval_range: (range_min, range_max),
+            rng: ChaCha8Rng::seed_from_u64(seed)
+        })
+    }
+
+    fn next(&mut self) -> u64 {
+
+        let mut interval = self.interval_dist.sample(&mut self.rng) as u64;
+
+        if interval < self.interval_range.0 {
+            interval = self.interval_range.0;
+        } else if interval > self.interval_range.1 {
+            interval = self.interval_range.1;
+        }
+
+        interval
+    }
+}
+
 #[async_trait]
 impl ModelDataGenerator for BuildingHierarchyDataGenerator {}
 
@@ -398,25 +434,26 @@ impl From<&mut BuildingHierarchyDataGeneratorInternalState> for BuildingHierarch
 }
 
 pub struct BuildingHierarchyDataGeneratorInternalState {
-    pub building_graph: Arc<Mutex<BuildingGraph>>,
-    pub change_tx_channel: Sender<ScheduledChangeEventMessage>,
-    pub delayer_tx_channel: Sender<ScheduledChangeEventMessage>,
-    pub dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>>,
-    pub error_messages: Vec<String>,
-    pub message_seq_num: u64,
-    pub previous_event: Option<ProcessedChangeEvent>,
-    pub rate_limiter_tx_channel: Sender<ScheduledChangeEventMessage>,
-    pub settings: BuildingHierarchyDataGeneratorSettings,
-    pub skips_remaining: u64,
-    pub skips_spacing_mode: Option<SpacingMode>,
-    pub status: SourceChangeGeneratorStatus,
-    pub stats: BuildingHierarchyDataGeneratorStats,
-    pub steps_remaining: u64,
-    pub steps_spacing_mode: Option<SpacingMode>,
-    pub virtual_time_ns_current: u64,
-    pub virtual_time_ns_next: u64,
-    pub virtual_time_ns_offset: u64,
-    pub virtual_time_ns_start: u64,
+    building_graph: Arc<Mutex<BuildingGraph>>,
+    change_interval_generator: ChangeIntervalGenerator,
+    change_tx_channel: Sender<ScheduledChangeEventMessage>,
+    delayer_tx_channel: Sender<ScheduledChangeEventMessage>,
+    dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>>,
+    error_messages: Vec<String>,
+    message_seq_num: u64,
+    previous_event: Option<ProcessedChangeEvent>,
+    rate_limiter_tx_channel: Sender<ScheduledChangeEventMessage>,
+    settings: BuildingHierarchyDataGeneratorSettings,
+    skips_remaining: u64,
+    skips_spacing_mode: Option<SpacingMode>,
+    status: SourceChangeGeneratorStatus,
+    stats: BuildingHierarchyDataGeneratorStats,
+    steps_remaining: u64,
+    steps_spacing_mode: Option<SpacingMode>,
+    virtual_time_ns_current: u64,
+    virtual_time_ns_next: u64,
+    virtual_time_ns_offset: u64,
+    virtual_time_ns_start: u64,
 }
 
 impl BuildingHierarchyDataGeneratorInternalState {
@@ -446,6 +483,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
 
         let state = Self {
             building_graph,
+            change_interval_generator: ChangeIntervalGenerator::new(settings.seed, settings.change_interval)?,
             change_tx_channel,
             delayer_tx_channel,
             dispatchers,
@@ -684,6 +722,8 @@ impl BuildingHierarchyDataGeneratorInternalState {
         //   state.delayer_tx_channel
         //   state.settings
     
+        self.building_graph = Arc::new(Mutex::new(BuildingGraph::new(&self.settings)?));
+        self.change_interval_generator = ChangeIntervalGenerator::new(self.settings.seed, self.settings.change_interval)?;
         self.dispatchers = dispatchers;
         self.error_messages = Vec::new();
         self.message_seq_num = 0;
@@ -708,7 +748,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
             self.virtual_time_ns_current
         } else {
             // Calculate the next event time based on the current time and the delay.
-            self.virtual_time_ns_current + 1_000_000
+            self.virtual_time_ns_current + self.change_interval_generator.next()
         };
 
         self.message_seq_num += 1;

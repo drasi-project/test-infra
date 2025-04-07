@@ -23,9 +23,10 @@
                             ],
                             "model_data_generator": {
                               "kind": "BuildingHierarchy",
-                              "change_count": 100000,
+                              "change_interval": [100, 10, 0, 5000],
+                              "change_count": 1000000,
                               "seed": 123456789,
-                              "spacing_mode": "20000",
+                              "spacing_mode": "none",
                               "time_mode": "2025-01-03T10:03:15.4Z",
                               "building_count": [1, 0],
                               "floor_count": [1, 0],

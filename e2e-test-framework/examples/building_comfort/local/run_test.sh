@@ -18,4 +18,4 @@ GREEN="\033[32m"
 RESET="\033[0m"
 
 echo -e "${GREEN}\nRunning the E2E Test Service as a local process...${RESET}"
-RUST_LOG=info cargo run --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/local/config.json
+RUST_LOG=info cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/local/config.json

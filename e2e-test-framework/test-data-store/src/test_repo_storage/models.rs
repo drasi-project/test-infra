@@ -272,6 +272,7 @@ pub enum ModelDataGeneratorDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommonModelDataGeneratorDefinition {
     pub change_count: Option<u64>,
+    pub change_interval: Option<(u64, f64, u64, u64)>,
     pub seed: Option<u64>,
     #[serde(default)]
     pub spacing_mode: SpacingMode,

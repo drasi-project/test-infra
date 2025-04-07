@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashSet, fmt::{self, Debug, Formatter}, num::NonZeroU32, sync::Arc, time::{Duration, SystemTime}, u32};
+use std::{collections::HashSet, fmt::{self, Debug, Formatter}, num::NonZeroU32, sync::Arc, time::SystemTime, u32};
 
 use async_trait::async_trait;
 use building_graph::{BuildingGraph, GraphElementType, ModelChange};
 use futures::future::join_all;
-use governor::{Quota, RateLimiter};
-use rand::Rng;
+use governor::{clock::{QuantaClock, QuantaInstant}, middleware::NoOpMiddleware, state::{InMemoryState, NotKeyed}, Quota, RateLimiter};
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
+use rand_distr::{Distribution, Normal};
 use serde::Serialize;
 use time::{format_description, OffsetDateTime};
-use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle, time::sleep};
+use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle};
 
 use test_data_store::{
     scripts::{
@@ -68,6 +70,7 @@ pub struct BuildingHierarchyDataGeneratorSettings {
     pub floor_count: (u32, f64),
     pub room_count: (u32, f64),
     pub change_count: u64,
+    pub change_interval: (u64, f64, u64, u64),
     pub dispatchers: Vec<SourceChangeDispatcherDefinition>,
     pub id: TestRunSourceId,
     pub input_storage: TestSourceStorage,
@@ -92,6 +95,7 @@ impl BuildingHierarchyDataGeneratorSettings {
             floor_count: definition.floor_count.unwrap_or((5, 0.0)),
             room_count: definition.room_count.unwrap_or((10, 0.0)),
             change_count: definition.common.change_count.unwrap_or(100000),
+            change_interval: definition.common.change_interval.unwrap_or((1000000000, 0.0, u64::MIN, u64::MAX)),
             dispatchers,
             id: test_run_source_id,
             input_storage,
@@ -355,24 +359,57 @@ impl SourceChangeGenerator for BuildingHierarchyDataGenerator {
     }
 }
 
+struct ChangeIntervalGenerator {
+    interval_dist: Normal<f64>,     
+    interval_range: (u64, u64),
+    rng: ChaCha8Rng,
+}
+
+impl ChangeIntervalGenerator {
+    fn new(seed: u64, change_interval: (u64, f64, u64, u64)) -> anyhow::Result<Self> {
+
+        let (mean, std_dev, range_min, range_max) = change_interval;
+
+        Ok(Self { 
+            interval_dist: Normal::new(mean as f64, std_dev).unwrap(),
+            interval_range: (range_min, range_max),
+            rng: ChaCha8Rng::seed_from_u64(seed)
+        })
+    }
+
+    fn next(&mut self) -> u64 {
+
+        let mut interval = self.interval_dist.sample(&mut self.rng) as u64;
+
+        if interval < self.interval_range.0 {
+            interval = self.interval_range.0;
+        } else if interval > self.interval_range.1 {
+            interval = self.interval_range.1;
+        }
+
+        interval
+    }
+}
+
 #[async_trait]
 impl ModelDataGenerator for BuildingHierarchyDataGenerator {}
 
 #[derive(Debug, Serialize)]
 pub struct BuildingHierarchyDataGeneratorExternalState {
     pub error_messages: Vec<String>,
+    pub event_seq_num: u64,
+    pub next_event: Option<SourceChangeEvent>,
     pub previous_event: Option<ProcessedChangeEvent>,
     pub skips_remaining: u64,
-    pub skips_spacing_mode: Option<SpacingMode>,
     pub spacing_mode: SpacingMode,
+    pub stats: BuildingHierarchyDataGeneratorStats,
     pub status: SourceChangeGeneratorStatus,
     pub steps_remaining: u64,
-    pub steps_spacing_mode: Option<SpacingMode>,
     pub test_run_source_id: TestRunSourceId,
     pub time_mode: TimeMode,
     pub virtual_time_ns_current: u64,
     pub virtual_time_ns_next: u64,
-    pub virtual_time_ns_offset: u64,
+    pub virtual_time_ns_rebase_adjustment: i64,
     pub virtual_time_ns_start: u64,
 }
 
@@ -380,43 +417,43 @@ impl From<&mut BuildingHierarchyDataGeneratorInternalState> for BuildingHierarch
     fn from(state: &mut BuildingHierarchyDataGeneratorInternalState) -> Self {
         Self {
             error_messages: state.error_messages.clone(),
+            event_seq_num: state.event_seq_num,
+            next_event: state.next_event.clone(),
             previous_event: state.previous_event.clone(),
             skips_remaining: state.skips_remaining,
-            skips_spacing_mode: state.skips_spacing_mode.clone(),
             spacing_mode: state.settings.spacing_mode.clone(),
+            stats: state.stats.clone(),
             status: state.status,
             steps_remaining: state.steps_remaining,
-            steps_spacing_mode: state.steps_spacing_mode.clone(),
             test_run_source_id: state.settings.id.clone(),
             time_mode: state.settings.time_mode.clone(),
             virtual_time_ns_current: state.virtual_time_ns_current,
             virtual_time_ns_next: state.virtual_time_ns_next,
-            virtual_time_ns_offset: state.virtual_time_ns_offset,
+            virtual_time_ns_rebase_adjustment: state.virtual_time_ns_rebase_adjustment,
             virtual_time_ns_start: state.virtual_time_ns_start,
         }
     }
 }
 
 pub struct BuildingHierarchyDataGeneratorInternalState {
-    pub building_graph: Arc<Mutex<BuildingGraph>>,
-    pub change_tx_channel: Sender<ScheduledChangeEventMessage>,
-    pub delayer_tx_channel: Sender<ScheduledChangeEventMessage>,
-    pub dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>>,
-    pub error_messages: Vec<String>,
-    pub message_seq_num: u64,
-    pub previous_event: Option<ProcessedChangeEvent>,
-    pub rate_limiter_tx_channel: Sender<ScheduledChangeEventMessage>,
-    pub settings: BuildingHierarchyDataGeneratorSettings,
-    pub skips_remaining: u64,
-    pub skips_spacing_mode: Option<SpacingMode>,
-    pub status: SourceChangeGeneratorStatus,
-    pub stats: BuildingHierarchyDataGeneratorStats,
-    pub steps_remaining: u64,
-    pub steps_spacing_mode: Option<SpacingMode>,
-    pub virtual_time_ns_current: u64,
-    pub virtual_time_ns_next: u64,
-    pub virtual_time_ns_offset: u64,
-    pub virtual_time_ns_start: u64,
+    building_graph: Arc<Mutex<BuildingGraph>>,
+    change_interval_generator: ChangeIntervalGenerator,
+    change_tx_channel: Sender<ScheduledChangeEventMessage>,
+    dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>>,
+    error_messages: Vec<String>,
+    event_seq_num: u64,
+    next_event: Option<SourceChangeEvent>,
+    previous_event: Option<ProcessedChangeEvent>,
+    rate_limiter: RateLimiter<NotKeyed, InMemoryState, QuantaClock, NoOpMiddleware<QuantaInstant>>,
+    settings: BuildingHierarchyDataGeneratorSettings,
+    skips_remaining: u64,
+    status: SourceChangeGeneratorStatus,
+    stats: BuildingHierarchyDataGeneratorStats,
+    steps_remaining: u64,
+    virtual_time_ns_current: u64,
+    virtual_time_ns_next: u64,
+    virtual_time_ns_rebase_adjustment: i64,  // Add to current time to get rebased virtual time.
+    virtual_time_ns_start: u64,
 }
 
 impl BuildingHierarchyDataGeneratorInternalState {
@@ -435,37 +472,35 @@ impl BuildingHierarchyDataGeneratorInternalState {
             }
         }
 
+        let rate_limiter = match settings.spacing_mode {
+            SpacingMode::Rate(rate) => RateLimiter::direct(Quota::per_second(rate)),
+            _ => RateLimiter::direct(Quota::per_second(NonZeroU32::new(u32::MAX).unwrap())),
+        };
+
         // Create the channels and threads used for message passing.
         let (change_tx_channel, change_rx_channel) = tokio::sync::mpsc::channel(1000);
 
-        let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(1000);
-        let _ = tokio::spawn(delayer_thread(settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
-
-        let (rate_limiter_tx_channel, rate_limiter_rx_channel) = tokio::sync::mpsc::channel(1000);
-        let _ = tokio::spawn(rate_limiter_thread(settings.id.clone(), settings.spacing_mode.clone(), rate_limiter_rx_channel, change_tx_channel.clone()));
-
         let state = Self {
             building_graph,
+            change_interval_generator: ChangeIntervalGenerator::new(settings.seed, settings.change_interval)?,
             change_tx_channel,
-            delayer_tx_channel,
             dispatchers,
             error_messages: Vec::new(),
-            message_seq_num: 0,
+            event_seq_num: 0,
+            next_event: None,
             previous_event: None,
-            rate_limiter_tx_channel,
+            rate_limiter,
             settings,
             skips_remaining: 0,
-            skips_spacing_mode: None,
             status: SourceChangeGeneratorStatus::Paused,
             stats: BuildingHierarchyDataGeneratorStats::default(),
             steps_remaining: 0,
-            steps_spacing_mode: None,
             virtual_time_ns_current: 0,
             virtual_time_ns_next: 0,
-            virtual_time_ns_offset: 0,
+            virtual_time_ns_rebase_adjustment: 0,
             virtual_time_ns_start: 0,
         };
-    
+
         Ok((state, change_rx_channel))
     }
 
@@ -515,44 +550,47 @@ impl BuildingHierarchyDataGeneratorInternalState {
         }
     }
 
-    async fn process_next_source_change_event(&mut self, message: ScheduledChangeEventMessage) -> anyhow::Result<()> {
-        log::trace!("Processing next source change event: {:?}", message);
-    
-        let update = {
-            let building_graph = &mut self.building_graph.lock().await;
-            building_graph.update_random_room(self.virtual_time_ns_next)?
-        };
+    async fn process_change_stream_message(&mut self, message: ScheduledChangeEventMessage) -> anyhow::Result<()> {
+        log::debug!("Processing next source change event: {:?}", message);
 
-        // Update the virtual time.
+        // Update times
         self.virtual_time_ns_current = self.virtual_time_ns_next;
 
-        let source_change_event = match update {
-            Some(model_change) => {
-                match model_change {
-                    ModelChange::RoomUpdated(room_before, room_after) => {
-                        SourceChangeEvent {
-                            op: "u".to_string(),
-                            payload: SourceChangeEventPayload {
-                                source: SourceChangeEventSourceInfo {
-                                    db: self.settings.id.test_source_id.to_string(),
-                                    lsn: message.seq_num,
-                                    table: "node".to_string(),
-                                    ts_ns: self.virtual_time_ns_current,
-                                },
-                                before: serde_json::json!(room_before),
-                                after: serde_json::json!(room_after),
-                            },
-                            reactivator_end_ns: self.virtual_time_ns_current + 1,
-                            reactivator_start_ns: self.virtual_time_ns_current
-                        }
+        let source_change_event = match self.next_event.as_mut() {
+            Some(source_change_event) => {
+                let now_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+
+                source_change_event.reactivator_end_ns = now_ns;
+    
+                match self.settings.time_mode {
+                    TimeMode::Live => {
+                        source_change_event.payload.source.ts_ns = now_ns;
                     },
-                    _ => {
-                        log::debug!("Unexpected model change: {:?}", model_change);
-                        return Ok(());
-                    }
+                    TimeMode::Rebased(_) => {
+                        source_change_event.payload.source.ts_ns = now_ns + self.virtual_time_ns_rebase_adjustment as u64;
+                    },
+                    TimeMode::Recorded => {}
                 }
+
+                source_change_event.clone()    
             },
             None => {
+                self.transition_to_error_state("No next_event to process", None);
+                anyhow::bail!("No next_event to process");
+            }
+        };        
+
+        match &mut self.status {
+            SourceChangeGeneratorStatus::Running => {
+                // Dispatch the SourceChangeEvent.
+                self.dispatch_source_change_events(vec!(&source_change_event)).await;
+
+                self.previous_event = Some(ProcessedChangeEvent {
+                    dispatch_status: self.status.clone(),
+                    event: source_change_event,
+                    seq: message.seq_num,
+                });
+                self.event_seq_num += 1;
                 self.stats.num_source_change_events += 1;
 
                 if self.stats.num_source_change_events >= self.settings.change_count {
@@ -560,28 +598,30 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 } else {
                     self.schedule_next_change_event().await?;
                 }
-
-                return Ok(());
-                }
-        };
-
-        match &self.status {
-            SourceChangeGeneratorStatus::Running => {
-                // Dispatch the SourceChangeEvent.
-                self.dispatch_source_change_events(vec!(&source_change_event)).await;
-                self.schedule_next_change_event().await?;
             },
             SourceChangeGeneratorStatus::Stepping => {
                 if self.steps_remaining > 0 {
                     // Dispatch the SourceChangeEvent.
                     self.dispatch_source_change_events(vec!(&source_change_event)).await;
 
-                    self.steps_remaining -= 1;
-                    if self.steps_remaining == 0 {
-                        self.status = SourceChangeGeneratorStatus::Paused;
-                        self.steps_spacing_mode = None;
+                    self.previous_event = Some(ProcessedChangeEvent {
+                        dispatch_status: self.status.clone(),
+                        event: source_change_event,
+                        seq: message.seq_num,
+                    });
+                    self.event_seq_num += 1;
+                    self.stats.num_source_change_events += 1;
+        
+                    if self.stats.num_source_change_events >= self.settings.change_count {
+                        self.transition_to_finished_state().await;
                     } else {
-                        self.schedule_next_change_event().await?;
+                        self.steps_remaining -= 1;
+                        if self.steps_remaining == 0 {
+                            self.status = SourceChangeGeneratorStatus::Paused;
+                            self.schedule_next_change_event().await?;
+                        } else {
+                            self.schedule_next_change_event().await?;
+                        }
                     }
                 } else {
                     // Transition to an error state.
@@ -592,14 +632,26 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 if self.skips_remaining > 0 {
                     // DON'T dispatch the SourceChangeEvent.
                     log::trace!("Skipping ChangeScriptRecord: {:?}", source_change_event);
+
+                    self.previous_event = Some(ProcessedChangeEvent {
+                        dispatch_status: self.status.clone(),
+                        event: source_change_event,
+                        seq: message.seq_num,
+                    });
+                    self.event_seq_num += 1;
+                    self.stats.num_source_change_events += 1;
                     self.stats.num_skipped_source_change_events += 1;
 
-                    self.skips_remaining -= 1;
-                    if self.skips_remaining == 0 {
-                        self.status = SourceChangeGeneratorStatus::Paused;
-                        self.skips_spacing_mode = None;
+                    if self.stats.num_source_change_events >= self.settings.change_count {
+                        self.transition_to_finished_state().await;
                     } else {
-                        self.schedule_next_change_event().await?;
+                        self.skips_remaining -= 1;
+                        if self.skips_remaining == 0 {
+                            self.status = SourceChangeGeneratorStatus::Paused;
+                            self.schedule_next_change_event().await?;
+                        } else {
+                            self.schedule_next_change_event().await?;
+                        }
                     }
                 } else {
                     // Transition to an error state.
@@ -610,14 +662,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 // Transition to an error state.
                 self.transition_to_error_state("Unexpected status for SourceChange processing", None);
             },
-        }
-
-        // Process the event.
-        self.stats.num_source_change_events += 1;
-
-        if self.stats.num_source_change_events >= self.settings.change_count {
-            self.transition_to_finished_state().await;
-        }
+        };            
 
         Ok(())
     }    
@@ -663,6 +708,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
     }
     
     async fn reset(&mut self) -> anyhow::Result<()> {
+        log::debug!("Resetting BuildingHierarchyDataGenerator");
 
         // Create the new dispatchers
         self.close_dispatchers().await;    
@@ -676,106 +722,119 @@ impl BuildingHierarchyDataGeneratorInternalState {
             }
         }    
         // These fields do not get reset:
-        //   state.change_tx_channel
-        //   state.delayer_tx_channel
-        //   state.settings
+        //   change_tx_channel
+        //   delayer_tx_channel
+        //   rate_limiter
+        //   rate_limiter_tx_channel
+        //   settings
     
+        self.building_graph = Arc::new(Mutex::new(BuildingGraph::new(&self.settings)?));
+        self.change_interval_generator = ChangeIntervalGenerator::new(self.settings.seed, self.settings.change_interval)?;
         self.dispatchers = dispatchers;
         self.error_messages = Vec::new();
-        self.message_seq_num = 0;
+        self.event_seq_num = 0;        
+        self.next_event = None;
         self.previous_event = None;
         self.skips_remaining = 0;
-        self.skips_spacing_mode = None;
         self.status = SourceChangeGeneratorStatus::Paused;
         self.stats = BuildingHierarchyDataGeneratorStats::default();
         self.steps_remaining = 0;
-        self.steps_spacing_mode = None;
         self.virtual_time_ns_current = 0;
-        self.virtual_time_ns_offset = 0;
+        self.virtual_time_ns_next = 0;
+        self.virtual_time_ns_rebase_adjustment = 0;
         self.virtual_time_ns_start = 0;
-    
+
         Ok(())
     }
 
     async fn schedule_next_change_event(&mut self) -> anyhow::Result<()> {
+        log::debug!("Scheduling next change event");
 
-        self.virtual_time_ns_next = if self.message_seq_num == 0 {
-            // First event after start, fire immediately.
-            self.virtual_time_ns_current
+        // Throttle the event generation to the configured rate.
+        self.rate_limiter.until_ready().await;
+
+        // Calculate times
+        let now_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
+
+        if self.previous_event.is_none() {
+            // First event after start, initialize times.
+            self.stats.actual_start_time_ns = now_ns;
+
+            match self.settings.time_mode {
+                TimeMode::Live => {
+                    self.virtual_time_ns_start = now_ns;
+                    self.virtual_time_ns_current = now_ns;
+                    self.virtual_time_ns_next = now_ns;
+                    self.virtual_time_ns_rebase_adjustment = 0;
+                },
+                TimeMode::Rebased(base_ns) => {
+                    self.virtual_time_ns_start = base_ns;
+                    self.virtual_time_ns_current = base_ns;
+                    self.virtual_time_ns_next = base_ns;
+                    self.virtual_time_ns_rebase_adjustment = base_ns as i64 - now_ns as i64;
+                },
+                TimeMode::Recorded => {
+                    self.virtual_time_ns_start = now_ns;
+                    self.virtual_time_ns_current = now_ns;
+                    self.virtual_time_ns_next = now_ns;
+                    self.virtual_time_ns_rebase_adjustment = 0;
+                }
+            }
         } else {
-            // Calculate the next event time based on the current time and the delay.
-            self.virtual_time_ns_current + 1_000_000
+            // Calculate the next event time based on the current time and the configured event interval.
+            self.virtual_time_ns_next = self.virtual_time_ns_current + self.change_interval_generator.next();
         };
 
-        self.message_seq_num += 1;
+        let update = {
+            let building_graph = &mut self.building_graph.lock().await;
+            building_graph.generate_update(self.virtual_time_ns_next)?
+        };
+
+        let next_event = match update {
+            Some(model_change) => {
+                match model_change {
+                    ModelChange::RoomUpdated(room_before, room_after) => {
+                        SourceChangeEvent {
+                            op: "u".to_string(),
+                            reactivator_start_ns: now_ns, 
+                            reactivator_end_ns: 0, // Will be set in process_change_stream_message.
+                            payload: SourceChangeEventPayload {
+                                source: SourceChangeEventSourceInfo {
+                                    db: self.settings.id.test_source_id.to_string(),
+                                    lsn: self.event_seq_num,
+                                    table: "node".to_string(),
+                                    ts_ns: self.virtual_time_ns_next,
+                                },
+                                before: serde_json::json!(room_before),
+                                after: serde_json::json!(room_after)
+                            }
+                        }
+                    },
+                    _ => {
+                        anyhow::bail!("Unexpected model change: {:?}", model_change);
+                    }
+                }
+            },
+            None => {
+                anyhow::bail!("No model change generated");
+            }
+        };
+        self.next_event = Some(next_event);
 
         let sch_msg = ScheduledChangeEventMessage {
             delay_ns: self.virtual_time_ns_next - self.virtual_time_ns_current,
-            seq_num: self.message_seq_num,
+            seq_num: self.event_seq_num,
         };   
 
-        match self.status {
-            SourceChangeGeneratorStatus::Skipping => {
-                if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                    anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                }    
-            },
-            SourceChangeGeneratorStatus::Stepping => {
-                match self.steps_spacing_mode {
-                    Some(SpacingMode::None) => {
-                        if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                        }    
-                    },
-                    Some(SpacingMode::Rate(_)) => {
-                        if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                        }   
-                    },
-                    Some(SpacingMode::Recorded) => {
-                        if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                            anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                        };
-                    },
-                    None => match self.settings.spacing_mode {
-                        SpacingMode::None => {
-                            if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                            }    
-                        },
-                        SpacingMode::Rate(_) => {
-                            if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
-                                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                            }   
-                        },
-                        SpacingMode::Recorded => {
-                            if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                            };
-                        }
-                    },
-                }
-            },
-            SourceChangeGeneratorStatus::Running => match self.settings.spacing_mode {
-                SpacingMode::None => {
-                    if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                    }    
-                },
-                SpacingMode::Rate(_) => {
-                    if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                    }   
-                },
-                SpacingMode::Recorded => {
-                    if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
-                    };
-                }
-            },
-            _ => anyhow::bail!("Calculating record delay for unexpected status: {:?}", self.status),
-        };
-    
+        // if the status is Running, Skipping, or Stepping, send the message to the change_tx_channel.
+        if self.status.is_processing(){
+            if let Err(e) = self.change_tx_channel.send(sch_msg).await {
+                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
+            }    
+        } else {
+            log::error!("Not sending ScheduledChangeEventMessage: {:?}", sch_msg);
+        }
+
         Ok(())
     }
             
@@ -802,35 +861,16 @@ impl BuildingHierarchyDataGeneratorInternalState {
     async fn transition_from_paused_state(&mut self, command: &BuildingHierarchyDataGeneratorCommand) -> anyhow::Result<()> {
         log::debug!("Transitioning from {:?} state via command: {:?}", self.status, command);
     
-        // If we are unpausing for the first time, we need to initialize the start times based on time_mode config.
-        if self.previous_event.is_none() && 
-            matches!(command, BuildingHierarchyDataGeneratorCommand::Start 
-                | BuildingHierarchyDataGeneratorCommand::Step { .. }
-                | BuildingHierarchyDataGeneratorCommand::Skip { .. }
-            ) {
-            self.stats.actual_start_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
-    
-            self.virtual_time_ns_start = match self.settings.time_mode {
-                TimeMode::Live => self.stats.actual_start_time_ns,
-                TimeMode::Recorded => self.stats.actual_start_time_ns,
-                TimeMode::Rebased(ns) => ns,
-            };
-    
-            self.virtual_time_ns_current = self.virtual_time_ns_start;
-            self.virtual_time_ns_next = self.virtual_time_ns_start;
-            self.virtual_time_ns_offset = 0;
-        }
-    
         match command {
             BuildingHierarchyDataGeneratorCommand::GetState => Ok(()),
             BuildingHierarchyDataGeneratorCommand::Pause => Ok(()),
             BuildingHierarchyDataGeneratorCommand::Reset => self.reset().await,
-            BuildingHierarchyDataGeneratorCommand::Skip{skips, spacing_mode} => {
+            BuildingHierarchyDataGeneratorCommand::Skip{skips, ..} => {
                 log::info!("Script Skipping {} skips for TestRunSource {}", skips, self.settings.id);
     
                 self.status = SourceChangeGeneratorStatus::Skipping;
                 self.skips_remaining = *skips;
-                self.skips_spacing_mode = spacing_mode.clone();
+                // self.skips_spacing_mode = spacing_mode.clone();
                 self.schedule_next_change_event().await
             },
             BuildingHierarchyDataGeneratorCommand::Start => {
@@ -839,12 +879,12 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 self.status = SourceChangeGeneratorStatus::Running;
                 self.schedule_next_change_event().await
             },
-            BuildingHierarchyDataGeneratorCommand::Step{steps, spacing_mode} => {
+            BuildingHierarchyDataGeneratorCommand::Step{steps, ..} => {
                 log::info!("Script Stepping {} steps for TestRunSource {}", steps, self.settings.id);
     
                 self.status = SourceChangeGeneratorStatus::Stepping;
                 self.steps_remaining = *steps;
-                self.steps_spacing_mode = spacing_mode.clone();
+                // self.steps_spacing_mode = spacing_mode.clone();
                 self.schedule_next_change_event().await
             },
             BuildingHierarchyDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
@@ -884,7 +924,6 @@ impl BuildingHierarchyDataGeneratorInternalState {
             BuildingHierarchyDataGeneratorCommand::Pause => {
                 self.status = SourceChangeGeneratorStatus::Paused;
                 self.skips_remaining = 0;
-                self.skips_spacing_mode = None;
                 Ok(())
             },
             BuildingHierarchyDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
@@ -904,7 +943,6 @@ impl BuildingHierarchyDataGeneratorInternalState {
             BuildingHierarchyDataGeneratorCommand::Pause => {
                 self.status = SourceChangeGeneratorStatus::Paused;
                 self.steps_remaining = 0;
-                self.steps_spacing_mode = None;
                 Ok(())
             },
             BuildingHierarchyDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
@@ -932,9 +970,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
         self.status = SourceChangeGeneratorStatus::Finished;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
         self.skips_remaining = 0;
-        self.skips_spacing_mode = None;
         self.steps_remaining = 0;
-        self.steps_spacing_mode = None;
         
         self.close_dispatchers().await;
         self.write_result_summary().await.ok();
@@ -946,9 +982,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
         self.status = SourceChangeGeneratorStatus::Stopped;
         self.stats.actual_end_time_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
         self.skips_remaining = 0;
-        self.skips_spacing_mode = None;
         self.steps_remaining = 0;
-        self.steps_spacing_mode = None;
 
         self.close_dispatchers().await;
         self.write_result_summary().await.ok();
@@ -983,23 +1017,23 @@ impl BuildingHierarchyDataGeneratorInternalState {
     }    
 }
 
-
 impl Debug for BuildingHierarchyDataGeneratorInternalState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("BuildingHierarchyDataGeneratorInternalState")
             .field("error_messages", &self.error_messages)
+            .field("event_seq_num", &self.event_seq_num)
+            .field("next_event", &self.next_event)
             .field("previous_record", &self.previous_event)
+            .field("settings", &self.settings)
             .field("skips_remaining", &self.skips_remaining)
-            .field("skips_spacing_mode", &self.skips_spacing_mode)
             .field("spacing_mode", &self.settings.spacing_mode)
             .field("status", &self.status)
             .field("stats", &self.stats)
             .field("steps_remaining", &self.steps_remaining)
-            .field("steps_spacing_mode", &self.steps_spacing_mode)
             .field("time_mode", &self.settings.time_mode)
             .field("virtual_time_ns_current", &self.virtual_time_ns_current)
             .field("virtual_time_ns_next", &self.virtual_time_ns_next)
-            .field("virtual_time_ns_offset", &self.virtual_time_ns_offset)
+            .field("virtual_time_ns_rebase_adjustment", &self.virtual_time_ns_rebase_adjustment)
             .field("virtual_time_ns_start", &self.virtual_time_ns_start)
             .finish()
     }
@@ -1085,7 +1119,7 @@ impl Debug for BuildingHierarchyDataGeneratorResultSummary {
 pub async fn model_host_thread(mut command_rx_channel: Receiver<BuildingHierarchyDataGeneratorMessage>, settings: BuildingHierarchyDataGeneratorSettings, building_graph: Arc<Mutex<BuildingGraph>>) -> anyhow::Result<()>{
     log::info!("Script processor thread started for TestRunSource {} ...", settings.id);
 
-    // The BuildingHierarchyDataGenerator always starts with the first script record loaded and Paused.
+    // The BuildingHierarchyDataGenerator always starts with the model initialized and Paused.
     let (mut state, mut change_rx_channel) = match BuildingHierarchyDataGeneratorInternalState::initialize(settings, building_graph).await {
         Ok((state, change_rx_channel)) => (state, change_rx_channel),
         Err(e) => {
@@ -1124,8 +1158,9 @@ pub async fn model_host_thread(mut command_rx_channel: Receiver<BuildingHierarch
                     Some(change_stream_message) => {
                         // Only process the message if the seq_num matches the expected one.
                         // This avoids dealing with delayed messages from the delayer thread that are no longer relevant.
-                        if change_stream_message.seq_num == state.message_seq_num && state.status.is_processing() {
-                            state.process_next_source_change_event(change_stream_message).await
+                        log::trace!("Received change stream message: {:?}", change_stream_message);
+                        if change_stream_message.seq_num == state.event_seq_num && state.status.is_processing() {
+                            state.process_change_stream_message(change_stream_message).await
                                 .inspect_err(|e| state.transition_to_error_state("Error calling process_change_stream_message", Some(e))).ok();
                         }
                     }
@@ -1144,48 +1179,4 @@ pub async fn model_host_thread(mut command_rx_channel: Receiver<BuildingHierarch
 
     log::info!("Script processor thread exiting for TestRunSource {} ...", state.settings.id);    
     Ok(())
-}
-
-pub async fn delayer_thread(id: TestRunSourceId, mut delayer_rx_channel: Receiver<ScheduledChangeEventMessage>, change_tx_channel: Sender<ScheduledChangeEventMessage>) {
-    log::info!("Delayer thread started for TestRunSource {} ...", id);
-
-    loop {
-        match delayer_rx_channel.recv().await {
-            Some(message) => {
-                // Sleep for the specified time before sending the message to the change_tx_channel.
-                sleep(Duration::new(0, message.delay_ns as u32)).await;
-                if let Err(e) = change_tx_channel.send(message).await {
-                    log::error!("Error sending ScheduledChangeEventMessage to change_tx_channel: {:?}", e);
-                }
-            },
-            None => {
-                log::error!("ChangeScriptRecord delayer channel closed.");
-                break;
-            }
-        }
-    }
-}
-
-pub async fn rate_limiter_thread(id: TestRunSourceId, spacing_mode: SpacingMode, mut delayer_rx_channel: Receiver<ScheduledChangeEventMessage>, change_tx_channel: Sender<ScheduledChangeEventMessage>) {
-    log::info!("Rate limiter thread started for TestRunSource {} ...", id);
-
-    let limiter = match spacing_mode {
-        SpacingMode::Rate(rate) => RateLimiter::direct(Quota::per_second(rate)),
-        _ => RateLimiter::direct(Quota::per_second(NonZeroU32::new(u32::MAX).unwrap())),
-    };
-
-    loop {
-        match delayer_rx_channel.recv().await {
-            Some(message) => {
-                limiter.until_ready().await;
-                if let Err(e) = change_tx_channel.send(message).await {
-                    log::error!("Error sending ScheduledChangeEventMessage to change_tx_channel: {:?}", e);
-                }
-            },
-            None => {
-                log::error!("ChangeScriptRecord delayer channel closed.");
-                break;
-            }
-        }
-    }
 }

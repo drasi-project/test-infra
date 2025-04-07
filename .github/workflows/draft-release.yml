@@ -28,7 +28,7 @@ on:
 permissions:
   id-token: write # Required for requesting the JWT
   contents: read  # Required for actions/checkout
-  packages: write
+  packages: write # Required for pushing to GitHub Container Registry
 
 env:
   RELEASE_PATH: ./release

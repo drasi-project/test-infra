@@ -48,6 +48,8 @@ jobs:
         id: set_components
         run: |
           echo "test_infra_components=$(echo '${{ env.TEST_INFRA_COMPONENTS }}' | jq -c .)" >> $GITHUB_OUTPUT
+      - name: Debug Outputs
+        run: |   
           echo "Test Infra Components: ${{ steps.set_components.outputs.test_infra_components }}"
 
 

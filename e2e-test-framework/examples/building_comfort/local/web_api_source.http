@@ -23,6 +23,9 @@
 @test_run_id = test_run_001
 @source_id = facilities-db
 
+### Homepage
+GET http://{{hostname}}:{{port}}
+
 ### GET STATE of test run source
 GET http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{source_id}}
 
@@ -39,7 +42,7 @@ POST http://{{hostname}}:{{port}}/test_run_host/sources/{{repo_id}}.{{test_id}}.
 Content-Type: application/json
 
 {
-  "num_steps": 5000,
+  "num_steps": 1,
   "spacing_mode": "None"
 }
 
@@ -67,12 +70,8 @@ Content-Type: application/json
 {
     "queryId": "continent-country-population",
     "queryNodeId": "default",
-    "nodeLabels_1": ["Building"],
+    "nodeLabels": ["Building"],
     "nodeLabels_2": ["Building", "Floor"],
-    "nodeLabels": ["Building", "Floor", "Room"],
+    "nodeLabels_3": ["Building", "Floor", "Room"],
     "relLabels": []
 }
-
-### ROOT
-GET http://{{hostname}}:{{port}}
-

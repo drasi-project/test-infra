@@ -23,6 +23,9 @@
 @test_run_id = test_run_001
 @query_id = building_comfort
 
+### Homepage
+GET http://{{hostname}}:{{port}}
+
 ### GET STATE of test run query
 GET http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}
 
@@ -44,6 +47,3 @@ Content-Type: application/json
 ### RESET test run query
 POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/reset
 Content-Type: application/json
-
-### Homepage
-GET http://{{hostname}}:{{port}}

@@ -136,7 +136,7 @@ jobs:
                 manifests+=("ghcr.io/drasi-project/$component:${{ inputs.tag }}-arm64")
               
               else
-                echo "Error: Expected arm64 manifest found for $component:${{ inputs.tag }}-arm64" >&2
+                echo "Error: Expected arm64 manifest not found for $component:${{ inputs.tag }}-arm64" >&2
                 exit 1
               fi
             fi

@@ -42,7 +42,7 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
-      test_infra_compoenents: ${{ steps.set_components.outputs.test_infra_components }}
+      test_infra_components: ${{ steps.set_components.outputs.test_infra_components }}
     steps:
       - name: Set Component Outputs
         id: set_components

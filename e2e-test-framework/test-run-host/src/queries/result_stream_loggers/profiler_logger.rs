@@ -58,7 +58,7 @@ impl ProfilerResultStreamLoggerSettings {
             bootstrap_log_name: config.bootstrap_log_name.clone().unwrap_or("bootstrap".to_string()),
             change_image_name: config.change_image_name.clone().unwrap_or("change".to_string()),
             change_log_name: config.change_log_name.clone().unwrap_or("change".to_string()),
-            image_width: config.image_width.unwrap_or(900),
+            image_width: config.image_width.unwrap_or(1200),
             folder_path,
             test_run_query_id,
             max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
@@ -79,7 +79,7 @@ impl BootstrapRecordProfile {
     pub fn new(record: &ResultStreamRecord, change: &ChangeEvent) -> Self {
         Self {
             seq: change.base.sequence,
-            time_total: (record.dequeue_time_ns / 1_000_000) - (change.base.source_time_ms as u64),
+            time_total: record.dequeue_time_ns.saturating_sub((change.base.source_time_ms as u64) * 1_000_000)
         }
     }
 }
@@ -87,35 +87,39 @@ impl BootstrapRecordProfile {
 #[derive(Debug, Serialize)]
 struct ChangeRecordProfile {
     pub seq: i64,
+    pub time_in_reactivator: u64,
     pub time_in_src_change_q: u64,
     pub time_in_src_change_rtr: u64,
     pub time_in_src_disp_q: u64,
     pub time_in_src_change_disp: u64,
-    pub time_in_src_change_pub: u64,
+    pub time_in_query_change_q: u64,
     pub time_in_query_host: u64,
     pub time_in_query_solver: u64,
-    pub time_in_result_disp_q: u64,
+    pub time_in_result_q: u64,
     pub time_total: u64,
 }
 
 impl ChangeRecordProfile {
     pub fn new(record: &ResultStreamRecord, change: &ChangeEvent) -> Self {
 
-        let record_dequeue_time_ns = record.dequeue_time_ns;
-
         let metadata = &change.base.metadata.as_ref().unwrap().tracking;
+
+        let record_dequeue_time_ns = record.dequeue_time_ns;
+        let time_in_query_solver = metadata.query.query_end_ns.saturating_sub(metadata.query.query_start_ns); 
+        let time_in_query_host = (metadata.query.dequeue_ns.saturating_sub(metadata.query.enqueue_ns)).saturating_sub(time_in_query_solver);
 
         Self {
             seq: change.base.sequence,
-            time_in_src_change_q: metadata.source.change_router_start_ns - metadata.source.source_ns,
-            time_in_src_change_rtr: metadata.source.change_router_end_ns - metadata.source.change_router_start_ns,
-            time_in_src_disp_q: metadata.source.change_dispatcher_start_ns - metadata.source.change_router_end_ns,
-            time_in_src_change_disp: metadata.source.change_dispatcher_end_ns - metadata.source.change_dispatcher_start_ns,
-            time_in_src_change_pub: metadata.query.dequeue_ns - metadata.source.change_dispatcher_end_ns,
-            time_in_query_host: metadata.query.query_end_ns - metadata.query.dequeue_ns,
-            time_in_query_solver: metadata.query.query_end_ns - metadata.query.query_start_ns,
-            time_in_result_disp_q: record_dequeue_time_ns - metadata.query.query_end_ns,
-            time_total: record_dequeue_time_ns - metadata.source.source_ns,
+            time_in_reactivator: metadata.source.reactivator_end_ns.saturating_sub(metadata.source.reactivator_start_ns),
+            time_in_src_change_q: metadata.source.change_router_start_ns.saturating_sub(metadata.source.reactivator_end_ns),
+            time_in_src_change_rtr: metadata.source.change_router_end_ns.saturating_sub(metadata.source.change_router_start_ns),
+            time_in_src_disp_q: metadata.source.change_dispatcher_start_ns.saturating_sub(metadata.source.change_router_end_ns),
+            time_in_src_change_disp: metadata.source.change_dispatcher_end_ns.saturating_sub(metadata.source.change_dispatcher_start_ns),
+            time_in_query_change_q: metadata.query.dequeue_ns.saturating_sub(metadata.source.change_dispatcher_end_ns),
+            time_in_query_host,
+            time_in_query_solver,
+            time_in_result_q: record_dequeue_time_ns.saturating_sub(metadata.query.query_end_ns),
+            time_total: record_dequeue_time_ns.saturating_sub(metadata.source.reactivator_start_ns),
         }
     }
 }
@@ -127,6 +131,9 @@ struct ProfilerSummary{
     pub bootstrap_rec_time_total_max: u64,
     pub bootstrap_rec_time_total_min: u64,
     pub change_rec_count: usize,
+    pub change_rec_time_in_reactivator_avg: f64,
+    pub change_rec_time_in_reactivator_max: u64,
+    pub change_rec_time_in_reactivator_min: u64,
     pub change_rec_time_in_src_change_q_avg: f64,
     pub change_rec_time_in_src_change_q_max: u64,
     pub change_rec_time_in_src_change_q_min: u64,
@@ -139,18 +146,18 @@ struct ProfilerSummary{
     pub change_rec_time_in_src_change_disp_avg: f64,
     pub change_rec_time_in_src_change_disp_max: u64,
     pub change_rec_time_in_src_change_disp_min: u64,
-    pub change_rec_time_in_change_pub_avg: f64,
-    pub change_rec_time_in_change_pub_max: u64,
-    pub change_rec_time_in_change_pub_min: u64,
+    pub change_rec_time_in_query_change_q_avg: f64,
+    pub change_rec_time_in_query_change_q_max: u64,
+    pub change_rec_time_in_query_change_q_min: u64,
     pub change_rec_time_in_query_host_avg: f64,
     pub change_rec_time_in_query_host_max: u64,
     pub change_rec_time_in_query_host_min: u64,
     pub change_rec_time_in_query_solver_avg: f64,
     pub change_rec_time_in_query_solver_max: u64,
     pub change_rec_time_in_query_solver_min: u64,
-    pub change_rec_time_in_result_disp_q_avg: f64,
-    pub change_rec_time_in_result_disp_q_max: u64,
-    pub change_rec_time_in_result_disp_q_min: u64,
+    pub change_rec_time_in_result_q_avg: f64,
+    pub change_rec_time_in_result_q_max: u64,
+    pub change_rec_time_in_result_q_min: u64,
     pub change_rec_time_total_avg: f64,
     pub change_rec_time_total_max: u64,
     pub change_rec_time_total_min: u64,
@@ -165,6 +172,9 @@ impl Default for ProfilerSummary {
             bootstrap_rec_time_total_max: 0,
             bootstrap_rec_time_total_min: std::u64::MAX,
             change_rec_count: 0,
+            change_rec_time_in_reactivator_avg: 0.0,
+            change_rec_time_in_reactivator_max: 0,
+            change_rec_time_in_reactivator_min: 0,        
             change_rec_time_in_src_change_q_avg: 0.0,
             change_rec_time_in_src_change_q_max: 0,
             change_rec_time_in_src_change_q_min: std::u64::MAX,
@@ -177,18 +187,18 @@ impl Default for ProfilerSummary {
             change_rec_time_in_src_change_disp_avg: 0.0,
             change_rec_time_in_src_change_disp_max: 0,
             change_rec_time_in_src_change_disp_min: std::u64::MAX,
-            change_rec_time_in_change_pub_avg: 0.0,
-            change_rec_time_in_change_pub_max: 0,
-            change_rec_time_in_change_pub_min: std::u64::MAX,
+            change_rec_time_in_query_change_q_avg: 0.0,
+            change_rec_time_in_query_change_q_max: 0,
+            change_rec_time_in_query_change_q_min: std::u64::MAX,
             change_rec_time_in_query_host_avg: 0.0,
             change_rec_time_in_query_host_max: 0,
             change_rec_time_in_query_host_min: std::u64::MAX,
             change_rec_time_in_query_solver_avg: 0.0,
             change_rec_time_in_query_solver_max: 0,
             change_rec_time_in_query_solver_min: std::u64::MAX,
-            change_rec_time_in_result_disp_q_avg: 0.0,
-            change_rec_time_in_result_disp_q_max: 0,
-            change_rec_time_in_result_disp_q_min: std::u64::MAX,
+            change_rec_time_in_result_q_avg: 0.0,
+            change_rec_time_in_result_q_max: 0,
+            change_rec_time_in_result_q_min: std::u64::MAX,
             change_rec_time_total_avg: 0.0,
             change_rec_time_total_max: 0,
             change_rec_time_total_min: std::u64::MAX,
@@ -271,16 +281,20 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
         }
 
         if self.summary.change_rec_count > 0 {
+            self.summary.change_rec_time_in_reactivator_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_src_change_q_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_src_change_rtr_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_src_disp_q_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_src_change_disp_avg /= self.summary.change_rec_count as f64;
-            self.summary.change_rec_time_in_change_pub_avg /= self.summary.change_rec_count as f64;
+            self.summary.change_rec_time_in_query_change_q_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_query_host_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_query_solver_avg /= self.summary.change_rec_count as f64;
-            self.summary.change_rec_time_in_result_disp_q_avg /= self.summary.change_rec_count as f64;
+            self.summary.change_rec_time_in_result_q_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_total_avg /= self.summary.change_rec_count as f64;
         } else {
+            self.summary.change_rec_time_in_reactivator_avg = 0.0;
+            self.summary.change_rec_time_in_reactivator_max = 0;
+            self.summary.change_rec_time_in_reactivator_min = 0;
             self.summary.change_rec_time_in_src_change_q_avg = 0.0;
             self.summary.change_rec_time_in_src_change_q_max = 0;
             self.summary.change_rec_time_in_src_change_q_min = 0;
@@ -293,18 +307,18 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
             self.summary.change_rec_time_in_src_change_disp_avg = 0.0;
             self.summary.change_rec_time_in_src_change_disp_max = 0;
             self.summary.change_rec_time_in_src_change_disp_min = 0;
-            self.summary.change_rec_time_in_change_pub_avg = 0.0;
-            self.summary.change_rec_time_in_change_pub_max = 0;
-            self.summary.change_rec_time_in_change_pub_min = 0;
+            self.summary.change_rec_time_in_query_change_q_avg = 0.0;
+            self.summary.change_rec_time_in_query_change_q_max = 0;
+            self.summary.change_rec_time_in_query_change_q_min = 0;
             self.summary.change_rec_time_in_query_host_avg = 0.0;
             self.summary.change_rec_time_in_query_host_max = 0;
             self.summary.change_rec_time_in_query_host_min = 0;
             self.summary.change_rec_time_in_query_solver_avg = 0.0;
             self.summary.change_rec_time_in_query_solver_max = 0;
             self.summary.change_rec_time_in_query_solver_min = 0;
-            self.summary.change_rec_time_in_result_disp_q_avg = 0.0;
-            self.summary.change_rec_time_in_result_disp_q_max = 0;
-            self.summary.change_rec_time_in_result_disp_q_min = 0;
+            self.summary.change_rec_time_in_result_q_avg = 0.0;
+            self.summary.change_rec_time_in_result_q_max = 0;
+            self.summary.change_rec_time_in_result_q_min = 0;
             self.summary.change_rec_time_total_avg = 0.0;
             self.summary.change_rec_time_total_max = 0;
             self.summary.change_rec_time_total_min = 0;
@@ -339,6 +353,9 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
                     }
 
                     self.summary.change_rec_count += 1;
+                    self.summary.change_rec_time_in_reactivator_avg += profile.time_in_reactivator as f64;
+                    self.summary.change_rec_time_in_reactivator_max = std::cmp::max(self.summary.change_rec_time_in_reactivator_max, profile.time_in_reactivator);
+                    self.summary.change_rec_time_in_reactivator_min = std::cmp::min(self.summary.change_rec_time_in_reactivator_min, profile.time_in_reactivator);
                     self.summary.change_rec_time_in_src_change_q_avg += profile.time_in_src_change_q as f64;
                     self.summary.change_rec_time_in_src_change_q_max = std::cmp::max(self.summary.change_rec_time_in_src_change_q_max, profile.time_in_src_change_q);
                     self.summary.change_rec_time_in_src_change_q_min = std::cmp::min(self.summary.change_rec_time_in_src_change_q_min, profile.time_in_src_change_q);
@@ -351,18 +368,18 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
                     self.summary.change_rec_time_in_src_change_disp_avg += profile.time_in_src_change_disp as f64;
                     self.summary.change_rec_time_in_src_change_disp_max = std::cmp::max(self.summary.change_rec_time_in_src_change_disp_max, profile.time_in_src_change_disp);
                     self.summary.change_rec_time_in_src_change_disp_min = std::cmp::min(self.summary.change_rec_time_in_src_change_disp_min, profile.time_in_src_change_disp);
-                    self.summary.change_rec_time_in_change_pub_avg += profile.time_in_src_change_pub as f64;
-                    self.summary.change_rec_time_in_change_pub_max = std::cmp::max(self.summary.change_rec_time_in_change_pub_max, profile.time_in_src_change_pub);
-                    self.summary.change_rec_time_in_change_pub_min = std::cmp::min(self.summary.change_rec_time_in_change_pub_min, profile.time_in_src_change_pub);
+                    self.summary.change_rec_time_in_query_change_q_avg += profile.time_in_query_change_q as f64;
+                    self.summary.change_rec_time_in_query_change_q_max = std::cmp::max(self.summary.change_rec_time_in_query_change_q_max, profile.time_in_query_change_q);
+                    self.summary.change_rec_time_in_query_change_q_min = std::cmp::min(self.summary.change_rec_time_in_query_change_q_min, profile.time_in_query_change_q);
                     self.summary.change_rec_time_in_query_host_avg += profile.time_in_query_host as f64;
                     self.summary.change_rec_time_in_query_host_max = std::cmp::max(self.summary.change_rec_time_in_query_host_max, profile.time_in_query_host);
                     self.summary.change_rec_time_in_query_host_min = std::cmp::min(self.summary.change_rec_time_in_query_host_min, profile.time_in_query_host);
                     self.summary.change_rec_time_in_query_solver_avg += profile.time_in_query_solver as f64;
                     self.summary.change_rec_time_in_query_solver_max = std::cmp::max(self.summary.change_rec_time_in_query_solver_max, profile.time_in_query_solver);
                     self.summary.change_rec_time_in_query_solver_min = std::cmp::min(self.summary.change_rec_time_in_query_solver_min, profile.time_in_query_solver);
-                    self.summary.change_rec_time_in_result_disp_q_avg += profile.time_in_result_disp_q as f64;
-                    self.summary.change_rec_time_in_result_disp_q_max = std::cmp::max(self.summary.change_rec_time_in_result_disp_q_max, profile.time_in_result_disp_q);
-                    self.summary.change_rec_time_in_result_disp_q_min = std::cmp::min(self.summary.change_rec_time_in_result_disp_q_min, profile.time_in_result_disp_q);
+                    self.summary.change_rec_time_in_result_q_avg += profile.time_in_result_q as f64;
+                    self.summary.change_rec_time_in_result_q_max = std::cmp::max(self.summary.change_rec_time_in_result_q_max, profile.time_in_result_q);
+                    self.summary.change_rec_time_in_result_q_min = std::cmp::min(self.summary.change_rec_time_in_result_q_min, profile.time_in_result_q);
                     self.summary.change_rec_time_total_avg += profile.time_total as f64;
                     self.summary.change_rec_time_total_max = std::cmp::max(self.summary.change_rec_time_total_max, profile.time_total);
                     self.summary.change_rec_time_total_min = std::cmp::min(self.summary.change_rec_time_total_min, profile.time_total);   
@@ -424,24 +441,25 @@ impl ProfileImageWriter {
     async fn write_change_profile(&mut self, profile: &ChangeRecordProfile) -> anyhow::Result<()> {
         
         let mut times = [
+            profile.time_in_reactivator as u32,
             profile.time_in_src_change_q as u32,
             profile.time_in_src_change_rtr as u32,
             profile.time_in_src_disp_q as u32,
             profile.time_in_src_change_disp as u32,
-            profile.time_in_src_change_pub as u32,
-            profile.time_in_query_host as u32 - profile.time_in_query_solver as u32,
+            profile.time_in_query_change_q as u32,
+            profile.time_in_query_host as u32,
             profile.time_in_query_solver as u32,
-            profile.time_in_result_disp_q as u32,
+            profile.time_in_result_q as u32,
             0,  // shortfall
             profile.time_total as u32,
             0   // total for drasi only components
         ];
 
-        let drasi_sum: u32 = times[1] + times[3] + times[5] + times[6];
-        let all_sum: u32 = drasi_sum + times[0] + times[2] + times[4] + times[7];
+        let drasi_sum: u32 = times[0] + times[2] + times[4] + times[6] + times[7];
+        let all_sum: u32 = drasi_sum + times[1] + times[3] + times[5] + times[8];
 
-        times[8] = times[9] - all_sum;
-        times[10] = drasi_sum;
+        times[9] = times[10] - all_sum;
+        times[11] = drasi_sum;
 
         self.max_time_all = max(self.max_time_all, all_sum);
         self.max_time_drasi = max(self.max_time_drasi, drasi_sum);
@@ -462,21 +480,22 @@ impl ProfileImageWriter {
     async fn generate_all_image(&self) -> anyhow::Result<()> {
 
         let colors = [
-            Rgb([255, 0, 0]),   // time_in_src_change_q (red)
-            Rgb([255, 165, 0]), // time_in_src_change_rtr (orange)
-            Rgb([0, 255, 0]),   // time_in_src_disp_q (green)
-            Rgb([0, 0, 0]),     // time_in_src_change_disp (black)
-            Rgb([0, 0, 255]),   // time_in_src_change_pub (blue)
-            Rgb([128, 0, 128]), // time_in_query_host (purple)
-            Rgb([0, 255, 255]), // time_in_query_solver (cyan)
-            Rgb([255, 255, 0]), // time_in_result_disp_q (yellow)
-            Rgb([128, 128, 128]), // shortfall (gray)
+            Rgb([255, 0, 0]),     // Red - reactivator
+            Rgb([255, 165, 0]),   // Orange - source change queue
+            Rgb([0, 255, 0]),     // Green - source change router
+            Rgb([0, 0, 255]),     // Blue - source dispatch queue
+            Rgb([128, 0, 128]),   // Purple - source change dispatcher
+            Rgb([0, 255, 255]),   // Cyan - query change queue
+            Rgb([255, 255, 0]),   // Yellow - query host
+            Rgb([255, 105, 180]), // Hot Pink - query solver
+            Rgb([139, 69, 19]),   // Brown - result queue
+            Rgb([128, 128, 128]), // Gray - shortfall
         ];
 
         let header_height: u32 = 20;
         let header_span_width = self.width / colors.len() as u32; 
         let height = self.record_count as u32 + header_height;
-        let times_per_profile: usize = 11;
+        let times_per_profile: usize = 12;
         let mut img_abs = RgbImage::new(self.width, height);
         let mut img_rel = RgbImage::new(self.width, height);
 
@@ -504,7 +523,7 @@ impl ProfileImageWriter {
                 let mut x = 0;
                 let mut pixels_per_unit = self.width as f64 / self.max_time_all as f64;
                 let mut span_width: u32;
-                for i in 0..9 {
+                for i in 0..10 {
                     if raw_times[i] > 0 {
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
 
@@ -521,8 +540,8 @@ impl ProfileImageWriter {
 
                 // Relative
                 x = 0;
-                pixels_per_unit = self.width as f64 / raw_times[9] as f64;
-                for i in 0..9 {
+                pixels_per_unit = self.width as f64 / raw_times[10] as f64;
+                for i in 0..10 {
                     if raw_times[i] > 0 {                        
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
 

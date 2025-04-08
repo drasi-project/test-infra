@@ -25,6 +25,7 @@ use super::{ResultStreamHandler, ResultStreamHandlerError, ResultStreamHandlerMe
 pub mod redis_stream_read_result;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct RedisResultStreamHandlerSettings {
     pub host: String,
     pub port: u16,

@@ -106,7 +106,7 @@ impl ChangeRecordProfile {
 
         let record_dequeue_time_ns = record.dequeue_time_ns;
         let time_in_query_solver = metadata.query.query_end_ns.saturating_sub(metadata.query.query_start_ns); 
-        let time_in_query_host = (metadata.query.dequeue_ns.saturating_sub(metadata.query.enqueue_ns)).saturating_sub(time_in_query_solver);
+        let time_in_query_host = (metadata.query.query_end_ns.saturating_sub(metadata.query.dequeue_ns)).saturating_sub(time_in_query_solver);
 
         Self {
             seq: change.base.sequence,
@@ -413,9 +413,10 @@ struct ProfileImageWriter {
     // drasi_file_abs_path: PathBuf,
     // drasi_file_rel_path: PathBuf,
     // drasi_image_spans: Vec<u32>,
-    image_times: Vec<u32>,
-    max_time_all: u32,
-    max_time_drasi: u32,
+    image_times: Vec<u64>,
+    max_total_time: u64,
+    max_time_all: u64,
+    max_time_drasi: u64,
     record_count: usize,
     width: u32,
 }
@@ -431,6 +432,7 @@ impl ProfileImageWriter {
             // all_image_times: Vec::new(),
             // drasi_image_spans: Vec::new(),
             image_times: Vec::new(),
+            max_total_time: 0,
             max_time_all: 0,
             max_time_drasi: 0,
             record_count: 0,
@@ -441,26 +443,27 @@ impl ProfileImageWriter {
     async fn write_change_profile(&mut self, profile: &ChangeRecordProfile) -> anyhow::Result<()> {
         
         let mut times = [
-            profile.time_in_reactivator as u32,
-            profile.time_in_src_change_q as u32,
-            profile.time_in_src_change_rtr as u32,
-            profile.time_in_src_disp_q as u32,
-            profile.time_in_src_change_disp as u32,
-            profile.time_in_query_change_q as u32,
-            profile.time_in_query_host as u32,
-            profile.time_in_query_solver as u32,
-            profile.time_in_result_q as u32,
+            profile.time_in_reactivator,
+            profile.time_in_src_change_q,
+            profile.time_in_src_change_rtr,
+            profile.time_in_src_disp_q,
+            profile.time_in_src_change_disp,
+            profile.time_in_query_change_q,
+            profile.time_in_query_host,
+            profile.time_in_query_solver,
+            profile.time_in_result_q,
             0,  // shortfall
-            profile.time_total as u32,
+            profile.time_total,
             0   // total for drasi only components
         ];
 
-        let drasi_sum: u32 = times[0] + times[2] + times[4] + times[6] + times[7];
-        let all_sum: u32 = drasi_sum + times[1] + times[3] + times[5] + times[8];
+        let drasi_sum = times[0] + times[2] + times[4] + times[6] + times[7];
+        let all_sum = drasi_sum + times[1] + times[3] + times[5] + times[8];
 
         times[9] = times[10] - all_sum;
         times[11] = drasi_sum;
 
+        self.max_total_time = max(self.max_total_time, profile.time_total);
         self.max_time_all = max(self.max_time_all, all_sum);
         self.max_time_drasi = max(self.max_time_drasi, drasi_sum);
 
@@ -521,7 +524,7 @@ impl ProfileImageWriter {
 
                 // Absolute
                 let mut x = 0;
-                let mut pixels_per_unit = self.width as f64 / self.max_time_all as f64;
+                let mut pixels_per_unit = self.width as f64 / self.max_total_time as f64;
                 let mut span_width: u32;
                 for i in 0..10 {
                     if raw_times[i] > 0 {

@@ -343,7 +343,7 @@ async fn read_stream(con: &mut MultiplexedConnection, seq: Arc<AtomicUsize>, str
             let StreamId { id, map } = &id;
 
             let id = id.to_string();
-            let enqueue_time_ns: u64 = id.split('-').next().unwrap().parse().unwrap();
+            let enqueue_time_ns = id.split('-').next().unwrap().parse::<u64>().unwrap() * 1_000_000;
 
             match map.get("data") {
                 Some(data) => {

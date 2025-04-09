@@ -561,16 +561,16 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 let now_ns = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64;
 
                 source_change_event.reactivator_end_ns = now_ns;
-    
-                match self.settings.time_mode {
-                    TimeMode::Live => {
-                        source_change_event.payload.source.ts_ns = now_ns;
-                    },
-                    TimeMode::Rebased(_) => {
-                        source_change_event.payload.source.ts_ns = now_ns + self.virtual_time_ns_rebase_adjustment as u64;
-                    },
-                    TimeMode::Recorded => {}
-                }
+                
+                // match self.settings.time_mode {
+                //     TimeMode::Live => {
+                //         source_change_event.payload.source.ts_ns = now_ns;
+                //     },
+                //     TimeMode::Rebased(_) => {
+                //         source_change_event.payload.source.ts_ns = now_ns + self.virtual_time_ns_rebase_adjustment as u64;
+                //     },
+                //     TimeMode::Recorded => {}
+                // }
 
                 source_change_event.clone()    
             },

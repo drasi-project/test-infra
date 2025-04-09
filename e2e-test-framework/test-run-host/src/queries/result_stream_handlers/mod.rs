@@ -94,8 +94,8 @@ pub enum ResultStreamHandlerMessage {
 #[derive(Clone, Debug, Serialize)]
 pub struct ResultStreamRecord {
     pub record_data: QueryResultRecord,
-    pub dequeue_time_ns: u64,
     pub enqueue_time_ns: u64,
+    pub dequeue_time_ns: u64,
     pub id: String,
     pub seq: usize,
     pub traceparent: Option<String>,

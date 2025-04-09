@@ -51,4 +51,4 @@ kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_
 
 kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_all_rel.png" "./${TEST_RUN_ID}/query_profiler_viz_all_rel.png"
 
-
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_00000.jsonl" "./${TEST_RUN_ID}/query_profiler_change_log_sample.jsonl"

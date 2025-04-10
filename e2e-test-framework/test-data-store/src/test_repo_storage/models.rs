@@ -344,6 +344,7 @@ pub enum SourceChangeDispatcherDefinition {
     Console(ConsoleSourceChangeDispatcherDefinition),
     Dapr(DaprSourceChangeDispatcherDefinition),
     JsonlFile(JsonlFileSourceChangeDispatcherDefinition),
+    RedisStream(RedisStreamSourceChangeDispatcherDefinition)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -362,6 +363,13 @@ pub struct DaprSourceChangeDispatcherDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonlFileSourceChangeDispatcherDefinition {
     pub max_events_per_file: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RedisStreamSourceChangeDispatcherDefinition {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub stream_name: Option<String>
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -42,7 +42,7 @@ impl DaprSourceChangeDispatcherSettings {
 
 pub struct DaprSourceChangeDispatcher {
     _settings: DaprSourceChangeDispatcherSettings,
-    publisher: DaprHttpPublisher,
+    publisher: Option<DaprHttpPublisher>,
 }
 
 impl DaprSourceChangeDispatcher {
@@ -62,7 +62,7 @@ impl DaprSourceChangeDispatcher {
 
         Ok(DaprSourceChangeDispatcher {
             _settings: settings,
-            publisher,
+            publisher: Some(publisher),
         })
     }
 }  
@@ -70,12 +70,15 @@ impl DaprSourceChangeDispatcher {
 #[async_trait]
 impl SourceChangeDispatcher for DaprSourceChangeDispatcher {
     async fn close(&mut self) -> anyhow::Result<()> {
+        self.publisher = None;
         Ok(())
     }
 
     async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
 
         log::trace!("Dispatch source change events");
+
+        let publisher = self.publisher.as_mut().unwrap();
 
         let data = serde_json::to_value(events)?;
 
@@ -84,7 +87,7 @@ impl SourceChangeDispatcher for DaprSourceChangeDispatcher {
         // headers.insert("traceparent".to_string(), traceparent.clone());
         let _headers = Headers::new(headers);
 
-        match self.publisher.publish(data, _headers).await {
+        match publisher.publish(data, _headers).await {
             Ok(_) => Ok(()),
             Err(e) => {
                 let msg = format!("Error dispatching source change event: {:?}", e);

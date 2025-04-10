@@ -19,6 +19,7 @@ use test_data_store::{scripts::SourceChangeEvent, test_repo_storage::models::Sou
 pub mod console_dispatcher;
 pub mod dapr_dispatcher;
 pub mod jsonl_file_dispatcher;
+pub mod redis_stream_disspatcher;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceChangeDispatcherError {
@@ -61,6 +62,9 @@ pub async fn create_source_change_dispatcher(def: &SourceChangeDispatcherDefinit
         },
         SourceChangeDispatcherDefinition::JsonlFile(def) => {
             Ok(Box::new(jsonl_file_dispatcher::JsonlFileSourceChangeDispatcher::new(def, output_storage).await?) as Box<dyn SourceChangeDispatcher + Send + Sync>)
+        },
+        SourceChangeDispatcherDefinition::RedisStream(def) => {
+            Ok(Box::new(redis_stream_disspatcher::RedisStreamSourceChangeDispatcher::new(def, output_storage).await?) as Box<dyn SourceChangeDispatcher + Send + Sync>)
         },
     }
 }

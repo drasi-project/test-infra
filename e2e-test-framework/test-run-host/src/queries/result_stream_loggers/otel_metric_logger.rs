@@ -59,7 +59,7 @@ impl BootstrapRecordProfile {
     pub fn new(record: &ResultStreamRecord, change: &ChangeEvent) -> Self {
         Self {
             seq: change.base.sequence,
-            time_total: (record.dequeue_time_ns / 1_000_000) - (change.base.source_time_ms as u64),
+            time_total: record.dequeue_time_ns.saturating_sub((change.base.source_time_ms as u64) * 1_000_000)
         }
     }
 }
@@ -67,35 +67,39 @@ impl BootstrapRecordProfile {
 #[derive(Debug, Serialize)]
 struct ChangeRecordProfile {
     pub seq: i64,
+    pub time_in_reactivator: u64,
     pub time_in_src_change_q: u64,
     pub time_in_src_change_rtr: u64,
     pub time_in_src_disp_q: u64,
     pub time_in_src_change_disp: u64,
-    pub time_in_src_change_pub: u64,
+    pub time_in_query_change_q: u64,
     pub time_in_query_host: u64,
     pub time_in_query_solver: u64,
-    pub time_in_result_disp_q: u64,
+    pub time_in_result_q: u64,
     pub time_total: u64,
 }
 
 impl ChangeRecordProfile {
     pub fn new(record: &ResultStreamRecord, change: &ChangeEvent) -> Self {
 
-        let record_dequeue_time_ns = record.dequeue_time_ns;
-
         let metadata = &change.base.metadata.as_ref().unwrap().tracking;
+
+        let record_dequeue_time_ns = record.dequeue_time_ns;
+        let time_in_query_solver = metadata.query.query_end_ns.saturating_sub(metadata.query.query_start_ns); 
+        let time_in_query_host = (metadata.query.query_end_ns.saturating_sub(metadata.query.dequeue_ns)).saturating_sub(time_in_query_solver);
 
         Self {
             seq: change.base.sequence,
-            time_in_src_change_q: metadata.source.change_router_start_ns - metadata.source.source_ns,
-            time_in_src_change_rtr: metadata.source.change_router_end_ns - metadata.source.change_router_start_ns,
-            time_in_src_disp_q: metadata.source.change_dispatcher_start_ns - metadata.source.change_router_end_ns,
-            time_in_src_change_disp: metadata.source.change_dispatcher_end_ns - metadata.source.change_dispatcher_start_ns,
-            time_in_src_change_pub: metadata.query.dequeue_ns - metadata.source.change_dispatcher_end_ns,
-            time_in_query_host: metadata.query.query_end_ns - metadata.query.dequeue_ns,
-            time_in_query_solver: metadata.query.query_end_ns - metadata.query.query_start_ns,
-            time_in_result_disp_q: record_dequeue_time_ns - metadata.query.query_end_ns,
-            time_total: record_dequeue_time_ns - metadata.source.source_ns,
+            time_in_reactivator: metadata.source.reactivator_end_ns.saturating_sub(metadata.source.reactivator_start_ns),
+            time_in_src_change_q: metadata.source.change_router_start_ns.saturating_sub(metadata.source.reactivator_end_ns),
+            time_in_src_change_rtr: metadata.source.change_router_end_ns.saturating_sub(metadata.source.change_router_start_ns),
+            time_in_src_disp_q: metadata.source.change_dispatcher_start_ns.saturating_sub(metadata.source.change_router_end_ns),
+            time_in_src_change_disp: metadata.source.change_dispatcher_end_ns.saturating_sub(metadata.source.change_dispatcher_start_ns),
+            time_in_query_change_q: metadata.query.dequeue_ns.saturating_sub(metadata.source.change_dispatcher_end_ns),
+            time_in_query_host,
+            time_in_query_solver,
+            time_in_result_q: record_dequeue_time_ns.saturating_sub(metadata.query.query_end_ns),
+            time_total: record_dequeue_time_ns.saturating_sub(metadata.source.reactivator_start_ns),
         }
     }
 }
@@ -104,14 +108,15 @@ struct ProfilerMetrics {
     pub bootstrap_rec_count: Counter<u64>,
     pub bootstrap_rec_time_total: Histogram<f64>,
     pub change_rec_count: Counter<u64>,
+    pub change_rec_time_in_reactivator: Histogram<f64>,
     pub change_rec_time_in_src_change_q: Histogram<f64>,
     pub change_rec_time_in_src_change_rtr: Histogram<f64>,
     pub change_rec_time_in_src_disp_q: Histogram<f64>,
     pub change_rec_time_in_src_change_disp: Histogram<f64>,
-    pub change_rec_time_in_change_pub: Histogram<f64>,
+    pub change_rec_time_in_query_change_q: Histogram<f64>,
     pub change_rec_time_in_query_host: Histogram<f64>,
     pub change_rec_time_in_query_solver: Histogram<f64>,
-    pub change_rec_time_in_result_disp_q: Histogram<f64>,
+    pub change_rec_time_in_result_q: Histogram<f64>,
     pub change_rec_time_total: Histogram<f64>,
     pub control_rec_count: Counter<u64>,
 }
@@ -130,7 +135,7 @@ impl ProfilerMetrics {
         let bootstrap_rec_time_total = bootstrap_rec_meter
             .f64_histogram("drasi.query-result-profiler.bootstrap_rec_time_total")
             .with_description("Total time taken to process a Bootstrap Record")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();
 
         // Get a Change Record meter
@@ -141,58 +146,64 @@ impl ProfilerMetrics {
             .with_description("Count of Query Result Change Records")
             .init();
 
+        let change_rec_time_in_reactivator = change_rec_meter
+            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_reactivator")
+            .with_description("Total time Query Result Change spent in Reactivator")
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .init();
+
         let change_rec_time_in_src_change_q = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_q")
             .with_description("Total time Query Result Change spent in Source Change Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();
 
         let change_rec_time_in_src_change_rtr = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_rtr")
             .with_description("Total time Query Result Change spent in Source Change Router")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();
 
         let change_rec_time_in_src_disp_q = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_disp_q")
             .with_description("Total time Query Result Change spent in Source Dispatch Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();      
 
         let change_rec_time_in_src_change_disp = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_disp")
             .with_description("Total time Query Result Change spent in Source Change Dispatcher")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();    
 
-        let change_rec_time_in_change_pub = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_change_pub")
-            .with_description("Total time Query Result Change spent being dispatched")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+        let change_rec_time_in_query_change_q = change_rec_meter
+            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_change_q")
+            .with_description("Total time Query Result Change spent being in Query Change Queue")
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();   
 
         let change_rec_time_in_query_host = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_host")
             .with_description("Total time Query Result Change spent in Query Host")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();   
 
         let change_rec_time_in_query_solver = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_solver")
             .with_description("Total time Query Result Change spent in Query Solver")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();   
 
-        let change_rec_time_in_result_disp_q = change_rec_meter
-            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_result_disp_q")
-            .with_description("Total time Query Result Change spent in Query Result Dispatch Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+        let change_rec_time_in_result_q = change_rec_meter
+            .f64_histogram("drasi.query-result-profiler.change_rec_time_in_result_q")
+            .with_description("Total time Query Result Change spent in Query Result Queue")
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();              
 
         let change_rec_time_total = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_total")
             .with_description("Total time Query Result Change took to process")
-            .with_unit(opentelemetry::metrics::Unit::new("ms"))
+            .with_unit(opentelemetry::metrics::Unit::new("ns"))
             .init();  
 
         // Get a Control Record meter
@@ -207,14 +218,15 @@ impl ProfilerMetrics {
             bootstrap_rec_count,
             bootstrap_rec_time_total,
             change_rec_count,
+            change_rec_time_in_reactivator,
             change_rec_time_in_src_change_q,
             change_rec_time_in_src_change_rtr,
             change_rec_time_in_src_disp_q,
             change_rec_time_in_src_change_disp,
-            change_rec_time_in_change_pub,
+            change_rec_time_in_query_change_q,
             change_rec_time_in_query_host,
             change_rec_time_in_query_solver,
-            change_rec_time_in_result_disp_q,
+            change_rec_time_in_result_q,
             change_rec_time_total,
             control_rec_count,
         }
@@ -228,6 +240,9 @@ struct ProfilerSummary{
     pub bootstrap_rec_time_total_max: u64,
     pub bootstrap_rec_time_total_min: u64,
     pub change_rec_count: usize,
+    pub change_rec_time_in_reactivator_avg: f64,
+    pub change_rec_time_in_reactivator_max: u64,
+    pub change_rec_time_in_reactivator_min: u64,
     pub change_rec_time_in_src_change_q_avg: f64,
     pub change_rec_time_in_src_change_q_max: u64,
     pub change_rec_time_in_src_change_q_min: u64,
@@ -240,18 +255,18 @@ struct ProfilerSummary{
     pub change_rec_time_in_src_change_disp_avg: f64,
     pub change_rec_time_in_src_change_disp_max: u64,
     pub change_rec_time_in_src_change_disp_min: u64,
-    pub change_rec_time_in_change_pub_avg: f64,
-    pub change_rec_time_in_change_pub_max: u64,
-    pub change_rec_time_in_change_pub_min: u64,
+    pub change_rec_time_in_query_change_q_avg: f64,
+    pub change_rec_time_in_query_change_q_max: u64,
+    pub change_rec_time_in_query_change_q_min: u64,
     pub change_rec_time_in_query_host_avg: f64,
     pub change_rec_time_in_query_host_max: u64,
     pub change_rec_time_in_query_host_min: u64,
     pub change_rec_time_in_query_solver_avg: f64,
     pub change_rec_time_in_query_solver_max: u64,
     pub change_rec_time_in_query_solver_min: u64,
-    pub change_rec_time_in_result_disp_q_avg: f64,
-    pub change_rec_time_in_result_disp_q_max: u64,
-    pub change_rec_time_in_result_disp_q_min: u64,
+    pub change_rec_time_in_result_q_avg: f64,
+    pub change_rec_time_in_result_q_max: u64,
+    pub change_rec_time_in_result_q_min: u64,
     pub change_rec_time_total_avg: f64,
     pub change_rec_time_total_max: u64,
     pub change_rec_time_total_min: u64,
@@ -267,6 +282,9 @@ impl Default for ProfilerSummary {
             bootstrap_rec_time_total_max: 0,
             bootstrap_rec_time_total_min: std::u64::MAX,
             change_rec_count: 0,
+            change_rec_time_in_reactivator_avg: 0.0,
+            change_rec_time_in_reactivator_max: 0,
+            change_rec_time_in_reactivator_min: std::u64::MAX,
             change_rec_time_in_src_change_q_avg: 0.0,
             change_rec_time_in_src_change_q_max: 0,
             change_rec_time_in_src_change_q_min: std::u64::MAX,
@@ -279,18 +297,18 @@ impl Default for ProfilerSummary {
             change_rec_time_in_src_change_disp_avg: 0.0,
             change_rec_time_in_src_change_disp_max: 0,
             change_rec_time_in_src_change_disp_min: std::u64::MAX,
-            change_rec_time_in_change_pub_avg: 0.0,
-            change_rec_time_in_change_pub_max: 0,
-            change_rec_time_in_change_pub_min: std::u64::MAX,
+            change_rec_time_in_query_change_q_avg: 0.0,
+            change_rec_time_in_query_change_q_max: 0,
+            change_rec_time_in_query_change_q_min: std::u64::MAX,
             change_rec_time_in_query_host_avg: 0.0,
             change_rec_time_in_query_host_max: 0,
             change_rec_time_in_query_host_min: std::u64::MAX,
             change_rec_time_in_query_solver_avg: 0.0,
             change_rec_time_in_query_solver_max: 0,
             change_rec_time_in_query_solver_min: std::u64::MAX,
-            change_rec_time_in_result_disp_q_avg: 0.0,
-            change_rec_time_in_result_disp_q_max: 0,
-            change_rec_time_in_result_disp_q_min: std::u64::MAX,
+            change_rec_time_in_result_q_avg: 0.0,
+            change_rec_time_in_result_q_max: 0,
+            change_rec_time_in_result_q_min: std::u64::MAX,
             change_rec_time_total_avg: 0.0,
             change_rec_time_total_max: 0,
             change_rec_time_total_min: std::u64::MAX,
@@ -384,15 +402,16 @@ impl ResultStreamLogger for OtelMetricResultStreamLogger {
                 if change.base.metadata.is_some() {
                     let profile = ChangeRecordProfile::new(&record, &change);
 
-                    self.metrics.change_rec_count.add(1, &self.metrics_attributes);             
+                    self.metrics.change_rec_count.add(1, &self.metrics_attributes);     
+                    self.metrics.change_rec_time_in_reactivator.record(profile.time_in_reactivator as f64, &self.metrics_attributes);        
                     self.metrics.change_rec_time_in_src_change_q.record(profile.time_in_src_change_q as f64, &self.metrics_attributes);
                     self.metrics.change_rec_time_in_src_change_rtr.record(profile.time_in_src_change_rtr as f64, &self.metrics_attributes);
                     self.metrics.change_rec_time_in_src_disp_q.record(profile.time_in_src_disp_q as f64, &self.metrics_attributes);
                     self.metrics.change_rec_time_in_src_change_disp.record(profile.time_in_src_change_disp as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_change_pub.record(profile.time_in_src_change_pub as f64, &self.metrics_attributes);
+                    self.metrics.change_rec_time_in_query_change_q.record(profile.time_in_query_change_q as f64, &self.metrics_attributes);
                     self.metrics.change_rec_time_in_query_host.record(profile.time_in_query_host as f64, &self.metrics_attributes);
                     self.metrics.change_rec_time_in_query_solver.record(profile.time_in_query_solver as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_result_disp_q.record(profile.time_in_result_disp_q as f64, &self.metrics_attributes);
+                    self.metrics.change_rec_time_in_result_q.record(profile.time_in_result_q as f64, &self.metrics_attributes);
                     self.metrics.change_rec_time_total.record(profile.time_total as f64, &self.metrics_attributes);    
 
                 } else {

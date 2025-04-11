@@ -18,12 +18,13 @@ use image::{Rgb, RgbImage};
 
 use super::ChangeRecordProfile;
 
-const PROFILE_COLORS: [Rgb<u8>; 10] = [
+const PROFILE_COLORS: [Rgb<u8>; 11] = [
     Rgb([230, 25, 75]),    // Red - reactivator
     Rgb([60, 180, 75]),    // Green - source change queue
     Rgb([255, 225, 25]),   // Yellow - source change router
     Rgb([0, 130, 200]),    // Blue - source dispatch queue
     Rgb([245, 130, 48]),   // Orange - source change dispatcher
+    Rgb([255, 105, 180]),  // Pink - query pub api
     Rgb([145, 30, 180]),   // Purple - query change queue
     Rgb([70, 240, 240]),   // Cyan - query host
     Rgb([240, 50, 230]),   // Magenta - query solver
@@ -68,6 +69,7 @@ impl ProfileImageWriter {
             profile.time_in_src_change_rtr,
             profile.time_in_src_disp_q,
             profile.time_in_src_change_disp,
+            profile.time_in_query_pub_api,
             profile.time_in_query_change_q,
             profile.time_in_query_host,
             profile.time_in_query_solver,
@@ -77,11 +79,17 @@ impl ProfileImageWriter {
             0   // total for drasi only components
         ];
 
-        let drasi_sum = times[0] + times[2] + times[4] + times[6] + times[7];
-        let all_sum = drasi_sum + times[1] + times[3] + times[5] + times[8];
+        // let drasi_sum = times[0] + times[2] + times[4] + times[6] + times[7];
+        // let all_sum = drasi_sum + times[1] + times[3] + times[5] + times[8];
 
-        times[9] = times[10] - all_sum;
-        times[11] = drasi_sum;
+        // times[9] = times[10] - all_sum;
+        // times[11] = drasi_sum;
+
+        let drasi_sum = times[0] + times[2] + times[4] + times[5] + times[7] + times[8];
+        let all_sum = drasi_sum + times[1] + times[3] + times[6] + times[9];
+
+        times[10] = times[11] - all_sum;
+        times[12] = drasi_sum;
 
         self.max_total_time = max(self.max_total_time, profile.time_total);
         self.max_drasi_only_time = max(self.max_drasi_only_time, drasi_sum);
@@ -104,7 +112,7 @@ impl ProfileImageWriter {
         let header_height: u32 = 20;
         let header_span_width = self.width / PROFILE_COLORS.len() as u32; 
         let height = self.record_count as u32 + header_height;
-        let times_per_profile: usize = 12;
+        let times_per_profile: usize = PROFILE_COLORS.len() + 2;
         let mut img_abs = RgbImage::new(self.width, height);
         let mut img_rel = RgbImage::new(self.width, height);
 
@@ -132,7 +140,7 @@ impl ProfileImageWriter {
                 let mut x = 0;
                 let mut pixels_per_unit = self.width as f64 / self.max_total_time as f64;
                 let mut span_width: u32;
-                for i in 0..10 {
+                for i in 0..11 {
                     if raw_times[i] > 0 {
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
 
@@ -150,7 +158,7 @@ impl ProfileImageWriter {
                 // Relative
                 x = 0;
                 pixels_per_unit = self.width as f64 / raw_times[10] as f64;
-                for i in 0..10 {
+                for i in 0..11 {
                     if raw_times[i] > 0 {                        
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
 
@@ -178,7 +186,7 @@ impl ProfileImageWriter {
         let header_height: u32 = 20;
         let header_span_width = self.width / PROFILE_COLORS.len() as u32; 
         let height = self.record_count as u32 + header_height;
-        let times_per_profile: usize = 12;
+        let times_per_profile: usize = PROFILE_COLORS.len() + 2;
         let mut img_abs = RgbImage::new(self.width, height);
         let mut img_rel = RgbImage::new(self.width, height);
 
@@ -206,7 +214,7 @@ impl ProfileImageWriter {
                 let mut x = 0;
                 let mut pixels_per_unit = self.width as f64 / self.max_drasi_only_time as f64;
                 let mut span_width: u32;
-                for i in [0, 2, 4, 6, 7] {
+                for i in [0, 2, 4, 5, 7, 8] {
                     if raw_times[i] > 0 {
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
 
@@ -224,7 +232,7 @@ impl ProfileImageWriter {
                 // Relative
                 x = 0;
                 pixels_per_unit = self.width as f64 / raw_times[11] as f64;
-                for i in [0, 2, 4, 6, 7] {
+                for i in [0, 2, 4, 5, 7, 8] {
                     if raw_times[i] > 0 {                        
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
 

@@ -95,6 +95,7 @@ struct ChangeRecordProfile {
     pub time_in_src_change_rtr: u64,
     pub time_in_src_disp_q: u64,
     pub time_in_src_change_disp: u64,
+    pub time_in_query_pub_api: u64,
     pub time_in_query_change_q: u64,
     pub time_in_query_host: u64,
     pub time_in_query_solver: u64,
@@ -118,7 +119,10 @@ impl ChangeRecordProfile {
             time_in_src_change_rtr: metadata.source.change_router_end_ns.saturating_sub(metadata.source.change_router_start_ns),
             time_in_src_disp_q: metadata.source.change_dispatcher_start_ns.saturating_sub(metadata.source.change_router_end_ns),
             time_in_src_change_disp: metadata.source.change_dispatcher_end_ns.saturating_sub(metadata.source.change_dispatcher_start_ns),
-            time_in_query_change_q: metadata.query.dequeue_ns.saturating_sub(metadata.source.change_dispatcher_end_ns),
+            
+            time_in_query_pub_api:metadata.query.enqueue_ns.saturating_sub(metadata.source.change_dispatcher_end_ns),    
+            time_in_query_change_q: metadata.query.dequeue_ns.saturating_sub(metadata.query.enqueue_ns),
+
             time_in_query_host,
             time_in_query_solver,
             time_in_result_q: record_dequeue_time_ns.saturating_sub(metadata.query.query_end_ns),
@@ -149,6 +153,9 @@ struct ProfilerSummary{
     pub change_rec_time_in_src_change_disp_avg: f64,
     pub change_rec_time_in_src_change_disp_max: u64,
     pub change_rec_time_in_src_change_disp_min: u64,
+    pub change_rec_time_in_query_pub_api_avg: f64,
+    pub change_rec_time_in_query_pub_api_max: u64,
+    pub change_rec_time_in_query_pub_api_min: u64,
     pub change_rec_time_in_query_change_q_avg: f64,
     pub change_rec_time_in_query_change_q_max: u64,
     pub change_rec_time_in_query_change_q_min: u64,
@@ -190,6 +197,9 @@ impl Default for ProfilerSummary {
             change_rec_time_in_src_change_disp_avg: 0.0,
             change_rec_time_in_src_change_disp_max: 0,
             change_rec_time_in_src_change_disp_min: std::u64::MAX,
+            change_rec_time_in_query_pub_api_avg: 0.0,
+            change_rec_time_in_query_pub_api_max: 0,
+            change_rec_time_in_query_pub_api_min: std::u64::MAX,
             change_rec_time_in_query_change_q_avg: 0.0,
             change_rec_time_in_query_change_q_max: 0,
             change_rec_time_in_query_change_q_min: std::u64::MAX,
@@ -289,6 +299,7 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
             self.summary.change_rec_time_in_src_change_rtr_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_src_disp_q_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_src_change_disp_avg /= self.summary.change_rec_count as f64;
+            self.summary.change_rec_time_in_query_pub_api_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_query_change_q_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_query_host_avg /= self.summary.change_rec_count as f64;
             self.summary.change_rec_time_in_query_solver_avg /= self.summary.change_rec_count as f64;
@@ -310,6 +321,9 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
             self.summary.change_rec_time_in_src_change_disp_avg = 0.0;
             self.summary.change_rec_time_in_src_change_disp_max = 0;
             self.summary.change_rec_time_in_src_change_disp_min = 0;
+            self.summary.change_rec_time_in_query_pub_api_avg = 0.0;
+            self.summary.change_rec_time_in_query_pub_api_max = 0;
+            self.summary.change_rec_time_in_query_pub_api_min = 0;
             self.summary.change_rec_time_in_query_change_q_avg = 0.0;
             self.summary.change_rec_time_in_query_change_q_max = 0;
             self.summary.change_rec_time_in_query_change_q_min = 0;
@@ -371,6 +385,9 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
                     self.summary.change_rec_time_in_src_change_disp_avg += profile.time_in_src_change_disp as f64;
                     self.summary.change_rec_time_in_src_change_disp_max = std::cmp::max(self.summary.change_rec_time_in_src_change_disp_max, profile.time_in_src_change_disp);
                     self.summary.change_rec_time_in_src_change_disp_min = std::cmp::min(self.summary.change_rec_time_in_src_change_disp_min, profile.time_in_src_change_disp);
+                    self.summary.change_rec_time_in_query_pub_api_avg += profile.time_in_query_pub_api as f64;
+                    self.summary.change_rec_time_in_query_pub_api_max = std::cmp::max(self.summary.change_rec_time_in_query_pub_api_max, profile.time_in_query_pub_api);
+                    self.summary.change_rec_time_in_query_pub_api_min = std::cmp::min(self.summary.change_rec_time_in_query_pub_api_min, profile.time_in_query_pub_api);                
                     self.summary.change_rec_time_in_query_change_q_avg += profile.time_in_query_change_q as f64;
                     self.summary.change_rec_time_in_query_change_q_max = std::cmp::max(self.summary.change_rec_time_in_query_change_q_max, profile.time_in_query_change_q);
                     self.summary.change_rec_time_in_query_change_q_min = std::cmp::min(self.summary.change_rec_time_in_query_change_q_min, profile.time_in_query_change_q);

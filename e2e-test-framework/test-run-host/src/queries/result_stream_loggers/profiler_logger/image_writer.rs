@@ -109,6 +109,7 @@ impl ProfileImageWriter {
 
     async fn generate_all_image(&self) -> anyhow::Result<()> {
 
+        log::error!("Generating all image");
         let header_height: u32 = 20;
         let header_span_width = self.width / PROFILE_COLORS.len() as u32; 
         let height = self.record_count as u32 + header_height;
@@ -174,6 +175,7 @@ impl ProfileImageWriter {
                 }
             });
 
+            log::error!("Saving image");
         // Save the image
         img_abs.save(&self.all_file_abs_path)?;
         img_rel.save(&self.all_file_rel_path)?;
@@ -182,6 +184,8 @@ impl ProfileImageWriter {
     }
 
     async fn generate_drasi_only_image(&self) -> anyhow::Result<()> {
+
+        log::error!("Generating drasi only image");
 
         let header_height: u32 = 20;
         let header_span_width = self.width / PROFILE_COLORS.len() as u32; 

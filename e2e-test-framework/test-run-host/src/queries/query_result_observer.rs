@@ -643,10 +643,9 @@ impl QueryResultObserverMetrics {
     pub fn update_change_record_time(&mut self, time_ns: u64) {
         if self.result_stream_change_record_first_ns == 0 {
             self.result_stream_change_record_first_ns = time_ns;
-            self.result_stream_change_record_last_ns = time_ns;
-        } else {
-            self.result_stream_change_record_last_ns = time_ns;
         }
+
+        self.result_stream_change_record_last_ns = time_ns;
     }
 
     pub fn try_set_control_stream_bootstrap_start_time(&mut self, time_ns: u64) {

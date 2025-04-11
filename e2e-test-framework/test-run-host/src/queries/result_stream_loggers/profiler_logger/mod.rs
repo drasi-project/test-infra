@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use image_writer::ProfileImageWriter;
 use log_writer::ProfileLogWriter;
+use rate_writer::RateTracker;
 use serde::{Deserialize, Serialize};
 use tokio::fs::{create_dir_all, write};
 
@@ -28,17 +29,20 @@ use super::{ResultStreamLogger, ResultStreamLoggerError, ResultStreamLoggerResul
 
 mod image_writer;
 mod log_writer;
+mod rate_writer;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfilerResultStreamLoggerConfig {
     pub bootstrap_log_name: Option<String>,
     pub change_image_name: Option<String>,
-    pub change_log_name: Option<String>,    
+    pub change_log_name: Option<String>, 
+    pub rates_log_name: Option<String>,   
     pub image_width: Option<u32>,
     pub max_lines_per_file: Option<u64>,
     pub write_bootstrap_log: Option<bool>,
     pub write_change_image: Option<bool>,
     pub write_change_log: Option<bool>,
+    pub write_change_rates: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -46,6 +50,7 @@ pub struct ProfilerResultStreamLoggerSettings {
     pub bootstrap_log_name: String,
     pub change_image_name: String,
     pub change_log_name: String,    
+    pub rates_log_name: String,
     pub folder_path: PathBuf,
     pub image_width: u32,
     pub test_run_query_id: TestRunQueryId,
@@ -53,6 +58,7 @@ pub struct ProfilerResultStreamLoggerSettings {
     pub write_bootstrap_log: bool,
     pub write_change_image: bool,
     pub write_change_log: bool,
+    pub write_change_rates: bool,
 }
 
 impl ProfilerResultStreamLoggerSettings {
@@ -61,6 +67,7 @@ impl ProfilerResultStreamLoggerSettings {
             bootstrap_log_name: config.bootstrap_log_name.clone().unwrap_or("bootstrap".to_string()),
             change_image_name: config.change_image_name.clone().unwrap_or("change".to_string()),
             change_log_name: config.change_log_name.clone().unwrap_or("change".to_string()),
+            rates_log_name: config.rates_log_name.clone().unwrap_or("change".to_string()),
             image_width: config.image_width.unwrap_or(1200),
             folder_path,
             test_run_query_id,
@@ -68,6 +75,7 @@ impl ProfilerResultStreamLoggerSettings {
             write_bootstrap_log: config.write_bootstrap_log.unwrap_or(false),
             write_change_image: config.write_change_image.unwrap_or(false),
             write_change_log: config.write_change_log.unwrap_or(false),
+            write_change_rates: config.write_change_rates.unwrap_or(false),
         });
     }
 }
@@ -225,17 +233,18 @@ pub struct ProfilerResultStreamLogger {
     bootstrap_log_writer: Option<ProfileLogWriter>,
     change_image_writer: Option<ProfileImageWriter>,
     change_log_writer: Option<ProfileLogWriter>,
+    rates_log_writer: Option<RateTracker>,
     settings: ProfilerResultStreamLoggerSettings,
     summary: ProfilerSummary,    
 }
 
 impl ProfilerResultStreamLogger {
     pub async fn new(test_run_query_id: TestRunQueryId, def: &ProfilerResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!("Creating ProfilerResultStreamLogger for {}, from {:?}, ", test_run_query_id, def);
+        log::error!("Creating ProfilerResultStreamLogger for {}, from {:?}, ", test_run_query_id, def);
 
         let folder_path = output_storage.result_change_path.join("profiler");
         let settings = ProfilerResultStreamLoggerSettings::new(test_run_query_id, &def, folder_path)?;
-        log::trace!("Creating ProfilerResultStreamLogger with settings {:?}, ", settings);
+        log::error!("Creating ProfilerResultStreamLogger with settings {:?}, ", settings);
 
         if !std::path::Path::new(&settings.folder_path).exists() {
             match create_dir_all(&settings.folder_path).await {
@@ -262,10 +271,17 @@ impl ProfilerResultStreamLogger {
             None
         };        
 
+        let rates_log_writer = if settings.write_change_rates {
+            Some(RateTracker::new(settings.folder_path.clone(), settings.rates_log_name.clone()))
+        } else {
+            None
+        };
+
         Ok(Box::new( Self { 
             bootstrap_log_writer,
             change_image_writer,
             change_log_writer,
+            rates_log_writer,
             settings,
             summary: ProfilerSummary::default(),
         }))
@@ -347,6 +363,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
             writer.generate_image().await?;
         }
 
+        if let Some(writer) = &mut self.rates_log_writer {
+            writer.write_to_csv().await?;
+        }
+        
         Ok(ResultStreamLoggerResult {
             has_output: true,
             logger_name: "Profiler".to_string(),
@@ -367,6 +387,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
 
                     if let Some(writer) = &mut self.change_image_writer {
                         writer.add_change_profile(&profile).await?;    
+                    }
+
+                    if let Some(writer) = &mut self.rates_log_writer {
+                        writer.process_record(&record, &change);
                     }
 
                     self.summary.change_rec_count += 1;

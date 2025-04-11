@@ -254,34 +254,26 @@ impl ProfilerResultStreamLogger {
         }        
 
         let bootstrap_log_writer = if settings.write_bootstrap_log {
-            log::error!("Creating bootstrap log writer");
             Some(ProfileLogWriter::new(settings.folder_path.clone(), settings.bootstrap_log_name.clone(), settings.max_lines_per_file).await?)
         } else {
-            log::error!("Not creating bootstrap log writer");
             None
         };
 
         let change_log_writer = if settings.write_change_log {
-            log::error!("Creating change log writer");
             Some(ProfileLogWriter::new(settings.folder_path.clone(), settings.change_log_name.clone(), settings.max_lines_per_file).await?)
         } else {
-            log::error!("Not creating change log writer");
             None
         };
 
         let change_image_writer = if settings.write_change_image {
-            log::error!("Creating change image writer");
             Some(ProfileImageWriter::new(settings.folder_path.clone(), settings.change_image_name.clone(), settings.image_width).await?)
         } else {
-            log::error!("Not creating change image writer");
             None
         };        
 
         let rates_log_writer = if settings.write_change_rates {
-            log::error!("Creating rates log writer");
             Some(RateTracker::new(settings.folder_path.clone(), settings.rates_log_name.clone()))
         } else {
-            log::error!("Not creating rates log writer");
             None
         };
 
@@ -301,12 +293,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
     async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult> {
 
         if let Some(writer) = &mut self.bootstrap_log_writer {
-            log::error!("Closing bootstrap log writer");
             writer.close().await?;
         }
 
         if let Some(writer) = &mut self.change_log_writer {
-            log::error!("Closing change log writer");
             writer.close().await?;
         }        
 
@@ -371,12 +361,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
         write(summary_path, serde_json::to_string_pretty(&self.summary)?).await?;
 
         if let Some(writer) = &mut self.change_image_writer {
-            log::error!("Closing change image writer");
             writer.generate_image().await?;
         }
 
         if let Some(writer) = &mut self.rates_log_writer {
-            log::error!("Closing rates log writer");
             writer.write_to_csv().await?;
         }
         
@@ -395,17 +383,14 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
                     let profile = ChangeRecordProfile::new(&record, &change);
 
                     if let Some(writer) = &mut self.change_log_writer {
-                        log::error!("Writing change log profile");
                         writer.write_change_profile(&profile).await?;
                     }
 
                     if let Some(writer) = &mut self.change_image_writer {
-                        log::error!("Writing change image profile");
                         writer.add_change_profile(&profile).await?;    
                     }
 
                     if let Some(writer) = &mut self.rates_log_writer {
-                        log::error!("Writing change rates profile");
                         writer.process_record(&record, &change);
                     }
 

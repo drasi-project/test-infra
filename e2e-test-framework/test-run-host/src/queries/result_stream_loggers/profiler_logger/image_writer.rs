@@ -79,12 +79,6 @@ impl ProfileImageWriter {
             0   // total for drasi only components
         ];
 
-        // let drasi_sum = times[0] + times[2] + times[4] + times[6] + times[7];
-        // let all_sum = drasi_sum + times[1] + times[3] + times[5] + times[8];
-
-        // times[9] = times[10] - all_sum;
-        // times[11] = drasi_sum;
-
         let drasi_sum = times[0] + times[2] + times[4] + times[5] + times[7] + times[8];
         let all_sum = drasi_sum + times[1] + times[3] + times[6] + times[9];
 
@@ -109,7 +103,6 @@ impl ProfileImageWriter {
 
     async fn generate_all_image(&self) -> anyhow::Result<()> {
 
-        log::error!("Generating all image");
         let header_height: u32 = 20;
         let header_span_width = self.width / PROFILE_COLORS.len() as u32; 
         let height = self.record_count as u32 + header_height;
@@ -158,7 +151,7 @@ impl ProfileImageWriter {
 
                 // Relative
                 x = 0;
-                pixels_per_unit = self.width as f64 / raw_times[10] as f64;
+                pixels_per_unit = self.width as f64 / raw_times[11] as f64;
                 for i in 0..11 {
                     if raw_times[i] > 0 {                        
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
@@ -175,7 +168,6 @@ impl ProfileImageWriter {
                 }
             });
 
-            log::error!("Saving image");
         // Save the image
         img_abs.save(&self.all_file_abs_path)?;
         img_rel.save(&self.all_file_rel_path)?;
@@ -184,8 +176,6 @@ impl ProfileImageWriter {
     }
 
     async fn generate_drasi_only_image(&self) -> anyhow::Result<()> {
-
-        log::error!("Generating drasi only image");
 
         let header_height: u32 = 20;
         let header_span_width = self.width / PROFILE_COLORS.len() as u32; 

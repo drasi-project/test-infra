@@ -225,7 +225,7 @@ impl ProfileImageWriter {
 
                 // Relative
                 x = 0;
-                pixels_per_unit = self.width as f64 / raw_times[11] as f64;
+                pixels_per_unit = self.width as f64 / raw_times[12] as f64;
                 for i in [0, 2, 4, 5, 7, 8] {
                     if raw_times[i] > 0 {                        
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;

@@ -15,6 +15,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use distribution_writer::TimeDistributionTracker;
 use image_writer::ProfileImageWriter;
 use log_writer::ProfileLogWriter;
 use rate_writer::RateTracker;
@@ -27,6 +28,7 @@ use crate::queries::{result_stream_handlers::ResultStreamRecord, result_stream_r
 
 use super::{ResultStreamLogger, ResultStreamLoggerError, ResultStreamLoggerResult};
 
+mod distribution_writer;
 mod image_writer;
 mod log_writer;
 mod rate_writer;
@@ -36,6 +38,7 @@ pub struct ProfilerResultStreamLoggerConfig {
     pub bootstrap_log_name: Option<String>,
     pub change_image_name: Option<String>,
     pub change_log_name: Option<String>, 
+    pub distribution_log_name: Option<String>,
     pub rates_log_name: Option<String>,   
     pub image_width: Option<u32>,
     pub max_lines_per_file: Option<u64>,
@@ -43,6 +46,7 @@ pub struct ProfilerResultStreamLoggerConfig {
     pub write_change_image: Option<bool>,
     pub write_change_log: Option<bool>,
     pub write_change_rates: Option<bool>,
+    pub write_distributions: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -50,6 +54,7 @@ pub struct ProfilerResultStreamLoggerSettings {
     pub bootstrap_log_name: String,
     pub change_image_name: String,
     pub change_log_name: String,    
+    pub distribution_log_name: String,
     pub rates_log_name: String,
     pub folder_path: PathBuf,
     pub image_width: u32,
@@ -59,6 +64,7 @@ pub struct ProfilerResultStreamLoggerSettings {
     pub write_change_image: bool,
     pub write_change_log: bool,
     pub write_change_rates: bool,
+    pub write_distributions: bool,
 }
 
 impl ProfilerResultStreamLoggerSettings {
@@ -67,6 +73,7 @@ impl ProfilerResultStreamLoggerSettings {
             bootstrap_log_name: config.bootstrap_log_name.clone().unwrap_or("bootstrap".to_string()),
             change_image_name: config.change_image_name.clone().unwrap_or("change".to_string()),
             change_log_name: config.change_log_name.clone().unwrap_or("change".to_string()),
+            distribution_log_name: config.distribution_log_name.clone().unwrap_or("change".to_string()),
             rates_log_name: config.rates_log_name.clone().unwrap_or("change".to_string()),
             image_width: config.image_width.unwrap_or(1200),
             folder_path,
@@ -76,6 +83,7 @@ impl ProfilerResultStreamLoggerSettings {
             write_change_image: config.write_change_image.unwrap_or(false),
             write_change_log: config.write_change_log.unwrap_or(false),
             write_change_rates: config.write_change_rates.unwrap_or(false),
+            write_distributions: config.write_distributions.unwrap_or(false),
         });
     }
 }
@@ -231,6 +239,7 @@ impl Default for ProfilerSummary {
 
 pub struct ProfilerResultStreamLogger {    
     bootstrap_log_writer: Option<ProfileLogWriter>,
+    distribution_writer: Option<TimeDistributionTracker>,
     change_image_writer: Option<ProfileImageWriter>,
     change_log_writer: Option<ProfileLogWriter>,
     rates_log_writer: Option<RateTracker>,
@@ -259,6 +268,12 @@ impl ProfilerResultStreamLogger {
             None
         };
 
+        let distribution_writer = if settings.write_distributions {
+            Some(TimeDistributionTracker::new(settings.folder_path.clone(), settings.distribution_log_name.clone()))
+        } else {
+            None
+        };
+
         let change_log_writer = if settings.write_change_log {
             Some(ProfileLogWriter::new(settings.folder_path.clone(), settings.change_log_name.clone(), settings.max_lines_per_file).await?)
         } else {
@@ -279,6 +294,7 @@ impl ProfilerResultStreamLogger {
 
         Ok(Box::new( Self { 
             bootstrap_log_writer,
+            distribution_writer,
             change_image_writer,
             change_log_writer,
             rates_log_writer,
@@ -360,6 +376,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
 
         write(summary_path, serde_json::to_string_pretty(&self.summary)?).await?;
 
+        if let Some(writer) = &mut self.distribution_writer {
+            writer.write_to_csv().await?;
+        }
+
         if let Some(writer) = &mut self.change_image_writer {
             writer.generate_image().await?;
         }
@@ -381,6 +401,10 @@ impl ResultStreamLogger for ProfilerResultStreamLogger {
             QueryResultRecord::Change(change) => {
                 if change.base.metadata.is_some() {
                     let profile = ChangeRecordProfile::new(&record, &change);
+
+                    if let Some(writer) = &mut self.distribution_writer {
+                        writer.process_record(&profile);
+                    }
 
                     if let Some(writer) = &mut self.change_log_writer {
                         writer.write_change_profile(&profile).await?;

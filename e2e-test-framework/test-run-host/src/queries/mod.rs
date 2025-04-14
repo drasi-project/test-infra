@@ -19,13 +19,18 @@ use serde::{Deserialize, Serialize};
 
 use result_stream_loggers::ResultStreamLoggerConfig;
 use query_result_observer::{QueryResultObserver, QueryResultObserverCommandResponse, QueryResultObserverExternalState};
-use test_data_store::{test_repo_storage::models::TestQueryDefinition, test_run_storage::{ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId, TestRunQueryStorage}};
+use test_data_store::{test_repo_storage::models::{StopTriggerDefinition, TestQueryDefinition}, test_run_storage::{ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId, TestRunQueryStorage}};
 
 pub mod query_result_observer;
 mod result_stream_handlers;
 pub mod result_stream_loggers;
 mod result_stream_record;
 mod stop_triggers;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TestRunQueryOverrides {
+    pub stop_trigger: Option<StopTriggerDefinition>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunQueryConfig {
@@ -35,6 +40,7 @@ pub struct TestRunQueryConfig {
     pub test_repo_id: String,
     pub test_run_id: Option<String>,
     pub test_query_id: String,
+    pub test_run_overrides: Option<TestRunQueryOverrides>,
     #[serde(default)]
     pub loggers: Vec<ResultStreamLoggerConfig>,
 }
@@ -79,6 +85,7 @@ pub struct TestRunQueryDefinition {
     pub loggers: Vec<ResultStreamLoggerConfig>,
     pub start_immediately: bool,    
     pub test_query_definition: TestQueryDefinition,
+    pub test_run_overrides: Option<TestRunQueryOverrides>,
 }
 
 impl TestRunQueryDefinition {
@@ -88,6 +95,7 @@ impl TestRunQueryDefinition {
             loggers: test_run_query_config.loggers,
             start_immediately: test_run_query_config.start_immediately,
             test_query_definition,
+            test_run_overrides: test_run_query_config.test_run_overrides,
         })
     }
 }
@@ -114,7 +122,8 @@ impl TestRunQuery {
             definition.id.clone(),
             definition.test_query_definition.clone(), 
             output_storage,
-            definition.loggers
+            definition.loggers,
+            definition.test_run_overrides
         ).await?;
 
         let trr = Self { 

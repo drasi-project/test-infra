@@ -51,7 +51,13 @@ data:
                     "write_change_rates": true,
                     "write_distributions": true
                   }
-                ]
+                ],
+                "test_run_overrides" : {
+                  "stop_trigger": {
+                    "kind": "RecordSequenceNumber",
+                    "record_sequence_number": 10000
+                  }
+                }                
               }          
             ],
             "sources": [

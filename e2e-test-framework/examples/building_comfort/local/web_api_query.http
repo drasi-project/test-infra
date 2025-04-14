@@ -21,7 +21,7 @@
 @repo_id = local_dev_repo
 @test_id = building_comfort
 @test_run_id = test_run_001
-@query_id = building_comfort
+@query_id = room-comfort-level
 
 ### Homepage
 GET http://{{hostname}}:{{port}}

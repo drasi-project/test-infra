@@ -217,8 +217,8 @@ impl GraphElementType {
     pub const BUILDING: &'static str = "Building";
     pub const FLOOR: &'static str = "Floor";
     pub const ROOM: &'static str = "Room";
-    pub const BUILDING_FLOOR: &'static str = "BuildingFloor";
-    pub const FLOOR_ROOM: &'static str = "FloorRoom";
+    pub const BUILDING_FLOOR: &'static str = "BUILDING_FLOOR";
+    pub const FLOOR_ROOM: &'static str = "FLOOR_ROOM";
 }
 
 // Structs for building, floor, and room

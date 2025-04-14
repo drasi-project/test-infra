@@ -47,7 +47,9 @@ data:
                     "kind": "Profiler",
                     "write_bootstrap_log": false,
                     "write_change_image": true,
-                    "write_change_log": false
+                    "write_change_log": false,
+                    "write_change_rates": true,
+                    "write_distributions": true
                   }
                 ]
               }          
@@ -63,7 +65,14 @@ data:
                   "model_data_generator": {
                     "spacing_mode": "none",
                     "time_mode": "live"
-                  }
+                  },
+                  "source_change_dispatchers": [
+                    {
+                      "kind": "RedisStream",
+                      "host": "drasi-redis",
+                      "port": 6379
+                    }
+                  ]
                 }
               }          
             ]

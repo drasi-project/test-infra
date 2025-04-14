@@ -149,7 +149,7 @@ impl RateTracker {
     }
     
     // Write to CSV with each component as a column
-    pub async fn write_to_csv(&self) -> Result<()> {
+    pub async fn generate_csv(&self) -> Result<()> {
         // Don't write anything if we haven't started yet
         if !self.has_started {
             return Ok(());

@@ -100,7 +100,7 @@ impl TimeDistributionTracker {
     }
     
     // Write to CSV with buckets as rows and components as columns
-    pub async fn write_to_csv(&self) -> Result<()> {
+    pub async fn generate_csv(&self) -> Result<()> {
         let file_exists = Path::new(&self.file_path).exists();
         
         let mut file = if file_exists {

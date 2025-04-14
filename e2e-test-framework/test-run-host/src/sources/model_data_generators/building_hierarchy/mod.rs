@@ -309,19 +309,19 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
         let mut bootstrap_data = BootstrapData::new();
 
         if building_nodes.len() > 0 {
-            bootstrap_data.nodes.insert("Building".to_string(), building_nodes);
+            bootstrap_data.nodes.insert(GraphElementType::BUILDING.to_string(), building_nodes);
         }   
         if floor_nodes.len() > 0 {
-            bootstrap_data.nodes.insert("Floor".to_string(), floor_nodes);
+            bootstrap_data.nodes.insert(GraphElementType::FLOOR.to_string(), floor_nodes);
         }
         if room_nodes.len() > 0 {
-            bootstrap_data.nodes.insert("Room".to_string(), room_nodes);
+            bootstrap_data.nodes.insert(GraphElementType::ROOM.to_string(), room_nodes);
         }
         if building_floor_rels.len() > 0 {
-            bootstrap_data.rels.insert("BuildingFloor".to_string(), building_floor_rels);
+            bootstrap_data.rels.insert(GraphElementType::BUILDING_FLOOR.to_string(), building_floor_rels);
         }
         if floor_room_rels.len() > 0 {
-            bootstrap_data.rels.insert("FloorRoom".to_string(), floor_room_rels);
+            bootstrap_data.rels.insert(GraphElementType::FLOOR_ROOM.to_string(), floor_room_rels);
         }
 
         Ok(bootstrap_data)

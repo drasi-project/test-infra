@@ -20,13 +20,13 @@ use time::{OffsetDateTime, format_description};
 use tokio::{sync::{mpsc::{Receiver, Sender}, oneshot, Mutex}, task::JoinHandle};
 
 use test_data_store::{
-    test_repo_storage::models::TestQueryDefinition, 
+    test_repo_storage::models::{StopTriggerDefinition, TestQueryDefinition}, 
     test_run_storage::{TestRunQueryId, TestRunQueryStorage}
 };
 
 use crate::queries::{result_stream_handlers::create_result_stream_handler, result_stream_record::{ControlSignal, QueryResultRecord}, stop_triggers::create_stop_trigger};
 
-use super::{result_stream_handlers::{ResultStreamHandler, ResultStreamHandlerMessage, ResultStreamRecord, ResultStreamStatus}, result_stream_loggers::{create_result_stream_loggers, ResultStreamLogger, ResultStreamLoggerResult}, stop_triggers::StopTrigger, ResultStreamLoggerConfig};
+use super::{result_stream_handlers::{ResultStreamHandler, ResultStreamHandlerMessage, ResultStreamRecord, ResultStreamStatus}, result_stream_loggers::{create_result_stream_loggers, ResultStreamLogger, ResultStreamLoggerResult}, stop_triggers::StopTrigger, ResultStreamLoggerConfig, TestRunQueryOverrides};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum QueryResultObserverStatus {
@@ -72,6 +72,7 @@ pub struct QueryResultObserverSettings {
     pub id: TestRunQueryId,
     pub loggers: Vec<ResultStreamLoggerConfig>,
     pub output_storage: TestRunQueryStorage,
+    pub stop_trigger: StopTriggerDefinition
 }
 
 impl QueryResultObserverSettings {
@@ -80,14 +81,24 @@ impl QueryResultObserverSettings {
         definition: TestQueryDefinition, 
         output_storage: TestRunQueryStorage,
         loggers: Vec<ResultStreamLoggerConfig>,
+        test_run_overrides: Option<TestRunQueryOverrides>,
     ) -> anyhow::Result<Self> {
 
-        Ok(QueryResultObserverSettings {
+        let mut settings = Self {
+            stop_trigger: definition.stop_trigger.clone(),
             definition,
             id: test_run_query_id,
             loggers,
             output_storage,
-        })
+        };
+
+        if let Some(overrides) = test_run_overrides {
+            if let Some(stop_trigger) = &overrides.stop_trigger {
+                settings.stop_trigger = stop_trigger.clone();
+            }
+        }
+
+        Ok(settings)
     }
 
     pub fn get_id(&self) -> TestRunQueryId {
@@ -127,8 +138,9 @@ impl QueryResultObserver {
         definition: TestQueryDefinition, 
         output_storage: TestRunQueryStorage,
         loggers: Vec<ResultStreamLoggerConfig>,
+        test_run_overrides: Option<TestRunQueryOverrides>,
     ) -> anyhow::Result<Self> {
-        let settings = QueryResultObserverSettings::new(test_run_query_id, definition, output_storage.clone(), loggers).await?;
+        let settings = QueryResultObserverSettings::new(test_run_query_id, definition, output_storage.clone(), loggers, test_run_overrides).await?;
         log::debug!("Creating QueryResultObserver from {:?}", &settings);
 
         let (observer_tx_channel, observer_rx_channel) = tokio::sync::mpsc::channel(100);
@@ -241,7 +253,7 @@ impl QueryResultObserverInternalState {
         let result_stream_handler = create_result_stream_handler(settings.id.clone(), settings.definition.result_stream_handler.clone()).await?;
         let result_stream_handler_rx_channel = result_stream_handler.init().await?;
         let loggers = create_result_stream_loggers(settings.id.clone(), &settings.loggers, &settings.output_storage).await?;        
-        let stop_trigger = create_stop_trigger(&settings.definition.stop_trigger).await?;
+        let stop_trigger = create_stop_trigger(&settings.stop_trigger).await?;
 
         Ok(Self {
             result_stream_handler,

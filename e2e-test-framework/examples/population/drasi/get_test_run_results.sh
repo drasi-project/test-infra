@@ -42,7 +42,7 @@ fi
 kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.population.test_run_001/sources/geo-db/test_run_summary.json" "./${TEST_RUN_ID}/source_summary.json"
 
 # Query Observer
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.population.test_run_001/queries/city-population/test_run_summary.json" "./${TEST_RUN_ID}/query_summary.json"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.population.test_run_001/queries/city-population/summary.json" "./${TEST_RUN_ID}/query_summary.json"
 
 # Query Result Profiler
 kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.population.test_run_001/queries/city-population/result_stream_log/profiler/summary.json" "./${TEST_RUN_ID}/query_profiler_summary.json"
@@ -55,4 +55,4 @@ kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_
 kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.population.test_run_001/queries/city-population/result_stream_log/profiler/change_rates.csv" "./${TEST_RUN_ID}/query_profiler_change_rates.csv"
 kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.population.test_run_001/queries/city-population/result_stream_log/profiler/change_distributions.csv" "./${TEST_RUN_ID}/query_profiler_change_distributions.csv"
 
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.population.test_run_001/queries/city-population/result_stream_log/profiler/change_00000.jsonl" "./${TEST_RUN_ID}/query_profiler_change_log_sample.jsonl"
+# kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.population.test_run_001/queries/city-population/result_stream_log/profiler/change_00000.jsonl" "./${TEST_RUN_ID}/query_profiler_change_log_sample.jsonl"

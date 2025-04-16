@@ -42,7 +42,7 @@ fi
 kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/sources/facilities-db/test_run_summary.json" "./${TEST_RUN_ID}/source_summary.json"
 
 # Query Observer
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/summary.json" "./${TEST_RUN_ID}/query_summary.json"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/test_run_summary.json" "./${TEST_RUN_ID}/query_summary.json"
 
 # Query Result Profiler
 kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/summary.json" "./${TEST_RUN_ID}/query_profiler_summary.json"

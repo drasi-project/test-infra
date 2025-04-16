@@ -55,7 +55,7 @@ data:
                 "test_run_overrides" : {
                   "stop_trigger": {
                     "kind": "RecordSequenceNumber",
-                    "record_sequence_number": 10000
+                    "record_sequence_number": 96000
                   }
                 }                
               }          

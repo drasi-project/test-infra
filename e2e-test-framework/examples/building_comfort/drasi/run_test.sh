@@ -37,8 +37,8 @@ drasi wait -f examples/building_comfort/drasi/source.yaml -t 200
 
 # Create the Continuous Queries
 echo -e "${GREEN}\n\nCreating Drasi Continuous Queries...${RESET}"
-drasi apply -f examples/building_comfort/drasi/query.yaml
-drasi wait -f examples/building_comfort/drasi/query.yaml -t 200
+drasi apply -f examples/building_comfort/drasi/query_container_redis/query.yaml
+drasi wait -f examples/building_comfort/drasi/query_container_redis/query.yaml -t 200
 
 # Forward the Test Service port and configure the Repository, Source, and Query
 echo -e "${GREEN}\n\nPort forwarding to enable access the Test Service Web API...${RESET}"

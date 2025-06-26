@@ -1,13 +1,15 @@
 kind: QueryContainer
 apiVersion: v1
-name: default
+name: rocks-container
 spec:
   queryHostCount: 1
-  defaultStore: memory
+  defaultStore: rocks
   storage:
-    memory:
-      kind: memory
+    rocks:
+      kind: rocksDb
+      storageClass: azurefile-csi-premium
       enableArchive: false
+      directIo: false
   results:
     MONGO_URI: mongodb://drasi-mongo:27017
     MONGO_RESULT_STORE_DB_NAME: Drasi

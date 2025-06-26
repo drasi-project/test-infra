@@ -13,7 +13,7 @@
 # limitations under the License.
 
 FROM rust:1.82 AS builder
-# rust:1.81-bullseye
+
 RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
 
 WORKDIR /usr/src

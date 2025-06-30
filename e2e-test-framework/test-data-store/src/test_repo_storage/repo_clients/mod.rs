@@ -18,10 +18,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize, Serializer};
 
 use azure_storage_blob_test_repo_client::AzureStorageBlobTestRepoClient;
+use github_test_repo_client::GithubTestRepoClient;
 
 use super::models::{LocalTestDefinition, TestSourceDefinition};
 
 pub mod azure_storage_blob_test_repo_client;
+pub mod github_test_repo_client;
 pub mod local_storage_test_repo_client;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,6 +34,12 @@ pub enum TestRepoConfig {
         common_config: CommonTestRepoConfig,
         #[serde(flatten)]
         unique_config: AzureStorageBlobTestRepoConfig,
+    },
+    GitHub {
+        #[serde(flatten)]
+        common_config: CommonTestRepoConfig,
+        #[serde(flatten)]
+        unique_config: GithubTestRepoConfig,
     },
     LocalStorage {
         #[serde(flatten)]
@@ -45,6 +53,7 @@ impl TestRepoConfig {
     pub fn get_id(&self) -> String {
         match self {
             TestRepoConfig::AzureStorageBlob { common_config, .. } => common_config.id.clone(),
+            TestRepoConfig::GitHub { common_config, .. } => common_config.id.clone(),
             TestRepoConfig::LocalStorage { common_config, .. } => common_config.id.clone(),
         }
     }
@@ -52,6 +61,7 @@ impl TestRepoConfig {
     pub fn get_local_tests(&self) -> Vec<LocalTestDefinition> {
         match self {
             TestRepoConfig::AzureStorageBlob { common_config, .. } => common_config.local_tests.clone(),
+            TestRepoConfig::GitHub { common_config, .. } => common_config.local_tests.clone(),
             TestRepoConfig::LocalStorage { common_config, .. } => common_config.local_tests.clone(),
         }
     }
@@ -83,6 +93,20 @@ where
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GithubTestRepoConfig {
+    #[serde(default = "drasi_project")]
+    pub owner: String,
+    #[serde(default = "test_infra")]
+    pub repo: String,
+    #[serde(default = "main")]
+    pub branch: String,
+    #[serde(default = "is_false")]
+    pub force_cache_refresh: bool,
+    pub root_path: String,
+    pub token: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LocalStorageTestRepoConfig {
     pub source_path: Option<String>,
 }
@@ -108,6 +132,8 @@ pub async fn create_test_repo_client(config: TestRepoConfig) -> anyhow::Result<B
     match config {
         TestRepoConfig::AzureStorageBlob{common_config, unique_config} 
             => AzureStorageBlobTestRepoClient::new(common_config, unique_config).await,
+        TestRepoConfig::GitHub{common_config, unique_config}
+            => GithubTestRepoClient::new(common_config, unique_config).await,
         TestRepoConfig::LocalStorage{common_config, unique_config}
             => local_storage_test_repo_client::LocalStorageTestRepoClient::new(common_config, unique_config).await,
     }

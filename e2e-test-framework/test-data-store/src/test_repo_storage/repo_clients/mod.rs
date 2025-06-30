@@ -98,12 +98,24 @@ pub struct GithubTestRepoConfig {
     pub owner: String,
     #[serde(default = "test_infra")]
     pub repo: String,
-    #[serde(default = "main")]
+    #[serde(default = "main_branch")]
     pub branch: String,
     #[serde(default = "is_false")]
     pub force_cache_refresh: bool,
     pub root_path: String,
     pub token: Option<String>,
+}
+
+fn drasi_project() -> String {
+    "drasi-project".to_string()
+}
+
+fn test_infra() -> String {
+    "test-infra".to_string()
+}
+
+fn main_branch() -> String {
+    "main".to_string()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

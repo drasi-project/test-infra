@@ -96,7 +96,7 @@ where
 pub struct GithubTestRepoConfig {
     #[serde(default = "drasi_project")]
     pub owner: String,
-    #[serde(default = "test_infra")]
+    #[serde(default = "test_repo")]
     pub repo: String,
     #[serde(default = "main_branch")]
     pub branch: String,
@@ -110,8 +110,8 @@ fn drasi_project() -> String {
     "drasi-project".to_string()
 }
 
-fn test_infra() -> String {
-    "test-infra".to_string()
+fn test_repo() -> String {
+    "test-repo".to_string()
 }
 
 fn main_branch() -> String {

@@ -22,6 +22,11 @@ echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
 # # This is a workaround for the issue with the init command regularly failing.
 # drasi init 
 
+# Update the Query Host to use Redis as the Index
+echo -e "${GREEN}\n\nUpdating Query Host to use Redis Index...${RESET}"
+drasi apply -f examples/building_comfort/drasi/query_container_redis/query_container_redis.yaml
+drasi wait -f examples/building_comfort/drasi/query_container_redis/query_container_redis.yaml -t 200
+
 # Deploy the Test Service and wait for it to be available
 echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"
 kubectl apply -f examples/building_comfort/drasi/test_service_deployment.yaml
@@ -37,8 +42,8 @@ drasi wait -f examples/building_comfort/drasi/source.yaml -t 200
 
 # Create the Continuous Queries
 echo -e "${GREEN}\n\nCreating Drasi Continuous Queries...${RESET}"
-drasi apply -f examples/building_comfort/drasi/query_container_redis/query.yaml
-drasi wait -f examples/building_comfort/drasi/query_container_redis/query.yaml -t 200
+drasi apply -f examples/building_comfort/drasi/query_container_redis/query_redis.yaml
+drasi wait -f examples/building_comfort/drasi/query_container_redis/query_redis.yaml -t 200
 
 # Forward the Test Service port and configure the Repository, Source, and Query
 echo -e "${GREEN}\n\nPort forwarding to enable access the Test Service Web API...${RESET}"

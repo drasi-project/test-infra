@@ -22,8 +22,8 @@ drasi init
 # This is a workaround for the issue with the init command regularly failing.
 drasi init 
 
-# Update the Query Host to use Rocks as a Index
-echo -e "${GREEN}\n\nUpdating Query Host to use a Rocks Index...${RESET}"
+# Update the Query Host to use In-memory as the Index
+echo -e "${GREEN}\n\nUpdating Query Host to use In-memory Index...${RESET}"
 drasi apply -f examples/building_comfort/drasi/query_container_memory/query_container_memory.yaml
 drasi wait -f examples/building_comfort/drasi/query_container_memory/query_container_memory.yaml -t 200
 

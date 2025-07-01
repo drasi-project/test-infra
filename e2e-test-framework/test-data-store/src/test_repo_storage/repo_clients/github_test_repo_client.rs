@@ -244,11 +244,11 @@ async fn download_github_repo_file(
 
     let json: Value = response.json().await?;
 
-    let donwload_url = json.get("download_url")
+    let download_url = json.get("download_url")
         .and_then(|url| url.as_str())
         .ok_or_else(|| anyhow::anyhow!("No download URL found in GitHub API response"))?;
 
-    let download_response = client.get(donwload_url)
+    let download_response = client.get(download_url)
         .send().await?;
 
     if !download_response.status().is_success() {

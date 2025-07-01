@@ -14,7 +14,7 @@
 
 kind: QueryContainer
 apiVersion: v1
-name: default
+name: redis-container
 spec:
   queryHostCount: 1
   defaultStore: redis

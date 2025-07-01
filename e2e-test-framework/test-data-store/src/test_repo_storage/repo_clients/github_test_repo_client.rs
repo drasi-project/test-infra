@@ -15,7 +15,6 @@
 use std::{collections::HashMap, path::PathBuf, pin::Pin};
 
 use async_trait::async_trait;
-use base64::Engine;
 use reqwest::Client;
 use serde_json::Value;
 use tokio::{fs::File, io::AsyncWriteExt};

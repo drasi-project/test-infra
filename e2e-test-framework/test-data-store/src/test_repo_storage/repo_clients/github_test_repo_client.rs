@@ -89,53 +89,57 @@ impl GithubTestRepoClient {
     }
 
     async fn download_bootstrap_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
-        log::debug!("Downloading Bootstrap Script Files from {:?} to {:?}", repo_folder, local_folder);
+        todo!();
+        // This is still WIP; we will work on this when we have fixed the population test.
+        // log::debug!("Downloading Bootstrap Script Files from {:?} to {:?}", repo_folder, local_folder);
 
-        let mut file_path_list = download_github_repo_folder(
-            self.client.clone(),
-            self.settings.owner.clone(),
-            self.settings.repo.clone(),
-            self.settings.branch.clone(),
-            local_folder,
-            repo_folder,
-        ).await?;
-        log::trace!("Bootstrap Script Files: {:?}", file_path_list);
+        // let mut file_path_list = download_github_repo_folder(
+        //     self.client.clone(),
+        //     self.settings.owner.clone(),
+        //     self.settings.repo.clone(),
+        //     self.settings.branch.clone(),
+        //     local_folder,
+        //     repo_folder,
+        // ).await?;
+        // log::trace!("Bootstrap Script Files: {:?}", file_path_list);
 
-        // Sort the list of files by the file name to get them in the correct order for processing.
-        file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        // // Sort the list of files by the file name to get them in the correct order for processing.
+        // file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
-        // Group the files by the data type name, which is the parent folder name of the file and turn it into a HashMap
-        // using the data type name as the key and a vector of file paths as the value.
-        let mut file_path_map = HashMap::new();
-        for file_path in file_path_list {
-            let data_type_name = file_path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string();
-            if !file_path_map.contains_key(&data_type_name) {
-                file_path_map.insert(data_type_name.clone(), vec![]);
-            }
-            file_path_map.get_mut(&data_type_name).unwrap().push(file_path);
-        }
-        log::trace!("Bootstrap Script Map: {:?}", file_path_map);
+        // // Group the files by the data type name, which is the parent folder name of the file and turn it into a HashMap
+        // // using the data type name as the key and a vector of file paths as the value.
+        // let mut file_path_map = HashMap::new();
+        // for file_path in file_path_list {
+        //     let data_type_name = file_path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string();
+        //     if !file_path_map.contains_key(&data_type_name) {
+        //         file_path_map.insert(data_type_name.clone(), vec![]);
+        //     }
+        //     file_path_map.get_mut(&data_type_name).unwrap().push(file_path);
+        // }
+        // log::trace!("Bootstrap Script Map: {:?}", file_path_map);
 
-        Ok(file_path_map)
+        // Ok(file_path_map)
     }
 
     async fn download_change_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
-        log::debug!("Downloading Source Change Script Files from {:?} to {:?}", repo_folder, local_folder);
+        todo!();
+        // This is still WIP; we will work on this when we have fixed the population test.
+        // log::debug!("Downloading Source Change Script Files from {:?} to {:?}", repo_folder, local_folder);
 
-        let mut file_path_list = download_github_repo_folder(
-            self.client.clone(),
-            self.settings.owner.clone(),
-            self.settings.repo.clone(),
-            self.settings.branch.clone(),
-            local_folder,
-            repo_folder,
-        ).await?;
-        log::trace!("Change Scripts Files: {:?}", file_path_list);
+        // let mut file_path_list = download_github_repo_folder(
+        //     self.client.clone(),
+        //     self.settings.owner.clone(),
+        //     self.settings.repo.clone(),
+        //     self.settings.branch.clone(),
+        //     local_folder,
+        //     repo_folder,
+        // ).await?;
+        // log::trace!("Change Scripts Files: {:?}", file_path_list);
 
-        // Sort the list of files by the file name to get them in the correct order for processing.
-        file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        // // Sort the list of files by the file name to get them in the correct order for processing.
+        // file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
-        Ok(file_path_list)
+        // Ok(file_path_list)
     }
 }
 
@@ -211,122 +215,6 @@ impl RemoteTestRepoClient for GithubTestRepoClient {
     }
 }
 
-fn download_github_repo_folder(
-    client: Client,
-    owner: String,
-    repo: String,
-    branch: String,
-    local_repo_folder: PathBuf,
-    remote_repo_folder: String, 
-) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<Vec<PathBuf>>> + Send>> {
-    Box::pin(async move {
-
-    // Create the local folder if it doesn't exist.
-    if !local_repo_folder.exists() {
-        tokio::fs::create_dir_all(&local_repo_folder).await?;
-    }
-
-    // Vector of tasks to download the files.
-    // Each task will download a single file.
-    // All downloads must be complete before returning.
-    let mut tasks = vec![];
-
-    // Vector of local file paths being downloaded.
-    let mut local_file_paths = vec![];
-
-    // Get directory contents from GitHub API
-    let items = list_github_directory_contents(&client, &owner, &repo, &branch, &remote_repo_folder).await?;
-    
-    for item in items {
-        if let (Some(name), Some(item_type), Some(path)) = (
-            item.get("name").and_then(|n| n.as_str()),
-            item.get("type").and_then(|t| t.as_str()),
-            item.get("path").and_then(|p| p.as_str())
-        ) {
-            let local_item_path = local_repo_folder.join(name);
-            
-            match item_type {
-                "file" => {
-                    if name.ends_with(".jsonl") {
-                        // Add the local file path to the list of files being downloaded.
-                        local_file_paths.push(local_item_path.clone());
-
-                        let client_clone = client.clone();
-                        let owner_clone = owner.clone();
-                        let repo_clone = repo.clone();
-                        let branch_clone = branch.clone();
-                        let path_clone = path.to_string();
-                        
-                        let task = tokio::spawn(async move {
-                            download_github_repo_file(
-                                client_clone,
-                                owner_clone,
-                                repo_clone,
-                                branch_clone,
-                                path_clone,
-                                local_item_path
-                            ).await
-                        });
-    
-                        tasks.push(task);
-                    }
-                },
-                "dir" => {
-                    // Recursively download directory contents
-                    let sub_files = download_github_repo_folder(
-                        client.clone(),
-                        owner.clone(),
-                        repo.clone(),
-                        branch.clone(),
-                        local_item_path,
-                        path.to_string()
-                    ).await?;
-                    local_file_paths.extend(sub_files);
-                },
-                _ => {}
-            }
-        }
-    }
-
-    match futures::future::try_join_all(tasks).await {
-        Ok(_) => Ok(local_file_paths),
-        Err(e) => Err(e.into()),
-    }
-    })
-}
-
-async fn list_github_directory_contents(
-    client: &Client,
-    owner: &str,
-    repo: &str,
-    branch: &str,
-    path: &str
-) -> anyhow::Result<Vec<Value>> {
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
-        owner,
-        repo,
-        path,
-        branch
-    );
-
-    log::debug!("Listing directory from GitHub: {}", url);
-
-    let response = client.get(&url).send().await?;
-    
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!("Failed to list directory from GitHub: {} - {}", response.status(), response.text().await.unwrap_or_default()));
-    }
-
-    let json: Value = response.json().await?;
-    
-    if let Some(items) = json.as_array() {
-        Ok(items.clone())
-    } else {
-        Err(anyhow::anyhow!("Expected array response from GitHub API"))
-    }
-}
-
 async fn download_github_repo_file(
     client: Client,
     owner: String,
@@ -350,7 +238,6 @@ async fn download_github_repo_file(
                     .header("X-GitHub-Api-Version", "2022-11-28")
                     .send().await?;
     
-    println!("url: {}, status: {}", url, response.status());
     if !response.status().is_success() {
         return Err(anyhow::anyhow!("Failed to fetch file from GitHub: {} - {}", response.status(), response.text().await.unwrap_or_default()));
     }
@@ -377,7 +264,29 @@ async fn download_github_repo_file(
 
     let mut file = File::create(&local_file_path).await?;
     file.write_all(&content).await?;
-    println!("File downloaded successfully to {:?}", local_file_path);
     Ok(())
 
 }
+
+// This is still WIP; we will work on this when we have fixed the population test.
+fn download_github_repo_folder(
+    client: Client,
+    owner: String,
+    repo: String,
+    branch: String,
+    local_repo_folder: PathBuf,
+    remote_repo_folder: String, 
+) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<Vec<PathBuf>>> + Send>> {
+    todo!();
+}
+
+async fn list_github_directory_contents(
+    client: &Client,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    path: &str
+) -> anyhow::Result<Vec<Value>> {
+    todo!();
+}
+

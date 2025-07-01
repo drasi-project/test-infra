@@ -27,10 +27,10 @@ data:
                 "id": "github_dev_repo",
                 "kind": "GitHub",
                 "owner": "drasi-project",
-                "repo": "test-infra",
-                "branch": "test-repo-github-storage",
+                "repo": "test-repo",
+                "branch": "main",
                 "force_cache_refresh": false,
-                "root_path": "e2e-tests/dev_repo"
+                "root_path": "dev_repo"
             }
           ]
         },
@@ -107,8 +107,7 @@ spec:
     spec:
       containers:
       - name: drasi-test-service
-        image: drasi.azurecr.io/e2e-test-service:ruokun-dev
-        # image: ghcr.io/drasi-project/e2e-test-service:0.2.1
+        image: ghcr.io/drasi-project/e2e-test-service:0.3.4
         ports:
         - containerPort: 63123
         env:

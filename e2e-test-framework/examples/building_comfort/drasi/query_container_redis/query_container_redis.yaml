@@ -12,20 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM rust:1.82 AS builder
-
-RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
-
-WORKDIR /usr/src
-COPY ./reactivator ./reactivator
-
-WORKDIR /usr/src/reactivator
-RUN cargo install --force --path .
-
-FROM debian:bullseye-slim
-RUN apt-get update && apt-get install -y \
-    gdb curl wget vim net-tools iputils-ping \
-    && apt-get clean
-ENV RUST_BACKTRACE=1
-COPY --from=builder /usr/local/cargo/bin/reactivator /usr/local/bin/reactivator
-CMD ["reactivator"]
+kind: QueryContainer
+apiVersion: v1
+name: redis-container
+spec:
+  queryHostCount: 1
+  defaultStore: redis
+  storage:
+    redis:
+      kind: redis
+      connectionString: redis://drasi-redis:6379
+  results:
+    MONGO_URI: mongodb://drasi-mongo:27017
+    MONGO_RESULT_STORE_DB_NAME: Drasi
+    MONGO_RESULT_STORE_COLL_NAME: Results

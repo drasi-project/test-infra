@@ -17,6 +17,7 @@ apiVersion: v1
 name: room-comfort-level
 spec:
   mode: query
+  container: memory-container
   sources:
     subscriptions:
       - id: facilities-db

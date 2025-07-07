@@ -12,20 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM rust:1.82 AS builder
-
-RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
-
-WORKDIR /usr/src
-COPY ./reactivator ./reactivator
-
-WORKDIR /usr/src/reactivator
-RUN cargo install --force --path .
-
-FROM debian:bullseye-slim
-RUN apt-get update && apt-get install -y \
-    gdb curl wget vim net-tools iputils-ping \
-    && apt-get clean
-ENV RUST_BACKTRACE=1
-COPY --from=builder /usr/local/cargo/bin/reactivator /usr/local/bin/reactivator
-CMD ["reactivator"]
+kind: ContinuousQuery
+apiVersion: v1
+name: room-comfort-level
+spec:
+  mode: query
+  container: rocks-container
+  sources:
+    subscriptions:
+      - id: facilities-db
+        nodes:
+          - sourceLabel: Room
+  query: >
+    MATCH
+      (r:Room)
+    RETURN
+      elementId(r) AS RoomId,
+      50 + (r.temperature - 72) + (r.humidity - 42) + (r.co2 / 25) AS ComfortLevel

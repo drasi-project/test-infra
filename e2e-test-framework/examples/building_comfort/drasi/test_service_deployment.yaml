@@ -24,12 +24,12 @@ data:
         "data_store": {
             "test_repos": [
               {
-                "id": "az_dev_repo",
-                "kind": "AzureStorageBlob",
+                "id": "github_dev_repo",
+                "kind": "GitHub",
+                "owner": "drasi-project",
+                "repo": "test-repo",
+                "branch": "main",
                 "force_cache_refresh": false,
-                "account_name": "drasidev",
-                "access_key": "<your_access_key>",
-                "container": "e2etests",
                 "root_path": "dev_repo"
             }
           ]
@@ -38,7 +38,7 @@ data:
             "queries": [
               {
                 "test_id": "building_comfort",
-                "test_repo_id": "az_dev_repo",
+                "test_repo_id": "github_dev_repo",
                 "test_run_id": "test_run_001",
                 "test_query_id": "room-comfort-level",
                 "start_immediately": true,
@@ -63,7 +63,7 @@ data:
             "sources": [
               {
                 "test_id": "building_comfort",
-                "test_repo_id": "az_dev_repo",                
+                "test_repo_id": "github_dev_repo",                
                 "test_run_id": "test_run_001",
                 "test_source_id": "facilities-db",
                 "start_mode": "bootstrap",
@@ -107,7 +107,7 @@ spec:
     spec:
       containers:
       - name: drasi-test-service
-        image: ghcr.io/drasi-project/e2e-test-service:0.2.1
+        image: ghcr.io/drasi-project/e2e-test-service:0.4.0
         ports:
         - containerPort: 63123
         env:

@@ -31,11 +31,10 @@ COPY ./test-service .
 RUN cargo install --force --path .
 
     
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
-    gdb curl wget vim net-tools iputils-ping \
-    && apt-get clean
+    gdb curl wget vim net-tools iputils-ping libssl3 \
+    && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 ENV RUST_BACKTRACE=1
 COPY --from=builder /usr/local/cargo/bin/test-service /usr/local/bin/test-service
-# RUN apt-get update && apt install -y openssl
 CMD ["test-service"]

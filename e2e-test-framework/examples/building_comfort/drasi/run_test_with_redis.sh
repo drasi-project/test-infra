@@ -18,9 +18,9 @@ GREEN="\033[32m"
 RESET="\033[0m"
 
 echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
-# drasi init
-# # This is a workaround for the issue with the init command regularly failing.
-# drasi init 
+drasi init
+# This is a workaround for the issue with the init command regularly failing.
+drasi init 
 
 # Update the Query Host to use Redis as the Index
 echo -e "${GREEN}\n\nUpdating Query Host to use Redis Index...${RESET}"

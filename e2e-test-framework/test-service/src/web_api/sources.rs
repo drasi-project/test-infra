@@ -15,27 +15,57 @@
 use std::{collections::HashSet, sync::Arc};
 
 use axum::{
-    extract::{Extension, Path}, response::IntoResponse, routing::{get, post}, Json, Router
+    extract::{Extension, Path},
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
 };
 use serde::{Deserialize, Serialize, Serializer};
 
 use serde_json::{json, Value};
-use test_data_store::{scripts::{NodeRecord, RelationRecord}, test_repo_storage::models::SpacingMode};
-use test_run_host::{sources::{bootstrap_data_generators::BootstrapData, TestRunSourceConfig}, TestRunHost, TestRunHostStatus};
+use test_data_store::{
+    scripts::{NodeRecord, RelationRecord},
+    test_repo_storage::models::SpacingMode,
+};
+use test_run_host::{
+    sources::{bootstrap_data_generators::BootstrapData, TestRunSourceConfig},
+    TestRunHost, TestRunHostStatus,
+};
 
 use super::TestServiceWebApiError;
 
 pub fn get_sources_routes() -> Router {
     Router::new()
-        .route("/sources", get(get_source_list_handler).post(post_source_handler))
+        .route(
+            "/sources",
+            get(get_source_list_handler).post(post_source_handler),
+        )
         .route("/sources/:id", get(get_source_handler))
         .route("/sources/:id/bootstrap", post(source_bootstrap_handler))
-        .route("/sources/:id/pause", post(source_change_generator_pause_handler))
-        .route("/sources/:id/reset", post(source_change_generator_reset_handler))
-        .route("/sources/:id/skip", post(source_change_generator_skip_handler))
-        .route("/sources/:id/start", post(source_change_generator_start_handler))
-        .route("/sources/:id/step", post(source_change_generator_step_handler))
-        .route("/sources/:id/stop", post(source_change_generator_stop_handler))        
+        .route(
+            "/sources/:id/pause",
+            post(source_change_generator_pause_handler),
+        )
+        .route(
+            "/sources/:id/reset",
+            post(source_change_generator_reset_handler),
+        )
+        .route(
+            "/sources/:id/skip",
+            post(source_change_generator_skip_handler),
+        )
+        .route(
+            "/sources/:id/start",
+            post(source_change_generator_start_handler),
+        )
+        .route(
+            "/sources/:id/step",
+            post(source_change_generator_step_handler),
+        )
+        .route(
+            "/sources/:id/stop",
+            post(source_change_generator_stop_handler),
+        )
 }
 
 pub async fn get_source_list_handler(
@@ -92,28 +122,29 @@ pub struct SourceBootstrapRequestBody {
     #[serde(rename = "nodeLabels")]
     pub node_labels: Vec<String>,
     #[serde(rename = "relLabels")]
-    pub rel_labels: Vec<String>
+    pub rel_labels: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SourceBootstrapResponseBody {
     pub nodes: Vec<Node>,
-    pub rels: Vec<Relation>
+    pub rels: Vec<Relation>,
 }
 
 impl SourceBootstrapResponseBody {
     pub fn new(data: BootstrapData) -> Self {
-
         let mut body = Self {
             nodes: Vec::new(),
-            rels: Vec::new()
+            rels: Vec::new(),
         };
 
         for (_, nodes) in data.nodes {
-            body.nodes.extend(nodes.iter().map(|node| Node::from_script_record(node)));
+            body.nodes
+                .extend(nodes.iter().map(|node| Node::from_script_record(node)));
         }
         for (_, rels) in data.rels {
-            body.rels.extend(rels.iter().map(|rel| Relation::from_script_record(rel)));
+            body.rels
+                .extend(rels.iter().map(|rel| Relation::from_script_record(rel)));
         }
 
         body
@@ -126,8 +157,8 @@ pub struct Node {
     pub id: String,
     #[serde(default)]
     pub labels: Vec<String>,
-    #[serde(serialize_with = "serialize_properties")] 
-    pub properties: Value
+    #[serde(serialize_with = "serialize_properties")]
+    pub properties: Value,
 }
 
 impl Node {
@@ -135,7 +166,7 @@ impl Node {
         Self {
             id: record.id.clone(),
             labels: record.labels.clone(),
-            properties: record.properties.clone()
+            properties: record.properties.clone(),
         }
     }
 }
@@ -155,7 +186,7 @@ pub struct Relation {
     #[serde(skip_serializing_if = "Option::is_none", rename = "endLabel")]
     pub end_label: Option<String>,
     #[serde(serialize_with = "serialize_properties")]
-    pub properties: Value
+    pub properties: Value,
 }
 
 impl Relation {
@@ -167,7 +198,7 @@ impl Relation {
             start_label: record.start_label.clone(),
             end_id: record.end_id.clone(),
             end_label: record.end_label.clone(),
-            properties: record.properties.clone()
+            properties: record.properties.clone(),
         }
     }
 }
@@ -181,7 +212,7 @@ where
         Value::Null => {
             let empty_obj = json!({});
             empty_obj.serialize(serializer)
-        },
+        }
         // Otherwise, serialize the value as-is.
         _ => value.serialize(serializer),
     }
@@ -203,20 +234,23 @@ pub async fn source_bootstrap_handler(
 
     let node_labels: HashSet<String> = bootstrap_body.node_labels.into_iter().collect();
     let rel_labels: HashSet<String> = bootstrap_body.rel_labels.into_iter().collect();
-    log::debug!("Source: {:?}, Node Labels: {:?}, Rel Labels: {:?}", id, node_labels, rel_labels);
+    log::debug!(
+        "Source: {:?}, Node Labels: {:?}, Rel Labels: {:?}",
+        id,
+        node_labels,
+        rel_labels
+    );
 
-    let response = test_run_host.get_source_bootstrap_data(&id, &node_labels, &rel_labels).await;
+    let response = test_run_host
+        .get_source_bootstrap_data(&id, &node_labels, &rel_labels)
+        .await;
     match response {
-        Ok(data) => {
-            Ok(Json(SourceBootstrapResponseBody::new(data)).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(data) => Ok(Json(SourceBootstrapResponseBody::new(data)).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn source_change_generator_pause_handler (
+pub async fn source_change_generator_pause_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -229,16 +263,12 @@ pub async fn source_change_generator_pause_handler (
 
     let response = test_run_host.test_source_pause(&id).await;
     match response {
-        Ok(source) => {
-            Ok(Json(source.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(source) => Ok(Json(source.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn source_change_generator_reset_handler (
+pub async fn source_change_generator_reset_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -251,16 +281,12 @@ pub async fn source_change_generator_reset_handler (
 
     let response = test_run_host.test_source_reset(&id).await;
     match response {
-        Ok(source) => {
-            Ok(Json(source.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(source) => Ok(Json(source.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn source_change_generator_skip_handler (
+pub async fn source_change_generator_skip_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
     body: Json<Option<TestSkipConfig>>,
@@ -274,19 +300,16 @@ pub async fn source_change_generator_skip_handler (
 
     let skips_body = body.0.unwrap_or_default();
 
-    let response = 
-        test_run_host.test_source_skip(&id, skips_body.num_skips, skips_body.spacing_mode).await;
+    let response = test_run_host
+        .test_source_skip(&id, skips_body.num_skips, skips_body.spacing_mode)
+        .await;
     match response {
-        Ok(source) => {
-            Ok(Json(source.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(source) => Ok(Json(source.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn source_change_generator_start_handler (
+pub async fn source_change_generator_start_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -299,12 +322,8 @@ pub async fn source_change_generator_start_handler (
 
     let response = test_run_host.test_source_start(&id).await;
     match response {
-        Ok(source) => {
-            Ok(Json(source.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(source) => Ok(Json(source.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
@@ -324,7 +343,7 @@ impl Default for TestStepConfig {
     }
 }
 
-pub async fn source_change_generator_step_handler (
+pub async fn source_change_generator_step_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
     body: Json<Option<TestStepConfig>>,
@@ -338,19 +357,16 @@ pub async fn source_change_generator_step_handler (
 
     let steps_body = body.0.unwrap_or_default();
 
-    let response = 
-        test_run_host.test_source_step(&id, steps_body.num_steps, steps_body.spacing_mode).await;
+    let response = test_run_host
+        .test_source_step(&id, steps_body.num_steps, steps_body.spacing_mode)
+        .await;
     match response {
-        Ok(source) => {
-            Ok(Json(source.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(source) => Ok(Json(source.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn source_change_generator_stop_handler (
+pub async fn source_change_generator_stop_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -363,22 +379,17 @@ pub async fn source_change_generator_stop_handler (
 
     let response = test_run_host.test_source_stop(&id).await;
     match response {
-        Ok(source) => {
-            Ok(Json(source.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(source) => Ok(Json(source.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-
-pub async fn post_source_handler (
+pub async fn post_source_handler(
     test_run_host: Extension<Arc<TestRunHost>>,
     body: Json<TestRunSourceConfig>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!("Processing call - post_source");
-    
+
     // If the TestRunHost is an Error state, return an error and a description of the error.
     if let TestRunHostStatus::Error(msg) = &test_run_host.get_status().await? {
         return Err(TestServiceWebApiError::TestRunHostError(msg.to_string()));
@@ -387,15 +398,12 @@ pub async fn post_source_handler (
     let source_config = body.0;
 
     match test_run_host.add_test_source(source_config).await {
-        Ok(id) => {
-            match test_run_host.get_test_source_state(&id.to_string()).await {
-                Ok(source) => {
-                    Ok(Json(source).into_response())
-                },
-                Err(_) => {
-                    Err(TestServiceWebApiError::NotFound("TestRunSource".to_string(), id.to_string()))
-                }
-            }
+        Ok(id) => match test_run_host.get_test_source_state(&id.to_string()).await {
+            Ok(source) => Ok(Json(source).into_response()),
+            Err(_) => Err(TestServiceWebApiError::NotFound(
+                "TestRunSource".to_string(),
+                id.to_string(),
+            )),
         },
         Err(e) => {
             let msg = format!("Error creating Source: {}", e);

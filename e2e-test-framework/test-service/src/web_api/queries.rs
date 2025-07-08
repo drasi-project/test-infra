@@ -16,22 +16,37 @@ use base64::prelude::*;
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::{ extract::{Extension, Path}, http::{header, StatusCode}, response::{Html, IntoResponse}, routing::{get, post}, Json, Router };
+use axum::{
+    extract::{Extension, Path},
+    http::{header, StatusCode},
+    response::{Html, IntoResponse},
+    routing::{get, post},
+    Json, Router,
+};
 use tokio::{fs, io::AsyncReadExt};
 
-use test_run_host::{queries::{query_result_observer::QueryResultObserverStatus, TestRunQueryConfig}, TestRunHost, TestRunHostStatus};
+use test_run_host::{
+    queries::{query_result_observer::QueryResultObserverStatus, TestRunQueryConfig},
+    TestRunHost, TestRunHostStatus,
+};
 
 use super::TestServiceWebApiError;
 
 pub fn get_queries_routes() -> Router {
     Router::new()
-        .route("/queries", get(get_query_list_handler).post(post_query_handler))
+        .route(
+            "/queries",
+            get(get_query_list_handler).post(post_query_handler),
+        )
         .route("/queries/:id", get(get_query_handler))
-        .route("/queries/:id/profile", get(get_query_result_profile_handler))  
+        .route(
+            "/queries/:id/profile",
+            get(get_query_result_profile_handler),
+        )
         .route("/queries/:id/pause", post(query_observer_pause_handler))
         .route("/queries/:id/reset", post(query_observer_reset_handler))
         .route("/queries/:id/start", post(query_observer_start_handler))
-        .route("/queries/:id/stop", post(query_observer_stop_handler))  
+        .route("/queries/:id/stop", post(query_observer_stop_handler))
 }
 
 pub async fn get_query_list_handler(
@@ -47,7 +62,6 @@ pub async fn get_query_list_handler(
     let queries = test_run_host.get_test_query_ids().await?;
     Ok(Json(queries).into_response())
 }
-
 
 pub async fn get_query_handler(
     Path(id): Path<String>,
@@ -80,20 +94,26 @@ pub async fn get_query_result_profile_handler(
     // Check the status of the query
     let query_state = test_run_host.get_test_query_state(&id).await?;
     if query_state.query_observer.status != QueryResultObserverStatus::Stopped {
-        return Err(TestServiceWebApiError::NotReady(format!("Query {} is not finished. No Result Profile available", id)));
-    }  
+        return Err(TestServiceWebApiError::NotReady(format!(
+            "Query {} is not finished. No Result Profile available",
+            id
+        )));
+    }
 
-    let query_results = test_run_host.get_test_query_result_logger_output(&id).await?;
+    let query_results = test_run_host
+        .get_test_query_result_logger_output(&id)
+        .await?;
 
     let mut image_paths = Vec::new();
     for query_result in query_results {
         if let Some(output_folder_path) = query_result.output_folder_path {
-
-            let mut dir_entries = fs::read_dir(&output_folder_path).await.context("Failed to read directory")?;
+            let mut dir_entries = fs::read_dir(&output_folder_path)
+                .await
+                .context("Failed to read directory")?;
 
             while let Some(entry) = dir_entries.next_entry().await? {
                 let path = entry.path();
-                
+
                 // Check if it's a file and has an image extension
                 if path.is_file() {
                     if let Some(ext) = path.extension() {
@@ -109,7 +129,7 @@ pub async fn get_query_result_profile_handler(
     }
 
     let mut image_tags = String::new();
-    
+
     for path in image_paths {
         match fs::File::open(&path).await {
             Ok(mut file) => {
@@ -134,11 +154,7 @@ pub async fn get_query_result_profile_handler(
                 }
             }
             Err(e) => {
-                image_tags.push_str(&format!(
-                    "<p>Could not open {}: {}</p>",
-                    path.display(),
-                    e
-                ));
+                image_tags.push_str(&format!("<p>Could not open {}: {}</p>", path.display(), e));
             }
         }
     }
@@ -165,10 +181,11 @@ pub async fn get_query_result_profile_handler(
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/html")],
         Html(html_content),
-    ).into_response())
+    )
+        .into_response())
 }
 
-pub async fn query_observer_pause_handler (
+pub async fn query_observer_pause_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -181,16 +198,12 @@ pub async fn query_observer_pause_handler (
 
     let response = test_run_host.test_query_pause(&id).await;
     match response {
-        Ok(query) => {
-            Ok(Json(query.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(query) => Ok(Json(query.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn query_observer_reset_handler (
+pub async fn query_observer_reset_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -203,16 +216,12 @@ pub async fn query_observer_reset_handler (
 
     let response = test_run_host.test_query_reset(&id).await;
     match response {
-        Ok(query) => {
-            Ok(Json(query.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(query) => Ok(Json(query.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn query_observer_start_handler (
+pub async fn query_observer_start_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -225,16 +234,12 @@ pub async fn query_observer_start_handler (
 
     let response = test_run_host.test_query_start(&id).await;
     match response {
-        Ok(query) => {
-            Ok(Json(query.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(query) => Ok(Json(query.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn query_observer_stop_handler (
+pub async fn query_observer_stop_handler(
     Path(id): Path<String>,
     test_run_host: Extension<Arc<TestRunHost>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -247,16 +252,12 @@ pub async fn query_observer_stop_handler (
 
     let response = test_run_host.test_query_stop(&id).await;
     match response {
-        Ok(query) => {
-            Ok(Json(query.state).into_response())
-        },
-        Err(e) => {
-            Err(TestServiceWebApiError::AnyhowError(e))
-        }
+        Ok(query) => Ok(Json(query.state).into_response()),
+        Err(e) => Err(TestServiceWebApiError::AnyhowError(e)),
     }
 }
 
-pub async fn post_query_handler (
+pub async fn post_query_handler(
     test_run_host: Extension<Arc<TestRunHost>>,
     body: Json<TestRunQueryConfig>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
@@ -270,15 +271,12 @@ pub async fn post_query_handler (
     let query_config = body.0;
 
     match test_run_host.add_test_query(query_config).await {
-        Ok(id) => {
-            match test_run_host.get_test_query_state(&id.to_string()).await {
-                Ok(query) => {
-                    Ok(Json(query).into_response())
-                },
-                Err(_) => {
-                    Err(TestServiceWebApiError::NotFound("TestRunQuery".to_string(), id.to_string()))
-                }
-            }
+        Ok(id) => match test_run_host.get_test_query_state(&id.to_string()).await {
+            Ok(query) => Ok(Json(query).into_response()),
+            Err(_) => Err(TestServiceWebApiError::NotFound(
+                "TestRunQuery".to_string(),
+                id.to_string(),
+            )),
         },
         Err(e) => {
             let msg = format!("Error creating Query: {}", e);

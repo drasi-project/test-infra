@@ -18,7 +18,6 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::Value;
 use tokio::{fs::File, io::AsyncWriteExt};
-use base64::engine::general_purpose;
 
 use crate::test_repo_storage::models::{BootstrapDataGeneratorDefinition, SourceChangeGeneratorDefinition, TestSourceDefinition};
 
@@ -87,7 +86,7 @@ impl GithubTestRepoClient {
         Ok(Box::new(Self { settings, client }))
     }
 
-    async fn download_bootstrap_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
+    async fn download_bootstrap_script_files(&self, _repo_folder: String, _local_folder: PathBuf) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
         todo!();
         // This is still WIP; we will work on this when we have fixed the population test.
         // log::debug!("Downloading Bootstrap Script Files from {:?} to {:?}", repo_folder, local_folder);
@@ -120,7 +119,7 @@ impl GithubTestRepoClient {
         // Ok(file_path_map)
     }
 
-    async fn download_change_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+    async fn download_change_script_files(&self, _repo_folder: String, _local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
         todo!();
         // This is still WIP; we will work on this when we have fixed the population test.
         // log::debug!("Downloading Source Change Script Files from {:?} to {:?}", repo_folder, local_folder);
@@ -268,23 +267,25 @@ async fn download_github_repo_file(
 }
 
 // This is still WIP; we will work on this when we have fixed the population test.
+#[allow(dead_code)]
 fn download_github_repo_folder(
-    client: Client,
-    owner: String,
-    repo: String,
-    branch: String,
-    local_repo_folder: PathBuf,
-    remote_repo_folder: String, 
+    _client: Client,
+    _owner: String,
+    _repo: String,
+    _branch: String,
+    _local_repo_folder: PathBuf,
+    _remote_repo_folder: String, 
 ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<Vec<PathBuf>>> + Send>> {
     todo!();
 }
 
+#[allow(dead_code)]
 async fn list_github_directory_contents(
-    client: &Client,
-    owner: &str,
-    repo: &str,
-    branch: &str,
-    path: &str
+    _client: &Client,
+    _owner: &str,
+    _repo: &str,
+    _branch: &str,
+    _path: &str
 ) -> anyhow::Result<Vec<Value>> {
     todo!();
 }

@@ -15,7 +15,11 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::post, Json, Router
+    extract::Extension,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::post,
+    Json, Router,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -30,13 +34,13 @@ pub struct SourceBootstrapRequestBody {
     #[serde(rename = "nodeLabels")]
     pub node_labels: Vec<String>,
     #[serde(rename = "relLabels")]
-    pub rel_labels: Vec<String>
+    pub rel_labels: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct SourceBootstrapResponseBody {
     pub nodes: Vec<SourceElement>,
-    pub rels: Vec<SourceElement>
+    pub rels: Vec<SourceElement>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -68,20 +72,20 @@ pub struct AcquireRequestBody {
     #[serde(rename = "nodeLabels")]
     pub node_labels: Vec<String>,
     #[serde(rename = "relLabels")]
-    pub rel_labels: Vec<String>
+    pub rel_labels: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AcquireResponseBody {
     pub nodes: Vec<SourceElement>,
-    pub rels: Vec<SourceElement>
+    pub rels: Vec<SourceElement>,
 }
 
 impl From<SourceBootstrapResponseBody> for AcquireResponseBody {
     fn from(data: SourceBootstrapResponseBody) -> Self {
         Self {
             nodes: data.nodes,
-            rels: data.rels
+            rels: data.rels,
         }
     }
 }
@@ -93,7 +97,7 @@ pub enum TestProxyWebApiError {
     #[error("Error: {0}")]
     ReqwestError(reqwest::Error),
     #[error("Error: {0}")]
-    SerdeJsonError(serde_json::Error)
+    SerdeJsonError(serde_json::Error),
 }
 
 impl From<anyhow::Error> for TestProxyWebApiError {
@@ -119,13 +123,13 @@ impl IntoResponse for TestProxyWebApiError {
         match self {
             TestProxyWebApiError::AnyhowError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
             TestProxyWebApiError::ReqwestError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
             TestProxyWebApiError::SerdeJsonError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
         }
     }
 }
@@ -139,8 +143,7 @@ pub(crate) async fn start_web_api(cfg: Params) {
 
     println!("\n\nTest Proxy Web API listening on http://{}", addr);
 
-    let server = axum::Server::bind(&addr)
-        .serve(app.into_make_service());
+    let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = server.with_graceful_shutdown(shutdown_signal());
@@ -165,14 +168,15 @@ async fn shutdown_signal() {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
             sigterm.recv().await;
             println!("\nReceived SIGTERM, shutting down...");
         }
         #[cfg(not(unix))]
         futures::future::pending::<()>().await; // Fallback for non-Unix systems
     };
-    
+
     // Wait for either signal
     select! {
         _ = ctrl_c => {},
@@ -184,15 +188,16 @@ async fn shutdown_signal() {
     println!("Resources cleaned up.");
 }
 
-
 pub async fn post_acquire_handler(
     cfg: Extension<Arc<Params>>,
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestProxyWebApiError> {
     log::debug!("Processing call - post_acquire - {:?}", body);
 
-    let url = format!("http://{}:{}/test_run_host/sources/{}/bootstrap", 
-        cfg.test_service_host, cfg.test_service_port, cfg.test_run_source_id);
+    let url = format!(
+        "http://{}:{}/test_run_host/sources/{}/bootstrap",
+        cfg.test_service_host, cfg.test_service_port, cfg.test_run_source_id
+    );
 
     let acquire_body: AcquireRequestBody = serde_json::from_value(body.0)?;
     let src_req_body = SourceBootstrapRequestBody {
@@ -211,9 +216,13 @@ pub async fn post_acquire_handler(
 
     match response.json::<SourceBootstrapResponseBody>().await {
         Ok(data) => {
-            log::debug!("Response from Test Service - #nodes:{:?}, #rels:{:?}", data.nodes.len(), data.rels.len());
+            log::debug!(
+                "Response from Test Service - #nodes:{:?}, #rels:{:?}",
+                data.nodes.len(),
+                data.rels.len()
+            );
             Ok(Json(AcquireResponseBody::from(data)).into_response())
-        },
+        }
         Err(e) => {
             log::error!("Error: {:?}", e);
             Err(e.into())

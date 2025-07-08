@@ -15,7 +15,11 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::get, Json, Router
+    extract::Extension,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
 };
 use thiserror::Error;
 use tokio::{select, signal};
@@ -39,7 +43,7 @@ impl IntoResponse for TestReactivatorWebApiError {
         match self {
             TestReactivatorWebApiError::AnyhowError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
         }
     }
 }
@@ -53,8 +57,7 @@ pub(crate) async fn start_web_api(cfg: Params) {
 
     println!("\n\nTest Reactivator Web API listening on http://{}", addr);
 
-    let server = axum::Server::bind(&addr)
-        .serve(app.into_make_service());
+    let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = server.with_graceful_shutdown(shutdown_signal());
@@ -79,14 +82,15 @@ async fn shutdown_signal() {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
             sigterm.recv().await;
             println!("\nReceived SIGTERM, shutting down...");
         }
         #[cfg(not(unix))]
         futures::future::pending::<()>().await; // Fallback for non-Unix systems
     };
-    
+
     // Wait for either signal
     select! {
         _ = ctrl_c => {},
@@ -97,7 +101,6 @@ async fn shutdown_signal() {
     // TODO: Perform cleanup here...
     println!("Resources cleaned up.");
 }
-
 
 pub async fn get_handler(
     cfg: Extension<Arc<Params>>,

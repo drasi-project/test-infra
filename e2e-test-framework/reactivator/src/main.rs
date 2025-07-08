@@ -28,10 +28,20 @@ pub struct Params {
     #[arg(short = 's', long = "test_run_source_id", env = "TEST_RUN_SOURCE_ID")]
     pub test_run_source_id: String,
 
-    #[arg(short = 'h', long = "test_service_host", env = "TEST_SERVICE_HOST", default_value = "test-service")]
+    #[arg(
+        short = 'h',
+        long = "test_service_host",
+        env = "TEST_SERVICE_HOST",
+        default_value = "test-service"
+    )]
     pub test_service_host: String,
 
-    #[arg(short = 'p', long = "test_service_port", env = "TEST_SERVICE_PORT", default_value_t = 63123)]
+    #[arg(
+        short = 'p',
+        long = "test_service_port",
+        env = "TEST_SERVICE_PORT",
+        default_value_t = 63123
+    )]
     pub test_service_port: u16,
 }
 

@@ -53,7 +53,7 @@ pub struct HostParams {
     pub port: u16,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct TestServiceConfig {
     #[serde(default)]
     pub data_store: TestDataStoreConfig,
@@ -61,16 +61,6 @@ pub struct TestServiceConfig {
     pub test_run_host: TestRunHostConfig,
     #[serde(default)]
     pub data_collector: DataCollectorConfig,
-}
-
-impl Default for TestServiceConfig {
-    fn default() -> Self {
-        TestServiceConfig {
-            data_store: TestDataStoreConfig::default(),
-            test_run_host: TestRunHostConfig::default(),
-            data_collector: DataCollectorConfig::default(),
-        }
-    }
 }
 
 // The main function that starts the starts the Test Service.

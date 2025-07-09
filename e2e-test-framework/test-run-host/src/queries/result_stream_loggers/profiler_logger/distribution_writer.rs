@@ -118,7 +118,7 @@ impl TimeDistributionTracker {
         for component_name in COMPONENT_NAMES.iter() {
             header.push_str(&format!(",{}", component_name));
         }
-        header.push_str("\n");
+        header.push('\n');
         file.write_all(header.as_bytes()).await?;
         
         // Write data for each bucket as a row
@@ -147,7 +147,7 @@ impl TimeDistributionTracker {
                 row.push_str(&format!(",{}", self.distributions[component_idx][bucket_idx]));
             }
             
-            row.push_str("\n");
+            row.push('\n');
             file.write_all(row.as_bytes()).await?;
         }
         

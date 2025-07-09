@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::{self, Debug, Formatter}, num::NonZeroU32, pin::Pin, sync::Arc, time::{Duration, SystemTime}, u32};
+use std::{fmt::{self, Debug, Formatter}, num::NonZeroU32, pin::Pin, sync::Arc, time::{Duration, SystemTime}};
 
 use async_trait::async_trait;
 use futures::{future::join_all, Stream};
@@ -348,10 +348,10 @@ impl ScriptSourceChangeGeneratorInternalState {
         let (change_tx_channel, change_rx_channel) = tokio::sync::mpsc::channel(1000);
 
         let (delayer_tx_channel, delayer_rx_channel) = tokio::sync::mpsc::channel(1000);
-        let _ = tokio::spawn(delayer_thread(settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
+        tokio::spawn(delayer_thread(settings.id.clone(), delayer_rx_channel, change_tx_channel.clone()));
 
         let (rate_limiter_tx_channel, rate_limiter_rx_channel) = tokio::sync::mpsc::channel(1000);
-        let _ = tokio::spawn(rate_limiter_thread(settings.id.clone(), settings.spacing_mode.clone(), rate_limiter_rx_channel, change_tx_channel.clone()));
+        tokio::spawn(rate_limiter_thread(settings.id.clone(), settings.spacing_mode.clone(), rate_limiter_rx_channel, change_tx_channel.clone()));
 
         
         let state = Self {
@@ -711,7 +711,7 @@ impl ScriptSourceChangeGeneratorInternalState {
                     Some(SpacingMode::Recorded) => {
                         if next_record.offset_ns > self.virtual_time_ns_offset { 
                             sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
-                            sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
+                            sch_msg.virtual_time_ns_replay += sch_msg.delay_ns;
                         }
         
                         if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
@@ -732,7 +732,7 @@ impl ScriptSourceChangeGeneratorInternalState {
                         SpacingMode::Recorded => {
                             if next_record.offset_ns > self.virtual_time_ns_offset { 
                                 sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
-                                sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
+                                sch_msg.virtual_time_ns_replay += sch_msg.delay_ns;
                             }
             
                             if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
@@ -756,7 +756,7 @@ impl ScriptSourceChangeGeneratorInternalState {
                 SpacingMode::Recorded => {
                     if next_record.offset_ns > self.virtual_time_ns_offset { 
                         sch_msg.delay_ns = next_record.offset_ns - self.virtual_time_ns_offset;
-                        sch_msg.virtual_time_ns_replay = sch_msg.virtual_time_ns_replay + sch_msg.delay_ns;
+                        sch_msg.virtual_time_ns_replay += sch_msg.delay_ns;
                     }
     
                     if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
@@ -889,7 +889,10 @@ impl ScriptSourceChangeGeneratorInternalState {
                 self.steps_spacing_mode = spacing_mode.clone();
                 self.schedule_next_change_stream_record().await
             },
-            ScriptSourceChangeGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            ScriptSourceChangeGeneratorCommand::Stop => {
+                self.transition_to_stopped_state().await;
+                Ok(())
+            },
         }
     }
     
@@ -913,7 +916,8 @@ impl ScriptSourceChangeGeneratorInternalState {
                 Err(ScriptSourceChangeGeneratorError::PauseToStep.into())
             },
             ScriptSourceChangeGeneratorCommand::Stop => {
-                Ok(self.transition_to_stopped_state().await)
+                self.transition_to_stopped_state().await;
+                Ok(())
             },
         }
     }
@@ -929,7 +933,10 @@ impl ScriptSourceChangeGeneratorInternalState {
                 self.skips_spacing_mode = None;
                 Ok(())
             },
-            ScriptSourceChangeGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            ScriptSourceChangeGeneratorCommand::Stop => {
+                self.transition_to_stopped_state().await;
+                Ok(())
+            },
             ScriptSourceChangeGeneratorCommand::Reset
             | ScriptSourceChangeGeneratorCommand::Skip {..}
             | ScriptSourceChangeGeneratorCommand::Start
@@ -949,7 +956,10 @@ impl ScriptSourceChangeGeneratorInternalState {
                 self.steps_spacing_mode = None;
                 Ok(())
             },
-            ScriptSourceChangeGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            ScriptSourceChangeGeneratorCommand::Stop => {
+                self.transition_to_stopped_state().await;
+                Ok(())
+            },
             ScriptSourceChangeGeneratorCommand::Reset
             | ScriptSourceChangeGeneratorCommand::Skip {..}
             | ScriptSourceChangeGeneratorCommand::Start
@@ -1049,7 +1059,7 @@ impl Debug for ScriptSourceChangeGeneratorInternalState {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Default)]
 pub struct ScriptSourceChangeGeneratorStats {
     pub actual_start_time_ns: u64,
     pub actual_end_time_ns: u64,
@@ -1059,18 +1069,6 @@ pub struct ScriptSourceChangeGeneratorStats {
     pub num_pause_records: u64,
 }
 
-impl Default for ScriptSourceChangeGeneratorStats {
-    fn default() -> Self {
-        Self {
-            actual_start_time_ns: 0,
-            actual_end_time_ns: 0,
-            num_source_change_records: 0,
-            num_skipped_source_change_records: 0,
-            num_label_records: 0,
-            num_pause_records: 0,
-        }
-    }
-}
 
 #[derive(Clone, Serialize)]
 pub struct ScriptSourceChangeGeneratorResultSummary {

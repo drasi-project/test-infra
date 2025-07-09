@@ -40,12 +40,12 @@ pub struct JsonlFileResultStreamLoggerSettings {
 
 impl JsonlFileResultStreamLoggerSettings {
     pub fn new(test_run_query_id: TestRunQueryId, config: &JsonlFileResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
-        return Ok(Self {
+        Ok(Self {
             folder_path,
             log_name: "results".to_string(),
             max_lines_per_file: config.max_lines_per_file.unwrap_or(10000),
             test_run_query_id,
-        });
+        })
     }
 }
 
@@ -56,11 +56,12 @@ pub struct JsonlFileResultStreamLogger {
 }
 
 impl JsonlFileResultStreamLogger {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new(test_run_query_id: TestRunQueryId, def:&JsonlFileResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
         log::debug!("Creating JsonlFileResultStreamLogger for {} from {:?}, ", test_run_query_id, def);
 
         let folder_path = output_storage.result_change_path.join("jsonl_file");
-        let settings = JsonlFileResultStreamLoggerSettings::new(test_run_query_id, &def, folder_path)?;
+        let settings = JsonlFileResultStreamLoggerSettings::new(test_run_query_id, def, folder_path)?;
         log::trace!("Creating JsonlFileResultStreamLogger with settings {:?}, ", settings);
 
         if !std::path::Path::new(&settings.folder_path).exists() {

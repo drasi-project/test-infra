@@ -52,6 +52,7 @@ pub struct TestBeaconSourceChangeQueueReader {
 }
 
 impl TestBeaconSourceChangeQueueReader {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new<S: Into<String>>(config: TestBeaconSourceChangeQueueReaderConfig, source_id: S) -> anyhow::Result<Box<dyn SourceChangeQueueReader + Send + Sync>> {
         log::debug!("Creating TestBeaconSourceChangeQueueReader from config {:?}", config);
 
@@ -217,7 +218,7 @@ async fn reader_thread(settings: TestBeaconSourceChangeQueueReaderSettings, stat
                             dequeue_time_ns: 0,
                             enqueue_time_ns: 0,
                             id: "".to_string(),
-                            seq: seq,
+                            seq,
                             traceid: "".to_string(),
                             traceparent: "".to_string(),
                         };

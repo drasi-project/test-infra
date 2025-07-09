@@ -85,6 +85,7 @@ impl Serialize for ResultStreamHandlerStatus {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ResultStreamHandlerMessage {
     Error(ResultStreamHandlerError),
     Record(ResultStreamRecord),
@@ -127,7 +128,7 @@ impl std::fmt::Display for ResultStreamRecord {
 
                 write!(f, "{}", json_data_unescaped)
             },
-            Err(e) => return write!(f, "Error serializing ResultStreamRecord: {:?}. Error: {}", self, e),
+            Err(e) => write!(f, "Error serializing ResultStreamRecord: {:?}. Error: {}", self, e),
         }
     }
 }

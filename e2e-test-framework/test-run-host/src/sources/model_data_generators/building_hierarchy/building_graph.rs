@@ -288,7 +288,7 @@ impl Building {
         let floor = self.floors.get_mut(floor_id)
             .context(format!("Floor {} not found in building {}", floor_id, self.id))?;
 
-        Ok(floor.add_room(effective_from, change_generator)?)
+        floor.add_room(effective_from, change_generator)
     }    
 
     pub fn get_floor(&self, floor_id: &Location) -> Option<&Floor> {
@@ -311,7 +311,7 @@ impl Building {
     pub fn update_random_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<Option<ModelChange>> {
 
         match self.floors.len() {
-            0 => return Ok(None),
+            0 => Ok(None),
             len => {
                 let idx = change_generator.get_usize_in_range(0, len, false);
                 let (_, floor) = self.floors.iter_mut().nth(idx).unwrap();
@@ -394,7 +394,7 @@ impl Floor {
     pub fn update_random_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<Option<ModelChange>> {
 
         match self.rooms.len() {
-            0 => return Ok(None),
+            0 => Ok(None),
             len => {
                 let idx = change_generator.get_usize_in_range(0, len, false);
                 let (_, room) = self.rooms.iter_mut().nth(idx).unwrap();
@@ -455,9 +455,10 @@ impl Room {
             sensor_values: change_generator.initialize_sensor_values(&id, effective_from)?
         };
 
-        let mut changes = Vec::new();
-        changes.push(ModelChange::RoomAdded((&room).into()));
-        changes.push(ModelChange::FloorRoomRelationAdded(FloorRoomRelation::new(effective_from, &id)?));
+        let changes = vec![
+            ModelChange::RoomAdded((&room).into()),
+            ModelChange::FloorRoomRelationAdded(FloorRoomRelation::new(effective_from, &id)?),
+        ];
 
         Ok((room, changes))
     }
@@ -701,7 +702,7 @@ impl GraphChangeGenerator {
         Ok(sensor_values)
     }
 
-    pub fn update_sensor_values(&mut self, effective_from: u64, sensor_values: &mut Vec<SensorValue>) {
+    pub fn update_sensor_values(&mut self, effective_from: u64, sensor_values: &mut [SensorValue]) {
 
         let sensor_to_update = self.get_usize_in_range(0, self.room_sensor_value_generators.len(), false);
 
@@ -711,24 +712,28 @@ impl GraphChangeGenerator {
 
                     let value_change = svg.value_change_dist.sample(&mut self.rng);
 
-                    if sensor_value.momentum > 0 {
-                        sensor_value.value = (sensor_value.value + value_change).clamp(svg.value_range.0, svg.value_range.1);
+                    match sensor_value.momentum.cmp(&0) {
+                        std::cmp::Ordering::Greater => {
+                            sensor_value.value = (sensor_value.value + value_change).clamp(svg.value_range.0, svg.value_range.1);
 
-                        if sensor_value.momentum > 1 {
-                            sensor_value.momentum -= 1;
-                        } else {
-                            sensor_value.momentum = (svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1);
-                            if self.rng.random_bool(svg.momentum_reverse_prob) { sensor_value.momentum = -sensor_value.momentum; }
+                            if sensor_value.momentum > 1 {
+                                sensor_value.momentum -= 1;
+                            } else {
+                                sensor_value.momentum = (svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1);
+                                if self.rng.random_bool(svg.momentum_reverse_prob) { sensor_value.momentum = -sensor_value.momentum; }
+                            }
                         }
-                    } else if sensor_value.momentum < 0 {
-                        sensor_value.value = (sensor_value.value - value_change).clamp(svg.value_range.0, svg.value_range.1);
+                        std::cmp::Ordering::Less => {
+                            sensor_value.value = (sensor_value.value - value_change).clamp(svg.value_range.0, svg.value_range.1);
 
-                        if sensor_value.momentum < -1 {
-                            sensor_value.momentum += 1;
-                        } else {
-                            sensor_value.momentum = -(svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1);
-                            if self.rng.random_bool(svg.momentum_reverse_prob) { sensor_value.momentum = -sensor_value.momentum; }
+                            if sensor_value.momentum < -1 {
+                                sensor_value.momentum += 1;
+                            } else {
+                                sensor_value.momentum = -(svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1);
+                                if self.rng.random_bool(svg.momentum_reverse_prob) { sensor_value.momentum = -sensor_value.momentum; }
+                            }
                         }
+                        std::cmp::Ordering::Equal => {}
                     }                    
 
                     sensor_value.effective_from = effective_from;
@@ -797,7 +802,7 @@ impl BuildingGraph {
 
         let building = buildings.get_mut(building_id).unwrap();
 
-        Ok(building.add_floor(effective_from, &mut self.change_generator)?)
+        building.add_floor(effective_from, &mut self.change_generator)
     }
 
     // Add a room with auto-generated ID, requiring only floor_id
@@ -807,7 +812,7 @@ impl BuildingGraph {
 
         let building = buildings.get_mut(&floor_id.get_building_location().unwrap()).unwrap();
 
-        Ok(building.add_room(floor_id, effective_from, &mut self.change_generator)?)
+        building.add_room(floor_id, effective_from, &mut self.change_generator)
     }
 
     pub fn get_current_state(&self, included_types: &HashSet<String>) -> CurrentStateIterator<'_> {
@@ -842,7 +847,7 @@ impl BuildingGraph {
                 let idx = self.change_generator.get_usize_in_range(0, buildings.len(), false);
                 let (_, building) = buildings.iter_mut().nth(idx).unwrap();
 
-                Ok(building.update_random_room(effective_from, &mut self.change_generator)?)
+                building.update_random_room(effective_from, &mut self.change_generator)
             }
         }
     }
@@ -868,7 +873,7 @@ pub struct CurrentStateIterator<'a> {
     included_types: HashSet<String>,
 }
 
-impl<'a> Iterator for CurrentStateIterator<'a> {
+impl Iterator for CurrentStateIterator<'_> {
     type Item = ModelChange;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -882,10 +887,10 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     // If buildings are included, return a BuildingNode
                     if self.included_types.contains(GraphElementType::BUILDING) {
                         let building_node = BuildingNode::from(building);
-                        return Some(ModelChange::BuildingAdded(building_node));
+                        Some(ModelChange::BuildingAdded(building_node))
                     } else {
                         // Skip to next building if not included
-                        return self.next();
+                        self.next()
                     }
                 } else {
                     // Prepare for next state: floors
@@ -923,10 +928,10 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                         // If floors are included, return a FloorNode
                         if self.included_types.contains(GraphElementType::FLOOR) {
                             let floor_node = FloorNode::from(floor);
-                            return Some(ModelChange::FloorAdded(floor_node));
+                            Some(ModelChange::FloorAdded(floor_node))
                         } else {
                             // Skip to next floor if not included
-                            return self.next();
+                            self.next()
                         }
                     } else {
                         // Move to next building
@@ -980,10 +985,10 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                             // If rooms are included, return a RoomNode
                             if self.included_types.contains(GraphElementType::ROOM) {
                                 let room_node = RoomNode::from(room);
-                                return Some(ModelChange::RoomAdded(room_node));
+                                Some(ModelChange::RoomAdded(room_node))
                             } else {
                                 // Skip to next room if not included
-                                return self.next();
+                                self.next()
                             }
                         } else {
                             // Move to next floor
@@ -1022,12 +1027,12 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     // If building-floor relations are included, return one
                     if self.included_types.contains(GraphElementType::BUILDING_FLOOR) {
                         let floor_id = floor_id_str.parse::<Location>().unwrap();
-                        return Some(ModelChange::BuildingFloorRelationAdded(
+                        Some(ModelChange::BuildingFloorRelationAdded(
                             BuildingFloorRelation::new(0, &floor_id).unwrap()
-                        ));
+                        ))
                     } else {
                         // Skip to next relation if not included
-                        return self.next();
+                        self.next()
                     }
                 } else {
                     // Prepare for next state: FloorRoomRelations
@@ -1055,12 +1060,12 @@ impl<'a> Iterator for CurrentStateIterator<'a> {
                     // If floor-room relations are included, return one
                     if self.included_types.contains(GraphElementType::FLOOR_ROOM) {
                         let room_id = room_id_str.parse::<Location>().unwrap();
-                        return Some(ModelChange::FloorRoomRelationAdded(
+                        Some(ModelChange::FloorRoomRelationAdded(
                             FloorRoomRelation::new(0, &room_id).unwrap()
-                        ));
+                        ))
                     } else {
                         // Skip to next relation if not included
-                        return self.next();
+                        self.next()
                     }
                 } else {
                     self.state = IterationState::Done;

@@ -39,10 +39,10 @@ pub struct OtelTraceResultStreamLoggerSettings {
 
 impl OtelTraceResultStreamLoggerSettings {
     pub fn new(test_run_query_id: TestRunQueryId, def: &OtelTraceResultStreamLoggerConfig) -> anyhow::Result<Self> {
-        return Ok(Self {
+        Ok(Self {
             otel_endpoint: def.otel_endpoint.clone().unwrap_or("http://otel-collector:4317".to_string()),
             test_run_query_id,
-        });
+        })
     }
 }
 
@@ -52,10 +52,11 @@ pub struct OtelTraceResultStreamLogger {
 }
 
 impl OtelTraceResultStreamLogger {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(test_run_query_id: TestRunQueryId, def: &OtelTraceResultStreamLoggerConfig) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
         log::debug!("Creating OtelTraceResultStreamLogger for {} from {:?}, ", test_run_query_id, def);
 
-        let settings = OtelTraceResultStreamLoggerSettings::new(test_run_query_id, &def)?;
+        let settings = OtelTraceResultStreamLoggerSettings::new(test_run_query_id, def)?;
         log::trace!("Creating OtelTraceResultStreamLogger with settings {:?}, ", settings);
 
         let batch_config = BatchConfig::default()

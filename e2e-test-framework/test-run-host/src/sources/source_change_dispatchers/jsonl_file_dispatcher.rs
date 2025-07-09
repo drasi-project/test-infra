@@ -31,10 +31,10 @@ pub struct JsonlFileSourceChangeDispatcherSettings {
 
 impl JsonlFileSourceChangeDispatcherSettings {
     pub fn new(config: &JsonlFileSourceChangeDispatcherDefinition, folder_path: PathBuf) -> anyhow::Result<Self> {
-        return Ok(Self {
+        Ok(Self {
             folder_path,
             max_events_per_file: config.max_events_per_file.unwrap_or(10000),
-        });
+        })
     }
 }
 
@@ -49,7 +49,7 @@ impl JsonlFileSourceChangeDispatcher {
         log::debug!("Creating JsonlFileSourceChangeDispatcher from {:?}, ", def);
 
         let folder_path = output_storage.source_change_path.clone();
-        let settings = JsonlFileSourceChangeDispatcherSettings::new(&def, folder_path)?;
+        let settings = JsonlFileSourceChangeDispatcherSettings::new(def, folder_path)?;
         log::trace!("Creating JsonlFileSourceChangeDispatcher with settings {:?}, ", settings);
 
         // Make sure the local change_data_folder exists, if not, create it.

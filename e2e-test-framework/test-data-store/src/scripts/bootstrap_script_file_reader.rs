@@ -75,12 +75,12 @@ impl BootstrapScriptReader {
         if let Ok(seq_rec) = read_result {
             if let BootstrapScriptRecord::Header(header) = seq_rec.record {
                 reader.header = header;
-                return Ok(reader);
+                Ok(reader)
             } else {
-                return Err(BootstrapScriptReaderError::MissingHeader(reader.get_current_file_name()).into());
+                Err(BootstrapScriptReaderError::MissingHeader(reader.get_current_file_name()).into())
             }
         } else {
-            return Err(BootstrapScriptReaderError::MissingHeader(reader.get_current_file_name()).into());
+            Err(BootstrapScriptReaderError::MissingHeader(reader.get_current_file_name()).into())
         }
     }
 

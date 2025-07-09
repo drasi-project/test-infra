@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashSet, fmt::{self, Debug, Formatter}, num::NonZeroU32, sync::Arc, time::SystemTime, u32};
+use std::{collections::HashSet, fmt::{self, Debug, Formatter}, num::NonZeroU32, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use building_graph::{BuildingGraph, GraphElementType, ModelChange};
@@ -247,7 +247,7 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
             match change {
                 ModelChange::BuildingAdded(building) => {
                     let node_record = NodeRecord {
-                        id: building.id.into(),
+                        id: building.id,
                         labels: building.labels.clone(),                        
                         properties: serde_json::json!({}),
                     };
@@ -255,7 +255,7 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
                 },
                 ModelChange::FloorAdded(floor) => {
                     let node_record = NodeRecord {
-                        id: floor.id.into(),
+                        id: floor.id,
                         labels: floor.labels.clone(),                        
                         properties: serde_json::json!({}),
                     };
@@ -263,7 +263,7 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
                 },
                 ModelChange::RoomAdded(room) => {
                     let node_record = NodeRecord {
-                        id: room.id.into(),
+                        id: room.id,
                         labels: room.labels.clone(),                        
                         properties: serde_json::json!(room.properties),
                     };
@@ -279,24 +279,24 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
             match change {
                 ModelChange::BuildingFloorRelationAdded(relation) => {
                     let rel_record = RelationRecord {
-                        id: relation.id.into(),
+                        id: relation.id,
                         labels: relation.labels.clone(),
                         properties: serde_json::json!({}),
-                        start_id: relation.building_id.into(),
+                        start_id: relation.building_id,
                         start_label: Some(GraphElementType::BUILDING.to_string()),
-                        end_id: relation.floor_id.into(),
+                        end_id: relation.floor_id,
                         end_label: Some(GraphElementType::FLOOR.to_string()),
                     };
                     building_floor_rels.push(rel_record);
                 },
                 ModelChange::FloorRoomRelationAdded(relation) => {
                     let rel_record = RelationRecord {
-                        id: relation.id.into(),
+                        id: relation.id,
                         labels: relation.labels.clone(),
                         properties: serde_json::json!({}),
-                        start_id: relation.floor_id.into(),
+                        start_id: relation.floor_id,
                         start_label: Some(GraphElementType::FLOOR.to_string()),
-                        end_id: relation.room_id.into(),
+                        end_id: relation.room_id,
                         end_label: Some(GraphElementType::ROOM.to_string()),
                     };
                     floor_room_rels.push(rel_record);                },
@@ -308,19 +308,19 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
 
         let mut bootstrap_data = BootstrapData::new();
 
-        if building_nodes.len() > 0 {
+        if !building_nodes.is_empty() {
             bootstrap_data.nodes.insert(GraphElementType::BUILDING.to_string(), building_nodes);
         }   
-        if floor_nodes.len() > 0 {
+        if !floor_nodes.is_empty() {
             bootstrap_data.nodes.insert(GraphElementType::FLOOR.to_string(), floor_nodes);
         }
-        if room_nodes.len() > 0 {
+        if !room_nodes.is_empty() {
             bootstrap_data.nodes.insert(GraphElementType::ROOM.to_string(), room_nodes);
         }
-        if building_floor_rels.len() > 0 {
+        if !building_floor_rels.is_empty() {
             bootstrap_data.rels.insert(GraphElementType::BUILDING_FLOOR.to_string(), building_floor_rels);
         }
-        if floor_room_rels.len() > 0 {
+        if !floor_room_rels.is_empty() {
             bootstrap_data.rels.insert(GraphElementType::FLOOR_ROOM.to_string(), floor_room_rels);
         }
 
@@ -586,7 +586,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 self.dispatch_source_change_events(vec!(&source_change_event)).await;
 
                 self.previous_event = Some(ProcessedChangeEvent {
-                    dispatch_status: self.status.clone(),
+                    dispatch_status: self.status,
                     event: source_change_event,
                     seq: message.seq_num,
                 });
@@ -605,7 +605,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
                     self.dispatch_source_change_events(vec!(&source_change_event)).await;
 
                     self.previous_event = Some(ProcessedChangeEvent {
-                        dispatch_status: self.status.clone(),
+                        dispatch_status: self.status,
                         event: source_change_event,
                         seq: message.seq_num,
                     });
@@ -634,7 +634,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
                     log::trace!("Skipping ChangeScriptRecord: {:?}", source_change_event);
 
                     self.previous_event = Some(ProcessedChangeEvent {
-                        dispatch_status: self.status.clone(),
+                        dispatch_status: self.status,
                         event: source_change_event,
                         seq: message.seq_num,
                     });
@@ -887,7 +887,10 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 // self.steps_spacing_mode = spacing_mode.clone();
                 self.schedule_next_change_event().await
             },
-            BuildingHierarchyDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            BuildingHierarchyDataGeneratorCommand::Stop => {
+                self.transition_to_stopped_state().await;
+                Ok(())
+            },
         }
     }
     
@@ -911,7 +914,8 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 Err(BuildingHierarchyDataGeneratorError::PauseToStep.into())
             },
             BuildingHierarchyDataGeneratorCommand::Stop => {
-                Ok(self.transition_to_stopped_state().await)
+                self.transition_to_stopped_state().await;
+                Ok(())
             },
         }
     }
@@ -926,7 +930,10 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 self.skips_remaining = 0;
                 Ok(())
             },
-            BuildingHierarchyDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            BuildingHierarchyDataGeneratorCommand::Stop => {
+                self.transition_to_stopped_state().await;
+                Ok(())
+            },
             BuildingHierarchyDataGeneratorCommand::Reset
             | BuildingHierarchyDataGeneratorCommand::Skip {..}
             | BuildingHierarchyDataGeneratorCommand::Start
@@ -945,7 +952,10 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 self.steps_remaining = 0;
                 Ok(())
             },
-            BuildingHierarchyDataGeneratorCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            BuildingHierarchyDataGeneratorCommand::Stop => {
+                self.transition_to_stopped_state().await;
+                Ok(())
+            },
             BuildingHierarchyDataGeneratorCommand::Reset
             | BuildingHierarchyDataGeneratorCommand::Skip {..}
             | BuildingHierarchyDataGeneratorCommand::Start
@@ -1039,7 +1049,7 @@ impl Debug for BuildingHierarchyDataGeneratorInternalState {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Default)]
 pub struct BuildingHierarchyDataGeneratorStats {
     pub actual_start_time_ns: u64,
     pub actual_end_time_ns: u64,
@@ -1047,16 +1057,6 @@ pub struct BuildingHierarchyDataGeneratorStats {
     pub num_skipped_source_change_events: u64,
 }
 
-impl Default for BuildingHierarchyDataGeneratorStats {
-    fn default() -> Self {
-        Self {
-            actual_start_time_ns: 0,
-            actual_end_time_ns: 0,
-            num_source_change_events: 0,
-            num_skipped_source_change_events: 0,
-        }
-    }
-}
 
 #[derive(Clone, Serialize)]
 pub struct BuildingHierarchyDataGeneratorResultSummary {

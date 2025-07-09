@@ -336,7 +336,7 @@ impl QueryResultObserverInternalState {
     
                 self.log_result_stream_record(&record).await;
 
-                let record_time_ns = record.dequeue_time_ns as u64;
+                let record_time_ns = record.dequeue_time_ns;
                 self.metrics.result_stream_record_seq = record.record_data.get_source_seq();
 
                 match record.record_data {
@@ -469,7 +469,10 @@ impl QueryResultObserverInternalState {
                 self.metrics.observer_stop_time_ns = 0;
                 self.result_stream_handler.start().await
             },
-            QueryResultObserverCommand::Stop => Ok(self.transition_to_stopped_state().await),
+            QueryResultObserverCommand::Stop => {
+                self.transition_to_stopped_state().await;
+                Ok(())
+            },
         }
     }
     
@@ -489,7 +492,8 @@ impl QueryResultObserverInternalState {
             },
             QueryResultObserverCommand::Start => Ok(()),
             QueryResultObserverCommand::Stop => {
-                Ok(self.transition_to_stopped_state().await)
+                self.transition_to_stopped_state().await;
+                Ok(())
             },
         }
     }
@@ -575,7 +579,7 @@ impl Debug for QueryResultObserverInternalState {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Default)]
 pub struct QueryResultObserverMetrics {
     pub observer_create_time_ns: u64,
     pub observer_start_time_ns: u64,
@@ -691,28 +695,6 @@ impl QueryResultObserverMetrics {
     }
 }
 
-impl Default for QueryResultObserverMetrics {
-    fn default() -> Self {
-        Self {
-            observer_create_time_ns: 0,
-            observer_start_time_ns: 0,
-            observer_stop_time_ns: 0,
-            result_stream_bootstrap_record_count: 0,
-            result_stream_bootstrap_record_first_ns: 0,
-            result_stream_bootstrap_record_last_ns: 0,
-            result_stream_change_record_count: 0,
-            result_stream_change_record_first_ns: 0,
-            result_stream_change_record_last_ns: 0,
-            result_stream_record_seq: 0,
-            control_stream_record_count: 0,
-            control_stream_bootstrap_start_time_ns: 0,
-            control_stream_bootstrap_complete_time_ns: 0,
-            control_stream_running_time_ns: 0,
-            control_stream_stop_time_ns: 0,
-            control_stream_delete_time_ns: 0,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct QueryResultObserverSummary {
@@ -831,7 +813,7 @@ impl From<&QueryResultObserverInternalState> for QueryResultObserverSummary {
 impl Display for QueryResultObserverSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Query Result Observer Summary:")?;
-        writeln!(f, "  Test Run Query ID: {}", self.test_run_query_id.to_string())?;
+        writeln!(f, "  Test Run Query ID: {}", self.test_run_query_id)?;
         
         // Observer Timing Section
         writeln!(f, "\n  Observer Timing:")?;

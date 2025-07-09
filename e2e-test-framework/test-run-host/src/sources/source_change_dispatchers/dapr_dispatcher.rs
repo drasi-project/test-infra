@@ -50,7 +50,7 @@ impl DaprSourceChangeDispatcher {
         log::debug!("Creating DaprSourceChangeDispatcher from {:?}, ", def);
 
         let source_id = output_storage.id.test_source_id.clone();
-        let settings = DaprSourceChangeDispatcherSettings::new(&def, source_id)?;
+        let settings = DaprSourceChangeDispatcherSettings::new(def, source_id)?;
         log::trace!("Creating DaprSourceChangeDispatcher with settings {:?}, ", settings);
 
         let publisher = DaprHttpPublisher::new(

@@ -47,7 +47,7 @@ impl DataCollectionStore {
     }
 
     pub async fn contains_data_collection(&self, id: &str) -> anyhow::Result<bool> {
-        let path = self.path.join(&id);
+        let path = self.path.join(id);
         Ok(path.exists())
     }
 
@@ -75,7 +75,7 @@ impl DataCollectionStore {
     pub async fn get_data_collection_storage(&self, id: &str, replace: bool) -> anyhow::Result<DataCollectionStorage> {
         log::debug!("Getting DataCollectionStorage for ID: {:?}", &id);
 
-        Ok(DataCollectionStorage::new(id, self.path.clone(), replace).await?)
+        DataCollectionStorage::new(id, self.path.clone(), replace).await
     }
 }
 
@@ -90,7 +90,7 @@ impl DataCollectionStorage {
     pub async fn new(id: &str, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
         log::debug!("Creating DataCollectionStorage for ID {:?} in folder: {:?}", id, &parent_path);
 
-        let path = parent_path.join(&id);
+        let path = parent_path.join(id);
         let sources_path = path.join(SOURCES_FOLDER_NAME);
 
         if replace && path.exists() {
@@ -112,7 +112,7 @@ impl DataCollectionStorage {
     pub async fn get_source_storage(&self, id: &str, replace: bool) -> anyhow::Result<DataCollectionSourceStorage> {
         log::debug!("Getting DataCollectionSourceStorage for ID: {:?}", &id);
 
-        Ok(DataCollectionSourceStorage::new(id, self.sources_path.clone(), replace).await?)
+        DataCollectionSourceStorage::new(id, self.sources_path.clone(), replace).await
     }
 
     pub async fn get_source_ids(&self) -> anyhow::Result<Vec<String>> {
@@ -142,7 +142,7 @@ impl DataCollectionSourceStorage {
     pub async fn new(id: &str, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
         log::debug!("Creating DataCollectionSourceStorage for ID {:?} in folder: {:?}", id, &parent_path);
 
-        let path = parent_path.join(&id);
+        let path = parent_path.join(id);
         let bootstrap_data_path = path.join(BOOTSTRAP_DATA_FOLDER_NAME);            
         let change_log_path = path.join(CHANGE_LOG_FOLDER_NAME);
 
@@ -158,7 +158,7 @@ impl DataCollectionSourceStorage {
 
         Ok(Self {
             id: id.to_string(),
-            path: path,
+            path,
         })
     }
 }
@@ -173,7 +173,7 @@ impl DataCollectionQueryStorage {
     pub async fn new(id: &str, parent_path: PathBuf, replace: bool) -> anyhow::Result<Self> {
         log::debug!("Creating DataCollectionQueryStorage for ID {:?} in folder: {:?}", id, &parent_path);
 
-        let path = parent_path.join(&id);
+        let path = parent_path.join(id);
         let snapshot_path = path.join(SNAPSHOTS_FOLDER_NAME);
 
         if replace && path.exists() {

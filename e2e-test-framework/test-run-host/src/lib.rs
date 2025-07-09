@@ -28,21 +28,12 @@ use test_data_store::{test_repo_storage::models::SpacingMode, test_run_storage::
 pub mod queries;
 pub mod sources;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct TestRunHostConfig {
     #[serde(default)]
     pub queries: Vec<TestRunQueryConfig>,
     #[serde(default)]
     pub sources: Vec<TestRunSourceConfig>,
-}
-
-impl Default for TestRunHostConfig {
-    fn default() -> Self {
-        TestRunHostConfig {
-            queries: Vec::new(),
-            sources: Vec::new(),
-        }
-    }
 }
 
 // An enum that represents the current state of the TestRunHost.
@@ -108,7 +99,7 @@ impl TestRunHost {
                 anyhow::bail!("{}", msg);
             },
             TestRunHostStatus::Error(_) => {
-                let msg = format!("TestRunHost is in an Error state, cannot Start.");
+                let msg = "TestRunHost is in an Error state, cannot Start.".to_string();
                 log::error!("{}", msg);
                 anyhow::bail!("{}", msg);
             },

@@ -74,12 +74,12 @@ impl ChangeScriptReader {
         if let Ok(seq_rec) = read_result {
             if let ChangeScriptRecord::Header(header) = seq_rec.record {
                 reader.header = header;
-                return Ok(reader);
+                Ok(reader)
             } else {
-                return Err(ChangeScriptReaderError::MissingHeader(reader.get_current_file_name()).into());
+                Err(ChangeScriptReaderError::MissingHeader(reader.get_current_file_name()).into())
             }
         } else {
-            return Err(ChangeScriptReaderError::MissingHeader(reader.get_current_file_name()).into());
+            Err(ChangeScriptReaderError::MissingHeader(reader.get_current_file_name()).into())
         }
     }
 
@@ -178,16 +178,13 @@ impl ChangeScriptReader {
                     if seq_rec.offset_ns == 0 {
                         // Missing offsets are defaulted to 0 during deserialization.
                         // They are adjusted to be the same as the previous offset.
-                        self.offset_ns = self.offset_ns;
+                    } else if seq_rec.offset_ns >= self.offset_ns {
+                        self.offset_ns = seq_rec.offset_ns;
                     } else {
-                        if seq_rec.offset_ns >= self.offset_ns {
-                            self.offset_ns = seq_rec.offset_ns;
-                        } else {
-                            // Throw an error if the offset_ns is less than the previous record's offset_ns.
-                            let error_message = format!("Offset_ns for record {:?} is less than the previous record's offset_ns {}.", seq_rec, self.offset_ns);
-                            log::error!("{}", error_message);
-                            return Err(ChangeScriptReaderError::RecordOutOfSequence(self.seq).into());
-                        }
+                        // Throw an error if the offset_ns is less than the previous record's offset_ns.
+                        let error_message = format!("Offset_ns for record {:?} is less than the previous record's offset_ns {}.", seq_rec, self.offset_ns);
+                        log::error!("{}", error_message);
+                        return Err(ChangeScriptReaderError::RecordOutOfSequence(self.seq).into());
                     }
                     self.offset_ns = seq_rec.offset_ns;
 

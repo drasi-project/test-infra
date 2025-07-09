@@ -58,6 +58,7 @@ pub struct RedisResultStreamHandler {
 }
 
 impl RedisResultStreamHandler {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new(id: TestRunQueryId, definition: RedisStreamResultStreamHandlerDefinition) -> anyhow::Result<Box<dyn ResultStreamHandler + Send + Sync>> {
         let settings = RedisResultStreamHandlerSettings::new(id, definition)?;
         log::trace!("Creating RedisResultStreamHandler with settings {:?}", settings);
@@ -254,7 +255,7 @@ async fn reader_thread(
     loop {
         let current_status = {
             if let Ok(status) = status.try_read() {
-                (*status).clone()
+                *status
             } else {
                 log::warn!("Could not acquire status lock in loop");
                 continue;
@@ -356,7 +357,7 @@ async fn read_stream(con: &mut MultiplexedConnection, seq: Arc<AtomicUsize>, str
                                             records.push(RedisStreamReadResult {
                                                 id,
                                                 seq: seq.fetch_add(1, Ordering::SeqCst),
-                                                enqueue_time_ns: enqueue_time_ns,
+                                                enqueue_time_ns,
                                                 dequeue_time_ns,
                                                 record: Some(record),
                                                 error: None,

@@ -32,7 +32,7 @@ const DEFAULT_DATA_COLLECTION_STORE_FOLDER: &str = "data_collections";
 const DEFAULT_TEST_REPO_STORE_FOLDER: &str = "test_repos";
 const DEFAULT_TEST_RUN_STORE_FOLDER: &str = "test_runs";
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct TestDataStoreConfig {
     pub data_collection_folder: Option<String>,
     pub data_store_path: Option<String>,
@@ -43,19 +43,6 @@ pub struct TestDataStoreConfig {
     pub test_run_folder: Option<String>,
 }
 
-impl Default for TestDataStoreConfig {
-    fn default() -> Self {
-        TestDataStoreConfig {
-            data_collection_folder: None,
-            data_store_path: None,
-            delete_on_start: None,
-            delete_on_stop: None,
-            test_repos: None,
-            test_repo_folder: None,
-            test_run_folder: None,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct TestDataStoreInfo {
@@ -128,7 +115,7 @@ impl TestDataStore {
         let config = TestDataStoreConfig {
             data_store_path: Some(TempDir::new().unwrap().into_path().to_string_lossy().to_string()),
             delete_on_stop: Some(true),
-            test_repos: test_repos,
+            test_repos,
             ..TestDataStoreConfig::default()
         };
 
@@ -153,26 +140,26 @@ impl TestDataStore {
     }
 
     pub async fn add_test_repo(&self, config: TestRepoConfig ) -> anyhow::Result<TestRepoStorage> {
-        Ok(self.test_repo_store.lock().await.add_test_repo(config, false).await?)
+        self.test_repo_store.lock().await.add_test_repo(config, false).await
     }
 
     pub async fn contains_test_repo(&self, id: &str) -> anyhow::Result<bool> {
-        Ok(self.test_repo_store.lock().await.contains_test_repo(id).await?)
+        self.test_repo_store.lock().await.contains_test_repo(id).await
     }
 
     pub async fn get_test_definition(&self, repo_id: &str, test_id: &str) -> anyhow::Result<TestDefinition> {
-        Ok(self.test_repo_store.lock().await
+        self.test_repo_store.lock().await
             .get_test_repo_storage(repo_id).await?
-            .get_test_definition(test_id).await?)
+            .get_test_definition(test_id).await
     }
 
     pub async fn get_test_repo_ids(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self.test_repo_store.lock().await.get_test_repo_ids().await?)
+        self.test_repo_store.lock().await.get_test_repo_ids().await
     }
 
     pub async fn get_test_repo_storage(&self, repo_id: &str) -> anyhow::Result<TestRepoStorage> {
-        Ok(self.test_repo_store.lock().await
-            .get_test_repo_storage(repo_id).await?)
+        self.test_repo_store.lock().await
+            .get_test_repo_storage(repo_id).await
     }
 
     pub async fn get_test_repo_test_ids(&self, repo_id: &str) -> anyhow::Result<Vec<String>> {
@@ -182,29 +169,29 @@ impl TestDataStore {
     }
 
     pub async fn get_test_source_scripts(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceScriptSet> {
-        Ok(self.test_repo_store.lock().await
+        self.test_repo_store.lock().await
             .get_test_repo_storage(repo_id).await?
             .get_test_storage(test_id).await?
             .get_test_source(source_id, false).await?
-            .get_script_files().await?)
+            .get_script_files().await
     }
     
     pub async fn get_test_source_storage(&self, repo_id: &str, test_id: &str, source_id: &str) -> anyhow::Result<TestSourceStorage> {
-        Ok(self.test_repo_store.lock().await
+        self.test_repo_store.lock().await
             .get_test_repo_storage(repo_id).await?
             .get_test_storage(test_id).await?
-            .get_test_source(source_id, false).await?)
+            .get_test_source(source_id, false).await
     }
 
     pub async fn get_test_storage(&self, repo_id: &str, test_id: &str) -> anyhow::Result<TestStorage> {
-        Ok(self.test_repo_store.lock().await
+        self.test_repo_store.lock().await
             .get_test_repo_storage(repo_id).await?
-            .get_test_storage(test_id).await?)
+            .get_test_storage(test_id).await
     }
 
     // Test Run functions
     pub async fn contains_test_run(&self, id: &TestRunId) -> anyhow::Result<bool> {
-        Ok(self.test_run_store.lock().await.contains_test_run(id).await?)
+        self.test_run_store.lock().await.contains_test_run(id).await
     }
 
     pub async fn get_test_definition_for_test_run_source(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestDefinition> {
@@ -247,36 +234,36 @@ impl TestDataStore {
     }
 
     pub async fn get_test_run_ids(&self) -> anyhow::Result<Vec<TestRunId>> {
-        Ok(self.test_run_store.lock().await.get_test_run_ids().await?)
+        self.test_run_store.lock().await.get_test_run_ids().await
     }
 
     pub async fn get_test_run_storage(&self, test_run_id: &TestRunId) -> anyhow::Result<TestRunStorage> {
-        Ok(self.test_run_store.lock().await.get_test_run_storage(test_run_id, false).await?)
+        self.test_run_store.lock().await.get_test_run_storage(test_run_id, false).await
     }
 
     pub async fn get_test_run_query_storage(&self, test_run_query_id: &TestRunQueryId) -> anyhow::Result<TestRunQueryStorage> {
-        Ok(self.test_run_store.lock().await
+        self.test_run_store.lock().await
             .get_test_run_storage(&test_run_query_id.test_run_id, false).await?
-            .get_query_storage(test_run_query_id, false).await?)
+            .get_query_storage(test_run_query_id, false).await
     }
 
     pub async fn get_test_run_source_storage(&self, test_run_source_id: &TestRunSourceId) -> anyhow::Result<TestRunSourceStorage> {
-        Ok(self.test_run_store.lock().await
+        self.test_run_store.lock().await
             .get_test_run_storage(&test_run_source_id.test_run_id, false).await?
-            .get_source_storage(test_run_source_id, false).await?)
+            .get_source_storage(test_run_source_id, false).await
     }
 
     // Data Collection functions
     pub async fn contains_data_collection(&self, id: &str) -> anyhow::Result<bool> {
-        Ok(self.data_collection_store.lock().await.contains_data_collection(id).await?)
+        self.data_collection_store.lock().await.contains_data_collection(id).await
     }
 
     pub async fn get_data_collection_ids(&self) -> anyhow::Result<Vec<String>> {
-        Ok(self.data_collection_store.lock().await.get_data_collection_ids().await?)
+        self.data_collection_store.lock().await.get_data_collection_ids().await
     }
 
     pub async fn get_data_collection_storage(&self, id: &str) -> anyhow::Result<DataCollectionStorage> {
-        Ok(self.data_collection_store.lock().await.get_data_collection_storage(id, false).await?)
+        self.data_collection_store.lock().await.get_data_collection_storage(id, false).await
     }
 }
 

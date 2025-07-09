@@ -140,14 +140,14 @@ pub(crate) async fn start_web_api(
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_run_host));
 
-    println!("\n\nTest Service Web API listening on http://{}", addr);
+    log::info!("Test Service Web API listening on http://{}", addr);
 
     let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = server.with_graceful_shutdown(shutdown_signal());
 
-    println!("\n\nPress CTRL-C to stop the server...\n\n");
+    log::info!("Press CTRL-C to stop the server...");
 
     if let Err(err) = graceful.await {
         eprintln!("Server error: {}", err);
@@ -159,7 +159,7 @@ async fn shutdown_signal() {
     // Either will trigger a shutdown
     let ctrl_c = async {
         signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-        println!("\nReceived Ctrl+C, shutting down...");
+        log::info!("Received Ctrl+C, shutting down...");
     };
 
     // Listen for SIGTERM (Docker stop signal)
@@ -170,7 +170,7 @@ async fn shutdown_signal() {
             let mut sigterm =
                 signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
             sigterm.recv().await;
-            println!("\nReceived SIGTERM, shutting down...");
+            log::info!("Received SIGTERM, shutting down...");
         }
         #[cfg(not(unix))]
         futures::future::pending::<()>().await; // Fallback for non-Unix systems
@@ -182,9 +182,9 @@ async fn shutdown_signal() {
         _ = sigterm => {},
     }
 
-    println!("Cleaning up resources...");
+    log::info!("Cleaning up resources...");
     // TODO: Perform cleanup here...
-    println!("Resources cleaned up.");
+    log::info!("Resources cleaned up.");
 }
 
 async fn get_service_info_handler(

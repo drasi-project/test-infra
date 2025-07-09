@@ -140,11 +140,11 @@ impl SourceBootstrapResponseBody {
 
         for (_, nodes) in data.nodes {
             body.nodes
-                .extend(nodes.iter().map(|node| Node::from_script_record(node)));
+                .extend(nodes.iter().map(Node::from_script_record));
         }
         for (_, rels) in data.rels {
             body.rels
-                .extend(rels.iter().map(|rel| Relation::from_script_record(rel)));
+                .extend(rels.iter().map(Relation::from_script_record));
         }
 
         body

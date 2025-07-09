@@ -28,9 +28,9 @@ pub struct RecordSequenceNumberStopTriggerSettings {
 
 impl RecordSequenceNumberStopTriggerSettings {
     pub fn new(cfg: &RecordSequenceNumberStopTriggerDefinition) -> anyhow::Result<Self> {
-        return Ok(Self {
+        Ok(Self {
             record_sequence_number: cfg.record_sequence_number,
-        });
+        })
     }
 }
 
@@ -39,10 +39,11 @@ pub struct RecordSequenceNumberStopTrigger {
 }
 
 impl RecordSequenceNumberStopTrigger {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(def: &RecordSequenceNumberStopTriggerDefinition) -> anyhow::Result<Box<dyn StopTrigger + Send + Sync>> {
         log::debug!("Creating RecordSequenceNumberStopTrigger from {:?}, ", def);
 
-        let settings = RecordSequenceNumberStopTriggerSettings::new(&def)?;
+        let settings = RecordSequenceNumberStopTriggerSettings::new(def)?;
         log::trace!("Creating RecordSequenceNumberStopTrigger with settings {:?}, ", settings);
 
         Ok(Box::new(Self { settings }))

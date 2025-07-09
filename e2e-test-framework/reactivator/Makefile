@@ -18,5 +18,9 @@ docker-tag-and-push:
 kind-load:
 	kind load docker-image $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) --name $(CLUSTER_NAME)
 
+lint-check:
+	cargo fmt -- --check
+	cargo clippy --all-targets --all-features -- -D warnings -W clippy::print_stdout -A unused -A clippy::module_inception -A clippy::ptr_arg -A clippy::type_complexity
+	
 test:
 	cargo test

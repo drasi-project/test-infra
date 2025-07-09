@@ -27,9 +27,9 @@ pub struct ConsoleSourceChangeDispatcherSettings {
 
 impl ConsoleSourceChangeDispatcherSettings {
     pub fn new(def: &ConsoleSourceChangeDispatcherDefinition) -> anyhow::Result<Self> {
-        return Ok(Self {
+        Ok(Self {
             date_time_format: def.date_time_format.clone().unwrap_or("%Y-%m-%d %H:%M:%S%.f".to_string()),
-        });
+        })
     }
 }
 
@@ -41,7 +41,7 @@ impl ConsoleSourceChangeDispatcher {
     pub fn new(def: &ConsoleSourceChangeDispatcherDefinition, _output_storage: &TestRunSourceStorage) -> anyhow::Result<Self> {
         log::debug!("Creating ConsoleSourceChangeDispatcher from {:?}, ", def);
 
-        let settings = ConsoleSourceChangeDispatcherSettings::new(&def)?;
+        let settings = ConsoleSourceChangeDispatcherSettings::new(def)?;
         log::trace!("Creating ConsoleSourceChangeDispatcher with settings {:?}, ", settings);
 
         Ok(Self { settings })

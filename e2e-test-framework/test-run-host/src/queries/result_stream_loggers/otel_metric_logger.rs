@@ -42,10 +42,10 @@ pub struct OtelMetricResultStreamLoggerSettings {
 
 impl OtelMetricResultStreamLoggerSettings {
     pub fn new(test_run_query_id: TestRunQueryId, config: &OtelMetricResultStreamLoggerConfig) -> anyhow::Result<Self> {
-        return Ok(Self {
+        Ok(Self {
             test_run_query_id,
             otel_endpoint: config.otel_endpoint.clone().unwrap_or("http://otel-collector:4317".to_string()),
-        });
+        })
     }
 }
 
@@ -280,38 +280,38 @@ impl Default for ProfilerSummary {
             bootstrap_rec_count: 0,
             bootstrap_rec_time_total_avg: 0.0,
             bootstrap_rec_time_total_max: 0,
-            bootstrap_rec_time_total_min: std::u64::MAX,
+            bootstrap_rec_time_total_min: u64::MAX,
             change_rec_count: 0,
             change_rec_time_in_reactivator_avg: 0.0,
             change_rec_time_in_reactivator_max: 0,
-            change_rec_time_in_reactivator_min: std::u64::MAX,
+            change_rec_time_in_reactivator_min: u64::MAX,
             change_rec_time_in_src_change_q_avg: 0.0,
             change_rec_time_in_src_change_q_max: 0,
-            change_rec_time_in_src_change_q_min: std::u64::MAX,
+            change_rec_time_in_src_change_q_min: u64::MAX,
             change_rec_time_in_src_change_rtr_avg: 0.0,
             change_rec_time_in_src_change_rtr_max: 0,
-            change_rec_time_in_src_change_rtr_min: std::u64::MAX,
+            change_rec_time_in_src_change_rtr_min: u64::MAX,
             change_rec_time_in_src_disp_q_avg: 0.0,
             change_rec_time_in_src_disp_q_max: 0,
-            change_rec_time_in_src_disp_q_min: std::u64::MAX,
+            change_rec_time_in_src_disp_q_min: u64::MAX,
             change_rec_time_in_src_change_disp_avg: 0.0,
             change_rec_time_in_src_change_disp_max: 0,
-            change_rec_time_in_src_change_disp_min: std::u64::MAX,
+            change_rec_time_in_src_change_disp_min: u64::MAX,
             change_rec_time_in_query_change_q_avg: 0.0,
             change_rec_time_in_query_change_q_max: 0,
-            change_rec_time_in_query_change_q_min: std::u64::MAX,
+            change_rec_time_in_query_change_q_min: u64::MAX,
             change_rec_time_in_query_host_avg: 0.0,
             change_rec_time_in_query_host_max: 0,
-            change_rec_time_in_query_host_min: std::u64::MAX,
+            change_rec_time_in_query_host_min: u64::MAX,
             change_rec_time_in_query_solver_avg: 0.0,
             change_rec_time_in_query_solver_max: 0,
-            change_rec_time_in_query_solver_min: std::u64::MAX,
+            change_rec_time_in_query_solver_min: u64::MAX,
             change_rec_time_in_result_q_avg: 0.0,
             change_rec_time_in_result_q_max: 0,
-            change_rec_time_in_result_q_min: std::u64::MAX,
+            change_rec_time_in_result_q_min: u64::MAX,
             change_rec_time_total_avg: 0.0,
             change_rec_time_total_max: 0,
-            change_rec_time_total_min: std::u64::MAX,
+            change_rec_time_total_min: u64::MAX,
             control_rec_count: 0,
         }
     }
@@ -327,10 +327,11 @@ pub struct OtelMetricResultStreamLogger {
 }
 
 impl OtelMetricResultStreamLogger {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new(test_run_query_id: TestRunQueryId, cfg: &OtelMetricResultStreamLoggerConfig) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
         log::debug!("Creating OtelMetricResultStreamLogger for {}, from {:?}, ", test_run_query_id, cfg);
 
-        let settings = OtelMetricResultStreamLoggerSettings::new(test_run_query_id, &cfg)?;
+        let settings = OtelMetricResultStreamLoggerSettings::new(test_run_query_id, cfg)?;
         log::trace!("Creating OtelMetricResultStreamLogger with settings {:?}, ", settings);
 
         // Initialize meter provider using pipeline
@@ -400,7 +401,7 @@ impl ResultStreamLogger for OtelMetricResultStreamLogger {
         match &record.record_data {
             QueryResultRecord::Change(change) => {
                 if change.base.metadata.is_some() {
-                    let profile = ChangeRecordProfile::new(&record, &change);
+                    let profile = ChangeRecordProfile::new(record, change);
 
                     self.metrics.change_rec_count.add(1, &self.metrics_attributes);     
                     self.metrics.change_rec_time_in_reactivator.record(profile.time_in_reactivator as f64, &self.metrics_attributes);        
@@ -415,7 +416,7 @@ impl ResultStreamLogger for OtelMetricResultStreamLogger {
                     self.metrics.change_rec_time_total.record(profile.time_total as f64, &self.metrics_attributes);    
 
                 } else {
-                    let profile = BootstrapRecordProfile::new(&record, &change);
+                    let profile = BootstrapRecordProfile::new(record, change);
 
                     self.metrics.bootstrap_rec_count.add(1, &self.metrics_attributes);  
                     self.metrics.bootstrap_rec_time_total.record(profile.time_total as f64, &self.metrics_attributes);               

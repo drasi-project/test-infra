@@ -15,7 +15,11 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::post, Json, Router
+    extract::Extension,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::post,
+    Json, Router,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -30,13 +34,13 @@ pub struct SourceBootstrapRequestBody {
     #[serde(rename = "nodeLabels")]
     pub node_labels: Vec<String>,
     #[serde(rename = "relLabels")]
-    pub rel_labels: Vec<String>
+    pub rel_labels: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct SourceBootstrapResponseBody {
     pub nodes: Vec<SourceElement>,
-    pub rels: Vec<SourceElement>
+    pub rels: Vec<SourceElement>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -68,24 +72,25 @@ pub struct AcquireRequestBody {
     #[serde(rename = "nodeLabels")]
     pub node_labels: Vec<String>,
     #[serde(rename = "relLabels")]
-    pub rel_labels: Vec<String>
+    pub rel_labels: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AcquireResponseBody {
     pub nodes: Vec<SourceElement>,
-    pub rels: Vec<SourceElement>
+    pub rels: Vec<SourceElement>,
 }
 
 impl From<SourceBootstrapResponseBody> for AcquireResponseBody {
     fn from(data: SourceBootstrapResponseBody) -> Self {
         Self {
             nodes: data.nodes,
-            rels: data.rels
+            rels: data.rels,
         }
     }
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Error)]
 pub enum TestProxyWebApiError {
     #[error("Error: {0}")]
@@ -93,7 +98,7 @@ pub enum TestProxyWebApiError {
     #[error("Error: {0}")]
     ReqwestError(reqwest::Error),
     #[error("Error: {0}")]
-    SerdeJsonError(serde_json::Error)
+    SerdeJsonError(serde_json::Error),
 }
 
 impl From<anyhow::Error> for TestProxyWebApiError {
@@ -119,13 +124,13 @@ impl IntoResponse for TestProxyWebApiError {
         match self {
             TestProxyWebApiError::AnyhowError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
             TestProxyWebApiError::ReqwestError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
             TestProxyWebApiError::SerdeJsonError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
         }
     }
 }
@@ -137,18 +142,17 @@ pub(crate) async fn start_web_api(cfg: Params) {
         .route("/acquire", post(post_acquire_handler))
         .layer(axum::extract::Extension(Arc::new(cfg)));
 
-    println!("\n\nTest Proxy Web API listening on http://{}", addr);
+    log::info!("\n\nTest Proxy Web API listening on http://{}", addr);
 
-    let server = axum::Server::bind(&addr)
-        .serve(app.into_make_service());
+    let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = server.with_graceful_shutdown(shutdown_signal());
 
-    println!("\n\nPress CTRL-C to stop the Test Proxy...\n\n");
+    log::info!("\n\nPress CTRL-C to stop the Test Proxy...\n\n");
 
     if let Err(err) = graceful.await {
-        eprintln!("Test Proxy error: {}", err);
+        log::error!("Test Proxy error: {}", err);
     }
 }
 
@@ -157,7 +161,7 @@ async fn shutdown_signal() {
     // Either will trigger a shutdown
     let ctrl_c = async {
         signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-        println!("\nReceived Ctrl+C, shutting down...");
+        log::info!("\nReceived Ctrl+C, shutting down...");
     };
 
     // Listen for SIGTERM (Docker stop signal)
@@ -165,25 +169,25 @@ async fn shutdown_signal() {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
             sigterm.recv().await;
-            println!("\nReceived SIGTERM, shutting down...");
+            log::info!("\nReceived SIGTERM, shutting down...");
         }
         #[cfg(not(unix))]
         futures::future::pending::<()>().await; // Fallback for non-Unix systems
     };
-    
+
     // Wait for either signal
     select! {
         _ = ctrl_c => {},
         _ = sigterm => {},
     }
 
-    println!("Cleaning up resources...");
+    log::info!("Cleaning up resources...");
     // TODO: Perform cleanup here...
-    println!("Resources cleaned up.");
+    log::info!("Resources cleaned up.");
 }
-
 
 pub async fn post_acquire_handler(
     cfg: Extension<Arc<Params>>,
@@ -191,8 +195,10 @@ pub async fn post_acquire_handler(
 ) -> anyhow::Result<impl IntoResponse, TestProxyWebApiError> {
     log::debug!("Processing call - post_acquire - {:?}", body);
 
-    let url = format!("http://{}:{}/test_run_host/sources/{}/bootstrap", 
-        cfg.test_service_host, cfg.test_service_port, cfg.test_run_source_id);
+    let url = format!(
+        "http://{}:{}/test_run_host/sources/{}/bootstrap",
+        cfg.test_service_host, cfg.test_service_port, cfg.test_run_source_id
+    );
 
     let acquire_body: AcquireRequestBody = serde_json::from_value(body.0)?;
     let src_req_body = SourceBootstrapRequestBody {
@@ -211,9 +217,13 @@ pub async fn post_acquire_handler(
 
     match response.json::<SourceBootstrapResponseBody>().await {
         Ok(data) => {
-            log::debug!("Response from Test Service - #nodes:{:?}, #rels:{:?}", data.nodes.len(), data.rels.len());
+            log::debug!(
+                "Response from Test Service - #nodes:{:?}, #rels:{:?}",
+                data.nodes.len(),
+                data.rels.len()
+            );
             Ok(Json(AcquireResponseBody::from(data)).into_response())
-        },
+        }
         Err(e) => {
             log::error!("Error: {:?}", e);
             Err(e.into())

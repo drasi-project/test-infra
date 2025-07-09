@@ -31,7 +31,7 @@ pub enum BootstrapDataGeneratorError {
     // NotConfigured
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct BootstrapData {
     pub nodes: HashMap<String, Vec<NodeRecord>>,
     pub rels: HashMap<String, Vec<RelationRecord>>,
@@ -47,10 +47,10 @@ impl BootstrapData {
 
     pub fn merge(&mut self, other: BootstrapData) {
         for (label, ids) in other.nodes {
-            self.nodes.entry(label).or_insert_with(Vec::new).extend(ids);
+            self.nodes.entry(label).or_default().extend(ids);
         }
         for (label, ids) in other.rels {
-            self.rels.entry(label).or_insert_with(Vec::new).extend(ids);
+            self.rels.entry(label).or_default().extend(ids);
         }
     }
 }

@@ -75,7 +75,7 @@ impl std::fmt::Display for SourceChangeEvent {
 
                 write!(f, "{}", json_data_unescaped)
             },
-            Err(e) => return write!(f, "Error serializing SourceChangeEvent: {:?}. Error: {}", self, e),
+            Err(e) => write!(f, "Error serializing SourceChangeEvent: {:?}. Error: {}", self, e)
         }
     }
 }

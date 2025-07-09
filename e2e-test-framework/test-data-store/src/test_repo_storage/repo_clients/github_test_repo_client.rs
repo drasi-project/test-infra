@@ -18,7 +18,6 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::Value;
 use tokio::{fs::File, io::AsyncWriteExt};
-use base64::engine::general_purpose;
 
 use crate::test_repo_storage::models::{BootstrapDataGeneratorDefinition, SourceChangeGeneratorDefinition, TestSourceDefinition};
 
@@ -56,6 +55,7 @@ pub struct GithubTestRepoClient {
 }
 
 impl GithubTestRepoClient {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new(common_config: CommonTestRepoConfig, unique_config: GithubTestRepoConfig) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
         log::debug!("Creating GithubTestRepoClient from common_config:{:?} and unique_config:{:?}, ", common_config, unique_config);
 
@@ -87,7 +87,7 @@ impl GithubTestRepoClient {
         Ok(Box::new(Self { settings, client }))
     }
 
-    async fn download_bootstrap_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
+    async fn download_bootstrap_script_files(&self, _repo_folder: String, _local_folder: PathBuf) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
         todo!();
         // This is still WIP; we will work on this when we have fixed the population test.
         // log::debug!("Downloading Bootstrap Script Files from {:?} to {:?}", repo_folder, local_folder);
@@ -120,7 +120,7 @@ impl GithubTestRepoClient {
         // Ok(file_path_map)
     }
 
-    async fn download_change_script_files(&self, repo_folder: String, local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+    async fn download_change_script_files(&self, _repo_folder: String, _local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
         todo!();
         // This is still WIP; we will work on this when we have fixed the population test.
         // log::debug!("Downloading Source Change Script Files from {:?} to {:?}", repo_folder, local_folder);
@@ -169,45 +169,36 @@ impl RemoteTestRepoClient for GithubTestRepoClient {
     }
 
     async fn copy_test_source_content(&self, test_data_folder: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
-        match test_source_def {
-            TestSourceDefinition::Script(def) => {
-                log::debug!("Copying Test Source Content for {:?} to {:?}", def.common.test_source_id, test_source_data_path);
+        if let TestSourceDefinition::Script(def) = test_source_def {
+            log::debug!("Copying Test Source Content for {:?} to {:?}", def.common.test_source_id, test_source_data_path);
 
-                // Bootstrap Data Script Files
-                match &def.bootstrap_data_generator {
-                    Some(BootstrapDataGeneratorDefinition::Script(bs_def)) => {
-                        // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
-                        let repo_path = format!(
-                            "{}/{}/sources/{}/{}/", 
-                            self.settings.root_path, 
-                            test_data_folder, 
-                            def.common.test_source_id, 
-                            &bs_def.script_file_folder
-                        );
-                        let local_path = test_source_data_path.join(&bs_def.script_file_folder);
-                        self.download_bootstrap_script_files(repo_path, local_path).await?
-                    },
-                    _ => HashMap::new()
-                };
+            // Bootstrap Data Script Files
+            if let Some(BootstrapDataGeneratorDefinition::Script(bs_def)) = &def.bootstrap_data_generator {
+            // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
+            let repo_path = format!(
+                "{}/{}/sources/{}/{}/", 
+                self.settings.root_path, 
+                test_data_folder, 
+                def.common.test_source_id, 
+                &bs_def.script_file_folder
+            );
+            let local_path = test_source_data_path.join(&bs_def.script_file_folder);
+            self.download_bootstrap_script_files(repo_path, local_path).await?;
+            }
 
-                // Source Change Script Files
-                match &def.source_change_generator {
-                    Some(SourceChangeGeneratorDefinition::Script(sc_def)) => {
-                        // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
-                        let repo_path = format!(
-                            "{}/{}/sources/{}/{}/", 
-                            self.settings.root_path, 
-                            test_data_folder, 
-                            def.common.test_source_id, 
-                            &sc_def.script_file_folder
-                        );
-                        let local_path = test_source_data_path.join(&sc_def.script_file_folder);
-                        self.download_change_script_files(repo_path, local_path).await?
-                    },
-                    _ => Vec::new()
-                };
-            },
-            _ => {}
+            // Source Change Script Files
+            if let Some(SourceChangeGeneratorDefinition::Script(sc_def)) = &def.source_change_generator {
+            // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
+            let repo_path = format!(
+                "{}/{}/sources/{}/{}/", 
+                self.settings.root_path, 
+                test_data_folder, 
+                def.common.test_source_id, 
+                &sc_def.script_file_folder
+            );
+            let local_path = test_source_data_path.join(&sc_def.script_file_folder);
+            self.download_change_script_files(repo_path, local_path).await?;
+            }
         }
 
         Ok(())
@@ -268,23 +259,25 @@ async fn download_github_repo_file(
 }
 
 // This is still WIP; we will work on this when we have fixed the population test.
+#[allow(dead_code)]
 fn download_github_repo_folder(
-    client: Client,
-    owner: String,
-    repo: String,
-    branch: String,
-    local_repo_folder: PathBuf,
-    remote_repo_folder: String, 
+    _client: Client,
+    _owner: String,
+    _repo: String,
+    _branch: String,
+    _local_repo_folder: PathBuf,
+    _remote_repo_folder: String, 
 ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<Vec<PathBuf>>> + Send>> {
     todo!();
 }
 
+#[allow(dead_code)]
 async fn list_github_directory_contents(
-    client: &Client,
-    owner: &str,
-    repo: &str,
-    branch: &str,
-    path: &str
+    _client: &Client,
+    _owner: &str,
+    _repo: &str,
+    _branch: &str,
+    _path: &str
 ) -> anyhow::Result<Vec<Value>> {
     todo!();
 }

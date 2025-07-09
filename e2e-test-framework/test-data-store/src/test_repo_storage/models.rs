@@ -214,7 +214,6 @@ impl TestDefinition {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
-
 pub enum TestSourceDefinition {
     Model(ModelTestSourceDefinition),
     Script(ScriptTestSourceDefinition),

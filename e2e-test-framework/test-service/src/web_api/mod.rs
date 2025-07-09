@@ -15,7 +15,11 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::Extension, http::StatusCode, response::{IntoResponse, Response}, routing::get, Json, Router
+    extract::Extension,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -60,7 +64,6 @@ impl From<serde_json::Error> for TestServiceWebApiError {
     }
 }
 
-
 impl From<std::io::Error> for TestServiceWebApiError {
     fn from(error: std::io::Error) -> Self {
         TestServiceWebApiError::IOError(error)
@@ -72,22 +75,24 @@ impl IntoResponse for TestServiceWebApiError {
         match self {
             TestServiceWebApiError::AnyhowError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
-            TestServiceWebApiError::NotFound(kind, id) => {
-                (StatusCode::NOT_FOUND, Json(format!("{} with ID {} not found", kind, id))).into_response()
-            },
+            }
+            TestServiceWebApiError::NotFound(kind, id) => (
+                StatusCode::NOT_FOUND,
+                Json(format!("{} with ID {} not found", kind, id)),
+            )
+                .into_response(),
             TestServiceWebApiError::SerdeJsonError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
             TestServiceWebApiError::TestRunHostError(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(msg)).into_response()
-            },
+            }
             TestServiceWebApiError::NotReady(msg) => {
                 (StatusCode::SERVICE_UNAVAILABLE, Json(msg)).into_response()
-            },
+            }
             TestServiceWebApiError::IOError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response()
-            },
+            }
         }
     }
 }
@@ -118,7 +123,12 @@ struct DataCollectorStateResponse {
     pub data_collection_ids: Vec<String>,
 }
 
-pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>, test_run_host: Arc<TestRunHost>, data_collector: Arc<DataCollector>) {
+pub(crate) async fn start_web_api(
+    port: u16,
+    test_data_store: Arc<TestDataStore>,
+    test_run_host: Arc<TestRunHost>,
+    data_collector: Arc<DataCollector>,
+) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
     let app = Router::new()
@@ -130,20 +140,18 @@ pub(crate) async fn start_web_api(port: u16, test_data_store: Arc<TestDataStore>
         .layer(axum::extract::Extension(test_data_store))
         .layer(axum::extract::Extension(test_run_host));
 
-    println!("\n\nTest Service Web API listening on http://{}", addr);
+    log::info!("Test Service Web API listening on http://{}", addr);
 
-    let server = axum::Server::bind(&addr)
-        .serve(app.into_make_service());
+    let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = server.with_graceful_shutdown(shutdown_signal());
 
-    println!("\n\nPress CTRL-C to stop the server...\n\n");
+    log::info!("Press CTRL-C to stop the server...");
 
     if let Err(err) = graceful.await {
         eprintln!("Server error: {}", err);
     }
-
 }
 
 async fn shutdown_signal() {
@@ -151,7 +159,7 @@ async fn shutdown_signal() {
     // Either will trigger a shutdown
     let ctrl_c = async {
         signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-        println!("\nReceived Ctrl+C, shutting down...");
+        log::info!("Received Ctrl+C, shutting down...");
     };
 
     // Listen for SIGTERM (Docker stop signal)
@@ -159,23 +167,24 @@ async fn shutdown_signal() {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
             sigterm.recv().await;
-            println!("\nReceived SIGTERM, shutting down...");
+            log::info!("Received SIGTERM, shutting down...");
         }
         #[cfg(not(unix))]
         futures::future::pending::<()>().await; // Fallback for non-Unix systems
     };
-    
+
     // Wait for either signal
     select! {
         _ = ctrl_c => {},
         _ = sigterm => {},
     }
 
-    println!("Cleaning up resources...");
+    log::info!("Cleaning up resources...");
     // TODO: Perform cleanup here...
-    println!("Resources cleaned up.");
+    log::info!("Resources cleaned up.");
 }
 
 async fn get_service_info_handler(
@@ -187,7 +196,11 @@ async fn get_service_info_handler(
 
     Ok(Json(TestServiceStateResponse {
         data_store: TestDataStoreStateResponse {
-            path: test_data_store.get_data_store_path().await?.to_string_lossy().to_string(),
+            path: test_data_store
+                .get_data_store_path()
+                .await?
+                .to_string_lossy()
+                .to_string(),
             test_repo_ids: test_data_store.get_test_repo_ids().await?,
         },
         test_run_host: TestRunHostStateResponse {

@@ -27,5 +27,10 @@ kind-load:
 drasi-apply:
 	drasi apply -f test-source-provider/e2e-test-service-provider.yaml
 
+lint-check:
+	$(MAKE) -C test-service lint-check
+	$(MAKE) -C reactivator lint-check
+	$(MAKE) -C proxy lint-check
+
 test:
 	cargo test

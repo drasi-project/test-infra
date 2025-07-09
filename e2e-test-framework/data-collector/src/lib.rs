@@ -209,7 +209,7 @@ impl DataCollection {
             for result in results {
                 match result {
                     Ok(Ok(_)) => continue, // Task and source.start() both succeeded
-                    Ok(Err(e)) => return Err(e.into()), // source.start() returned an error
+                    Ok(Err(e)) => return Err(e), // source.start() returned an error
                     Err(e) => return Err(anyhow::Error::new(e)), // Task itself panicked
                 }
             }

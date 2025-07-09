@@ -100,7 +100,7 @@ impl RedisStreamSourceChangeDispatcher {
         log::debug!("Creating RedisStreamSourceChangeDispatcher from {:?}", def);
 
         let source_id = output_storage.id.test_source_id.clone();
-        let settings = RedisStreamSourceChangeDispatcherSettings::new(&def, source_id)?;
+        let settings = RedisStreamSourceChangeDispatcherSettings::new(def, source_id)?;
         log::trace!("Creating RedisStreamSourceChangeDispatcher with settings {:?}", settings);
 
         let redis_url = format!("redis://{}:{}", &settings.host, &settings.port);

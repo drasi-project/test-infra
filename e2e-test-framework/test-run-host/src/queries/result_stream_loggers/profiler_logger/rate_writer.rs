@@ -69,14 +69,12 @@ impl RateTracker {
         let metadata = &change.base.metadata.as_ref().unwrap().tracking;
         
         // Check if this is the first event with a reactivator_start component
-        if !self.has_started {
-            if metadata.source.reactivator_start_ns > 0 {
-                // Initialize with this start time
-                self.start_time_ns = metadata.source.reactivator_start_ns;
-                // Add the first time window
-                self.counts.push([0; COMPONENT_COUNT]);
-                self.has_started = true;
-            }
+        if !self.has_started && metadata.source.reactivator_start_ns > 0 {
+            // Initialize with this start time
+            self.start_time_ns = metadata.source.reactivator_start_ns;
+            // Add the first time window
+            self.counts.push([0; COMPONENT_COUNT]);
+            self.has_started = true;
         }
         
         // Only process if we've been initialized

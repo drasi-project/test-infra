@@ -69,7 +69,7 @@ pub struct ProfilerResultStreamLoggerSettings {
 
 impl ProfilerResultStreamLoggerSettings {
     pub fn new(test_run_query_id: TestRunQueryId, config: &ProfilerResultStreamLoggerConfig, folder_path: PathBuf) -> anyhow::Result<Self> {
-        return Ok(Self {
+        Ok(Self {
             bootstrap_log_name: config.bootstrap_log_name.clone().unwrap_or("bootstrap".to_string()),
             change_image_name: config.change_image_name.clone().unwrap_or("change".to_string()),
             change_log_name: config.change_log_name.clone().unwrap_or("change".to_string()),
@@ -84,7 +84,7 @@ impl ProfilerResultStreamLoggerSettings {
             write_change_log: config.write_change_log.unwrap_or(false),
             write_change_rates: config.write_change_rates.unwrap_or(false),
             write_distributions: config.write_distributions.unwrap_or(false),
-        });
+        })
     }
 }
 
@@ -109,7 +109,7 @@ impl TimingStats {
         Self {
             mean: 0.0,
             max: 0,
-            min: std::u64::MAX,
+            min: u64::MAX,
             std_dev: 0.0,
             count: 0,
             m2: 0.0,
@@ -135,18 +135,22 @@ impl TimingStats {
     /// Finalize statistics calculation
     pub fn finalize(&mut self) {
         // Count parameter is ignored as we track count internally now
-        if self.count > 1 {
-            // Calculate standard deviation from M2
-            self.std_dev = (self.m2 / (self.count - 1) as f64).sqrt();
-        } else if self.count == 1 {
-            // Only one sample, no deviation
-            self.std_dev = 0.0;
-        } else {
-            // No samples, reset everything
-            self.mean = 0.0;
-            self.max = 0;
-            self.min = 0;
-            self.std_dev = 0.0;
+        match self.count {
+            n if n > 1 => {
+                // Calculate standard deviation from M2
+                self.std_dev = (self.m2 / (self.count - 1) as f64).sqrt();
+            }
+            1 => {
+                // Only one sample, no deviation
+                self.std_dev = 0.0;
+            }
+            _ => {
+                // No samples, reset everything
+                self.mean = 0.0;
+                self.max = 0;
+                self.min = 0;
+                self.std_dev = 0.0;
+            }
         }
     }
 }
@@ -319,11 +323,12 @@ pub struct ProfilerResultStreamLogger {
 }
 
 impl ProfilerResultStreamLogger {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new(test_run_query_id: TestRunQueryId, def: &ProfilerResultStreamLoggerConfig, output_storage: &TestRunQueryStorage) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
         log::debug!("Creating ProfilerResultStreamLogger for {}, from {:?}, ", test_run_query_id, def);
 
         let folder_path = output_storage.result_change_path.join("profiler");
-        let settings = ProfilerResultStreamLoggerSettings::new(test_run_query_id, &def, folder_path)?;
+        let settings = ProfilerResultStreamLoggerSettings::new(test_run_query_id, def, folder_path)?;
         log::trace!("Creating ProfilerResultStreamLogger with settings {:?}, ", settings);
 
         if !std::path::Path::new(&settings.folder_path).exists() {

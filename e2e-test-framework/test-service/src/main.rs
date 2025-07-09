@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use clap::Parser;
-use serde::{Deserialize, Serialize};
 use data_collector::{config::DataCollectorConfig, DataCollector};
-use test_data_store::{TestDataStoreConfig, TestDataStore};
-use test_run_host::{TestRunHostConfig, TestRunHost};
+use serde::{Deserialize, Serialize};
+use test_data_store::{TestDataStore, TestDataStoreConfig};
+use test_run_host::{TestRunHost, TestRunHostConfig};
 
 mod web_api;
 
@@ -40,15 +40,20 @@ pub struct HostParams {
 
     // Flag to enable pruning of the data store at startup.
     #[arg(short = 'x', long = "prune", env = "DRASI_PRUNE_DATA_STORE")]
-    pub prune_data_store : bool,
+    pub prune_data_store: bool,
 
     // The port number the Web API will listen on.
     // If not provided, the default_value is used.
-    #[arg(short = 'p', long = "port", env = "DRASI_PORT", default_value_t = 63123)]
-    pub port: u16
+    #[arg(
+        short = 'p',
+        long = "port",
+        env = "DRASI_PORT",
+        default_value_t = 63123
+    )]
+    pub port: u16,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct TestServiceConfig {
     #[serde(default)]
     pub data_store: TestDataStoreConfig,
@@ -58,21 +63,10 @@ pub struct TestServiceConfig {
     pub data_collector: DataCollectorConfig,
 }
 
-impl Default for TestServiceConfig {
-    fn default() -> Self {
-        TestServiceConfig {
-            data_store: TestDataStoreConfig::default(),
-            test_run_host: TestRunHostConfig::default(),
-            data_collector: DataCollectorConfig::default(),
-        }
-    }
-}
-
 // The main function that starts the starts the Test Service.
 #[tokio::main]
 async fn main() {
-     
-     env_logger::init();
+    env_logger::init();
 
     // Parse the command line and env var args. If the args are invalid, return an error.
     let host_params = HostParams::parse();
@@ -91,14 +85,15 @@ async fn main() {
             }
 
             // Read the file content into a string.
-            let config_file_json = std::fs::read_to_string(config_file_path).unwrap_or_else(|err| {
-                panic!("Error reading config file: {}", err);
-            });
+            let config_file_json =
+                std::fs::read_to_string(config_file_path).unwrap_or_else(|err| {
+                    panic!("Error reading config file: {}", err);
+                });
 
             serde_json::from_str::<TestServiceConfig>(&config_file_json).unwrap_or_else(|err| {
                 panic!("Error parsing TestServiceConfig: {}", err);
             })
-        },
+        }
         None => {
             log::info!("No config file specified; using default configuration.");
             TestServiceConfig::default()
@@ -114,28 +109,41 @@ async fn main() {
     };
 
     // Create the TestDataStore.
-    let test_data_store = Arc::new(TestDataStore::new(test_service_config.data_store).await.unwrap_or_else(|err| {
-        panic!("Error creating TestDataStore: {}", err);
-    }));
+    let test_data_store = Arc::new(
+        TestDataStore::new(test_service_config.data_store)
+            .await
+            .unwrap_or_else(|err| {
+                panic!("Error creating TestDataStore: {}", err);
+            }),
+    );
 
-    let data_collector = Arc::new(DataCollector::new(test_service_config.data_collector, test_data_store.clone()).await.unwrap_or_else(|err| {
-        panic!("Error creating DataCollector: {}", err);
-    }));
+    let data_collector = Arc::new(
+        DataCollector::new(test_service_config.data_collector, test_data_store.clone())
+            .await
+            .unwrap_or_else(|err| {
+                panic!("Error creating DataCollector: {}", err);
+            }),
+    );
 
     // Start the DataCollector. This will start any collectors that are configured to start on launch.
     data_collector.start().await.unwrap_or_else(|err| {
         panic!("Error starting DataCollector: {}", err);
     });
 
-    let test_run_host = Arc::new(TestRunHost::new(test_service_config.test_run_host, test_data_store.clone()).await.unwrap_or_else(|err| {
-        panic!("Error creating TestRunHost: {}", err);
-    }));
+    let test_run_host = Arc::new(
+        TestRunHost::new(test_service_config.test_run_host, test_data_store.clone())
+            .await
+            .unwrap_or_else(|err| {
+                panic!("Error creating TestRunHost: {}", err);
+            }),
+    );
 
     // Start the Web API.
     web_api::start_web_api(
-        host_params.port, 
-        test_data_store, 
-        test_run_host, 
-        data_collector
-    ).await;
+        host_params.port,
+        test_data_store,
+        test_run_host,
+        data_collector,
+    )
+    .await;
 }

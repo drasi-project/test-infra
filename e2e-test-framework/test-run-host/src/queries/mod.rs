@@ -67,7 +67,7 @@ impl TryFrom<&TestRunQueryConfig> for TestRunQueryId {
             Ok(test_run_id) => {
                 Ok(TestRunQueryId::new(&test_run_id, &value.test_query_id))
             }
-            Err(e) => return Err(ParseTestRunQueryIdError::InvalidValues(e.to_string())),
+            Err(e) => Err(ParseTestRunQueryIdError::InvalidValues(e.to_string())),
         }
     }
 }
@@ -152,18 +152,18 @@ impl TestRunQuery {
     }
 
     pub async fn pause_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
-        Ok(self.query_result_observer.pause().await?)
+        self.query_result_observer.pause().await
     }
 
     pub async fn reset_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
-        Ok(self.query_result_observer.reset().await?)
+        self.query_result_observer.reset().await
     }    
 
     pub async fn start_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
-        Ok(self.query_result_observer.start().await?)
+        self.query_result_observer.start().await
     }
 
     pub async fn stop_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
-        Ok(self.query_result_observer.stop().await?)
+        self.query_result_observer.stop().await
     }
 }

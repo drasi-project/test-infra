@@ -24,6 +24,7 @@ pub struct NoneSourceChangeQueueReader {
 }
 
 impl NoneSourceChangeQueueReader {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Box<dyn SourceChangeQueueReader + Send + Sync> {
         log::debug!("Creating NoneSourceChangeQueueReader");
 

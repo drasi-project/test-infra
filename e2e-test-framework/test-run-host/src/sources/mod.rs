@@ -135,7 +135,7 @@ impl TryFrom<&TestRunSourceConfig> for TestRunSourceId {
             Ok(test_run_id) => {
                 Ok(TestRunSourceId::new(&test_run_id, &value.test_source_id))
             }
-            Err(e) => return Err(ParseTestRunSourceIdError::InvalidValues(e.to_string())),
+            Err(e) => Err(ParseTestRunSourceIdError::InvalidValues(e.to_string())),
         }
     }
 }

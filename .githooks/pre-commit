@@ -1,0 +1,17 @@
+#!/bin/sh
+case ":${PATH}:" in
+    *:"$HOME/.cargo/bin":*)
+        ;;
+    *)
+        export PATH="$HOME/.cargo/bin:$PATH"
+        ;;
+esac
+
+echo "Running cargo fmt for test service"
+cargo fmt --manifest-path e2e-test-framework/test-service/Cargo.toml --check
+
+echo "Running cargo fmt for reactivator"
+cargo fmt --manifest-path e2e-test-framework/reactivator/Cargo.toml --check
+
+echo "Running cargo fmt for proxy"
+cargo fmt --manifest-path e2e-test-framework/proxy/Cargo.toml --check

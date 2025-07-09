@@ -301,7 +301,7 @@ pub async fn recorder_thread(settings: SourceChangeRecorderSettings, mut recorde
                         // };
 
                         // Display the record to the console
-                        println!("Record In Recorder: {:?}", queue_record);
+                        log::debug!("Record In Recorder: {:?}", queue_record);
                     },
                     Some(SourceChangeQueueReaderMessage::Error(e)) => {
                         log::error!("Error getting next change event: {:?}", e);

@@ -94,6 +94,7 @@ pub struct RedisSourceChangeQueueReader {
 }
 
 impl RedisSourceChangeQueueReader {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new<S: Into<String>>(config: RedisSourceChangeQueueReaderConfig, source_id: S) -> anyhow::Result<Box<dyn SourceChangeQueueReader + Send + Sync>> {
         log::debug!("Creating RedisSourceChangeQueueReader from config {:?}", config);
 

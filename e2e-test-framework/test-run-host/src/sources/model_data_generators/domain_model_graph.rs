@@ -162,6 +162,12 @@ impl DomainModelGraph {
     }
 }
 
+impl Default for DomainModelGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[allow(clippy::unwrap_used)]
 impl DomainModelGraph {
     pub fn add_node(&mut self, node: Node) -> Result<GraphChangeResult<Node>, GraphError> {

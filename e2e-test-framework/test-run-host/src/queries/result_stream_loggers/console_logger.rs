@@ -34,10 +34,10 @@ pub struct ConsoleResultStreamLoggerSettings {
 
 impl ConsoleResultStreamLoggerSettings {
     pub fn new(test_run_query_id: TestRunQueryId, def: &ConsoleResultStreamLoggerConfig) -> anyhow::Result<Self> {
-        return Ok(Self {
+        Ok(Self {
             date_time_format: def.date_time_format.clone().unwrap_or("%Y-%m-%d %H:%M:%S%.f".to_string()),
             test_run_query_id,
-        });
+        })
     }
 }
 
@@ -46,10 +46,11 @@ pub struct ConsoleResultStreamLogger {
 }
 
 impl ConsoleResultStreamLogger {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new(test_run_query_id: TestRunQueryId, def: &ConsoleResultStreamLoggerConfig) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
         log::debug!("Creating ConsoleResultStreamLogger for {} from {:?}, ", test_run_query_id, def);
 
-        let settings = ConsoleResultStreamLoggerSettings::new(test_run_query_id, &def)?;
+        let settings = ConsoleResultStreamLoggerSettings::new(test_run_query_id, def)?;
         log::trace!("Creating ConsoleResultStreamLogger with settings {:?}, ", settings);
 
         Ok(Box::new(Self { settings }))

@@ -113,6 +113,7 @@ impl TestDataStore {
         log::debug!("Creating temporary TestDataStore with repos: {:?}", &test_repos);
 
         let config = TestDataStoreConfig {
+            #[allow(deprecated)]
             data_store_path: Some(TempDir::new().unwrap().into_path().to_string_lossy().to_string()),
             delete_on_stop: Some(true),
             test_repos,

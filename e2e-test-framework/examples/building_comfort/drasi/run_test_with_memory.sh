@@ -17,6 +17,7 @@
 GREEN="\033[32m"
 RESET="\033[0m"
 
+drasi env kube
 echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
 drasi init
 # This is a workaround for the issue with the init command regularly failing.
@@ -26,6 +27,7 @@ drasi init
 echo -e "${GREEN}\n\nUpdating Query Host to use In-memory Index...${RESET}"
 drasi apply -f examples/building_comfort/drasi/query_container_memory/query_container_memory.yaml
 drasi wait -f examples/building_comfort/drasi/query_container_memory/query_container_memory.yaml -t 200
+drasi delete querycontainer default
 
 # Deploy the Test Service and wait for it to be available
 echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"

@@ -317,6 +317,7 @@ impl TestRunDrasiServer {
                         log_level: log_level.to_string(),
                         max_connections: 1000,
                         shutdown_timeout_seconds: 30,
+                        disable_persistence: true
                     },
                     sources: drasi_sources,
                     queries: drasi_queries,

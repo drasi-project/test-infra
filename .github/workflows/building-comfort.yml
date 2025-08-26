@@ -15,6 +15,9 @@
 name: Building Comfort E2E Test
 
 on:
+  push:
+    branches:
+      - e2e-framework-automation
   workflow_dispatch:
   repository_dispatch:
     types: [building-comfort-trigger]

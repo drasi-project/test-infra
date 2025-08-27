@@ -2,7 +2,7 @@
 param clusterName string
 
 @description('The location of the AKS cluster')
-param location string = resourceGroup().location
+param location string = 'westus3'
 
 @description('Optional DNS prefix to use with hosted Kubernetes API server FQDN')
 param dnsPrefix string = 'drasi-aks-${uniqueString(resourceGroup().id)}'

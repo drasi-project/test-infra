@@ -86,7 +86,7 @@ jobs:
       - name: Deploy building comfort tests
         run: |
           cd e2e-test-framework
-          ./run_test_with_${{ matrix.cluster_type }}.sh
+          ./examples/building_comfort/drasi/run_test_with_${{ matrix.cluster_type }}.sh
 
         
 

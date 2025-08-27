@@ -27,12 +27,17 @@ permissions:
   id-token: write
 
 env:
-  CLUSTER_NAME: "building-comfort-aks-${{ github.run_number }}"
+  CLUSTER_NAME_REDIS: "building-comfort-aks-${{ github.run_number }}-redis"
+  CLUSTER_NAME_ROCKS: "building-comfort-aks-${{ github.run_number }}-rocks"
+  CLUSTER_NAME_MEMORY: "building-comfort-aks-${{ github.run_number }}-memory"
   RESOURCE_GROUP_NAME: "project-drasi"
 
 jobs:
   infra:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cluster_type: [redis, rocks, memory]
     
     steps:
       - name: Checkout repository
@@ -45,23 +50,65 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         
-      
       - name: Deploy AKS cluster
         run: |
           az deployment group create \
             --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
             --template-file infra/aks/aks-cluster.bicep \
-            --parameters clusterName=${{ env.CLUSTER_NAME }}
+            --parameters clusterName="building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}"
 
   deploy-tests:
     runs-on: ubuntu-latest
     needs: infra
+    strategy:
+      matrix:
+        cluster_type: [redis, rocks, memory]
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+            --name "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}" \
+            --overwrite-existing
+      
       - name: Deploy building comfort tests
         run: |
-          echo "Deploying building comfort E2E tests..."
-          # Add test deployment commands here
+          cd e2e-test-framework
+          ./run_test_with_${{ matrix.cluster_type }}.sh
+
+        
+
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: deploy-tests
+    if: always()
+    strategy:
+      matrix:
+        cluster_type: [redis, rocks, memory]
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Delete AKS cluster
+        run: |
+          az aks delete \
+            --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+            --name "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}" \
+            --yes --no-wait
+    

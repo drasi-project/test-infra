@@ -82,6 +82,11 @@ jobs:
             --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
             --name "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}" \
             --overwrite-existing
+
+      - name: Install Drasi CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/drasi-project/drasi-platform/main/cli/installers/install-drasi-cli.sh | /bin/bash
+
       
       - name: Deploy building comfort tests
         run: |

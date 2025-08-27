@@ -55,7 +55,8 @@ jobs:
           az deployment group create \
             --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
             --template-file infra/aks/aks-cluster.bicep \
-            --parameters clusterName="building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}"
+            --parameters clusterName="building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}" \
+            --name "aks-cluster-${{ github.run_number }}-${{ matrix.cluster_type }}"
 
   deploy-tests:
     runs-on: ubuntu-latest

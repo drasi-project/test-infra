@@ -23,7 +23,9 @@ on:
       image_prefix:
         description: 'Image Prefix'
         required: false
-        default: 'ghcr.io/drasi-project'  
+        default: 'ghcr.io/drasi-project'
+  repository_dispatch:
+    types: [draft-release-trigger]  
 
 permissions:
   id-token: write # Required for requesting the JWT
@@ -32,6 +34,8 @@ permissions:
 
 env:
   RELEASE_PATH: ./release
+  TAG: ${{ github.event.client_payload.tag || inputs.tag }}
+  IMAGE_PREFIX: ${{ github.event.client_payload.image_prefix || inputs.image_prefix }}
   
   TEST_INFRA_COMPONENTS: '[
     {"label": "E2E proxy", "path": "e2e-test-framework/proxy", "name": "e2e-proxy", "platforms": "linux/amd64,linux/arm64"},
@@ -94,8 +98,8 @@ jobs:
         if: contains(matrix.component.platforms, steps.platform.outputs.platform)
         run: |
           cd ${{ matrix.component.path }}
-          DOCKER_TAG_VERSION=${{ inputs.tag }}${{ steps.platform.outputs.suffix }} \
-          IMAGE_PREFIX=${{ inputs.image_prefix }} \
+          DOCKER_TAG_VERSION=${{ env.TAG }}${{ steps.platform.outputs.suffix }} \
+          IMAGE_PREFIX=${{ env.IMAGE_PREFIX }} \
           DOCKERX_OPTS="--push --platform ${{ steps.platform.outputs.platform }}" \
           make
 
@@ -117,32 +121,32 @@ jobs:
             expected_platforms=$(echo '${{ env.TEST_INFRA_COMPONENTS }}' | jq -r ".[] | select(.name == \"$component\") | .platforms")
             if echo "$expected_platforms" | grep -q "linux/amd64"; then
               
-              if docker manifest inspect ghcr.io/drasi-project/$component:${{ inputs.tag }}-amd64 > /dev/null 2>&1; then
-                echo "Manifest for $component:${{ inputs.tag }}-amd64:"
-                docker manifest inspect ghcr.io/drasi-project/$component:${{ inputs.tag }}-amd64
-                manifests+=("ghcr.io/drasi-project/$component:${{ inputs.tag }}-amd64")
+              if docker manifest inspect ${{ env.IMAGE_PREFIX }}/$component:${{ env.TAG }}-amd64 > /dev/null 2>&1; then
+                echo "Manifest for $component:${{ env.TAG }}-amd64:"
+                docker manifest inspect ${{ env.IMAGE_PREFIX }}/$component:${{ env.TAG }}-amd64
+                manifests+=("${{ env.IMAGE_PREFIX }}/$component:${{ env.TAG }}-amd64")
               
               else
-                echo "Error: Expected amd64 manifest not found for $component:${{ inputs.tag }}-amd64" >&2
+                echo "Error: Expected amd64 manifest not found for $component:${{ env.TAG }}-amd64" >&2
                 exit 1
               fi
             fi
 
             if echo "$expected_platforms" | grep -q "linux/arm64"; then
 
-              if docker manifest inspect ghcr.io/drasi-project/$component:${{ inputs.tag }}-arm64 > /dev/null 2>&1; then
-                echo "Manifest for $component:${{ inputs.tag }}-arm64:"
-                docker manifest inspect ghcr.io/drasi-project/$component:${{ inputs.tag }}-arm64
-                manifests+=("ghcr.io/drasi-project/$component:${{ inputs.tag }}-arm64")
+              if docker manifest inspect ${{ env.IMAGE_PREFIX }}/$component:${{ env.TAG }}-arm64 > /dev/null 2>&1; then
+                echo "Manifest for $component:${{ env.TAG }}-arm64:"
+                docker manifest inspect ${{ env.IMAGE_PREFIX }}/$component:${{ env.TAG }}-arm64
+                manifests+=("${{ env.IMAGE_PREFIX }}/$component:${{ env.TAG }}-arm64")
               
               else
-                echo "Error: Expected arm64 manifest not found for $component:${{ inputs.tag }}-arm64" >&2
+                echo "Error: Expected arm64 manifest not found for $component:${{ env.TAG }}-arm64" >&2
                 exit 1
               fi
             fi
 
             if [ ${#manifests[@]} -gt 0 ]; then
-              docker buildx imagetools create -t ghcr.io/drasi-project/$component:${{ inputs.tag }} ${manifests[@]}
+              docker buildx imagetools create -t ${{ env.IMAGE_PREFIX }}/$component:${{ env.TAG }} ${manifests[@]}
             else
               echo "No manifests found for $component, skipping manifest creation."
             fi

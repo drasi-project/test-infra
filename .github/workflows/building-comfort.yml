@@ -93,6 +93,8 @@ jobs:
           cd e2e-test-framework
           ./examples/building_comfort/drasi/run_test_with_${{ matrix.cluster_type }}.sh
           
+          sleep 10
+          
           # Wait for tests to complete by polling the query status
           echo "Waiting for tests to complete..."
           while true; do

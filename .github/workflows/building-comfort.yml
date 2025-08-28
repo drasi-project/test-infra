@@ -96,6 +96,7 @@ jobs:
       - name: Export test results
         run: |
           cd e2e-test-framework
+          sleep 30
           ./examples/building_comfort/drasi/get_test_run_results.sh "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}"
           
       - name: Upload test results to storage account

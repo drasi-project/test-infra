@@ -83,6 +83,7 @@ jobs:
             --name "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}" \
             --overwrite-existing
 
+      
       - name: Install Drasi CLI
         run: |
           curl -fsSL https://raw.githubusercontent.com/drasi-project/drasi-platform/main/cli/installers/install-drasi-cli.sh | /bin/bash
@@ -118,6 +119,13 @@ jobs:
         run: |
           cd e2e-test-framework
           ./examples/building_comfort/drasi/get_test_run_results.sh "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}"
+          
+      - name: Re-authenticate with Azure (refresh token)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           
       - name: Upload test results to storage account
         run: |

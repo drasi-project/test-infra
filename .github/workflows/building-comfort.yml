@@ -93,10 +93,31 @@ jobs:
           cd e2e-test-framework
           ./examples/building_comfort/drasi/run_test_with_${{ matrix.cluster_type }}.sh
           
+          # Wait for tests to complete by polling the query status
+          echo "Waiting for tests to complete..."
+          while true; do
+            # Get the service IP for the test service
+            SERVICE_IP=$(kubectl get svc drasi-test-service -n drasi-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [ -z "$SERVICE_IP" ]; then
+              SERVICE_IP=$(kubectl get svc drasi-test-service -n drasi-system -o jsonpath='{.spec.clusterIP}')
+            fi
+            
+            # Check query status
+            STATUS=$(curl -s "http://$SERVICE_IP:80/test_run_host/queries/github_dev_repo.building_comfort.test_run_001.room-comfort-level" | jq -r '.query_observer.status // "Running"')
+            
+            echo "Current status: $STATUS"
+            if [ "$STATUS" = "Stopped" ]; then
+              echo "Tests completed successfully!"
+              break
+            fi
+            
+            echo "Tests still running, waiting 10 seconds..."
+            sleep 10
+          done
+          
       - name: Export test results
         run: |
           cd e2e-test-framework
-          sleep 90
           ./examples/building_comfort/drasi/get_test_run_results.sh "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}"
           
       - name: Upload test results to storage account

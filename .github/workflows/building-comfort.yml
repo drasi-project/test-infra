@@ -141,13 +141,14 @@ jobs:
             --auth-mode login \
             --only-show-errors
           
-          # Upload all files from the results directory
+          # Upload all files from the results directory with Cold tier
           az storage blob upload-batch \
             --destination $CONTAINER_NAME \
             --source "./$CLUSTER_NAME" \
             --destination-path "building-comfort/$CLUSTER_NAME" \
             --account-name $STORAGE_ACCOUNT \
-            --auth-mode login
+            --auth-mode login \
+            --tier Cold
 
         
 

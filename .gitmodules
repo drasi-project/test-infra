@@ -1,0 +1,3 @@
+[submodule "e2e-test-framework/test-run-host/drasi-core"]
+	path = e2e-test-framework/test-run-host/drasi-core
+	url = https://github.com/drasi-project/drasi-core

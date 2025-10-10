@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use anyhow::{anyhow, Result};
-use drasi_server::channels::ComponentStatus;
-use drasi_server::config::{QueryConfig, ReactionConfig, SourceConfig};
+use drasi_server_core::channels::ComponentStatus;
+use drasi_server_core::config::{QueryConfig, ReactionConfig, SourceConfig, QueryLanguage};
 use std::collections::HashMap;
 
 use super::TestRunDrasiServer;
@@ -82,6 +82,7 @@ impl TestRunDrasiServer {
                 source_type: request.source_type,
                 auto_start: request.auto_start,
                 properties: serde_json::from_value(request.properties)?,
+                bootstrap_provider: None,
             };
 
             core.source_manager().add_source(config).await?;
@@ -114,6 +115,7 @@ impl TestRunDrasiServer {
                     // Properties from SourceDetails is a Value, need to convert to HashMap
                     serde_json::from_value(existing.properties)?
                 },
+                bootstrap_provider: None,
             };
 
             core.source_manager()
@@ -221,6 +223,7 @@ impl TestRunDrasiServer {
             let config = QueryConfig {
                 id: request.name.clone(),
                 query: request.query,
+                query_language: QueryLanguage::Cypher,
                 sources: request.sources,
                 auto_start: request.auto_start,
                 properties,
@@ -255,6 +258,7 @@ impl TestRunDrasiServer {
             let config = QueryConfig {
                 id: query_id_clone.clone(),
                 query: request.query.unwrap_or(existing.query),
+                query_language: QueryLanguage::Cypher,
                 sources: request.sources.unwrap_or(existing.sources),
                 auto_start: request.auto_start.unwrap_or(existing.auto_start),
                 properties,

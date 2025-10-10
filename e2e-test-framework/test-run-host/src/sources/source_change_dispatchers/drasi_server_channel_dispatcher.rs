@@ -16,6 +16,8 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use drasi_server_core::ApplicationSourceHandle;
+
 use test_data_store::{
     scripts::SourceChangeEvent,
     test_repo_storage::models::DrasiServerChannelSourceChangeDispatcherDefinition,
@@ -339,10 +341,10 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
 
 /// Dispatch a test framework SourceChangeEvent to Drasi using ApplicationSourceHandle helper methods
 async fn dispatch_event_to_drasi(
-    source_handle: &drasi_server::ApplicationSourceHandle,
+    source_handle: &ApplicationSourceHandle,
     event: &SourceChangeEvent,
 ) -> anyhow::Result<()> {
-    use drasi_server::PropertyMapBuilder;
+    use drasi_server_core::PropertyMapBuilder;
 
     // Log the event structure for debugging
     log::trace!(

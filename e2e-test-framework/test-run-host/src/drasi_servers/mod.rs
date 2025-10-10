@@ -17,7 +17,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use derive_more::Debug;
-use drasi_server::{server_core::DrasiServerCore, ApplicationHandle, RuntimeConfig};
+use drasi_server_core::{
+    ApplicationHandle, DrasiServerCore, QueryConfig, ReactionConfig, RuntimeConfig, SourceConfig,
+    config::{DrasiServerCoreSettings, QueryLanguage}
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use utoipa::ToSchema;
@@ -273,23 +276,30 @@ impl TestRunDrasiServer {
                 let log_level = config.log_level.as_deref().unwrap_or("info");
 
                 // Convert our configs to drasi_server configs
-                let drasi_sources: Vec<drasi_server::config::SourceConfig> = config
+                let drasi_sources: Vec<SourceConfig> = config
                     .sources
                     .iter()
-                    .map(|s| drasi_server::config::SourceConfig {
+                    .map(|s| SourceConfig {
                         id: s.id.clone(),
                         source_type: s.source_type.clone(),
                         auto_start: s.auto_start,
                         properties: s.properties.clone(),
+                        bootstrap_provider: None
                     })
                     .collect();
 
-                let drasi_queries: Vec<drasi_server::config::QueryConfig> = config
+                let drasi_queries: Vec<QueryConfig> = config
                     .queries
                     .iter()
-                    .map(|q| drasi_server::config::QueryConfig {
+                    .map(|q| QueryConfig {
                         id: q.id.clone(),
                         query: q.query.clone(),
+                        query_language: QueryLanguage::Cypher,
+                        // query_language: match q {
+                        //     Some(crate::api::QueryLanguage::Cypher) => drasi_server_core::config::QueryLanguage::Cypher,
+                        //     Some(crate::api::QueryLanguage::GQL) => drasi_server_core::config::QueryLanguage::GQL,
+                        //     None => drasi_server_core::config::QueryLanguage::Cypher,
+                        // },
                         sources: q.sources.clone(),
                         auto_start: q.auto_start,
                         properties: q.properties.clone(),
@@ -297,10 +307,10 @@ impl TestRunDrasiServer {
                     })
                     .collect();
 
-                let drasi_reactions: Vec<drasi_server::config::ReactionConfig> = config
+                let drasi_reactions: Vec<ReactionConfig> = config
                     .reactions
                     .iter()
-                    .map(|r| drasi_server::config::ReactionConfig {
+                    .map(|r| ReactionConfig {
                         id: r.id.clone(),
                         reaction_type: r.reaction_type.clone(),
                         queries: r.queries.clone(),
@@ -311,7 +321,8 @@ impl TestRunDrasiServer {
 
                 // Create RuntimeConfig for DrasiServerCore with all components
                 let runtime_config = Arc::new(RuntimeConfig {
-                    server: drasi_server::config::schema::ServerSettings {
+                    server: DrasiServerCoreSettings {
+                        disable_persistence: true,
                         host: "0.0.0.0".to_string(),
                         port: 0, // Not used by DrasiServerCore (embedded library)
                         log_level: log_level.to_string(),
@@ -545,7 +556,7 @@ impl TestRunDrasiServer {
         self.state.read().await.clone()
     }
 
-    pub async fn get_server_core(&self) -> Option<Arc<drasi_server::server_core::DrasiServerCore>> {
+    pub async fn get_server_core(&self) -> Option<Arc<DrasiServerCore>> {
         let core_guard = self.drasi_core.read().await;
         core_guard.clone()
     }
@@ -571,7 +582,7 @@ impl TestRunDrasiServer {
 
     pub(crate) async fn with_core<F, Fut, T>(&self, f: F) -> anyhow::Result<T>
     where
-        F: FnOnce(Arc<drasi_server::server_core::DrasiServerCore>) -> Fut,
+        F: FnOnce(Arc<DrasiServerCore>) -> Fut,
         Fut: std::future::Future<Output = anyhow::Result<T>> + Send + 'static,
         T: Send + 'static,
     {

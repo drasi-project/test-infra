@@ -10,7 +10,7 @@ tonic-build = "0.8"
 drasi-comms-abstractions = { path = "../infrastructure/comms-abstractions" }
 drasi-comms-dapr = { path = "../infrastructure/comms-dapr" }
 test-data-store = { path = "../test-data-store" }
-drasi-server = { workspace = true }
+drasi-server-core = { path = "./drasi-core/server-core" }
 
 anyhow = "1.0.86"
 async-trait = "0.1.81"

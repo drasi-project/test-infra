@@ -9,7 +9,6 @@ drasi-comms-dapr = { path = "../infrastructure/comms-dapr" }
 data-collector = { path = "../data-collector" }
 test-data-store = { path = "../test-data-store" }
 test-run-host = { path = "../test-run-host" }
-drasi-server = { workspace = true }
 
 axum = "0.6.19"
 azure_core = "0.20.0"

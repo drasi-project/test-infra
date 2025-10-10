@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM rust:1.82 AS builder
-RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
+FROM rust:1.86 AS builder
+RUN apt-get update && apt-get install -y protobuf-compiler cmake libc6-dev libssl-dev libclang-dev
 
 WORKDIR /usr/src
 COPY ./proxy ./proxy
@@ -21,10 +21,7 @@ COPY ./proxy ./proxy
 WORKDIR /usr/src/proxy
 RUN cargo install --force --path .
 
-FROM debian:bullseye-slim
-RUN apt-get update && apt-get install -y \
-    gdb curl wget vim net-tools iputils-ping \
-    && apt-get clean
-ENV RUST_BACKTRACE=1
+FROM gcr.io/distroless/cc
 COPY --from=builder /usr/local/cargo/bin/proxy /usr/local/bin/proxy
+USER root
 CMD ["proxy"]

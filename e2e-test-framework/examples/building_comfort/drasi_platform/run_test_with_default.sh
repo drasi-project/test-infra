@@ -17,10 +17,11 @@
 GREEN="\033[32m"
 RESET="\033[0m"
 
+drasi env kube
 # echo -e "${GREEN}\n\nInstalling Drasi...${RESET}"
-# drasi init
+drasi init --local --version latest
 # This is a workaround for the issue with the init command regularly failing.
-# drasi init 
+drasi init --local --version latest 
 
 # Deploy the Test Service and wait for it to be available
 echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"

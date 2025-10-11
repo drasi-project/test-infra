@@ -152,28 +152,28 @@ impl TestSourceResponse {
 pub fn get_test_repo_routes() -> Router {
     Router::new()
         .route(
-            "/",
+            "/api/test_repos",
             get(get_test_repo_list_handler).post(post_test_repo_handler),
         )
-        .route("/:repo_id", get(get_test_repo_handler))
+        .route("/api/test_repos/:repo_id", get(get_test_repo_handler))
         .route(
-            "/:repo_id/tests",
+            "/api/test_repos/:repo_id/tests",
             get(get_test_repo_test_list_handler).post(post_test_repo_test_handler),
         )
-        .route("/:repo_id/tests/:test_id", get(get_test_repo_test_handler))
+        .route("/api/test_repos/:repo_id/tests/:test_id", get(get_test_repo_test_handler))
         .route(
-            "/:repo_id/tests/:test_id/sources",
+            "/api/test_repos/:repo_id/tests/:test_id/sources",
             get(get_test_repo_test_source_list_handler).post(post_test_repo_test_source_handler),
         )
         .route(
-            "/:repo_id/tests/:test_id/sources/:source_id",
+            "/api/test_repos/:repo_id/tests/:test_id/sources/:source_id",
             get(get_test_repo_test_source_handler),
         )
 }
 
 #[utoipa::path(
     get,
-    path = "/test_repos",
+    path = "/api/test_repos",
     tag = "repos",
     responses(
         (status = 200, description = "List of repository IDs", body = Vec<String>),
@@ -191,7 +191,7 @@ pub async fn get_test_repo_list_handler(
 
 #[utoipa::path(
     get,
-    path = "/test_repos/{repo_id}/tests",
+    path = "/api/test_repos/{repo_id}/tests",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier")
@@ -217,7 +217,7 @@ pub async fn get_test_repo_test_list_handler(
 
 #[utoipa::path(
     get,
-    path = "/test_repos/{repo_id}/tests/{test_id}/sources",
+    path = "/api/test_repos/{repo_id}/tests/{test_id}/sources",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier"),
@@ -249,7 +249,7 @@ pub async fn get_test_repo_test_source_list_handler(
 
 #[utoipa::path(
     get,
-    path = "/test_repos/{repo_id}",
+    path = "/api/test_repos/{repo_id}",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier")
@@ -272,7 +272,7 @@ pub async fn get_test_repo_handler(
 
 #[utoipa::path(
     get,
-    path = "/test_repos/{repo_id}/tests/{test_id}",
+    path = "/api/test_repos/{repo_id}/tests/{test_id}",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier"),
@@ -300,7 +300,7 @@ pub async fn get_test_repo_test_handler(
 
 #[utoipa::path(
     get,
-    path = "/test_repos/{repo_id}/tests/{test_id}/sources/{source_id}",
+    path = "/api/test_repos/{repo_id}/tests/{test_id}/sources/{source_id}",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier"),
@@ -332,7 +332,7 @@ pub async fn get_test_repo_test_source_handler(
 
 #[utoipa::path(
     post,
-    path = "/test_repos",
+    path = "/api/test_repos",
     tag = "repos",
     request_body = test_data_store::test_repo_storage::repo_clients::TestRepoConfig,
     responses(
@@ -355,7 +355,7 @@ pub async fn post_test_repo_handler(
 
 #[utoipa::path(
     post,
-    path = "/test_repos/{repo_id}/tests",
+    path = "/api/test_repos/{repo_id}/tests",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier")
@@ -401,7 +401,7 @@ pub async fn post_test_repo_test_handler(
 
 #[utoipa::path(
     post,
-    path = "/test_repos/{repo_id}/tests/{test_id}/sources",
+    path = "/api/test_repos/{repo_id}/tests/{test_id}/sources",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier"),

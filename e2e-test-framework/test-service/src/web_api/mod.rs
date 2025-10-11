@@ -218,8 +218,8 @@ pub(crate) async fn start_web_api(
     // Create the main API router
     let api_router = Router::new()
         .route("/", get(get_service_info_handler))
-        .nest("/test_repos", get_test_repo_routes())
         // Hierarchical API routes
+        .merge(get_test_repo_routes())
         .merge(get_test_runs_routes());
 
     // Create the complete application with Swagger UI

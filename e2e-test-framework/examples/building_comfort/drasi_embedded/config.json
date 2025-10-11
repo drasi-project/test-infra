@@ -1,23 +1,23 @@
 {
   "data_store": {
-      "data_store_path": "examples/building_comfort/drasi_server_internal/test_data_cache",
+      "data_store_path": "examples/building_comfort/drasi_embedded/test_data_cache",
       "delete_on_start": true,
       "delete_on_stop": true,
       "test_repos": [
           {
-              "id": "drasi_server_dev_repo",
+              "id": "local_dev_repo",
               "kind": "LocalStorage",
-              "source_path": "examples/building_comfort/drasi_server_internal/dev_repo",
+              "source_path": "examples/building_comfort/drasi_embedded/dev_repo",
               "local_tests": [
                 {
                     "test_id": "building_comfort",
                     "version": 1,
-                    "description": "Building comfort monitoring test with internal Drasi Server",
+                    "description": "Building comfort monitoring test with in-process Drasi",
                     "test_folder": "building_comfort",
                     "drasi_servers": [
                         {
-                        "id": "internal-drasi-server",
-                        "name": "Internal Drasi Server for Building Comfort",
+                        "id": "embedded-drasi-server",
+                        "name": "embedded Drasi Server for Building Comfort",
                         "description": "Embedded Drasi Server instance for testing",
                         "config": {
                             "runtime": {
@@ -31,7 +31,7 @@
                             "sources": [
                             {
                                 "id": "facilities-db",
-                                "source_type": "internal.application",
+                                "source_type": "application",
                                 "auto_start": true,
                                 "properties": {}
                             }
@@ -48,7 +48,7 @@
                             "reactions": [
                             {
                                 "id": "building-comfort-alerts",
-                                "reaction_type": "internal.application",
+                                "reaction_type": "application",
                                 "queries": ["all-rooms"],
                                 "auto_start": true,
                                 "properties": {}
@@ -65,7 +65,7 @@
                         "source_change_dispatchers": [ 
                             {
                             "kind": "DrasiServerChannel",
-                            "drasi_server_id": "internal-drasi-server",
+                            "drasi_server_id": "embedded-drasi-server",
                             "source_id": "facilities-db",
                             "buffer_size": 2048
                             }
@@ -116,7 +116,7 @@
                         "test_reaction_id": "building-comfort",
                         "output_handler": {
                             "kind": "DrasiServerChannel",
-                            "drasi_server_id": "internal-drasi-server",
+                            "drasi_server_id": "embedded-drasi-server",
                             "reaction_id": "building-comfort-alerts",
                             "buffer_size": 1024
                         },
@@ -137,11 +137,11 @@
       "test_runs": [
           {
               "test_id": "building_comfort",
-              "test_repo_id": "drasi_server_dev_repo",
+              "test_repo_id": "local_dev_repo",
               "test_run_id": "test_run_001",
               "drasi_servers": [
                   {
-                      "test_drasi_server_id": "internal-drasi-server",
+                      "test_drasi_server_id": "embedded-drasi-server",
                       "start_immediately": true
                   }
               ],

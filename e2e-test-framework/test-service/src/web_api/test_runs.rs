@@ -180,7 +180,7 @@ pub async fn create_test_run(
     get,
     path = "/api/test_runs",
     responses(
-        (status = 200, description = "List of test runs", body = Vec<TestRunInfo>),
+        (status = 200, description = "List of test run IDs", body = Vec<String>),
         (status = 500, description = "Internal server error")
     ),
     tag = "test-runs"
@@ -189,27 +189,9 @@ pub async fn list_test_runs(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
     let run_ids = test_run_host.get_test_run_ids().await?;
-    let mut runs = Vec::new();
 
-    log::info!("Found {} test run IDs", run_ids.len());
-
-    for id_str in run_ids {
-        log::debug!("Processing test run ID: {}", id_str);
-        if let Ok(run_id) = TestRunId::try_from(id_str.as_str()) {
-            if let Ok(status) = test_run_host.get_test_run_status(&run_id).await {
-                runs.push(TestRunInfo {
-                    id: id_str,
-                    test_id: run_id.test_id.clone(),
-                    test_repo_id: run_id.test_repo_id.clone(),
-                    test_run_id: run_id.test_run_id.clone(),
-                    status,
-                });
-            }
-        }
-    }
-
-    log::info!("Returning {} test runs", runs.len());
-    Ok(Json(runs))
+    log::info!("Returning {} test run IDs", run_ids.len());
+    Ok(Json(run_ids))
 }
 
 /// Get a specific test run

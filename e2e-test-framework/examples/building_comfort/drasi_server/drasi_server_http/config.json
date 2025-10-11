@@ -1,13 +1,13 @@
 {
   "data_store": {
-      "data_store_path": "examples/building_comfort/drasi_server_http/test_data_cache",
+      "data_store_path": "examples/building_comfort/drasi_server/drasi_server_http/test_data_cache",
       "delete_on_start": true,
       "delete_on_stop": true,
       "test_repos": [
           {
-              "id": "drasi_server_dev_repo",
+              "id": "local_dev_repo",
               "kind": "LocalStorage",
-              "source_path": "examples/building_comfort/drasi_server_http/dev_repo",
+              "source_path": "examples/building_comfort/drasi_server/drasi_server_http/dev_repo",
               "local_tests": [ 
                   {
                       "test_id": "building_comfort",
@@ -21,6 +21,7 @@
                           "kind": "Model",
                           "source_change_dispatchers": [ 
                             {
+                              "source_id": "events-http",
                               "kind": "Http",
                               "url": "http://localhost",
                               "port": 9000,
@@ -100,7 +101,7 @@
       "test_runs": [
           {
               "test_id": "building_comfort",
-              "test_repo_id": "drasi_server_dev_repo",
+              "test_repo_id": "local_dev_repo",
               "test_run_id": "test_run_001",
               "queries": [],
               "reactions": [

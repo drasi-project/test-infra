@@ -21,10 +21,14 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::{json, Value};
 use utoipa::ToSchema;
 
-use test_data_store::test_run_storage::TestRunId;
+use test_data_store::{
+    test_repo_storage::models::SpacingMode,
+    test_run_storage::TestRunId,
+};
 use test_run_host::{TestRunConfig, TestRunStatus};
 
 use super::TestServiceWebApiError;
@@ -56,6 +60,79 @@ where
         TestRunStatus::Error(msg) => return serializer.serialize_str(&format!("Error: {}", msg)),
     };
     serializer.serialize_str(status_str)
+}
+
+// Request/Response structures for skip, step, and bootstrap endpoints
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct TestSkipConfig {
+    #[serde(default = "default_skip_count")]
+    pub num_skips: u64,
+    pub spacing_mode: Option<SpacingMode>,
+}
+
+fn default_skip_count() -> u64 {
+    1
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct TestStepConfig {
+    #[serde(default = "default_step_count")]
+    pub num_steps: u64,
+    pub spacing_mode: Option<SpacingMode>,
+}
+
+fn default_step_count() -> u64 {
+    1
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SourceBootstrapRequestBody {
+    #[serde(rename = "nodeLabels")]
+    pub node_labels: Vec<String>,
+    #[serde(rename = "relLabels")]
+    pub rel_labels: Vec<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SourceBootstrapResponseBody {
+    pub nodes: Vec<Node>,
+    pub rels: Vec<Relation>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Node {
+    pub id: String,
+    pub labels: Vec<String>,
+    #[serde(serialize_with = "serialize_properties")]
+    #[schema(value_type = Value)]
+    pub properties: Value,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Relation {
+    pub id: String,
+    pub labels: Vec<String>,
+    pub start_id: String,
+    pub start_label: Option<String>,
+    pub end_id: String,
+    pub end_label: Option<String>,
+    #[serde(serialize_with = "serialize_properties")]
+    #[schema(value_type = Value)]
+    pub properties: Value,
+}
+
+fn serialize_properties<S>(value: &Value, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        Value::Null => {
+            let empty_obj = json!({});
+            empty_obj.serialize(serializer)
+        }
+        _ => value.serialize(serializer),
+    }
 }
 
 pub fn get_test_runs_routes() -> Router {
@@ -91,6 +168,18 @@ pub fn get_test_runs_routes() -> Router {
         .route(
             "/api/test_runs/:run_id/sources/:source_id/reset",
             post(reset_test_run_source),
+        )
+        .route(
+            "/api/test_runs/:run_id/sources/:source_id/skip",
+            post(skip_test_run_source),
+        )
+        .route(
+            "/api/test_runs/:run_id/sources/:source_id/step",
+            post(step_test_run_source),
+        )
+        .route(
+            "/api/test_runs/:run_id/sources/:source_id/bootstrap",
+            post(bootstrap_test_run_source),
         )
         .route(
             "/api/test_runs/:run_id/queries",
@@ -514,6 +603,121 @@ async fn reset_test_run_source(
     let full_id = format!("{}.{}", run_id, source_id);
     test_run_host.test_source_reset(&full_id).await?;
     Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/test_runs/{run_id}/sources/{source_id}/skip",
+    params(
+        ("run_id" = String, Path, description = "Test run ID"),
+        ("source_id" = String, Path, description = "Source ID")
+    ),
+    request_body = TestSkipConfig,
+    responses(
+        (status = 200, description = "Source skipped successfully", body = test_run_host::sources::source_change_generators::SourceChangeGeneratorState),
+        (status = 404, description = "Source not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "test-runs"
+)]
+async fn skip_test_run_source(
+    Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
+    Path((run_id, source_id)): Path<(String, String)>,
+    Json(config): Json<TestSkipConfig>,
+) -> Result<impl IntoResponse, TestServiceWebApiError> {
+    let full_id = format!("{}.{}", run_id, source_id);
+    let response = test_run_host
+        .test_source_skip(&full_id, config.num_skips, config.spacing_mode)
+        .await?;
+    Ok(Json(response.state))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/test_runs/{run_id}/sources/{source_id}/step",
+    params(
+        ("run_id" = String, Path, description = "Test run ID"),
+        ("source_id" = String, Path, description = "Source ID")
+    ),
+    request_body = TestStepConfig,
+    responses(
+        (status = 200, description = "Source stepped successfully", body = test_run_host::sources::source_change_generators::SourceChangeGeneratorState),
+        (status = 404, description = "Source not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "test-runs"
+)]
+async fn step_test_run_source(
+    Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
+    Path((run_id, source_id)): Path<(String, String)>,
+    Json(config): Json<TestStepConfig>,
+) -> Result<impl IntoResponse, TestServiceWebApiError> {
+    let full_id = format!("{}.{}", run_id, source_id);
+    let response = test_run_host
+        .test_source_step(&full_id, config.num_steps, config.spacing_mode)
+        .await?;
+    Ok(Json(response.state))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/test_runs/{run_id}/sources/{source_id}/bootstrap",
+    params(
+        ("run_id" = String, Path, description = "Test run ID"),
+        ("source_id" = String, Path, description = "Source ID")
+    ),
+    request_body = SourceBootstrapRequestBody,
+    responses(
+        (status = 200, description = "Bootstrap data retrieved successfully", body = SourceBootstrapResponseBody),
+        (status = 404, description = "Source not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "test-runs"
+)]
+async fn bootstrap_test_run_source(
+    Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
+    Path((run_id, source_id)): Path<(String, String)>,
+    Json(body): Json<SourceBootstrapRequestBody>,
+) -> Result<impl IntoResponse, TestServiceWebApiError> {
+    use std::collections::HashSet;
+
+    let full_id = format!("{}.{}", run_id, source_id);
+    let node_labels: HashSet<String> = body.node_labels.into_iter().collect();
+    let rel_labels: HashSet<String> = body.rel_labels.into_iter().collect();
+
+    let bootstrap_data = test_run_host
+        .get_source_bootstrap_data(&full_id, &node_labels, &rel_labels)
+        .await?;
+
+    // Flatten nodes from the HashMap structure
+    let mut nodes: Vec<Node> = Vec::new();
+    for (_, node_list) in bootstrap_data.nodes {
+        for node in node_list {
+            nodes.push(Node {
+                id: node.id,
+                labels: node.labels,
+                properties: node.properties,
+            });
+        }
+    }
+
+    // Flatten relations from the HashMap structure
+    let mut rels: Vec<Relation> = Vec::new();
+    for (_, rel_list) in bootstrap_data.rels {
+        for rel in rel_list {
+            rels.push(Relation {
+                id: rel.id,
+                labels: rel.labels,
+                start_id: rel.start_id,
+                start_label: rel.start_label,
+                end_id: rel.end_id,
+                end_label: rel.end_label,
+                properties: rel.properties,
+            });
+        }
+    }
+
+    Ok(Json(SourceBootstrapResponseBody { nodes, rels }))
 }
 
 

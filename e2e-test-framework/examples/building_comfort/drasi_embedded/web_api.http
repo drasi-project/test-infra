@@ -18,10 +18,12 @@
 
 @hostname = localhost
 @port = 63123
-@test_repo_id = local_dev_repo
-@test_run_id = local_dev_repo.building_comfort.test_run_001
+@repo_id = local_dev_repo
 @test_id = building_comfort
+@test_run_id = test_run_001
 @source_id = facilities-db
+
+@fq_test_run_id = {{repo_id}}.{{test_id}}.{{test_run_id}}
 
 ### Homepage
 GET http://{{hostname}}:{{port}}
@@ -40,35 +42,33 @@ GET http://{{hostname}}:{{port}}/api-docs/openapi.json
 GET http://{{hostname}}:{{port}}/api/test_repos
 
 ### GET DETAIL of specific Test Repo
-GET http://{{hostname}}:{{port}}/api/test_repos/{{test_repo_id}}
+GET http://{{hostname}}:{{port}}/api/test_repos/{{repo_id}}
 
 ### GET LIST of Tests in specific Test Repo
-GET http://{{hostname}}:{{port}}/api/test_repos/{{test_repo_id}}/tests
+GET http://{{hostname}}:{{port}}/api/test_repos/{{repo_id}}/tests
 
 TODO - this does not work: empty list even though test is accessible directly
 
 ### GET DETAIL of specific Test
-GET http://{{hostname}}:{{port}}/api/test_repos/{{test_repo_id}}/tests/{{test_id}}
+GET http://{{hostname}}:{{port}}/api/test_repos/{{repo_id}}/tests/{{test_id}}
 
 ### GET LIST of Sources for specific Test
-GET http://{{hostname}}:{{port}}/api/test_repos/{{test_repo_id}}/tests/{{test_id}}/sources
+GET http://{{hostname}}:{{port}}/api/test_repos/{{repo_id}}/tests/{{test_id}}/sources
 
 TODO - this does not work - 500 Internal Server Error
 
 ### GET DETAIL of specific Source for specific Test
-GET http://{{hostname}}:{{port}}/api/test_repos/{{test_repo_id}}/tests/{{test_id}}/{{source_id}}
-
-TODO - this does not work - 404 Not Found
+GET http://{{hostname}}:{{port}}/api/test_repos/{{repo_id}}/tests/{{test_id}}/sources/{{source_id}}
 
 # TEST RUNS
 ### GET LIST of Test Runs
 GET http://{{hostname}}:{{port}}/api/test_runs
 
 ### GET DETAIL of a specific Test Run
-GET http://{{hostname}}:{{port}}/api/test_runs/{{test_run_id}}
+GET http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}
 
 ### Start a specific Test Run
-POST http://{{hostname}}:{{port}}/api/test_runs/{{test_run_id}}/start
+POST http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/start
 
 TODO - this does not work, it seems to hang Test Service
 

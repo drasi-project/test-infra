@@ -196,8 +196,8 @@ pub async fn post_acquire_handler(
     log::debug!("Processing call - post_acquire - {:?}", body);
 
     let url = format!(
-        "http://{}:{}/test_run_host/sources/{}/bootstrap",
-        cfg.test_service_host, cfg.test_service_port, cfg.test_run_source_id
+        "http://{}:{}/api/test_runs/{}/sources/{}/bootstrap",
+        cfg.test_service_host, cfg.test_service_port, cfg.test_run_id, cfg.test_source_id
     );
 
     let acquire_body: AcquireRequestBody = serde_json::from_value(body.0)?;

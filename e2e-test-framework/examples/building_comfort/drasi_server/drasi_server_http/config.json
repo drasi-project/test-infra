@@ -12,7 +12,7 @@
                   {
                       "test_id": "building_comfort",
                       "version": 1,
-                      "description": "",
+                      "description": "Test with HTTP",
                       "test_folder": "building_comfort",
                       "queries": [],
                       "sources": [
@@ -115,7 +115,7 @@
                           },
                           {
                               "kind": "PerformanceMetrics"
-                          }                      
+                          }
                       ]
                   }
               ],

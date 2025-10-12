@@ -21,14 +21,14 @@
                           "kind": "Model",
                           "source_change_dispatchers": [ 
                             {
-                              "source_id": "events-http",
+                              "source_id": "facilities-db",
                               "kind": "Http",
                               "url": "http://localhost",
-                              "port": 8081,
+                              "port": 9000,
                               "batch_events": true,
                               "adaptive_enabled": true,
                               "batch_size": 1000,
-                              "batch_timeout_ms": 50,
+                              "batch_timeout_ms": 50
                             },
                             {
                               "kind": "JsonlFile",
@@ -73,17 +73,17 @@
                             ]
                           },
                           "subscribers": [
-                            { "node_id": "default", "query_id": "event-processing" }
+                            { "node_id": "default", "query_id": "building-comfort" }
                           ]
                         }
                       ],
                       "reactions": [
                         {
-                          "test_reaction_id": "http-webhook",
+                          "test_reaction_id": "building-comfort",
                           "output_handler": {
                             "kind": "Http",
-                            "port": 3000,
-                            "path": "/events",
+                            "port": 9001,
+                            "path": "/reaction",
                             "correlation_header": "X-Query-Sequence"
                           },
                           "stop_triggers": [
@@ -104,11 +104,11 @@
           {
               "test_id": "building_comfort",
               "test_repo_id": "local_dev_repo",
-              "test_run_id": "test_run_http_adaptive_001",
+              "test_run_id": "test_run_001",
               "queries": [],
               "reactions": [
                   {
-                      "test_reaction_id": "http-webhook",
+                      "test_reaction_id": "building-comfort",
                       "start_immediately": true,
                       "output_loggers": [
                           {
@@ -126,7 +126,7 @@
                       "test_source_id": "facilities-db",
                       "start_mode": "auto",
                       "test_run_overrides" : {
-                        "model_data_generator": {}              
+                        "model_data_generator": {}
                       }
                   }
               ]

@@ -258,7 +258,7 @@ async fn reader_thread(
     notify: Arc<Notify>,
     result_stream_handler_tx_channel: Sender<QueryHandlerMessage>,
 ) {
-    log::debug!("Starting RedisResultStreamHandler Reader Thread");
+    log::debug!("Starting RedisResultStreamHandler Reader Thread with {:?}", &settings);
 
     let client_result =
         redis::Client::open(format!("redis://{}:{}", &settings.host, &settings.port));

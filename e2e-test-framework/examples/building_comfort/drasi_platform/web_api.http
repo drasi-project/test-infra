@@ -18,11 +18,10 @@
 
 @hostname = localhost
 @port = 63123
-@repo_id = local_dev_repo
+@repo_id = github_dev_repo
 @test_id = building_comfort
 @test_run_id = test_run_001
 @source_id = facilities-db
-
 @fq_test_run_id = {{repo_id}}.{{test_id}}.{{test_run_id}}
 
 ### Homepage
@@ -73,6 +72,6 @@ POST http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/start
 TODO - this does not work, it seems to hang Test Service
 
 ### Stop a specific Test Run
-POST http://{{hostname}}:{{port}}/api/test_runs/{{test_run_id}}/stop
+POST http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/stop
 
 TODO - this does not work, it seems to hang Test Service

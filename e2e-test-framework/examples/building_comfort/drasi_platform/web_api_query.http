@@ -23,24 +23,23 @@
 @test_run_id = test_run_001
 @query_id = room-comfort-level
 
-### Homepage
-GET http://{{hostname}}:{{port}}
+@fq_test_run_id = {{repo_id}}.{{test_id}}.{{test_run_id}}
 
 ### GET STATE of Test Run Query
-GET http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}
+GET http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/queries/{{query_id}}
 
 ### START Test Run Query
-POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/start
+POST http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/queries/{{query_id}}/start
 Content-Type: application/json
 
 ### PAUSE Test Run Query
-POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/pause
+POST http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/queries/{{query_id}}/pause
 Content-Type: application/json
 
 ### STOP Test Run Query
-POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/stop
+POST http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/queries/{{query_id}}/stop
 Content-Type: application/json
 
 ### RESET Test Run Query
-POST http://{{hostname}}:{{port}}/test_run_host/queries/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{query_id}}/reset
+POST http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/queries/{{query_id}}/reset
 Content-Type: application/json

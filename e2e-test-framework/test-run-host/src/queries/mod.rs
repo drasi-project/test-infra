@@ -22,7 +22,7 @@ use query_result_observer::{
 };
 use result_stream_loggers::ResultStreamLoggerConfig;
 use test_data_store::{
-    test_repo_storage::models::{StopTriggerDefinition, TestQueryDefinition},
+    test_repo_storage::models::{ResultStreamHandlerDefinition, StopTriggerDefinition, TestQueryDefinition},
     test_run_storage::{
         ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId,
         TestRunQueryStorage,
@@ -45,6 +45,9 @@ pub use query_output_handler::{
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunQueryOverrides {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub result_stream_handler: Option<ResultStreamHandlerDefinition>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub stop_trigger: Option<StopTriggerDefinition>,
 }
 
@@ -56,6 +59,7 @@ pub struct TestRunQueryConfig {
     pub test_run_overrides: Option<TestRunQueryOverrides>,
     #[serde(default)]
     pub loggers: Vec<ResultStreamLoggerConfig>,
+    // Runtime configuration for result stream handler (moved from test definition)
     // Legacy fields for backward compatibility - will be set by TestRun
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub test_id: Option<String>,
@@ -157,7 +161,7 @@ impl TestRunQuery {
             definition.test_query_definition.clone(),
             output_storage,
             definition.loggers,
-            definition.test_run_overrides,
+            definition.test_run_overrides
         )
         .await?;
 

@@ -465,8 +465,8 @@ pub struct DrasiServerChannelSourceChangeDispatcherDefinition {
 pub struct TestQueryDefinition {
     #[serde(default)]
     pub test_query_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_trigger: Option<StopTriggerDefinition>,
+    pub result_stream_handler: ResultStreamHandlerDefinition,
+    pub stop_trigger: StopTriggerDefinition,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1164,9 +1164,8 @@ mod tests {
         assert_eq!(test_definition.queries.len(), 1);
         let query = &test_definition.queries[0];
         assert_eq!(query.test_query_id, "room-comfort-level");
-        assert!(query.stop_trigger.is_some());
 
-        match query.stop_trigger.as_ref().unwrap() {
+        match &query.stop_trigger {
             StopTriggerDefinition::RecordCount(trigger) => {
                 assert_eq!(trigger.record_count, 90000);
             }
@@ -1274,7 +1273,13 @@ mod tests {
         // Note: handler fields in JSON will be ignored since they're not in the model
         let query = &local_test_def.queries[0];
         assert_eq!(query.test_query_id, "room-comfort-level");
-        assert!(query.stop_trigger.is_some());
+
+        match &query.stop_trigger {
+            StopTriggerDefinition::RecordCount(trigger) => {
+                assert_eq!(trigger.record_count, 90000);
+            }
+            _ => panic!("Expected RecordCount stop trigger"),
+        }
 
         let reaction = &local_test_def.reactions[0];
         assert_eq!(reaction.test_reaction_id, "building-comfort");

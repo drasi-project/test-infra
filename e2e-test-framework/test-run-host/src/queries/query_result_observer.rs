@@ -696,7 +696,7 @@ impl QueryResultObserverInternalState {
             }
         }
 
-        log::info!(
+        log::trace!(
             "Processed HandlerRecord: sequence: {}, time_ns: {}, handler_status: {:?}",
             record.payload.sequence.unwrap_or(0),
             record_time_ns,

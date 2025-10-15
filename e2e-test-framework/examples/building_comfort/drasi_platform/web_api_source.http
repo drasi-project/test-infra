@@ -19,11 +19,14 @@
 @hostname = localhost
 @port = 63123
 @repo_id = github_dev_repo
-@test_id = building_comfort
+@test_id = building_comfort_small
 @test_run_id = test_run_001
 @source_id = facilities-db
 
 @fq_test_run_id = {{repo_id}}.{{test_id}}.{{test_run_id}}
+
+### GET LIST of test run sources
+GET http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/sources
 
 ### GET STATE of test run source
 GET http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/sources/{{source_id}}
@@ -41,7 +44,7 @@ POST http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/sources/{{sou
 Content-Type: application/json
 
 {
-  "num_steps": 5000,
+  "num_steps": 1,
   "spacing_mode": "None"
 }
 

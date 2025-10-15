@@ -116,7 +116,7 @@
               "queries": [
                 {
                   "test_query_id": "room-comfort-level",
-                  "start_immediately": true,
+                  "start_immediately": false,
                   "loggers": [
                     {
                       "kind": "Profiler",

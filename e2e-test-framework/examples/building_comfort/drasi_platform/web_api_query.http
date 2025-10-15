@@ -19,11 +19,14 @@
 @hostname = localhost
 @port = 63123
 @repo_id = github_dev_repo
-@test_id = building_comfort
+@test_id = building_comfort_small
 @test_run_id = test_run_001
 @query_id = room-comfort-level
 
 @fq_test_run_id = {{repo_id}}.{{test_id}}.{{test_run_id}}
+
+### GET LIST of Test Run Queries
+GET http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/queries
 
 ### GET STATE of Test Run Query
 GET http://{{hostname}}:{{port}}/api/test_runs/{{fq_test_run_id}}/queries/{{query_id}}

@@ -37,13 +37,26 @@ data:
       "test_run_host": {
         "test_runs": [
           {
-            "test_id": "building_comfort",
+            "test_id": "building_comfort_small",
             "test_repo_id": "github_dev_repo",
             "test_run_id": "test_run_001",
             "queries": [
               {
                 "test_query_id": "room-comfort-level",
                 "start_immediately": true,
+                "test_run_overrides" : {
+                  "result_stream_handler": {
+                    "kind": "RedisStream",
+                    "host": "drasi-redis",
+                    "port": 6379,
+                    "stream_name": "room-comfort-level-results",
+                    "process_old_entries": true
+                  },                
+                  "stop_trigger": {
+                    "kind": "RecordCount",
+                    "record_count": 25
+                  }
+                },                
                 "loggers": [
                   {
                     "kind": "Profiler",
@@ -52,14 +65,12 @@ data:
                     "write_change_log": true,
                     "write_change_rates": true,
                     "write_distributions": true
+                  },
+                  {
+                    "kind": "JsonlFile",
+                    "max_lines_per_file": 15000
                   }
-                ],
-                "test_run_overrides" : {
-                  "stop_trigger": {
-                    "kind": "RecordCount",
-                    "record_count": 666
-                  }
-                }                
+                ]
               }          
             ],
             "sources": [

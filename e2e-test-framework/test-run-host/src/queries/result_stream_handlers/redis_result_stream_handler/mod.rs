@@ -458,6 +458,7 @@ async fn read_stream(
                                 }
                                 Err(e) => {
                                     log::error!("Error: {:?}", e);
+                                    log::error!("Record: {:?}", s);
                                     records.push(RedisStreamReadResult {
                                         id,
                                         seq: seq.fetch_add(1, Ordering::SeqCst),

@@ -272,9 +272,6 @@ impl TestRunDrasiServer {
                 // Get effective configuration
                 let config = self.definition.effective_config();
 
-                // Determine log level (default to "info" if not specified)
-                let log_level = config.log_level.as_deref().unwrap_or("info");
-
                 // Convert our configs to drasi_server configs
                 let drasi_sources: Vec<SourceConfig> = config
                     .sources
@@ -322,12 +319,7 @@ impl TestRunDrasiServer {
                 // Create RuntimeConfig for DrasiServerCore with all components
                 let runtime_config = Arc::new(RuntimeConfig {
                     server: DrasiServerCoreSettings {
-                        disable_persistence: true,
-                        host: "0.0.0.0".to_string(),
-                        port: 0, // Not used by DrasiServerCore (embedded library)
-                        log_level: log_level.to_string(),
-                        max_connections: 1000,
-                        shutdown_timeout_seconds: 30
+                        id: self.definition.id.test_drasi_server_id.clone(),
                     },
                     sources: drasi_sources,
                     queries: drasi_queries,

@@ -1126,11 +1126,12 @@ mod tests {
             "queries": [
                 {
                     "test_query_id": "room-comfort-level",
-                    "handler": {
-                        "kind": "Http",
-                        "port": 9001,
-                        "path": "/reaction",
-                        "correlation_header": "X-Query-Sequence"
+                    "result_stream_handler": {
+                        "kind": "RedisStream",
+                        "host": "drasi-redis",
+                        "port": 6379,
+                        "stream_name": "room-comfort-level-results",
+                        "process_old_entries": false
                     },
                     "stop_trigger": {
                         "kind": "RecordCount",
@@ -1195,11 +1196,12 @@ mod tests {
             "queries": [
                 {
                     "test_query_id": "room-comfort-level",
-                    "handler": {
-                        "kind": "Http",
-                        "port": 9001,
-                        "path": "/reaction",
-                        "correlation_header": "X-Query-Sequence"
+                    "result_stream_handler": {
+                        "kind": "RedisStream",
+                        "host": "drasi-redis",
+                        "port": 6379,
+                        "stream_name": "room-comfort-level-results",
+                        "process_old_entries": false
                     },
                     "stop_trigger": {
                         "kind": "RecordCount",

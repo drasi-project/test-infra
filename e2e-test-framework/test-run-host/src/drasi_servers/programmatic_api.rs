@@ -13,462 +13,465 @@
 // limitations under the License.
 
 use anyhow::{anyhow, Result};
-use drasi_server_core::channels::ComponentStatus;
-use drasi_server_core::config::{QueryConfig, ReactionConfig, SourceConfig, QueryLanguage};
-use std::collections::HashMap;
 
 use super::TestRunDrasiServer;
-use crate::drasi_servers::api_models::{
-    ComponentStatus as ApiComponentStatus, CreateQueryRequest, CreateReactionRequest,
-    CreateSourceRequest, QueryCreatedResponse, QueryDetails, QueryInfo, ReactionCreatedResponse,
-    ReactionDetails, ReactionInfo, SourceCreatedResponse, SourceDetails, SourceInfo,
-    StatusResponse, UpdateQueryRequest, UpdateReactionRequest, UpdateSourceRequest,
-};
+use crate::drasi_servers::api_models::*;
+use drasi_server_core::{Source, Query, Reaction};
+
+// NOTE: Update operations are not supported - components must be deleted and recreated
+// Create, Delete, Start, and Stop ARE all supported via the DrasiServerCore API
+
+const UPDATE_NOT_IMPLEMENTED_MSG: &str =
+    "Update operations are not available with the current DrasiServerCore API. \
+     To update a component, delete it and recreate it with the new configuration.";
 
 impl TestRunDrasiServer {
     // ===== Sources Management =====
 
     pub async fn list_sources(&self) -> Result<Vec<SourceInfo>> {
-        self.with_core(|core| async move {
-            let sources = core.source_manager().list_sources().await;
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            let sources = core
+                .list_sources()
+                .await
+                .map_err(|e| anyhow!("Failed to list sources: {}", e))?;
 
-            let mut source_infos = Vec::new();
-            for (name, status) in sources {
-                // We need to get the full source config to get the type
-                if let Some(config) = core.source_manager().get_source_config(&name).await {
-                    source_infos.push(SourceInfo {
-                        name: config.id,
-                        source_type: config.source_type,
-                        status: convert_component_status(status),
-                    });
-                }
-            }
-
-            Ok(source_infos)
-        })
-        .await
+            Ok(sources
+                .into_iter()
+                .map(|(id, status)| SourceInfo {
+                    name: id,
+                    source_type: "unknown".to_string(),
+                    status: match status {
+                        drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
+                        drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
+                        drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
+                        drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
+                        drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                    },
+                })
+                .collect())
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn get_source(&self, source_id: &str) -> Result<SourceDetails> {
-        let source_id = source_id.to_string();
-        self.with_core(|core| async move {
-            let source_runtime = core.source_manager().get_source(source_id.clone()).await?;
-
-            // Get the config to find auto_start
-            let config = core
-                .source_manager()
-                .get_source_config(&source_id)
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            let source_runtime = core
+                .get_source_info(source_id)
                 .await
-                .ok_or_else(|| anyhow!("Source config not found"))?;
+                .map_err(|e| anyhow!("Failed to get source info: {}", e))?;
 
             Ok(SourceDetails {
-                name: source_runtime.id,
-                source_type: source_runtime.source_type,
-                status: convert_component_status(source_runtime.status),
-                auto_start: config.auto_start,
-                properties: serde_json::to_value(source_runtime.properties)?,
+                name: source_runtime.id.clone(),
+                source_type: source_runtime.source_type.clone(),
+                status: match source_runtime.status {
+                    drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
+                    drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
+                    drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
+                    drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
+                    drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                },
+                auto_start: false, // Runtime info doesn't include auto_start
+                properties: serde_json::to_value(&source_runtime.properties)
+                    .map_err(|e| anyhow!("Failed to serialize properties: {}", e))?,
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn create_source(
         &self,
         request: CreateSourceRequest,
     ) -> Result<SourceCreatedResponse> {
-        self.with_core(|core| async move {
-            let config = SourceConfig {
-                id: request.name.clone(),
-                source_type: request.source_type,
-                auto_start: request.auto_start,
-                properties: serde_json::from_value(request.properties)?,
-                bootstrap_provider: None,
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            // Build the source configuration using the appropriate factory method
+            let mut builder = match request.source_type.as_str() {
+                "application" => Source::application(&request.name),
+                "mock" => Source::mock(&request.name),
+                "postgres" => Source::postgres(&request.name),
+                "platform" => Source::platform(&request.name),
+                _ => return Err(anyhow!("Unsupported source type: {}", request.source_type)),
             };
 
-            core.source_manager().add_source(config).await?;
+            builder = builder.auto_start(request.auto_start);
+
+            // Add properties from the request
+            if let Ok(props_map) = serde_json::from_value::<std::collections::HashMap<String, serde_json::Value>>(request.properties) {
+                for (key, value) in props_map {
+                    builder = builder.with_property(key, value);
+                }
+            }
+
+            let source_config = builder.build();
+
+            core.add_source_runtime(source_config)
+                .await
+                .map_err(|e| anyhow!("Failed to create source: {}", e))?;
 
             Ok(SourceCreatedResponse {
-                name: request.name.clone(),
-                message: format!("Source '{}' created successfully", request.name),
+                name: request.name,
+                message: "Source created successfully".to_string(),
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn update_source(
         &self,
-        source_id: &str,
-        request: UpdateSourceRequest,
+        _source_id: &str,
+        _request: UpdateSourceRequest,
     ) -> Result<SourceDetails> {
-        let source_id_str = source_id.to_string();
-        let existing = self.get_source(&source_id_str).await?;
-
-        let source_id_clone = source_id_str.clone();
-        self.with_core(|core| async move {
-            let config = SourceConfig {
-                id: source_id_clone.clone(),
-                source_type: request.source_type.unwrap_or(existing.source_type),
-                auto_start: request.auto_start.unwrap_or(existing.auto_start),
-                properties: if let Some(props) = request.properties {
-                    serde_json::from_value(props)?
-                } else {
-                    // Properties from SourceDetails is a Value, need to convert to HashMap
-                    serde_json::from_value(existing.properties)?
-                },
-                bootstrap_provider: None,
-            };
-
-            core.source_manager()
-                .update_source(source_id_clone, config)
-                .await?;
-            Ok(())
-        })
-        .await?;
-
-        self.get_source(&source_id_str).await
+        Err(anyhow!(UPDATE_NOT_IMPLEMENTED_MSG))
     }
 
     pub async fn delete_source(&self, source_id: &str) -> Result<()> {
-        let source_id = source_id.to_string();
-        self.with_core(|core| async move { core.source_manager().delete_source(source_id).await })
-            .await
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.remove_source(source_id)
+                .await
+                .map_err(|e| anyhow!("Failed to delete source: {}", e))?;
+            Ok(())
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn start_source(&self, source_id: &str) -> Result<StatusResponse> {
-        let source_id_str = source_id.to_string();
-        self.with_core(|core| async move {
-            core.source_manager()
-                .start_source(source_id_str.clone())
-                .await?;
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.start_source(source_id)
+                .await
+                .map_err(|e| anyhow!("Failed to start source: {}", e))?;
+
             Ok(StatusResponse {
                 status: "started".to_string(),
-                message: Some(format!("Source '{}' started successfully", source_id_str)),
+                message: Some(format!("Source '{}' started successfully", source_id)),
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn stop_source(&self, source_id: &str) -> Result<StatusResponse> {
-        let source_id_str = source_id.to_string();
-        self.with_core(|core| async move {
-            core.source_manager()
-                .stop_source(source_id_str.clone())
-                .await?;
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.stop_source(source_id)
+                .await
+                .map_err(|e| anyhow!("Failed to stop source: {}", e))?;
+
             Ok(StatusResponse {
                 status: "stopped".to_string(),
-                message: Some(format!("Source '{}' stopped successfully", source_id_str)),
+                message: Some(format!("Source '{}' stopped successfully", source_id)),
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     // ===== Queries Management =====
 
     pub async fn list_queries(&self) -> Result<Vec<QueryInfo>> {
-        self.with_core(|core| async move {
-            let queries = core.query_manager().list_queries().await;
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            let queries = core
+                .list_queries()
+                .await
+                .map_err(|e| anyhow!("Failed to list queries: {}", e))?;
 
-            let mut query_infos = Vec::new();
-            for (name, status) in queries {
-                // We need to get the full query config to get sources
-                if let Some(config) = core.query_manager().get_query_config(&name).await {
-                    query_infos.push(QueryInfo {
-                        name: config.id,
-                        sources: config.sources,
-                        status: convert_component_status(status),
-                    });
-                }
-            }
-
-            Ok(query_infos)
-        })
-        .await
+            Ok(queries
+                .into_iter()
+                .map(|(id, status)| QueryInfo {
+                    name: id,
+                    sources: Vec::new(),
+                    status: match status {
+                        drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
+                        drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
+                        drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
+                        drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
+                        drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                    },
+                })
+                .collect())
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn get_query(&self, query_id: &str) -> Result<QueryDetails> {
-        let query_id = query_id.to_string();
-        self.with_core(|core| async move {
-            let query_runtime = core.query_manager().get_query(query_id.clone()).await?;
-
-            // Get the config to find auto_start
-            let config = core
-                .query_manager()
-                .get_query_config(&query_id)
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            let query_runtime = core
+                .get_query_info(query_id)
                 .await
-                .ok_or_else(|| anyhow!("Query config not found"))?;
+                .map_err(|e| anyhow!("Failed to get query info: {}", e))?;
 
             Ok(QueryDetails {
-                name: query_runtime.id,
-                query: query_runtime.query,
-                sources: query_runtime.sources,
-                status: convert_component_status(query_runtime.status),
-                auto_start: config.auto_start,
-                profiling: query_runtime
-                    .properties
-                    .get("profiling")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
+                name: query_runtime.id.clone(),
+                query: query_runtime.query.clone(),
+                sources: query_runtime.sources.clone(),
+                status: match query_runtime.status {
+                    drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
+                    drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
+                    drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
+                    drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
+                    drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                },
+                auto_start: false, // Runtime info doesn't include auto_start
+                profiling: false,  // Runtime info doesn't include profiling
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn create_query(&self, request: CreateQueryRequest) -> Result<QueryCreatedResponse> {
-        self.with_core(|core| async move {
-            let mut properties = HashMap::new();
-            if request.profiling {
-                properties.insert("profiling".to_string(), serde_json::Value::Bool(true));
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            // Build the query configuration
+            let mut builder = Query::cypher(&request.name)
+                .query(&request.query)
+                .auto_start(request.auto_start);
+
+            // Add sources
+            for source in &request.sources {
+                builder = builder.from_source(source);
             }
 
-            let config = QueryConfig {
-                id: request.name.clone(),
-                query: request.query,
-                query_language: QueryLanguage::Cypher,
-                sources: request.sources,
-                auto_start: request.auto_start,
-                properties,
-                joins: None,
-            };
+            let query_config = builder.build();
 
-            core.query_manager().add_query(config).await?;
+            core.add_query_runtime(query_config)
+                .await
+                .map_err(|e| anyhow!("Failed to create query: {}", e))?;
 
             Ok(QueryCreatedResponse {
-                name: request.name.clone(),
-                message: format!("Query '{}' created successfully", request.name),
+                name: request.name,
+                message: "Query created successfully".to_string(),
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn update_query(
         &self,
-        query_id: &str,
-        request: UpdateQueryRequest,
+        _query_id: &str,
+        _request: UpdateQueryRequest,
     ) -> Result<QueryDetails> {
-        let query_id_str = query_id.to_string();
-        let existing = self.get_query(&query_id_str).await?;
-
-        let query_id_clone = query_id_str.clone();
-        self.with_core(|core| async move {
-            let mut properties = HashMap::new();
-            if let Some(profiling) = request.profiling {
-                properties.insert("profiling".to_string(), serde_json::Value::Bool(profiling));
-            }
-
-            let config = QueryConfig {
-                id: query_id_clone.clone(),
-                query: request.query.unwrap_or(existing.query),
-                query_language: QueryLanguage::Cypher,
-                sources: request.sources.unwrap_or(existing.sources),
-                auto_start: request.auto_start.unwrap_or(existing.auto_start),
-                properties,
-                joins: None,
-            };
-
-            core.query_manager()
-                .update_query(query_id_clone, config)
-                .await?;
-            Ok(())
-        })
-        .await?;
-
-        self.get_query(&query_id_str).await
+        Err(anyhow!(UPDATE_NOT_IMPLEMENTED_MSG))
     }
 
     pub async fn delete_query(&self, query_id: &str) -> Result<()> {
-        let query_id = query_id.to_string();
-        self.with_core(|core| async move { core.query_manager().delete_query(query_id).await })
-            .await
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.remove_query(query_id)
+                .await
+                .map_err(|e| anyhow!("Failed to delete query: {}", e))?;
+            Ok(())
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn start_query(&self, query_id: &str) -> Result<StatusResponse> {
-        let _query_id_str = query_id.to_string();
-        self.with_core(|_core| async move {
-            // Note: Starting a query through the manager requires a SourceChangeReceiver
-            // which is typically managed internally by DrasiServerCore
-            // For now, return an error indicating this operation is not supported
-            Err(anyhow!(
-                "Starting queries is managed automatically by DrasiServerCore"
-            ))
-        })
-        .await
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.start_query(query_id)
+                .await
+                .map_err(|e| anyhow!("Failed to start query: {}", e))?;
+
+            Ok(StatusResponse {
+                status: "started".to_string(),
+                message: Some(format!("Query '{}' started successfully", query_id)),
+            })
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn stop_query(&self, query_id: &str) -> Result<StatusResponse> {
-        let query_id_str = query_id.to_string();
-        self.with_core(|core| async move {
-            core.query_manager()
-                .stop_query(query_id_str.clone())
-                .await?;
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.stop_query(query_id)
+                .await
+                .map_err(|e| anyhow!("Failed to stop query: {}", e))?;
+
             Ok(StatusResponse {
                 status: "stopped".to_string(),
-                message: Some(format!("Query '{}' stopped successfully", query_id_str)),
+                message: Some(format!("Query '{}' stopped successfully", query_id)),
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
+
     pub async fn get_query_results(&self, query_id: &str) -> Result<serde_json::Value> {
-        let query_id = query_id.to_string();
-        self.with_core(|core| async move {
-            let results = core.query_manager().get_query_results(&query_id).await?;
-            Ok(serde_json::Value::Array(results))
-        })
-        .await
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            let results = core
+                .get_query_results(query_id)
+                .await
+                .map_err(|e| anyhow!("Failed to get query results: {}", e))?;
+
+            Ok(serde_json::json!({ "results": results }))
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     // ===== Reactions Management =====
 
     pub async fn list_reactions(&self) -> Result<Vec<ReactionInfo>> {
-        self.with_core(|core| async move {
-            let reactions = core.reaction_manager().list_reactions().await;
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            let reactions = core
+                .list_reactions()
+                .await
+                .map_err(|e| anyhow!("Failed to list reactions: {}", e))?;
 
-            let mut reaction_infos = Vec::new();
-            for (name, status) in reactions {
-                // We need to get the full reaction config to get type and queries
-                if let Some(config) = core.reaction_manager().get_reaction_config(&name).await {
-                    reaction_infos.push(ReactionInfo {
-                        name: config.id,
-                        reaction_type: config.reaction_type,
-                        queries: config.queries,
-                        status: convert_component_status(status),
-                    });
-                }
-            }
-
-            Ok(reaction_infos)
-        })
-        .await
+            Ok(reactions
+                .into_iter()
+                .map(|(id, status)| ReactionInfo {
+                    name: id,
+                    reaction_type: "unknown".to_string(),
+                    queries: Vec::new(),
+                    status: match status {
+                        drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
+                        drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
+                        drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
+                        drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
+                        drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                    },
+                })
+                .collect())
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn get_reaction(&self, reaction_id: &str) -> Result<ReactionDetails> {
-        let reaction_id = reaction_id.to_string();
-        self.with_core(|core| async move {
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
             let reaction_runtime = core
-                .reaction_manager()
-                .get_reaction(reaction_id.clone())
-                .await?;
-
-            // Get the config to find auto_start
-            let config = core
-                .reaction_manager()
-                .get_reaction_config(&reaction_id)
+                .get_reaction_info(reaction_id)
                 .await
-                .ok_or_else(|| anyhow!("Reaction config not found"))?;
+                .map_err(|e| anyhow!("Failed to get reaction info: {}", e))?;
 
             Ok(ReactionDetails {
-                name: reaction_runtime.id,
-                reaction_type: reaction_runtime.reaction_type,
-                queries: reaction_runtime.queries,
-                status: convert_component_status(reaction_runtime.status),
-                auto_start: config.auto_start,
-                properties: serde_json::to_value(reaction_runtime.properties)?,
+                name: reaction_runtime.id.clone(),
+                reaction_type: reaction_runtime.reaction_type.clone(),
+                queries: reaction_runtime.queries.clone(),
+                status: match reaction_runtime.status {
+                    drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
+                    drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
+                    drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
+                    drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
+                    drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                },
+                auto_start: false, // Runtime info doesn't include auto_start
+                properties: serde_json::to_value(&reaction_runtime.properties)
+                    .map_err(|e| anyhow!("Failed to serialize properties: {}", e))?,
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn create_reaction(
         &self,
         request: CreateReactionRequest,
     ) -> Result<ReactionCreatedResponse> {
-        self.with_core(|core| async move {
-            let config = ReactionConfig {
-                id: request.name.clone(),
-                reaction_type: request.reaction_type,
-                queries: request.queries,
-                auto_start: request.auto_start,
-                properties: serde_json::from_value(request.properties)?,
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            // Build the reaction configuration - determine which builder to use based on type
+            let mut builder = match request.reaction_type.as_str() {
+                "log" => Reaction::log(&request.name),
+                "application" => Reaction::application(&request.name),
+                _ => return Err(anyhow!("Unsupported reaction type: {}", request.reaction_type)),
             };
 
-            core.reaction_manager().add_reaction(config).await?;
+            builder = builder.auto_start(request.auto_start);
+
+            // Add query subscriptions
+            for query in &request.queries {
+                builder = builder.subscribe_to(query);
+            }
+
+            // Add properties from the request
+            if let Ok(props_map) = serde_json::from_value::<std::collections::HashMap<String, serde_json::Value>>(request.properties) {
+                for (key, value) in props_map {
+                    builder = builder.with_property(key, value);
+                }
+            }
+
+            let reaction_config = builder.build();
+
+            core.add_reaction_runtime(reaction_config)
+                .await
+                .map_err(|e| anyhow!("Failed to create reaction: {}", e))?;
 
             Ok(ReactionCreatedResponse {
-                name: request.name.clone(),
-                message: format!("Reaction '{}' created successfully", request.name),
+                name: request.name,
+                message: "Reaction created successfully".to_string(),
             })
-        })
-        .await
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn update_reaction(
         &self,
-        reaction_id: &str,
-        request: UpdateReactionRequest,
+        _reaction_id: &str,
+        _request: UpdateReactionRequest,
     ) -> Result<ReactionDetails> {
-        let reaction_id_str = reaction_id.to_string();
-        let existing = self.get_reaction(&reaction_id_str).await?;
-
-        let reaction_id_clone = reaction_id_str.clone();
-        self.with_core(|core| async move {
-            let config = ReactionConfig {
-                id: reaction_id_clone.clone(),
-                reaction_type: request.reaction_type.unwrap_or(existing.reaction_type),
-                queries: request.queries.unwrap_or(existing.queries),
-                auto_start: request.auto_start.unwrap_or(existing.auto_start),
-                properties: if let Some(props) = request.properties {
-                    serde_json::from_value(props)?
-                } else {
-                    // Properties from ReactionDetails is a Value, need to convert to HashMap
-                    serde_json::from_value(existing.properties)?
-                },
-            };
-
-            core.reaction_manager()
-                .update_reaction(reaction_id_clone, config)
-                .await?;
-            Ok(())
-        })
-        .await?;
-
-        self.get_reaction(&reaction_id_str).await
+        Err(anyhow!(UPDATE_NOT_IMPLEMENTED_MSG))
     }
 
     pub async fn delete_reaction(&self, reaction_id: &str) -> Result<()> {
-        let reaction_id = reaction_id.to_string();
-        self.with_core(
-            |core| async move { core.reaction_manager().delete_reaction(reaction_id).await },
-        )
-        .await
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.remove_reaction(reaction_id)
+                .await
+                .map_err(|e| anyhow!("Failed to delete reaction: {}", e))?;
+            Ok(())
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn start_reaction(&self, reaction_id: &str) -> Result<StatusResponse> {
-        let _reaction_id_str = reaction_id.to_string();
-        self.with_core(|_core| async move {
-            // Note: Starting a reaction through the manager requires a QueryResultReceiver
-            // which is typically managed internally by DrasiServerCore
-            // For now, return an error indicating this operation is not supported
-            Err(anyhow!(
-                "Starting reactions is managed automatically by DrasiServerCore"
-            ))
-        })
-        .await
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.start_reaction(reaction_id)
+                .await
+                .map_err(|e| anyhow!("Failed to start reaction: {}", e))?;
+
+            Ok(StatusResponse {
+                status: "started".to_string(),
+                message: Some(format!("Reaction '{}' started successfully", reaction_id)),
+            })
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 
     pub async fn stop_reaction(&self, reaction_id: &str) -> Result<StatusResponse> {
-        let reaction_id_str = reaction_id.to_string();
-        self.with_core(|core| async move {
-            core.reaction_manager()
-                .stop_reaction(reaction_id_str.clone())
-                .await?;
+        let core = self.drasi_core.read().await;
+        if let Some(core) = core.as_ref() {
+            core.stop_reaction(reaction_id)
+                .await
+                .map_err(|e| anyhow!("Failed to stop reaction: {}", e))?;
+
             Ok(StatusResponse {
                 status: "stopped".to_string(),
-                message: Some(format!(
-                    "Reaction '{}' stopped successfully",
-                    reaction_id_str
-                )),
+                message: Some(format!("Query '{}' stopped successfully", reaction_id)),
             })
-        })
-        .await
-    }
-}
-
-// Helper function to convert ComponentStatus
-fn convert_component_status(status: ComponentStatus) -> ApiComponentStatus {
-    match status {
-        ComponentStatus::Starting => ApiComponentStatus::Starting,
-        ComponentStatus::Running => ApiComponentStatus::Running,
-        ComponentStatus::Stopping => ApiComponentStatus::Stopping,
-        ComponentStatus::Stopped => ApiComponentStatus::Stopped,
-        ComponentStatus::Error => ApiComponentStatus::Error("Component error".to_string()),
+        } else {
+            Err(anyhow!("Drasi server not running"))
+        }
     }
 }

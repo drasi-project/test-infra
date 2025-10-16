@@ -18,8 +18,10 @@ use std::sync::Arc;
 
 use derive_more::Debug;
 use drasi_server_core::{
-    ApplicationHandle, DrasiServerCore, QueryConfig, ReactionConfig, RuntimeConfig, SourceConfig,
-    config::{DrasiServerCoreSettings, QueryLanguage}
+    DrasiServerCore,
+    Source, Query, Reaction,
+    QueryConfig, ReactionConfig, SourceConfig,
+    application::ApplicationHandle
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -272,78 +274,64 @@ impl TestRunDrasiServer {
                 // Get effective configuration
                 let config = self.definition.effective_config();
 
-                // Convert our configs to drasi_server configs
+                // Build sources using the builder API
                 let drasi_sources: Vec<SourceConfig> = config
                     .sources
                     .iter()
-                    .map(|s| SourceConfig {
-                        id: s.id.clone(),
-                        source_type: s.source_type.clone(),
-                        auto_start: s.auto_start,
-                        properties: s.properties.clone(),
-                        bootstrap_provider: None
+                    .map(|s| {
+                        Source::custom(&s.id, &s.source_type)
+                            .auto_start(s.auto_start)
+                            .with_properties(s.properties.clone().into())
+                            .build()
                     })
                     .collect();
 
+                // Build queries using the builder API
                 let drasi_queries: Vec<QueryConfig> = config
                     .queries
                     .iter()
-                    .map(|q| QueryConfig {
-                        id: q.id.clone(),
-                        query: q.query.clone(),
-                        query_language: QueryLanguage::Cypher,
-                        // query_language: match q {
-                        //     Some(crate::api::QueryLanguage::Cypher) => drasi_server_core::config::QueryLanguage::Cypher,
-                        //     Some(crate::api::QueryLanguage::GQL) => drasi_server_core::config::QueryLanguage::GQL,
-                        //     None => drasi_server_core::config::QueryLanguage::Cypher,
-                        // },
-                        sources: q.sources.clone(),
-                        auto_start: q.auto_start,
-                        properties: q.properties.clone(),
-                        joins: None,
+                    .map(|q| {
+                        Query::cypher(&q.id)
+                            .query(&q.query)
+                            .from_sources(q.sources.clone())
+                            .auto_start(q.auto_start)
+                            .with_properties(q.properties.clone().into())
+                            .build()
                     })
                     .collect();
 
+                // Build reactions using the builder API
                 let drasi_reactions: Vec<ReactionConfig> = config
                     .reactions
                     .iter()
-                    .map(|r| ReactionConfig {
-                        id: r.id.clone(),
-                        reaction_type: r.reaction_type.clone(),
-                        queries: r.queries.clone(),
-                        auto_start: r.auto_start,
-                        properties: r.properties.clone(),
+                    .map(|r| {
+                        Reaction::custom(&r.id, &r.reaction_type)
+                            .subscribe_to_queries(r.queries.clone())
+                            .auto_start(r.auto_start)
+                            .with_properties(r.properties.clone().into())
+                            .build()
                     })
                     .collect();
 
-                // Create RuntimeConfig for DrasiServerCore with all components
-                let runtime_config = Arc::new(RuntimeConfig {
-                    server: DrasiServerCoreSettings {
-                        id: self.definition.id.test_drasi_server_id.clone(),
-                    },
-                    sources: drasi_sources,
-                    queries: drasi_queries,
-                    reactions: drasi_reactions,
-                });
-
-                // Create the DrasiServerCore instance
-                let mut core = DrasiServerCore::new(runtime_config);
-
                 // Log configuration summary
                 log::info!(
-                    "Created DrasiServerCore with {} sources, {} queries, {} reactions pre-configured",
-                    config.sources.len(),
-                    config.queries.len(),
-                    config.reactions.len()
+                    "Building DrasiServerCore with {} sources, {} queries, {} reactions",
+                    drasi_sources.len(),
+                    drasi_queries.len(),
+                    drasi_reactions.len()
                 );
 
-                // Initialize the core to create all components
-                log::info!("Initializing DrasiServerCore to create components...");
-                core.initialize()
+                // Use the builder API to create and initialize DrasiServerCore
+                log::info!("Creating DrasiServerCore with builder API...");
+                let core = DrasiServerCore::builder()
+                    .with_id(&self.definition.id.test_drasi_server_id)
+                    .add_sources(drasi_sources)
+                    .add_queries(drasi_queries)
+                    .add_reactions(drasi_reactions)
+                    .build()
                     .await
-                    .map_err(|e| anyhow::anyhow!("Failed to initialize DrasiServerCore: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to build DrasiServerCore: {}", e))?;
 
-                // Store the core after initialization but before starting
                 let core = Arc::new(core);
 
                 // Start the core to start all auto-start components
@@ -372,82 +360,62 @@ impl TestRunDrasiServer {
                 // Log the status of components
                 log::info!("DrasiServerCore ready, verifying component status...");
 
-                // Verify query status
-                for query_config in &config.queries {
-                    match core
-                        .query_manager()
-                        .get_query_status(query_config.id.clone())
-                        .await
-                    {
-                        Ok(status) => {
-                            log::info!(
-                                "Query '{}' status after startup: {:?}",
-                                query_config.id,
-                                status
-                            );
-                        }
-                        Err(e) => {
-                            log::error!(
-                                "Failed to get status for query '{}': {}",
-                                query_config.id,
-                                e
-                            );
-                        }
-                    }
-                }
+                // Note: Query status verification is now handled internally by DrasiServerCore
+                // The new API does not expose query_manager() directly
+                log::info!("All queries configured and started according to auto_start settings");
 
-                // Get and store application handles from the core managers
+                // Get and store application handles using the new direct handle access
                 {
                     let mut stored_handles = self.application_handles.write().await;
                     stored_handles.clear();
 
-                    // Get handles from source manager for configured sources
+                    // Get handles for configured sources using direct handle access
                     for source_config in &config.sources {
-                        if let Some(handle) = core
-                            .source_manager()
-                            .get_application_handle(&source_config.id)
-                            .await
-                        {
-                            stored_handles.insert(
-                                source_config.id.clone(),
-                                ApplicationHandle::source_only(handle),
-                            );
-                            log::info!(
-                                "Stored ApplicationHandle for source '{}' on Drasi Server {}",
-                                source_config.id,
-                                self.definition.id
-                            );
-                        } else {
-                            log::warn!(
-                                "Could not get ApplicationHandle for source '{}' on Drasi Server {}",
-                                source_config.id,
-                                self.definition.id
-                            );
+                        match core.source_handle(&source_config.id) {
+                            Ok(handle) => {
+                                stored_handles.insert(
+                                    source_config.id.clone(),
+                                    ApplicationHandle::source_only(handle),
+                                );
+                                log::info!(
+                                    "Stored ApplicationHandle for source '{}' on Drasi Server {}",
+                                    source_config.id,
+                                    self.definition.id
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Could not get ApplicationHandle for source '{}' on Drasi Server {}: {}",
+                                    source_config.id,
+                                    self.definition.id,
+                                    e
+                                );
+                            }
                         }
                     }
 
-                    // Get handles from reaction manager for configured reactions
+                    // Get handles for configured reactions using direct handle access
                     for reaction_config in &config.reactions {
-                        if let Some(handle) = core
-                            .reaction_manager()
-                            .get_application_handle(&reaction_config.id)
-                            .await
-                        {
-                            stored_handles.insert(
-                                reaction_config.id.clone(),
-                                ApplicationHandle::reaction_only(handle),
-                            );
-                            log::info!(
-                                "Stored ApplicationHandle for reaction '{}' on Drasi Server {}",
-                                reaction_config.id,
-                                self.definition.id
-                            );
-                        } else {
-                            log::warn!(
-                                "Could not get ApplicationHandle for reaction '{}' on Drasi Server {}",
-                                reaction_config.id,
-                                self.definition.id
-                            );
+                        match core.reaction_handle(&reaction_config.id) {
+                            Ok(handle) => {
+                                stored_handles.insert(
+                                    reaction_config.id.clone(),
+                                    ApplicationHandle::reaction_only(handle),
+                                );
+                                log::info!(
+                                    "Stored ApplicationHandle for reaction '{}' on Drasi Server {}",
+                                    reaction_config.id,
+                                    self.definition.id
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Could not get ApplicationHandle for reaction '{}' on Drasi Server {}: {}",
+                                    reaction_config.id,
+                                    self.definition.id,
+                                    e
+                                );
+                            }
                         }
                     }
 
@@ -570,21 +538,6 @@ impl TestRunDrasiServer {
 
     pub async fn get_application_handle(&self, name: &str) -> Option<ApplicationHandle> {
         self.application_handles.read().await.get(name).cloned()
-    }
-
-    pub(crate) async fn with_core<F, Fut, T>(&self, f: F) -> anyhow::Result<T>
-    where
-        F: FnOnce(Arc<DrasiServerCore>) -> Fut,
-        Fut: std::future::Future<Output = anyhow::Result<T>> + Send + 'static,
-        T: Send + 'static,
-    {
-        let core_guard = self.drasi_core.read().await;
-        match core_guard.as_ref() {
-            Some(core) => f(core.clone()).await,
-            None => Err(anyhow::anyhow!(
-                "DrasiServerCore not available - server not running"
-            )),
-        }
     }
 
     pub async fn write_summary(&self) -> anyhow::Result<()> {

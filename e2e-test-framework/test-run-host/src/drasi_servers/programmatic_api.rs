@@ -108,7 +108,7 @@ impl TestRunDrasiServer {
 
             let source_config = builder.build();
 
-            core.add_source_runtime(source_config)
+            core.create_source(source_config)
                 .await
                 .map_err(|e| anyhow!("Failed to create source: {}", e))?;
 
@@ -244,7 +244,7 @@ impl TestRunDrasiServer {
 
             let query_config = builder.build();
 
-            core.add_query_runtime(query_config)
+            core.create_query(query_config)
                 .await
                 .map_err(|e| anyhow!("Failed to create query: {}", e))?;
 
@@ -410,7 +410,7 @@ impl TestRunDrasiServer {
 
             let reaction_config = builder.build();
 
-            core.add_reaction_runtime(reaction_config)
+            core.create_reaction(reaction_config)
                 .await
                 .map_err(|e| anyhow!("Failed to create reaction: {}", e))?;
 

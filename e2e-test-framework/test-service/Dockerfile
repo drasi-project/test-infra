@@ -25,10 +25,15 @@ COPY ./test-run-host ./test-run-host
 RUN cargo new test-service
 WORKDIR /usr/src/test-service
 
-COPY ./test-service/Cargo.toml . 
-RUN cargo fetch
+COPY ./test-service/Cargo.toml .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo fetch
 COPY ./test-service .
-RUN cargo install --force --path .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/src/target \
+    cargo install --force --path .
 
     
 FROM debian:bookworm-slim

@@ -1,12 +1,22 @@
-.PHONY: default docker-build docker-tag-and-push kind-load drasi-apply test lint-check 
+.PHONY: default docker-build docker-build-parallel docker-tag-and-push kind-load drasi-apply test lint-check
 
 CLUSTER_NAME ?= kind
 IMAGE_PREFIX ?= drasi-project
 DOCKER_TAG_VERSION ?= latest
+# Enable inline cache (registry cache is optional, remove --cache-from if not using a registry)
 DOCKERX_OPTS ?= --load --cache-to type=inline,mode=max
 
 default: docker-build
 
+# Parallel build target (faster)
+docker-build-parallel:
+	@echo "Building Docker images in parallel..."
+	docker buildx build . -f proxy/Dockerfile -t $(IMAGE_PREFIX)/e2e-proxy:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS) & \
+	docker buildx build . -f reactivator/Dockerfile -t $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS) & \
+	docker buildx build . -f test-service/Dockerfile -t $(IMAGE_PREFIX)/e2e-test-service:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS) & \
+	wait
+
+# Sequential build target (for compatibility)
 docker-build:
 	docker buildx build . -f proxy/Dockerfile -t $(IMAGE_PREFIX)/e2e-proxy:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS)
 	docker buildx build . -f reactivator/Dockerfile -t $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS)

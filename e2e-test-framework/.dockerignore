@@ -1,0 +1,44 @@
+# Build artifacts
+target/
+**/target/
+
+# Git directories
+.git/
+**/.git/
+.gitignore
+**/.gitignore
+.gitmodules
+.github/
+
+# IDE and editor files
+.vscode/
+**/.vscode/
+.claude/
+**/.claude/
+.idea/
+**/.idea/
+*.swp
+*.swo
+*~
+
+# Test data and caches
+scratch/
+**/test_data_cache/
+**/test-data/
+
+# Logs
+*.log
+**/*.log
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Documentation (not needed in runtime)
+*.md
+!README.md
+CLAUDE.md
+**/.plans/
+
+# Examples (if not needed in runtime)
+examples/

@@ -19,7 +19,10 @@ WORKDIR /usr/src
 COPY ./proxy ./proxy
 
 WORKDIR /usr/src/proxy
-RUN cargo install --force --path .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/src/proxy/target \
+    cargo install --force --path .
 
 FROM gcr.io/distroless/cc
 COPY --from=builder /usr/local/cargo/bin/proxy /usr/local/bin/proxy

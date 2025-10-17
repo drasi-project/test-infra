@@ -26,7 +26,7 @@
                           },
                           "stop_trigger": {
                             "kind": "RecordCount",
-                            "record_count": 5666
+                            "record_count": 50
                           }
                         }                      
                       ],
@@ -135,7 +135,7 @@
                   "test_run_overrides" : {
                     "stop_trigger": {
                       "kind": "RecordCount",
-                      "record_count": 1666
+                      "record_count": 25
                     }
                   }
                 }             

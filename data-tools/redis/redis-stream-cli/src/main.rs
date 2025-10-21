@@ -55,8 +55,16 @@ async fn handle_read_command(params: Params) -> anyhow::Result<()> {
 
     log::info!("Successfully read {} records", records.len());
 
+    // Get the output file path (auto-generated or specified)
+    let output_path = params.get_output_path();
+
+    // Log the output destination
+    if let Some(ref path) = output_path {
+        log::info!("Writing output to file: {:?}", path);
+    }
+
     // Create the appropriate output writer
-    let writer = create_writer(params.output_file);
+    let writer = create_writer(output_path);
 
     // Write the records
     writer

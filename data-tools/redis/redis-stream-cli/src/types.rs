@@ -43,13 +43,32 @@ pub struct Params {
     #[arg(short = 'c', long = "count")]
     pub count: Option<usize>,
 
-    /// Optional output file (default: console output)
-    #[arg(short = 'f', long = "file")]
-    pub output_file: Option<PathBuf>,
+    /// Write output to file. If no filename provided, uses stream name with appropriate extension.
+    /// Example: -f (auto-generates filename), -f myfile.json (uses specified name)
+    #[arg(short = 'f', long = "file", num_args = 0..=1, default_missing_value = "")]
+    pub output_file: Option<String>,
 
     /// Output format (json or text)
     #[arg(short = 'o', long = "format", default_value = "json")]
     pub output_format: OutputFormat,
+}
+
+impl Params {
+    /// Get the output file path, generating one if -f was used without a value
+    pub fn get_output_path(&self) -> Option<PathBuf> {
+        self.output_file.as_ref().map(|f| {
+            if f.is_empty() {
+                // Generate filename from stream name and format
+                let extension = match self.output_format {
+                    OutputFormat::Json => "json",
+                    OutputFormat::Text => "txt",
+                };
+                PathBuf::from(format!("{}.{}", self.stream_name, extension))
+            } else {
+                PathBuf::from(f)
+            }
+        })
+    }
 }
 
 /// Output format options

@@ -37,7 +37,10 @@ cargo run -p redis-stream-cli -- [OPTIONS]
   - Use `$` to start from the latest entry
   - Use a specific stream ID like `1234567890-0`
 - `-c, --count <COUNT>`: Number of records to read (default: unlimited)
-- `-f, --file <OUTPUT_FILE>`: Optional output file path (default: console output)
+- `-f, --file [OUTPUT_FILE]`: Write output to file (optional filename)
+  - Without filename: Auto-generates filename from stream name and format (e.g., `my-stream.json`)
+  - With filename: Uses the specified filename (e.g., `-f output.json`)
+  - Omit flag entirely: Outputs to console
 - `-o, --format <FORMAT>`: Output format: `json` or `text` (default: `json`)
 
 ### Examples
@@ -72,13 +75,25 @@ redis-stream-cli -s my-stream -t 1609459200000-0
 redis-stream-cli -s my-stream -t $
 ```
 
-#### Output to a file in JSON format
+#### Auto-generate filename from stream name (creates my-stream.json)
+
+```bash
+redis-stream-cli -s my-stream -f
+```
+
+#### Auto-generate filename with text format (creates my-stream.txt)
+
+```bash
+redis-stream-cli -s my-stream -f -o text
+```
+
+#### Output to a specific file in JSON format
 
 ```bash
 redis-stream-cli -s my-stream -f output.json
 ```
 
-#### Output to a file in text format
+#### Output to a specific file in text format
 
 ```bash
 redis-stream-cli -s my-stream -f output.txt -o text

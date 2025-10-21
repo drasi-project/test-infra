@@ -143,3 +143,34 @@ impl RedisStreamReader {
         Ok(all_records)
     }
 }
+
+/// List all stream names on a Redis server
+pub async fn list_streams(redis_url: &str) -> anyhow::Result<Vec<String>> {
+    use redis::AsyncCommands;
+
+    log::info!("Connecting to Redis at: {}", redis_url);
+    let client = Client::open(redis_url)?;
+    let mut connection = client.get_multiplexed_async_connection().await?;
+    log::info!("Successfully connected to Redis");
+
+    log::debug!("Scanning for streams using TYPE filter");
+
+    let mut stream_names: Vec<String> = Vec::new();
+
+    // Use SCAN with TYPE option (requires Redis 6.0+)
+    // SCAN is cursor-based and safe for production use
+    let opts = redis::ScanOptions::default().with_type("stream");
+
+    let mut scan_iter: redis::AsyncIter<String> = connection.scan_options(opts).await?;
+
+    while let Some(key) = scan_iter.next_item().await {
+        log::debug!("Found stream: {}", key);
+        stream_names.push(key);
+    }
+
+    // Sort for consistent output
+    stream_names.sort();
+
+    log::info!("Found {} streams", stream_names.len());
+    Ok(stream_names)
+}

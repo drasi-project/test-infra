@@ -12,16 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// CLI parameters for the redis-stream-cli utility
+/// CLI for working with Redis streams
 #[derive(Parser, Debug)]
 #[command(name = "redis-stream-cli")]
-#[command(about = "CLI for reading records from Redis streams", long_about = None)]
-pub struct Params {
+#[command(about = "CLI for working with Redis streams", long_about = None)]
+#[command(version)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+/// Available subcommands
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Read records from a Redis stream
+    Read(ReadArgs),
+    /// List all stream names on a Redis server
+    List(ListArgs),
+}
+
+/// Arguments for the read subcommand
+#[derive(Args, Debug)]
+pub struct ReadArgs {
     /// Redis server URL
     #[arg(
         short = 'u',
@@ -53,7 +70,7 @@ pub struct Params {
     pub output_format: OutputFormat,
 }
 
-impl Params {
+impl ReadArgs {
     /// Get the output file path, generating one if -f was used without a value
     pub fn get_output_path(&self) -> Option<PathBuf> {
         self.output_file.as_ref().map(|f| {
@@ -64,6 +81,37 @@ impl Params {
                     OutputFormat::Text => "txt",
                 };
                 PathBuf::from(format!("{}.{}", self.stream_name, extension))
+            } else {
+                PathBuf::from(f)
+            }
+        })
+    }
+}
+
+/// Arguments for the list subcommand
+#[derive(Args, Debug)]
+pub struct ListArgs {
+    /// Redis server URL
+    #[arg(
+        short = 'u',
+        long = "url",
+        env = "REDIS_URL",
+        default_value = "redis://localhost:6379"
+    )]
+    pub redis_url: String,
+
+    /// Write output to file. If no filename provided, uses "streams.json"
+    /// Example: -f (creates streams.json), -f myfile.json (uses specified name)
+    #[arg(short = 'f', long = "file", num_args = 0..=1, default_missing_value = "")]
+    pub output_file: Option<String>,
+}
+
+impl ListArgs {
+    /// Get the output file path, generating "streams.json" if -f was used without a value
+    pub fn get_output_path(&self) -> Option<PathBuf> {
+        self.output_file.as_ref().map(|f| {
+            if f.is_empty() {
+                PathBuf::from("streams.json")
             } else {
                 PathBuf::from(f)
             }

@@ -14,16 +14,19 @@
 
 use clap::Parser;
 use redis_stream_cli::output::create_writer;
-use redis_stream_cli::reader::RedisStreamReader;
-use redis_stream_cli::types::Params;
+use redis_stream_cli::reader::{list_streams, RedisStreamReader};
+use redis_stream_cli::types::{Cli, Commands, ListArgs, ReadArgs};
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
 
-    let params = Params::parse();
+    let cli = Cli::parse();
 
-    let res = handle_read_command(params).await;
+    let res = match cli.command {
+        Commands::Read(args) => handle_read_command(args).await,
+        Commands::List(args) => handle_list_command(args).await,
+    };
 
     match res {
         Ok(_) => {
@@ -36,27 +39,27 @@ async fn main() {
     }
 }
 
-async fn handle_read_command(params: Params) -> anyhow::Result<()> {
+async fn handle_read_command(args: ReadArgs) -> anyhow::Result<()> {
     log::debug!("Read command:");
-    log::debug!("  Redis URL: {}", params.redis_url);
-    log::debug!("  Stream name: {}", params.stream_name);
-    log::debug!("  Start timestamp: {}", params.start_timestamp);
-    log::debug!("  Count: {:?}", params.count);
-    log::debug!("  Output file: {:?}", params.output_file);
-    log::debug!("  Output format: {:?}", params.output_format);
+    log::debug!("  Redis URL: {}", args.redis_url);
+    log::debug!("  Stream name: {}", args.stream_name);
+    log::debug!("  Start timestamp: {}", args.start_timestamp);
+    log::debug!("  Count: {:?}", args.count);
+    log::debug!("  Output file: {:?}", args.output_file);
+    log::debug!("  Output format: {:?}", args.output_format);
 
     // Create the Redis stream reader
-    let mut reader = RedisStreamReader::new(&params.redis_url, params.stream_name.clone()).await?;
+    let mut reader = RedisStreamReader::new(&args.redis_url, args.stream_name.clone()).await?;
 
     // Read records from the stream
     let records = reader
-        .read_records(&params.start_timestamp, params.count)
+        .read_records(&args.start_timestamp, args.count)
         .await?;
 
     log::info!("Successfully read {} records", records.len());
 
     // Get the output file path (auto-generated or specified)
-    let output_path = params.get_output_path();
+    let output_path = args.get_output_path();
 
     // Log the output destination
     if let Some(ref path) = output_path {
@@ -67,9 +70,57 @@ async fn handle_read_command(params: Params) -> anyhow::Result<()> {
     let writer = create_writer(output_path);
 
     // Write the records
-    writer
-        .write_records(&records, &params.output_format)
-        .await?;
+    writer.write_records(&records, &args.output_format).await?;
+
+    Ok(())
+}
+
+async fn handle_list_command(args: ListArgs) -> anyhow::Result<()> {
+    log::debug!("List command:");
+    log::debug!("  Redis URL: {}", args.redis_url);
+    log::debug!("  Output file: {:?}", args.output_file);
+
+    // List all streams
+    let streams = list_streams(&args.redis_url).await?;
+
+    log::info!("Found {} streams", streams.len());
+
+    // Get the output file path (auto-generated or specified)
+    let output_path = args.get_output_path();
+
+    // Log the output destination
+    if let Some(ref path) = output_path {
+        log::info!("Writing output to file: {:?}", path);
+    }
+
+    // Format as JSON
+    let json_output = serde_json::to_string_pretty(&streams)?;
+
+    // Output to console or file
+    match output_path {
+        Some(path) => {
+            // Write to file
+            use tokio::fs::File;
+            use tokio::io::AsyncWriteExt;
+
+            // Ensure parent directory exists
+            if let Some(parent) = path.parent() {
+                if !parent.exists() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+            }
+
+            let mut file = File::create(&path).await?;
+            file.write_all(json_output.as_bytes()).await?;
+            file.flush().await?;
+
+            log::info!("Successfully wrote {} streams to file", streams.len());
+        }
+        None => {
+            // Write to console
+            println!("{}", json_output);
+        }
+    }
 
     Ok(())
 }

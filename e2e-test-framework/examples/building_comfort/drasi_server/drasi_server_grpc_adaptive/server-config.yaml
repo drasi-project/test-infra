@@ -5,6 +5,9 @@ server:
   log_level: info  # Override with RUST_LOG environment variable if needed
   disable_persistence: true
 
+server_core:
+  priority_queue_capacity: 10000
+
 sources:
   - id: facilities-db
     source_type: grpc

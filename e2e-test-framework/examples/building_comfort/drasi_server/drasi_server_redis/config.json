@@ -27,16 +27,12 @@
                               "max_len": 10000,
                               "batch_size": 100,
                               "batch_timeout_ms": 100
-                            },
-                            {
-                              "kind": "JsonlFile",
-                              "max_lines_per_file": 15000
                             }
                           ],
                           "model_data_generator": {
                             "kind": "BuildingHierarchy",
                             "change_interval": [2000000000, 500000000, 500000000, 4000000000],
-                            "change_count": 20,
+                            "change_count": 10000,
                             "seed": 123456789,
                             "spacing_mode": "none",
                             "time_mode": "2025-01-03T10:03:15.4Z",
@@ -87,7 +83,7 @@
                           },
                           "stop_trigger": {
                             "kind": "RecordCount",
-                            "record_count": 20
+                            "record_count": 10000
                           }
                         }
                       ],
@@ -121,10 +117,6 @@
                       "write_change_log": true,
                       "write_change_rates": true,
                       "write_distributions": true
-                    },
-                    {
-                      "kind": "JsonlFile",
-                      "max_lines_per_file": 15000
                     }
                   ]
                 }

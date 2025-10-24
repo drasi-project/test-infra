@@ -6,7 +6,8 @@ server:
   disable_persistence: true
 
 server_core:
-  priority_queue_capacity: 10000
+  priority_queue_capacity: 100000
+  broadcast_channel_capacity: 50000
 
 sources:
   - id: facilities-db

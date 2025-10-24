@@ -21,13 +21,7 @@ echo -e "${GREEN}\nRunning the E2E Test Service with Embedded Drasi Server...${R
 
 # Set drasi_core modules to error level to suppress INFO logs from tracing instrumentation
 
-# Debug build (faster compile times)
 RUST_LOG="off,test_run_host=info, test_run_service=info, test_data_store=info" \
-	cargo run --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_embedded/config.json \
+	cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_embedded/config.json \
 	| egrep '^(TRACE|DEBUG|INFO|WARN|ERROR)'
-
-# Release build (slower compile times, but optimized)	
-# RUST_LOG="off,test_run_host=info, test_run_service=info, test_data_store=info" \
-# 	cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_embedded/config.json \
-# 	| egrep '^(TRACE|DEBUG|INFO|WARN|ERROR)'
 

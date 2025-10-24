@@ -56,8 +56,7 @@ start_redis() {
             -p ${REDIS_PORT}:6379 \
             ${REDIS_IMAGE} \
             redis-server \
-            --appendonly yes \
-            --stream-max-entries-approx-default 10000
+            --appendonly yes
     fi
 
     # Wait for Redis to be ready

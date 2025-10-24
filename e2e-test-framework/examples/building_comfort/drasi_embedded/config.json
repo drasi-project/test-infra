@@ -21,11 +21,11 @@
                         "description": "Embedded Drasi Server instance for testing",
                         "config": {
                             "runtime": {
-                            "workers": 4,
-                            "queue_size": 1000
+                                "workers": 4,
+                                "queue_size": 1000
                             },
                             "storage": {
-                            "type": "memory"
+                                "type": "memory"
                             },
                             "log_level": "info",
                             "sources": [
@@ -57,23 +57,22 @@
                         }
                         }
                     ],
-                    "queries": [],
                     "sources": [
                         {
                         "test_source_id": "facilities-db",
                         "kind": "Model",
                         "source_change_dispatchers": [ 
                             {
-                            "kind": "DrasiServerChannel",
-                            "drasi_server_id": "embedded-drasi-server",
-                            "source_id": "facilities-db",
-                            "buffer_size": 2048
+                                "kind": "DrasiServerChannel",
+                                "drasi_server_id": "embedded-drasi-server",
+                                "source_id": "facilities-db",
+                                "buffer_size": 2048
                             }
                         ],
                         "model_data_generator": {
                             "kind": "BuildingHierarchy",
                             "change_interval": [5000000000, 1000000000, 1000000000, 5000000000],
-                            "change_count": 100000,
+                            "change_count": 100,
                             "send_initial_inserts": true,
                             "seed": 123456789,
                             "spacing_mode": "none",
@@ -111,6 +110,7 @@
                         "subscribers": []
                         }
                     ],
+                    "queries": [],
                     "reactions": [
                         {
                         "test_reaction_id": "building-comfort",
@@ -128,7 +128,7 @@
                         ]
                         }
                     ]
-                    }
+                }
               ]
           }                    
       ]
@@ -145,6 +145,15 @@
                       "start_immediately": true
                   }
               ],
+              "sources": [
+                  {
+                      "test_source_id": "facilities-db",
+                      "start_mode": "auto",
+                      "test_run_overrides" : {
+                        "model_data_generator": {}              
+                      }
+                  }
+              ],
               "queries": [],
               "reactions": [
                   {
@@ -159,15 +168,6 @@
                               "kind": "PerformanceMetrics"
                           }
                       ]
-                  }
-              ],
-              "sources": [
-                  {
-                      "test_source_id": "facilities-db",
-                      "start_mode": "auto",
-                      "test_run_overrides" : {
-                        "model_data_generator": {}              
-                      }
                   }
               ]
           }

@@ -25,7 +25,7 @@ drasi init --local --version latest
 
 # Deploy the Test Service and wait for it to be available
 echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"
-kubectl apply -f examples/building_comfort/drasi_platform/test_service_deployment_kind.yaml
+kubectl apply -f examples/building_comfort/drasi_platform/test_service_deployment.yaml
 kubectl wait -n drasi-system --for=condition=available deployment/drasi-test-service --timeout=300s
 
 # Install the Test Source Provider and create the Test Source
@@ -38,8 +38,8 @@ drasi wait -f examples/building_comfort/drasi_platform/source.yaml -t 200
 
 # Create the Continuous Queries
 echo -e "${GREEN}\n\nCreating Drasi Continuous Queries...${RESET}"
-drasi apply -f examples/building_comfort/drasi_platform/query_container_default/query_default.yaml
-drasi wait -f examples/building_comfort/drasi_platform/query_container_default/query_default.yaml -t 200
+drasi apply -f examples/building_comfort/drasi_platform/query_container_default/query_default_worker.yaml
+drasi wait -f examples/building_comfort/drasi_platform/query_container_default/query_default_worker.yaml -t 200
 
 # Forward the Test Service port and configure the Repository, Source, and Query
 echo -e "${GREEN}\n\nPort forwarding to enable access the Test Service Web API...${RESET}"

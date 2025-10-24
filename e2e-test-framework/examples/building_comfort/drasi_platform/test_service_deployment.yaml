@@ -19,52 +19,32 @@ metadata:
   name: drasi-test-config
   namespace: drasi-system
 data:
+# For a smaller test set:
+# - "test_id": "building_comfort_small",
+# - "record_count": 100
   e2e_test_config.json: |
     {
-        "data_store": {
-            "test_repos": [
-              {
-                "id": "github_dev_repo",
-                "kind": "GitHub",
-                "owner": "drasi-project",
-                "repo": "test-repo",
-                "branch": "main",
-                "force_cache_refresh": false,
-                "root_path": "dev_repo"
-            }
-          ]
-        },
-        "test_run_host": {
-            "queries": [
-              {
-                "test_id": "building_comfort",
-                "test_repo_id": "github_dev_repo",
-                "test_run_id": "test_run_001",
-                "test_query_id": "room-comfort-level",
-                "start_immediately": true,
-                "loggers": [
-                  {
-                    "kind": "Profiler",
-                    "write_bootstrap_log": false,
-                    "write_change_image": true,
-                    "write_change_log": false,
-                    "write_change_rates": true,
-                    "write_distributions": true
-                  }
-                ],
-                "test_run_overrides" : {
-                  "stop_trigger": {
-                    "kind": "RecordSequenceNumber",
-                    "record_sequence_number": 96000
-                  }
-                }                
-              }          
-            ],
+      "data_store": {
+        "test_repos": [
+          {
+              "id": "github_dev_repo",
+              "kind": "GitHub",
+              "owner": "drasi-project",
+              "repo": "test-repo",
+              "branch": "main",
+              "force_cache_refresh": false,
+              "root_path": "dev_repo"
+          }
+        ]
+      },
+      "test_run_host": {
+        "test_runs": [
+          {
+            "test_id": "building_comfort",
+            "test_repo_id": "github_dev_repo",
+            "test_run_id": "test_run_001",
             "sources": [
               {
-                "test_id": "building_comfort",
-                "test_repo_id": "github_dev_repo",                
-                "test_run_id": "test_run_001",
                 "test_source_id": "facilities-db",
                 "start_mode": "bootstrap",
                 "test_run_overrides": {
@@ -81,8 +61,32 @@ data:
                   ]
                 }
               }          
+            ],
+            "queries": [
+              {
+                "test_query_id": "room-comfort-level",
+                "start_immediately": true,
+                "test_run_overrides" : {
+                  "stop_trigger": {
+                    "kind": "RecordCount",
+                    "record_count": 100000
+                  }
+                },
+                "loggers": [
+                  {
+                    "kind": "Profiler",
+                    "write_bootstrap_log": false,
+                    "write_change_image": true,
+                    "write_change_log": false,
+                    "write_change_rates": true,
+                    "write_distributions": true
+                  }
+                ]
+              }          
             ]
-        }
+          }
+        ]
+      }
     }
 ---
 apiVersion: apps/v1

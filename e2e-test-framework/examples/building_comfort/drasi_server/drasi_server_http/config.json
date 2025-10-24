@@ -14,7 +14,6 @@
                       "version": 1,
                       "description": "Test with HTTP",
                       "test_folder": "building_comfort",
-                      "queries": [],
                       "sources": [
                         {
                           "test_source_id": "facilities-db",
@@ -27,10 +26,6 @@
                               "port": 9000,
                               "timeout_seconds": 60,
                               "batch_events": false
-                            },
-                            {
-                              "kind": "JsonlFile",
-                              "max_lines_per_file": 15000
                             }
                           ],
                           "model_data_generator": {
@@ -75,6 +70,7 @@
                           ]
                         }
                       ],
+                      "queries": [],
                       "reactions": [
                         {
                           "test_reaction_id": "building-comfort",
@@ -103,6 +99,12 @@
               "test_id": "building_comfort",
               "test_repo_id": "local_dev_repo",
               "test_run_id": "test_run_001",
+              "sources": [
+                  {
+                      "test_source_id": "facilities-db",
+                      "start_mode": "auto"
+                  }
+              ],
               "queries": [],
               "reactions": [
                   {
@@ -110,22 +112,9 @@
                       "start_immediately": true,
                       "output_loggers": [
                           {
-                              "kind": "JsonlFile",
-                              "max_lines_per_file": 15000
-                          },
-                          {
                               "kind": "PerformanceMetrics"
                           }
                       ]
-                  }
-              ],
-              "sources": [
-                  {
-                      "test_source_id": "facilities-db",
-                      "start_mode": "auto",
-                      "test_run_overrides" : {
-                        "model_data_generator": {}
-                      }
                   }
               ]
           }

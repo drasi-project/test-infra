@@ -14,7 +14,6 @@
                       "version": 1,
                       "description": "Test with adaptive HTTP batching",
                       "test_folder": "building_comfort",
-                      "queries": [],
                       "sources": [
                         {
                           "test_source_id": "facilities-db",
@@ -73,6 +72,7 @@
                           ]
                         }
                       ],
+                      "queries": [],
                       "reactions": [
                         {
                           "test_reaction_id": "building-comfort",

@@ -337,7 +337,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
                     };
                     
                     // Log the batch being sent for debugging
-                    info!("Sending batch of {} events to {}", http_events.len(), batch_url);
+                    debug!("Sending batch of {} events to {}", http_events.len(), batch_url);
                     debug!("Batch request: {}", 
                            serde_json::to_string_pretty(&batch_request).unwrap_or_else(|_| "Failed to serialize".to_string()));
                     

@@ -182,7 +182,7 @@ impl AdaptiveGrpcSourceChangeDispatcher {
                         Ok(_) => {
                             successful_batches += 1;
                             if successful_batches % 100 == 0 {
-                                info!("Adaptive dispatcher metrics - Successful: {}, Failed: {}", 
+                                debug!("Adaptive dispatcher metrics - Successful: {}, Failed: {}", 
                                       successful_batches, failed_batches);
                             }
                             break;

@@ -25,7 +25,7 @@ drasi init --local --version latest
 
 # Deploy the Test Service and wait for it to be available
 echo -e "${GREEN}\n\nDeploying Test Service...${RESET}"
-kubectl apply -f examples/building_comfort/drasi_platform/test_service_deployment.yaml
+kubectl apply -f examples/building_comfort/drasi_platform/test_service_deployment_dev.yaml
 kubectl wait -n drasi-system --for=condition=available deployment/drasi-test-service --timeout=300s
 
 # Install the Test Source Provider and create the Test Source

@@ -72,7 +72,7 @@
                         "model_data_generator": {
                             "kind": "BuildingHierarchy",
                             "change_interval": [5000000000, 1000000000, 1000000000, 5000000000],
-                            "change_count": 100,
+                            "change_count": 100000,
                             "send_initial_inserts": true,
                             "seed": 123456789,
                             "spacing_mode": "none",
@@ -123,7 +123,7 @@
                         "stop_triggers": [
                             {
                             "kind": "RecordCount",
-                            "record_count": 100000
+                            "record_count": 90000
                             }
                         ]
                         }
@@ -148,10 +148,7 @@
               "sources": [
                   {
                       "test_source_id": "facilities-db",
-                      "start_mode": "auto",
-                      "test_run_overrides" : {
-                        "model_data_generator": {}              
-                      }
+                      "start_mode": "auto"
                   }
               ],
               "queries": [],
@@ -160,10 +157,6 @@
                       "test_reaction_id": "building-comfort",
                       "start_immediately": true,
                       "output_loggers": [
-                          {
-                              "kind": "JsonlFile",
-                              "max_lines_per_file": 15000
-                          },
                           {
                               "kind": "PerformanceMetrics"
                           }

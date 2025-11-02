@@ -459,11 +459,20 @@ impl ReactionObserver {
                     create_reaction_stop_triggers(&self.settings.stop_triggers).await?;
 
                 // Initialize and start the handler
-                log::info!("[ReactionObserver] Initializing output handler for reaction: {}", self.settings.id);
+                log::info!(
+                    "[ReactionObserver] Initializing output handler for reaction: {}",
+                    self.settings.id
+                );
                 let handler_rx_channel = self.output_handler.init().await?;
-                log::info!("[ReactionObserver] Starting output handler for reaction: {}", self.settings.id);
+                log::info!(
+                    "[ReactionObserver] Starting output handler for reaction: {}",
+                    self.settings.id
+                );
                 self.output_handler.start().await?;
-                log::info!("[ReactionObserver] Output handler started successfully for reaction: {}", self.settings.id);
+                log::info!(
+                    "[ReactionObserver] Output handler started successfully for reaction: {}",
+                    self.settings.id
+                );
 
                 // Start observer task
                 let (command_tx, command_rx) = tokio::sync::mpsc::channel(100);

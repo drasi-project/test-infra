@@ -160,7 +160,10 @@ pub fn get_test_repo_routes() -> Router {
             "/api/test_repos/:repo_id/tests",
             get(get_test_repo_test_list_handler).post(post_test_repo_test_handler),
         )
-        .route("/api/test_repos/:repo_id/tests/:test_id", get(get_test_repo_test_handler))
+        .route(
+            "/api/test_repos/:repo_id/tests/:test_id",
+            get(get_test_repo_test_handler),
+        )
         .route(
             "/api/test_repos/:repo_id/tests/:test_id/sources",
             get(get_test_repo_test_source_list_handler).post(post_test_repo_test_source_handler),

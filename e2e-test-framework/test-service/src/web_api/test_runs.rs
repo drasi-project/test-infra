@@ -25,10 +25,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 use utoipa::ToSchema;
 
-use test_data_store::{
-    test_repo_storage::models::SpacingMode,
-    test_run_storage::TestRunId,
-};
+use test_data_store::{test_repo_storage::models::SpacingMode, test_run_storage::TestRunId};
 use test_run_host::{TestRunConfig, TestRunStatus};
 
 use super::TestServiceWebApiError;
@@ -720,7 +717,6 @@ async fn bootstrap_test_run_source(
     Ok(Json(SourceBootstrapResponseBody { nodes, rels }))
 }
 
-
 // Query-related endpoints
 #[utoipa::path(
     get,
@@ -931,7 +927,6 @@ async fn reset_test_run_query(
     test_run_host.test_query_reset(&full_id).await?;
     Ok(StatusCode::OK)
 }
-
 
 // Reaction-related endpoints
 #[utoipa::path(

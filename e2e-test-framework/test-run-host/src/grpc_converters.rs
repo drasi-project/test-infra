@@ -177,7 +177,12 @@ fn extract_properties(obj: &Map<String, JsonValue>) -> Result<Struct> {
         // Fall back to extracting from top-level fields (excluding special fields)
         for (key, value) in obj {
             // Skip special fields
-            if key == "id" || key == "labels" || key == "startId" || key == "endId" || key == "properties" {
+            if key == "id"
+                || key == "labels"
+                || key == "startId"
+                || key == "endId"
+                || key == "properties"
+            {
                 continue;
             }
 

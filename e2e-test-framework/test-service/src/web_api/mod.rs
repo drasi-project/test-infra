@@ -28,11 +28,11 @@ use utoipa::{OpenApi, ToSchema};
 
 use data_collector::DataCollector;
 use repo::get_test_repo_routes;
+use std::collections::HashMap;
 use test_data_store::{test_run_storage::TestRunId, TestDataStore};
 use test_run_host::TestRunHost;
 use test_runs::get_test_runs_routes;
 use utoipa_swagger_ui::SwaggerUi;
-use std::collections::HashMap;
 
 use crate::openapi::ApiDoc;
 
@@ -322,10 +322,10 @@ async fn get_service_info_handler(
     let query_ids = test_run_host.get_test_query_ids().await?;
     let reaction_ids = test_run_host.get_test_reaction_ids().await?;
     let drasi_server_ids = test_run_host.get_test_drasi_server_ids().await?;
-    
+
     // Build hierarchical structure
     let mut test_runs_map: HashMap<String, TestRunSummary> = HashMap::new();
-    
+
     // Process each test run
     for run_id_str in test_run_ids {
         if let Ok(run_id) = TestRunId::try_from(run_id_str.as_str()) {
@@ -342,7 +342,7 @@ async fn get_service_info_handler(
             test_runs_map.insert(run_id_str, test_run);
         }
     }
-    
+
     // Add sources to their test runs
     for source_id in source_ids {
         // Extract test run ID from source ID (format: test_repo.test_id.run_id.source_id)
@@ -355,7 +355,7 @@ async fn get_service_info_handler(
             }
         }
     }
-    
+
     // Add queries to their test runs
     for query_id in query_ids {
         if let Some(run_id) = extract_test_run_id(&query_id) {
@@ -366,7 +366,7 @@ async fn get_service_info_handler(
             }
         }
     }
-    
+
     // Add reactions to their test runs
     for reaction_id in reaction_ids {
         if let Some(run_id) = extract_test_run_id(&reaction_id) {
@@ -377,7 +377,7 @@ async fn get_service_info_handler(
             }
         }
     }
-    
+
     // Add drasi servers to their test runs
     for server_id in drasi_server_ids {
         if let Some(run_id) = extract_test_run_id(&server_id) {
@@ -388,7 +388,7 @@ async fn get_service_info_handler(
             }
         }
     }
-    
+
     let test_runs: Vec<TestRunSummary> = test_runs_map.into_values().collect();
 
     Ok(Json(TestServiceStateResponse {

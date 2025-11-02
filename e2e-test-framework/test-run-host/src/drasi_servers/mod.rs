@@ -18,10 +18,8 @@ use std::sync::Arc;
 
 use derive_more::Debug;
 use drasi_server_core::{
-    DrasiServerCore,
-    Source, Query, Reaction,
-    QueryConfig, ReactionConfig, SourceConfig,
-    application::ApplicationHandle
+    application::ApplicationHandle, DrasiServerCore, Query, QueryConfig, Reaction, ReactionConfig,
+    Source, SourceConfig,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;

@@ -22,7 +22,9 @@ use query_result_observer::{
 };
 use result_stream_loggers::ResultStreamLoggerConfig;
 use test_data_store::{
-    test_repo_storage::models::{ResultStreamHandlerDefinition, StopTriggerDefinition, TestQueryDefinition},
+    test_repo_storage::models::{
+        ResultStreamHandlerDefinition, StopTriggerDefinition, TestQueryDefinition,
+    },
     test_run_storage::{
         ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId,
         TestRunQueryStorage,
@@ -161,7 +163,7 @@ impl TestRunQuery {
             definition.test_query_definition.clone(),
             output_storage,
             definition.loggers,
-            definition.test_run_overrides
+            definition.test_run_overrides,
         )
         .await?;
 

@@ -43,7 +43,9 @@ use super::result_stream_loggers::{
 use serde::Serialize;
 use std::sync::Arc;
 use test_data_store::{
-    test_repo_storage::models::{ResultStreamHandlerDefinition, StopTriggerDefinition, TestQueryDefinition},
+    test_repo_storage::models::{
+        ResultStreamHandlerDefinition, StopTriggerDefinition, TestQueryDefinition,
+    },
     test_run_storage::{TestRunQueryId, TestRunQueryStorage},
 };
 use tokio::{
@@ -111,7 +113,6 @@ impl QueryResultObserverSettings {
         loggers: Vec<ResultStreamLoggerConfig>,
         test_run_overrides: Option<TestRunQueryOverrides>,
     ) -> anyhow::Result<Self> {
-
         let overrides = test_run_overrides.as_ref();
 
         let stop_trigger = overrides
@@ -128,7 +129,7 @@ impl QueryResultObserverSettings {
             id: test_run_query_id,
             loggers,
             output_storage,
-            result_stream_handler
+            result_stream_handler,
         };
 
         Ok(settings)
@@ -415,7 +416,7 @@ impl QueryResultObserver {
             definition,
             output_storage.clone(),
             loggers,
-            test_run_overrides
+            test_run_overrides,
         )
         .await?;
         log::debug!("Creating QueryResultObserver from {:?}", &settings);
@@ -514,7 +515,9 @@ impl QueryResultObserverInternalState {
             ..Default::default()
         };
 
-        let output_handler = create_query_handler(settings.id.clone(), settings.result_stream_handler.clone()).await?;
+        let output_handler =
+            create_query_handler(settings.id.clone(), settings.result_stream_handler.clone())
+                .await?;
         let output_handler_rx_channel = output_handler.init().await?;
 
         // Create result stream loggers

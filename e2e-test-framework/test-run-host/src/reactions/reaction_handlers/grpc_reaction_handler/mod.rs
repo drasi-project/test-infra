@@ -139,10 +139,9 @@ impl GrpcServerImpl {
                 };
 
                 let message = ReactionHandlerMessage::Invocation(invocation);
-                self.tx
-                    .send(message)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to send message to output handler: {}", e))?;
+                self.tx.send(message).await.map_err(|e| {
+                    anyhow::anyhow!("Failed to send message to output handler: {}", e)
+                })?;
             }
         }
 
@@ -160,7 +159,10 @@ impl ReactionService for GrpcServerImpl {
         let req = request.into_inner();
 
         if let Some(results) = req.results {
-            debug!("Processing query results for query_id: {}", results.query_id);
+            debug!(
+                "Processing query results for query_id: {}",
+                results.query_id
+            );
             let items_count = results.results.len() as u32;
             match self.process_query_result(results).await {
                 Ok(_) => {
@@ -217,7 +219,11 @@ impl ReactionService for GrpcServerImpl {
 
                 match self_clone.process_query_result(result).await {
                     Ok(_) => {
-                        trace!("Processed batch {} with {} items", batches_processed, batch_item_count);
+                        trace!(
+                            "Processed batch {} with {} items",
+                            batches_processed,
+                            batch_item_count
+                        );
                         let response = StreamResultsResponse {
                             success: true,
                             message: "Batch processed".to_string(),
@@ -242,8 +248,11 @@ impl ReactionService for GrpcServerImpl {
                     }
                 }
             }
-            
-            debug!("Stream completed: {} batches, {} total items", batches_processed, items_processed);
+
+            debug!(
+                "Stream completed: {} batches, {} total items",
+                batches_processed, items_processed
+            );
         });
 
         Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
@@ -366,7 +375,10 @@ impl ReactionOutputHandler for GrpcReactionHandler {
         let shutdown_notify_clone = self.shutdown_notify.clone();
 
         info!("Starting Drasi ReactionService server on {}", addr);
-        info!("Server configured for query_ids: {:?}", self.settings.query_ids);
+        info!(
+            "Server configured for query_ids: {:?}",
+            self.settings.query_ids
+        );
 
         let handle = tokio::spawn(async move {
             Server::builder()
@@ -379,10 +391,13 @@ impl ReactionOutputHandler for GrpcReactionHandler {
 
         *server_handle = Some(handle);
         *self.status.write().await = ReactionHandlerStatus::Running;
-        
+
         // Give the server time to start listening
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        info!("Server is now listening and ready to accept connections on {}", self.settings.server_addr());
+        info!(
+            "Server is now listening and ready to accept connections on {}",
+            self.settings.server_addr()
+        );
 
         Ok(())
     }
@@ -436,4 +451,3 @@ impl ReactionOutputHandler for GrpcReactionHandler {
         }))
     }
 }
-

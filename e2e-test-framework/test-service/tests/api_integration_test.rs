@@ -35,7 +35,7 @@ async fn test_service_info_endpoint() {
 #[ignore]
 async fn test_direct_source_endpoints_return_404() {
     let client = reqwest::Client::new();
-    
+
     // These legacy endpoints should no longer exist
     let endpoints = vec![
         "/test_run_host/test_source",
@@ -54,7 +54,7 @@ async fn test_direct_source_endpoints_return_404() {
             .send()
             .await
             .unwrap();
-        
+
         assert_eq!(
             response.status(),
             StatusCode::NOT_FOUND,
@@ -68,7 +68,7 @@ async fn test_direct_source_endpoints_return_404() {
 #[ignore]
 async fn test_test_run_crud_operations() {
     let client = reqwest::Client::new();
-    
+
     // Create a test run
     let test_run_config = json!({
         "test_id": "test_api_test",
@@ -79,47 +79,47 @@ async fn test_test_run_crud_operations() {
         "reactions": [],
         "drasi_servers": []
     });
-    
+
     let response = client
         .post(format!("{}/api/test_runs", BASE_URL))
         .json(&test_run_config)
         .send()
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), StatusCode::CREATED);
     let created: serde_json::Value = response.json().await.unwrap();
     let run_id = created["id"].as_str().unwrap();
-    
+
     // List test runs
     let response = client
         .get(format!("{}/api/test_runs", BASE_URL))
         .send()
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), StatusCode::OK);
     let runs: Vec<serde_json::Value> = response.json().await.unwrap();
     assert!(runs.iter().any(|r| r["id"] == run_id));
-    
+
     // Get specific test run
     let response = client
         .get(format!("{}/api/test_runs/{}", BASE_URL, run_id))
         .send()
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), StatusCode::OK);
     let run: serde_json::Value = response.json().await.unwrap();
     assert_eq!(run["id"], run_id);
-    
+
     // Delete test run
     let response = client
         .delete(format!("{}/api/test_runs/{}", BASE_URL, run_id))
         .send()
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
@@ -127,7 +127,7 @@ async fn test_test_run_crud_operations() {
 #[ignore]
 async fn test_test_run_source_operations() {
     let client = reqwest::Client::new();
-    
+
     // First create a test run
     let test_run_config = json!({
         "test_id": "test_source_ops",
@@ -138,28 +138,28 @@ async fn test_test_run_source_operations() {
         "reactions": [],
         "drasi_servers": []
     });
-    
+
     let response = client
         .post(format!("{}/api/test_runs", BASE_URL))
         .json(&test_run_config)
         .send()
         .await
         .unwrap();
-    
+
     let created: serde_json::Value = response.json().await.unwrap();
     let run_id = created["id"].as_str().unwrap();
-    
+
     // List sources (should be empty)
     let response = client
         .get(format!("{}/api/test_runs/{}/sources", BASE_URL, run_id))
         .send()
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), StatusCode::OK);
     let sources: Vec<serde_json::Value> = response.json().await.unwrap();
     assert_eq!(sources.len(), 0);
-    
+
     // Create a source within the test run
     let source_config = json!({
         "source_id": "test_source_001",
@@ -171,16 +171,16 @@ async fn test_test_run_source_operations() {
             "kind": "Console"
         }
     });
-    
+
     let response = client
         .post(format!("{}/api/test_runs/{}/sources", BASE_URL, run_id))
         .json(&source_config)
         .send()
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), StatusCode::CREATED);
-    
+
     // Clean up
     client
         .delete(format!("{}/api/test_runs/{}", BASE_URL, run_id))
@@ -193,7 +193,7 @@ async fn test_test_run_source_operations() {
 #[ignore]
 async fn test_test_run_query_operations() {
     let client = reqwest::Client::new();
-    
+
     // Create a test run
     let test_run_config = json!({
         "test_id": "test_query_ops",
@@ -204,28 +204,28 @@ async fn test_test_run_query_operations() {
         "reactions": [],
         "drasi_servers": []
     });
-    
+
     let response = client
         .post(format!("{}/api/test_runs", BASE_URL))
         .json(&test_run_config)
         .send()
         .await
         .unwrap();
-    
+
     let created: serde_json::Value = response.json().await.unwrap();
     let run_id = created["id"].as_str().unwrap();
-    
+
     // List queries (should be empty)
     let response = client
         .get(format!("{}/api/test_runs/{}/queries", BASE_URL, run_id))
         .send()
         .await
         .unwrap();
-    
+
     assert_eq!(response.status(), StatusCode::OK);
     let queries: Vec<serde_json::Value> = response.json().await.unwrap();
     assert_eq!(queries.len(), 0);
-    
+
     // Clean up
     client
         .delete(format!("{}/api/test_runs/{}", BASE_URL, run_id))
@@ -238,14 +238,14 @@ async fn test_test_run_query_operations() {
 #[ignore]
 async fn test_repos_endpoint_exists() {
     let client = reqwest::Client::new();
-    
+
     // Test that repos endpoint still exists
     let response = client
         .get(format!("{}/test_repos", BASE_URL))
         .send()
         .await
         .unwrap();
-    
+
     // Should return OK (empty list) or similar success status
     assert_ne!(response.status(), StatusCode::NOT_FOUND);
 }

@@ -285,7 +285,11 @@ async fn http_server_thread(
         }
     };
 
-    log::info!("HTTP Reaction Handler listening on http://{} with path {} and batch support", addr, settings.path);
+    log::info!(
+        "HTTP Reaction Handler listening on http://{} with path {} and batch support",
+        addr,
+        settings.path
+    );
 
     let server = Server::bind(&addr)
         .serve(app.into_make_service())
@@ -342,8 +346,9 @@ async fn handle_reaction(
     let tracestate = header_map.get("tracestate").cloned();
 
     // Check if this is a batch request (array of batch results or single batch result)
-    let is_batch = uri.path().contains("/batch") || request_body.is_array() || 
-                   (request_body.is_object() && request_body.get("results").is_some());
+    let is_batch = uri.path().contains("/batch")
+        || request_body.is_array()
+        || (request_body.is_object() && request_body.get("results").is_some());
 
     log::debug!(
         "HTTP Reaction Handler received {} request to {} with body type: {}",
@@ -376,12 +381,14 @@ async fn handle_reaction(
 
         // Process each batch item
         for (idx, batch_item) in batch_items.iter().enumerate() {
-            let query_id = batch_item.get("query_id")
+            let query_id = batch_item
+                .get("query_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or(&state.settings.test_run_query_id.test_query_id)
                 .to_string();
 
-            let results = batch_item.get("results")
+            let results = batch_item
+                .get("results")
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default();
@@ -396,15 +403,17 @@ async fn handle_reaction(
             // Process each result in the batch
             for (result_idx, result) in results.iter().enumerate() {
                 // Determine reaction type from the result
-                let reaction_type = if result.get("before").is_some() && result.get("after").is_some() {
-                    "updated"
-                } else if result.get("after").is_some() {
-                    "added"
-                } else if result.get("before").is_some() {
-                    "deleted"
-                } else {
-                    "unknown"
-                }.to_string();
+                let reaction_type =
+                    if result.get("before").is_some() && result.get("after").is_some() {
+                        "updated"
+                    } else if result.get("after").is_some() {
+                        "added"
+                    } else if result.get("before").is_some() {
+                        "deleted"
+                    } else {
+                        "unknown"
+                    }
+                    .to_string();
 
                 let sequence = (idx * 1000 + result_idx) as u64; // Generate sequence for batch items
 
@@ -431,7 +440,9 @@ async fn handle_reaction(
                     handler_type: ReactionHandlerType::Http,
                     payload: ReactionHandlerPayload {
                         value: reaction_data,
-                        timestamp: chrono::DateTime::from_timestamp_nanos(invocation_time_ns as i64),
+                        timestamp: chrono::DateTime::from_timestamp_nanos(
+                            invocation_time_ns as i64,
+                        ),
                         invocation_id: Some(format!("{}-{}", query_id, sequence)),
                         metadata: Some(metadata),
                     },

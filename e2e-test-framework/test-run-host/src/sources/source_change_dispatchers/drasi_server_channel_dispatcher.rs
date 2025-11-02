@@ -380,11 +380,14 @@ async fn dispatch_event_to_drasi(
         "relation" => "r",
         _ => {
             // Fallback: check ID patterns or labels
-            if id.starts_with("B_") || id.starts_with("F_") || id.starts_with("R_") 
-                || labels.contains(&"Building".to_string()) 
+            if id.starts_with("B_")
+                || id.starts_with("F_")
+                || id.starts_with("R_")
+                || labels.contains(&"Building".to_string())
                 || labels.contains(&"Floor".to_string())
                 || labels.contains(&"Room".to_string())
-                || labels.contains(&"Stock".to_string()) {
+                || labels.contains(&"Stock".to_string())
+            {
                 "n" // Node
             } else if id.contains("HAS_FLOOR") || id.contains("HAS_ROOM") {
                 "r" // Relation
@@ -392,7 +395,8 @@ async fn dispatch_event_to_drasi(
                 // Default to node if we can't determine
                 log::debug!(
                     "Using default type 'node' for element {} with labels {:?}",
-                    id, labels
+                    id,
+                    labels
                 );
                 "n"
             }

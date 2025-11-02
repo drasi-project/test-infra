@@ -44,13 +44,12 @@ use tokio::{
 
 use test_data_store::{
     scripts::{
-        NodeRecord, SourceChangeEvent, SourceChangeEventPayload,
-        SourceChangeEventSourceInfo,
+        NodeRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo,
     },
     test_repo_storage::{
         models::{
-            StockDefinition, StockTradeDataGeneratorDefinition, SourceChangeDispatcherDefinition,
-            SpacingMode, TimeMode,
+            SourceChangeDispatcherDefinition, SpacingMode, StockDefinition,
+            StockTradeDataGeneratorDefinition, TimeMode,
         },
         TestSourceStorage,
     },
@@ -226,11 +225,8 @@ impl StockTradeDataGenerator {
             dispatchers,
         )
         .await?;
-        
-        log::debug!(
-            "Creating StockTradeDataGenerator from {:?}",
-            &settings
-        );
+
+        log::debug!("Creating StockTradeDataGenerator from {:?}", &settings);
 
         let stock_market = Arc::new(Mutex::new(StockMarket::new(&settings)?));
 
@@ -283,10 +279,7 @@ impl StockTradeDataGenerator {
                     },
                 })
             }
-            Err(e) => anyhow::bail!(
-                "Error sending command to StockTradeDataGenerator: {:?}",
-                e
-            ),
+            Err(e) => anyhow::bail!("Error sending command to StockTradeDataGenerator: {:?}", e),
         }
     }
 }
@@ -458,9 +451,7 @@ pub struct StockTradeDataGeneratorExternalState {
     pub virtual_time_ns_start: u64,
 }
 
-impl From<&mut StockTradeDataGeneratorInternalState>
-    for StockTradeDataGeneratorExternalState
-{
+impl From<&mut StockTradeDataGeneratorInternalState> for StockTradeDataGeneratorExternalState {
     fn from(state: &mut StockTradeDataGeneratorInternalState) -> Self {
         Self {
             error_messages: state.error_messages.clone(),
@@ -508,10 +499,7 @@ impl StockTradeDataGeneratorInternalState {
         settings: StockTradeDataGeneratorSettings,
         stock_market: Arc<Mutex<StockMarket>>,
     ) -> anyhow::Result<(Self, Receiver<ScheduledChangeEventMessage>)> {
-        log::debug!(
-            "Initializing StockTradeDataGenerator using {:?}",
-            settings
-        );
+        log::debug!("Initializing StockTradeDataGenerator using {:?}", settings);
 
         // Create the dispatchers
         let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
@@ -929,30 +917,26 @@ impl StockTradeDataGeneratorInternalState {
         };
 
         let next_event = match update {
-            Some(model_change) => {
-                match model_change {
-                    ModelChange::StockUpdated(stock_before, stock_after) => {
-                        SourceChangeEvent {
-                            op: "u".to_string(),
-                            reactivator_start_ns: now_ns,
-                            reactivator_end_ns: 0,
-                            payload: SourceChangeEventPayload {
-                                source: SourceChangeEventSourceInfo {
-                                    db: self.settings.id.test_source_id.to_string(),
-                                    lsn: self.event_seq_num,
-                                    table: "node".to_string(),
-                                    ts_ns: self.virtual_time_ns_next,
-                                },
-                                before: serde_json::json!(stock_before),
-                                after: serde_json::json!(stock_after),
-                            },
-                        }
-                    }
-                    _ => {
-                        anyhow::bail!("Unexpected model change: {:?}", model_change);
-                    }
+            Some(model_change) => match model_change {
+                ModelChange::StockUpdated(stock_before, stock_after) => SourceChangeEvent {
+                    op: "u".to_string(),
+                    reactivator_start_ns: now_ns,
+                    reactivator_end_ns: 0,
+                    payload: SourceChangeEventPayload {
+                        source: SourceChangeEventSourceInfo {
+                            db: self.settings.id.test_source_id.to_string(),
+                            lsn: self.event_seq_num,
+                            table: "node".to_string(),
+                            ts_ns: self.virtual_time_ns_next,
+                        },
+                        before: serde_json::json!(stock_before),
+                        after: serde_json::json!(stock_after),
+                    },
+                },
+                _ => {
+                    anyhow::bail!("Unexpected model change: {:?}", model_change);
                 }
-            }
+            },
             None => {
                 anyhow::bail!("No model change generated");
             }
@@ -1136,9 +1120,9 @@ impl StockTradeDataGeneratorInternalState {
             StockTradeDataGeneratorCommand::Reset
             | StockTradeDataGeneratorCommand::Skip { .. }
             | StockTradeDataGeneratorCommand::Start
-            | StockTradeDataGeneratorCommand::Step { .. } => Err(
-                StockTradeDataGeneratorError::CurrentlySkipping(self.skips_remaining).into(),
-            ),
+            | StockTradeDataGeneratorCommand::Step { .. } => {
+                Err(StockTradeDataGeneratorError::CurrentlySkipping(self.skips_remaining).into())
+            }
             StockTradeDataGeneratorCommand::SetTestRunHost { test_run_host } => {
                 self.set_test_run_host_on_dispatchers(test_run_host.clone());
                 Ok(())
@@ -1170,9 +1154,9 @@ impl StockTradeDataGeneratorInternalState {
             StockTradeDataGeneratorCommand::Reset
             | StockTradeDataGeneratorCommand::Skip { .. }
             | StockTradeDataGeneratorCommand::Start
-            | StockTradeDataGeneratorCommand::Step { .. } => Err(
-                StockTradeDataGeneratorError::CurrentlyStepping(self.steps_remaining).into(),
-            ),
+            | StockTradeDataGeneratorCommand::Step { .. } => {
+                Err(StockTradeDataGeneratorError::CurrentlyStepping(self.steps_remaining).into())
+            }
             StockTradeDataGeneratorCommand::SetTestRunHost { test_run_host } => {
                 self.set_test_run_host_on_dispatchers(test_run_host.clone());
                 Ok(())
@@ -1310,9 +1294,7 @@ pub struct StockTradeDataGeneratorResultSummary {
     pub test_run_source_id: String,
 }
 
-impl From<&mut StockTradeDataGeneratorInternalState>
-    for StockTradeDataGeneratorResultSummary
-{
+impl From<&mut StockTradeDataGeneratorInternalState> for StockTradeDataGeneratorResultSummary {
     fn from(state: &mut StockTradeDataGeneratorInternalState) -> Self {
         let run_duration_ns = state.stats.actual_end_time_ns - state.stats.actual_start_time_ns;
         let run_duration_sec = run_duration_ns as f64 / 1_000_000_000.0;

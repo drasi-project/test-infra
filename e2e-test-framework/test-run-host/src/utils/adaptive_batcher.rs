@@ -5,11 +5,11 @@ use tokio::time::timeout;
 /// Throughput levels for adaptive batching
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ThroughputLevel {
-    Idle,     // < 1 msg/sec
-    Low,      // 1-100 msgs/sec
-    Medium,   // 100-1,000 msgs/sec
-    High,     // 1,000-10,000 msgs/sec
-    Burst,    // > 10,000 msgs/sec
+    Idle,   // < 1 msg/sec
+    Low,    // 1-100 msgs/sec
+    Medium, // 100-1,000 msgs/sec
+    High,   // 1,000-10,000 msgs/sec
+    Burst,  // > 10,000 msgs/sec
 }
 
 /// Configuration for adaptive batching
@@ -59,7 +59,7 @@ impl ThroughputMonitor {
     pub fn record_batch(&mut self, batch_size: usize) {
         let now = Instant::now();
         self.events.push((now, batch_size));
-        
+
         // Clean old events outside the window
         let cutoff = now - self.window_size;
         self.events.retain(|(timestamp, _)| *timestamp > cutoff);
@@ -72,17 +72,18 @@ impl ThroughputMonitor {
 
         let now = Instant::now();
         let window_start = now - self.window_size;
-        
+
         // Calculate messages per second
-        let total_messages: usize = self.events
+        let total_messages: usize = self
+            .events
             .iter()
             .filter(|(timestamp, _)| *timestamp > window_start)
             .map(|(_, size)| size)
             .sum();
-        
+
         let elapsed = self.window_size.as_secs_f64();
         let msgs_per_sec = (total_messages as f64) / elapsed;
-        
+
         match msgs_per_sec {
             x if x < 1.0 => ThroughputLevel::Idle,
             x if x < 100.0 => ThroughputLevel::Low,
@@ -99,13 +100,14 @@ impl ThroughputMonitor {
 
         let now = Instant::now();
         let window_start = now - self.window_size;
-        
-        let total_messages: usize = self.events
+
+        let total_messages: usize = self
+            .events
             .iter()
             .filter(|(timestamp, _)| *timestamp > window_start)
             .map(|(_, size)| size)
             .sum();
-        
+
         let elapsed = self.window_size.as_secs_f64();
         (total_messages as f64) / elapsed
     }
@@ -140,7 +142,7 @@ impl<T> AdaptiveBatcher<T> {
 
         let level = self.monitor.get_throughput_level();
         let msgs_per_sec = self.monitor.get_messages_per_second();
-        
+
         match level {
             ThroughputLevel::Idle => {
                 // Optimize for latency - send immediately
@@ -149,28 +151,39 @@ impl<T> AdaptiveBatcher<T> {
             }
             ThroughputLevel::Low => {
                 // Small batches, minimal wait
-                self.current_batch_size = (self.config.min_batch_size * 2).min(self.config.max_batch_size);
+                self.current_batch_size =
+                    (self.config.min_batch_size * 2).min(self.config.max_batch_size);
                 self.current_wait_time = Duration::from_millis(1).max(self.config.min_wait_time);
             }
             ThroughputLevel::Medium => {
                 // Moderate batching
-                self.current_batch_size = ((self.config.max_batch_size - self.config.min_batch_size) / 4 + self.config.min_batch_size)
-                    .min(self.config.max_batch_size);
-                self.current_wait_time = Duration::from_millis(10).max(self.config.min_wait_time).min(self.config.max_wait_time);
+                self.current_batch_size =
+                    ((self.config.max_batch_size - self.config.min_batch_size) / 4
+                        + self.config.min_batch_size)
+                        .min(self.config.max_batch_size);
+                self.current_wait_time = Duration::from_millis(10)
+                    .max(self.config.min_wait_time)
+                    .min(self.config.max_wait_time);
             }
             ThroughputLevel::High => {
                 // Larger batches for efficiency
-                self.current_batch_size = ((self.config.max_batch_size - self.config.min_batch_size) / 2 + self.config.min_batch_size)
-                    .min(self.config.max_batch_size);
-                self.current_wait_time = Duration::from_millis(25).max(self.config.min_wait_time).min(self.config.max_wait_time);
+                self.current_batch_size =
+                    ((self.config.max_batch_size - self.config.min_batch_size) / 2
+                        + self.config.min_batch_size)
+                        .min(self.config.max_batch_size);
+                self.current_wait_time = Duration::from_millis(25)
+                    .max(self.config.min_wait_time)
+                    .min(self.config.max_wait_time);
             }
             ThroughputLevel::Burst => {
                 // Maximum throughput mode
                 self.current_batch_size = self.config.max_batch_size;
-                self.current_wait_time = Duration::from_millis(50).max(self.config.min_wait_time).min(self.config.max_wait_time);
+                self.current_wait_time = Duration::from_millis(50)
+                    .max(self.config.min_wait_time)
+                    .min(self.config.max_wait_time);
             }
         }
-        
+
         log::trace!(
             "Adapted batching parameters - Level: {:?}, Rate: {:.1} msgs/sec, Batch: {}, Wait: {:?}",
             level, msgs_per_sec, self.current_batch_size, self.current_wait_time
@@ -180,19 +193,19 @@ impl<T> AdaptiveBatcher<T> {
     /// Collect the next batch of items
     pub async fn next_batch(&mut self) -> Option<Vec<T>> {
         let mut batch = Vec::new();
-        
+
         // First, wait for at least one message
         match self.receiver.recv().await {
             Some(item) => batch.push(item),
             None => return None, // Channel closed
         }
-        
+
         // Adapt parameters based on recent throughput
         self.adapt_parameters();
-        
+
         // Now we have at least one message, decide how to batch
         let deadline = Instant::now() + self.current_wait_time;
-        
+
         // Try to collect more messages up to current batch size
         while batch.len() < self.current_batch_size {
             // Check if more messages are immediately available
@@ -221,20 +234,20 @@ impl<T> AdaptiveBatcher<T> {
                     if remaining.is_zero() {
                         break;
                     }
-                    
+
                     match timeout(remaining, self.receiver.recv()).await {
                         Ok(Some(item)) => batch.push(item),
                         Ok(None) => break, // Channel closed
-                        Err(_) => break,    // Timeout
+                        Err(_) => break,   // Timeout
                     }
                 }
                 Err(mpsc::error::TryRecvError::Disconnected) => break,
             }
         }
-        
+
         // Record batch for throughput monitoring
         self.monitor.record_batch(batch.len());
-        
+
         log::debug!(
             "Adaptive batch collected - Size: {}, Target: {}, Wait: {:?}, Level: {:?}",
             batch.len(),
@@ -242,10 +255,10 @@ impl<T> AdaptiveBatcher<T> {
             self.current_wait_time,
             self.monitor.get_throughput_level()
         );
-        
+
         Some(batch)
     }
-    
+
     /// Estimate number of pending messages (heuristic)
     fn estimate_pending(&self) -> usize {
         // Since we can't peek at the channel without consuming messages,
@@ -269,15 +282,15 @@ mod tests {
     #[tokio::test]
     async fn test_throughput_monitor() {
         let mut monitor = ThroughputMonitor::new(Duration::from_secs(1));
-        
+
         // Initially idle
         assert_eq!(monitor.get_throughput_level(), ThroughputLevel::Idle);
-        
+
         // Add some events
         monitor.record_batch(10);
         sleep(Duration::from_millis(100)).await;
         monitor.record_batch(10);
-        
+
         // Should be low throughput (20 msgs in 1 sec window)
         assert_eq!(monitor.get_throughput_level(), ThroughputLevel::Low);
     }
@@ -287,11 +300,11 @@ mod tests {
         let (tx, rx) = mpsc::channel(100);
         let config = AdaptiveBatchConfig::default();
         let mut batcher = AdaptiveBatcher::new(rx, config);
-        
+
         // Send a few messages slowly
         tx.send(1).await.unwrap();
         tx.send(2).await.unwrap();
-        
+
         let batch = batcher.next_batch().await.unwrap();
         assert!(batch.len() <= 10); // Should batch small for low traffic
     }
@@ -305,12 +318,12 @@ mod tests {
         config.min_batch_size = 5;
         config.max_wait_time = Duration::from_millis(10);
         let mut batcher = AdaptiveBatcher::new(rx, config);
-        
+
         // Send many messages quickly to simulate burst
         for i in 0..100 {
             tx.send(i).await.unwrap();
         }
-        
+
         let batch = batcher.next_batch().await.unwrap();
         // The batch should be at least min_batch_size (5) during burst
         // but we shouldn't assert exact size as it depends on timing

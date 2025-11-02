@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 
 use super::TestRunDrasiServer;
 use crate::drasi_servers::api_models::*;
-use drasi_server_core::{Source, Query, Reaction};
+use drasi_server_core::{Query, Reaction, Source};
 
 // NOTE: Update operations are not supported - components must be deleted and recreated
 // Create, Delete, Start, and Stop ARE all supported via the DrasiServerCore API
@@ -42,11 +42,21 @@ impl TestRunDrasiServer {
                     name: id,
                     source_type: "unknown".to_string(),
                     status: match status {
-                        drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
-                        drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
-                        drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
-                        drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
-                        drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                        drasi_server_core::channels::ComponentStatus::Running => {
+                            ComponentStatus::Running
+                        }
+                        drasi_server_core::channels::ComponentStatus::Stopped => {
+                            ComponentStatus::Stopped
+                        }
+                        drasi_server_core::channels::ComponentStatus::Starting => {
+                            ComponentStatus::Starting
+                        }
+                        drasi_server_core::channels::ComponentStatus::Stopping => {
+                            ComponentStatus::Stopping
+                        }
+                        drasi_server_core::channels::ComponentStatus::Error => {
+                            ComponentStatus::Error("Error".to_string())
+                        }
                     },
                 })
                 .collect())
@@ -67,11 +77,21 @@ impl TestRunDrasiServer {
                 name: source_runtime.id.clone(),
                 source_type: source_runtime.source_type.clone(),
                 status: match source_runtime.status {
-                    drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
-                    drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
-                    drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
-                    drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
-                    drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                    drasi_server_core::channels::ComponentStatus::Running => {
+                        ComponentStatus::Running
+                    }
+                    drasi_server_core::channels::ComponentStatus::Stopped => {
+                        ComponentStatus::Stopped
+                    }
+                    drasi_server_core::channels::ComponentStatus::Starting => {
+                        ComponentStatus::Starting
+                    }
+                    drasi_server_core::channels::ComponentStatus::Stopping => {
+                        ComponentStatus::Stopping
+                    }
+                    drasi_server_core::channels::ComponentStatus::Error => {
+                        ComponentStatus::Error("Error".to_string())
+                    }
                 },
                 auto_start: false, // Runtime info doesn't include auto_start
                 properties: serde_json::to_value(&source_runtime.properties)
@@ -100,7 +120,10 @@ impl TestRunDrasiServer {
             builder = builder.auto_start(request.auto_start);
 
             // Add properties from the request
-            if let Ok(props_map) = serde_json::from_value::<std::collections::HashMap<String, serde_json::Value>>(request.properties) {
+            if let Ok(props_map) = serde_json::from_value::<
+                std::collections::HashMap<String, serde_json::Value>,
+            >(request.properties)
+            {
                 for (key, value) in props_map {
                     builder = builder.with_property(key, value);
                 }
@@ -189,11 +212,21 @@ impl TestRunDrasiServer {
                     name: id,
                     sources: Vec::new(),
                     status: match status {
-                        drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
-                        drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
-                        drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
-                        drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
-                        drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                        drasi_server_core::channels::ComponentStatus::Running => {
+                            ComponentStatus::Running
+                        }
+                        drasi_server_core::channels::ComponentStatus::Stopped => {
+                            ComponentStatus::Stopped
+                        }
+                        drasi_server_core::channels::ComponentStatus::Starting => {
+                            ComponentStatus::Starting
+                        }
+                        drasi_server_core::channels::ComponentStatus::Stopping => {
+                            ComponentStatus::Stopping
+                        }
+                        drasi_server_core::channels::ComponentStatus::Error => {
+                            ComponentStatus::Error("Error".to_string())
+                        }
                     },
                 })
                 .collect())
@@ -215,11 +248,21 @@ impl TestRunDrasiServer {
                 query: query_runtime.query.clone(),
                 sources: query_runtime.sources.clone(),
                 status: match query_runtime.status {
-                    drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
-                    drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
-                    drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
-                    drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
-                    drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                    drasi_server_core::channels::ComponentStatus::Running => {
+                        ComponentStatus::Running
+                    }
+                    drasi_server_core::channels::ComponentStatus::Stopped => {
+                        ComponentStatus::Stopped
+                    }
+                    drasi_server_core::channels::ComponentStatus::Starting => {
+                        ComponentStatus::Starting
+                    }
+                    drasi_server_core::channels::ComponentStatus::Stopping => {
+                        ComponentStatus::Stopping
+                    }
+                    drasi_server_core::channels::ComponentStatus::Error => {
+                        ComponentStatus::Error("Error".to_string())
+                    }
                 },
                 auto_start: false, // Runtime info doesn't include auto_start
                 profiling: false,  // Runtime info doesn't include profiling
@@ -340,11 +383,21 @@ impl TestRunDrasiServer {
                     reaction_type: "unknown".to_string(),
                     queries: Vec::new(),
                     status: match status {
-                        drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
-                        drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
-                        drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
-                        drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
-                        drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                        drasi_server_core::channels::ComponentStatus::Running => {
+                            ComponentStatus::Running
+                        }
+                        drasi_server_core::channels::ComponentStatus::Stopped => {
+                            ComponentStatus::Stopped
+                        }
+                        drasi_server_core::channels::ComponentStatus::Starting => {
+                            ComponentStatus::Starting
+                        }
+                        drasi_server_core::channels::ComponentStatus::Stopping => {
+                            ComponentStatus::Stopping
+                        }
+                        drasi_server_core::channels::ComponentStatus::Error => {
+                            ComponentStatus::Error("Error".to_string())
+                        }
                     },
                 })
                 .collect())
@@ -366,11 +419,21 @@ impl TestRunDrasiServer {
                 reaction_type: reaction_runtime.reaction_type.clone(),
                 queries: reaction_runtime.queries.clone(),
                 status: match reaction_runtime.status {
-                    drasi_server_core::channels::ComponentStatus::Running => ComponentStatus::Running,
-                    drasi_server_core::channels::ComponentStatus::Stopped => ComponentStatus::Stopped,
-                    drasi_server_core::channels::ComponentStatus::Starting => ComponentStatus::Starting,
-                    drasi_server_core::channels::ComponentStatus::Stopping => ComponentStatus::Stopping,
-                    drasi_server_core::channels::ComponentStatus::Error => ComponentStatus::Error("Error".to_string()),
+                    drasi_server_core::channels::ComponentStatus::Running => {
+                        ComponentStatus::Running
+                    }
+                    drasi_server_core::channels::ComponentStatus::Stopped => {
+                        ComponentStatus::Stopped
+                    }
+                    drasi_server_core::channels::ComponentStatus::Starting => {
+                        ComponentStatus::Starting
+                    }
+                    drasi_server_core::channels::ComponentStatus::Stopping => {
+                        ComponentStatus::Stopping
+                    }
+                    drasi_server_core::channels::ComponentStatus::Error => {
+                        ComponentStatus::Error("Error".to_string())
+                    }
                 },
                 auto_start: false, // Runtime info doesn't include auto_start
                 properties: serde_json::to_value(&reaction_runtime.properties)
@@ -391,7 +454,12 @@ impl TestRunDrasiServer {
             let mut builder = match request.reaction_type.as_str() {
                 "log" => Reaction::log(&request.name),
                 "application" => Reaction::application(&request.name),
-                _ => return Err(anyhow!("Unsupported reaction type: {}", request.reaction_type)),
+                _ => {
+                    return Err(anyhow!(
+                        "Unsupported reaction type: {}",
+                        request.reaction_type
+                    ))
+                }
             };
 
             builder = builder.auto_start(request.auto_start);
@@ -402,7 +470,10 @@ impl TestRunDrasiServer {
             }
 
             // Add properties from the request
-            if let Ok(props_map) = serde_json::from_value::<std::collections::HashMap<String, serde_json::Value>>(request.properties) {
+            if let Ok(props_map) = serde_json::from_value::<
+                std::collections::HashMap<String, serde_json::Value>,
+            >(request.properties)
+            {
                 for (key, value) in props_map {
                     builder = builder.with_property(key, value);
                 }

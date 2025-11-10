@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use derive_more::Debug;
 use drasi_server_core::{
-    application::ApplicationHandle, DrasiServerCore, Query, QueryConfig, Reaction, ReactionConfig,
-    Source, SourceConfig,
+    application::ApplicationHandle, DrasiServerCore, Properties, Query, QueryConfig, Reaction,
+    ReactionConfig, Source, SourceConfig,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -279,7 +279,7 @@ impl TestRunDrasiServer {
                     .map(|s| {
                         Source::custom(&s.id, &s.source_type)
                             .auto_start(s.auto_start)
-                            .with_properties(s.properties.clone().into())
+                            .with_properties(Properties::from_map(s.properties.clone()))
                             .build()
                     })
                     .collect();
@@ -293,7 +293,6 @@ impl TestRunDrasiServer {
                             .query(&q.query)
                             .from_sources(q.sources.clone())
                             .auto_start(q.auto_start)
-                            .with_properties(q.properties.clone().into())
                             .build()
                     })
                     .collect();
@@ -306,7 +305,7 @@ impl TestRunDrasiServer {
                         Reaction::custom(&r.id, &r.reaction_type)
                             .subscribe_to_queries(r.queries.clone())
                             .auto_start(r.auto_start)
-                            .with_properties(r.properties.clone().into())
+                            .with_properties(Properties::from_map(r.properties.clone()))
                             .build()
                     })
                     .collect();
@@ -369,7 +368,7 @@ impl TestRunDrasiServer {
 
                     // Get handles for configured sources using direct handle access
                     for source_config in &config.sources {
-                        match core.source_handle(&source_config.id) {
+                        match core.source_handle(&source_config.id).await {
                             Ok(handle) => {
                                 stored_handles.insert(
                                     source_config.id.clone(),
@@ -394,7 +393,7 @@ impl TestRunDrasiServer {
 
                     // Get handles for configured reactions using direct handle access
                     for reaction_config in &config.reactions {
-                        match core.reaction_handle(&reaction_config.id) {
+                        match core.reaction_handle(&reaction_config.id).await {
                             Ok(handle) => {
                                 stored_handles.insert(
                                     reaction_config.id.clone(),

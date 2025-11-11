@@ -187,7 +187,7 @@ impl RemoteTestRepoClient for GithubTestRepoClient {
         }
 
         // Formulate the remote repo path for the test definition file
-        let remote_path = format!("{}/{}.test.json", self.settings.root_path, test_id);
+        let remote_path = format!("{}/{}.test", self.settings.root_path, test_id);
 
         // Download the test definition file
         download_github_repo_file(

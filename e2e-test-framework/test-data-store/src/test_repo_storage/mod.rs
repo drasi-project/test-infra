@@ -26,6 +26,45 @@ pub mod repo_clients;
 
 const TEST_SOURCES_FOLDER_NAME: &str = "sources";
 
+/// Parse test definition content from either YAML or JSON format
+///
+/// This function attempts to parse the content as YAML first (since YAML is a superset of JSON),
+/// then falls back to JSON if YAML parsing fails. If both fail, it returns a detailed error
+/// showing both parser outputs.
+fn parse_test_definition(content: &str, file_path: &str) -> anyhow::Result<TestDefinition> {
+    // Try YAML first
+    match serde_yaml::from_str::<TestDefinition>(content) {
+        Ok(test_def) => {
+            log::debug!(
+                "Successfully parsed test definition as YAML from: {}",
+                file_path
+            );
+            Ok(test_def)
+        }
+        Err(yaml_err) => {
+            // If YAML fails, try JSON
+            match serde_json::from_str::<TestDefinition>(content) {
+                Ok(test_def) => {
+                    log::debug!(
+                        "Successfully parsed test definition as JSON from: {}",
+                        file_path
+                    );
+                    Ok(test_def)
+                }
+                Err(json_err) => {
+                    // Both failed, return detailed error
+                    Err(anyhow::anyhow!(
+                        "Failed to parse test definition file '{}':\n  YAML: {}\n  JSON: {}",
+                        file_path,
+                        yaml_err,
+                        json_err
+                    ))
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TestRepoStore {
     pub path: PathBuf,
@@ -158,7 +197,7 @@ impl TestRepoStorage {
             &test_def
         );
 
-        let test_def_path = self.path.join(format!("{}.test.json", &test_def.test_id));
+        let test_def_path = self.path.join(format!("{}.test", &test_def.test_id));
         let test_path = self.path.join(&test_def.test_id);
 
         if erase_data && test_path.exists() {
@@ -175,7 +214,7 @@ impl TestRepoStorage {
     pub async fn add_remote_test(&self, id: &str, replace: bool) -> anyhow::Result<TestStorage> {
         log::debug!("Adding Remote ((replace = {}) ) Test ID {:?}", replace, &id);
 
-        let test_def_path = self.path.join(format!("{}.test.json", id));
+        let test_def_path = self.path.join(format!("{}.test", id));
         let test_path = self.path.join(id);
 
         if replace {
@@ -208,15 +247,16 @@ impl TestRepoStorage {
     pub async fn get_test_definition(&self, id: &str) -> anyhow::Result<TestDefinition> {
         log::debug!("Getting Test Definition for ID {:?}", id);
 
-        let test_definition_path = self.path.join(format!("{}.test.json", id));
+        let test_definition_path = self.path.join(format!("{}.test", id));
         log::trace!("Looking in {:?}", test_definition_path);
 
         if !test_definition_path.exists() {
             anyhow::bail!("Test with ID {:?} not found", &id);
         } else {
             // Read the test definition file into a string.
-            let json_content = fs::read_to_string(test_definition_path).await?;
-            Ok(serde_json::from_str(&json_content)?)
+            let content = fs::read_to_string(&test_definition_path).await?;
+            let path_str = test_definition_path.to_string_lossy().to_string();
+            parse_test_definition(&content, &path_str)
         }
     }
 
@@ -239,14 +279,15 @@ impl TestRepoStorage {
     pub async fn get_test_storage(&self, id: &str) -> anyhow::Result<TestStorage> {
         log::debug!("Getting Test Storage for ID {:?}", id);
 
-        let test_definition_path = self.path.join(format!("{}.test.json", id));
+        let test_definition_path = self.path.join(format!("{}.test", id));
 
         if !test_definition_path.exists() {
             anyhow::bail!("Test with ID {:?} not found", &id);
         } else {
             // Read the test definition file into a string.
-            let json_content = fs::read_to_string(test_definition_path).await?;
-            let test_definition: models::TestDefinition = serde_json::from_str(&json_content)?;
+            let content = fs::read_to_string(&test_definition_path).await?;
+            let path_str = test_definition_path.to_string_lossy().to_string();
+            let test_definition = parse_test_definition(&content, &path_str)?;
 
             // The path to the test data is defined in test_definition.test_folder.
             // If not provided, use the test_id.

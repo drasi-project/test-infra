@@ -865,7 +865,7 @@ mod tests {
 
     fn create_test_file(content: &str) -> File {
         let dir = tempdir().unwrap();
-        let file_path = dir.path().join("unit_test.test.json");
+        let file_path = dir.path().join("unit_test.test");
         let mut file = File::create(&file_path).unwrap();
         writeln!(file, "{}", content).unwrap();
         file.sync_all().unwrap();
@@ -1377,5 +1377,108 @@ mod tests {
             .unwrap() as u64;
         let time_mode: TimeMode = serde_json::from_str(json).unwrap();
         assert_eq!(time_mode, TimeMode::Rebased(parsed_time));
+    }
+
+    #[test]
+    fn test_parse_yaml_test_definition() {
+        // Test parsing YAML format test definition
+        let yaml_content = r#"
+test_id: test_yaml
+version: 1
+description: A YAML test definition
+test_folder: test_yaml
+sources:
+  - test_source_id: source1
+    kind: Script
+    bootstrap_data_generator:
+      kind: Script
+      script_file_folder: bootstrap_data_scripts
+      time_mode: live
+    source_change_generator:
+      kind: Script
+      script_file_folder: source_change_scripts
+      spacing_mode: recorded
+      time_mode: live
+queries:
+  - test_query_id: query1
+    result_stream_handler:
+      kind: RedisStream
+      host: localhost
+      port: 6379
+      stream_name: test-results
+    stop_trigger:
+      kind: RecordCount
+      record_count: 100
+reactions:
+  - test_reaction_id: reaction1
+    output_handler:
+      kind: Http
+      host: localhost
+      port: 8080
+      path: /webhook
+"#;
+        let test_definition: TestDefinition = serde_yaml::from_str(yaml_content).unwrap();
+
+        assert_eq!(test_definition.version, 1);
+        assert_eq!(
+            test_definition.description,
+            Some("A YAML test definition".to_string())
+        );
+        assert_eq!(test_definition.sources.len(), 1);
+        assert_eq!(test_definition.queries.len(), 1);
+        assert_eq!(test_definition.reactions.len(), 1);
+
+        // Verify source details
+        match &test_definition.sources[0] {
+            TestSourceDefinition::Script(source) => {
+                assert_eq!(source.common.test_source_id, "source1");
+                assert!(source.bootstrap_data_generator.is_some());
+                assert!(source.source_change_generator.is_some());
+            }
+            _ => panic!("Expected Script source"),
+        }
+
+        // Verify query details
+        let query = &test_definition.queries[0];
+        assert_eq!(query.test_query_id, "query1");
+
+        // Verify reaction details
+        let reaction = &test_definition.reactions[0];
+        assert_eq!(reaction.test_reaction_id, "reaction1");
+    }
+
+    #[test]
+    fn test_parse_json_and_yaml_equivalence() {
+        // Test that JSON and YAML produce the same result
+        let json_content = r#"
+{
+    "test_id": "test1",
+    "version": 1,
+    "description": "Test",
+    "test_folder": "test1",
+    "sources": [],
+    "queries": [],
+    "reactions": []
+}
+"#;
+
+        let yaml_content = r#"
+test_id: test1
+version: 1
+description: Test
+test_folder: test1
+sources: []
+queries: []
+reactions: []
+"#;
+
+        let json_def: TestDefinition = serde_json::from_str(json_content).unwrap();
+        let yaml_def: TestDefinition = serde_yaml::from_str(yaml_content).unwrap();
+
+        assert_eq!(json_def.version, yaml_def.version);
+        assert_eq!(json_def.description, yaml_def.description);
+        assert_eq!(json_def.sources.len(), yaml_def.sources.len());
+        assert_eq!(json_def.queries.len(), yaml_def.queries.len());
+        assert_eq!(json_def.reactions.len(), yaml_def.reactions.len());
     }
 }

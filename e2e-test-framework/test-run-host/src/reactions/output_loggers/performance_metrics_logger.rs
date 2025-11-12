@@ -176,7 +176,7 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
     }
 
     async fn end_test_run(&mut self) -> anyhow::Result<OutputLoggerResult> {
-        log::error!(
+        log::info!(
             "PerformanceMetricsOutputLogger: Ending test run for {} with {} records",
             self.test_run_reaction_id,
             self.record_count

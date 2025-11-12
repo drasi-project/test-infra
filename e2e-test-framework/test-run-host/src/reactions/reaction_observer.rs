@@ -649,7 +649,7 @@ async fn observe_reaction_handler(
                         for (idx, trigger) in state.stop_triggers.iter().enumerate() {
                             match trigger.is_true(&handler_status, &state.metrics).await {
                                 Ok(true) => {
-                                    log::error!(
+                                    log::info!(
                                         "Stop trigger {} fired after {} invocations, stopping reaction observer",
                                         idx,
                                         state.metrics.reaction_invocation_count

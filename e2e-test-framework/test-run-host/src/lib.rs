@@ -55,6 +55,7 @@ pub mod grpc_converters;
 pub mod queries;
 pub mod reactions;
 pub mod sources;
+pub mod test_run_completion;
 pub mod utils;
 
 // Re-export api_models for use by test-service

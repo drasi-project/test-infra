@@ -267,6 +267,7 @@ impl ProfilerMetrics {
     }
 }
 
+#[allow(dead_code)] // Defined for potential future use
 #[derive(Debug, Serialize)]
 struct ProfilerSummary {
     pub bootstrap_rec_count: usize,

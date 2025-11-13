@@ -21,6 +21,7 @@ use std::{
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 
 use drasi_servers::{
     TestRunDrasiServer, TestRunDrasiServerConfig, TestRunDrasiServerDefinition,
@@ -47,6 +48,8 @@ use test_data_store::{
     },
     TestDataStore,
 };
+
+use test_run_completion::{ComponentStateTracker, LifecycleTx, create_completion_handler};
 
 pub mod common;
 pub mod drasi_server_api_impl;
@@ -84,6 +87,11 @@ pub struct TestRun {
     pub reactions: HashMap<String, TestRunReaction>,
     pub sources: HashMap<String, Box<dyn TestRunSource + Send + Sync>>,
     pub status: TestRunStatus,
+    #[debug(skip)]
+    lifecycle_tx: LifecycleTx,
+    #[debug(skip)]
+    #[allow(dead_code)] // Kept to ensure task isn't dropped prematurely
+    completion_monitoring_task: Option<JoinHandle<()>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -177,6 +185,72 @@ impl TestRunHost {
             anyhow::bail!("TestRun already exists with ID: {:?}", test_run_id);
         }
 
+        // Load test definition to check for completion handlers
+        let test_definition = self
+            .data_store
+            .get_test_definition(&config.test_repo_id, &config.test_id)
+            .await?;
+
+        // Create lifecycle channel and monitoring task if completion handlers are defined
+        let (lifecycle_tx, completion_monitoring_task) =
+            if !test_definition.completion_handlers.is_empty() {
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+                // Create completion handlers
+                let handlers: Vec<Box<dyn test_run_completion::CompletionHandler>> = test_definition
+                    .completion_handlers
+                    .iter()
+                    .filter_map(|handler_def| {
+                        create_completion_handler(handler_def)
+                            .inspect_err(|e| log::error!("Failed to create completion handler: {}", e))
+                            .ok()
+                    })
+                    .collect();
+
+                if handlers.is_empty() {
+                    log::warn!("No valid completion handlers could be created for TestRun {}", test_run_id);
+                    (LifecycleTx::disabled(), None)
+                } else {
+                    // Spawn monitoring task
+                    let test_run_id_clone = test_run_id.clone();
+                    let drasi_server_count = config.drasi_servers.len();
+                    let source_count = config.sources.len();
+                    let query_count = config.queries.len();
+                    let reaction_count = config.reactions.len();
+
+                    let task = tokio::spawn(async move {
+                        let mut tracker = ComponentStateTracker::new(
+                            drasi_server_count,
+                            source_count,
+                            query_count,
+                            reaction_count,
+                        );
+
+                        while let Some(event) = rx.recv().await {
+                            tracker.update(&event);
+
+                            if tracker.all_components_finished() {
+                                let summary = tracker.get_completion_summary();
+                                log::info!("All components finished for TestRun {}", test_run_id_clone);
+
+                                // Execute all handlers
+                                for handler in &handlers {
+                                    if let Err(e) = handler.handle_completion(&test_run_id_clone.to_string(), &summary).await {
+                                        log::error!("Completion handler failed: {}", e);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    });
+
+                    (LifecycleTx::new(tx), Some(task))
+                }
+            } else {
+                log::debug!("No completion handlers defined for TestRun {}", test_run_id);
+                (LifecycleTx::disabled(), None)
+            };
+
         let mut test_run = TestRun {
             id: test_run_id.clone(),
             drasi_servers: HashMap::new(),
@@ -184,6 +258,8 @@ impl TestRunHost {
             reactions: HashMap::new(),
             sources: HashMap::new(),
             status: TestRunStatus::Initialized,
+            lifecycle_tx,
+            completion_monitoring_task,
         };
 
         // Add drasi servers first (they need to be available for other components)
@@ -325,7 +401,7 @@ impl TestRunHost {
             .get_test_run_drasi_server_storage(&id)
             .await?;
 
-        let test_run_drasi_server = TestRunDrasiServer::new(definition, output_storage).await?;
+        let test_run_drasi_server = TestRunDrasiServer::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
         test_run
             .drasi_servers
             .insert(test_drasi_server_id, test_run_drasi_server);
@@ -355,7 +431,7 @@ impl TestRunHost {
 
         let definition = TestRunQueryDefinition::new(test_run_query, test_query_definition)?;
         let output_storage = self.data_store.get_test_run_query_storage(&id).await?;
-        let test_run_query = TestRunQuery::new(definition, output_storage).await?;
+        let test_run_query = TestRunQuery::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run.queries.insert(test_query_id, test_run_query);
         Ok(())
@@ -405,7 +481,7 @@ impl TestRunHost {
 
         let id = TestRunReactionId::new(&test_run.id, &test_reaction_id);
         let output_storage = self.data_store.get_test_run_reaction_storage(&id).await?;
-        let test_run_reaction = TestRunReaction::new(definition, output_storage).await?;
+        let test_run_reaction = TestRunReaction::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run
             .reactions
@@ -503,7 +579,7 @@ impl TestRunHost {
         let output_storage = self.data_store.get_test_run_query_storage(&id).await?;
 
         // Create the TestRunQuery and add it to the TestRun.
-        let test_run_query_obj = TestRunQuery::new(definition, output_storage).await?;
+        let test_run_query_obj = TestRunQuery::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run.queries.insert(query_id, test_run_query_obj);
 
@@ -584,7 +660,7 @@ impl TestRunHost {
         let output_storage = self.data_store.get_test_run_reaction_storage(&id).await?;
 
         // Create the TestRunReaction and add it to the TestRun.
-        let test_run_reaction_obj = TestRunReaction::new(definition, output_storage).await?;
+        let test_run_reaction_obj = TestRunReaction::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run
             .reactions
@@ -1100,7 +1176,7 @@ impl TestRunHost {
             .await?;
 
         // Create the TestRunDrasiServer and add it to the TestRun.
-        let test_run_drasi_server_obj = TestRunDrasiServer::new(definition, output_storage).await?;
+        let test_run_drasi_server_obj = TestRunDrasiServer::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run
             .drasi_servers

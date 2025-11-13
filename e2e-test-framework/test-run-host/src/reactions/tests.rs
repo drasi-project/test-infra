@@ -67,7 +67,8 @@ mod tests {
             reaction_storage.clone(),
             vec![logger_config],
             vec![], // stop_triggers
-            None,
+            None,   // test_run_overrides
+            crate::test_run_completion::LifecycleTx::disabled(),   // lifecycle_tx
         )
         .await?;
 
@@ -144,7 +145,7 @@ mod tests {
             output_loggers,
         };
 
-        let reaction = TestRunReaction::new(definition, reaction_storage.clone()).await?;
+        let reaction = TestRunReaction::new(definition, reaction_storage.clone(), crate::test_run_completion::LifecycleTx::disabled()).await?;
 
         // Start and verify
         reaction.start_reaction_observer().await?;
@@ -184,7 +185,8 @@ mod tests {
             reaction_storage.clone(),
             vec![logger_config],
             vec![], // stop_triggers
-            None,
+            None,   // test_run_overrides
+            crate::test_run_completion::LifecycleTx::disabled(),   // lifecycle_tx
         )
         .await?;
 
@@ -228,7 +230,7 @@ mod tests {
             output_loggers: vec![],
         };
 
-        let reaction = TestRunReaction::new(definition, reaction_storage.clone()).await?;
+        let reaction = TestRunReaction::new(definition, reaction_storage.clone(), crate::test_run_completion::LifecycleTx::disabled()).await?;
 
         // With the new design, reactions don't auto-start themselves
         // TestRunHost is responsible for starting reactions with start_immediately=true

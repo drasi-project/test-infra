@@ -44,11 +44,13 @@
 
 pub mod completion_handlers;
 pub mod events;
+pub mod lifecycle_tx;
 pub mod tracker;
 pub mod types;
 
 pub use completion_handlers::{create_completion_handler, CompletionHandler};
 pub use events::ComponentLifecycleEvent;
+pub use lifecycle_tx::LifecycleTx;
 pub use tracker::ComponentStateTracker;
 pub use types::{
     ComponentCompletionSummary, DrasiServerState, QueryState, ReactionState, SourceState,

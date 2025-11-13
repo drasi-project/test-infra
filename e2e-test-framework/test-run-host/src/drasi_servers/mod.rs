@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use utoipa::ToSchema;
 
+use crate::test_run_completion::LifecycleTx;
 use test_data_store::{
     test_repo_storage::models::{
         DrasiServerConfig as TestDrasiServerConfig, TestDrasiServerDefinition,
@@ -215,12 +216,15 @@ pub struct TestRunDrasiServer {
     drasi_core: Arc<RwLock<Option<Arc<DrasiServerCore>>>>,
     #[debug(skip)]
     application_handles: Arc<RwLock<HashMap<String, ApplicationHandle>>>,
+    #[debug(skip)]
+    lifecycle_tx: LifecycleTx,
 }
 
 impl TestRunDrasiServer {
     pub async fn new(
         definition: TestRunDrasiServerDefinition,
         storage: TestRunDrasiServerStorage,
+        lifecycle_tx: LifecycleTx,
     ) -> anyhow::Result<Self> {
         let server = Self {
             definition,
@@ -228,6 +232,7 @@ impl TestRunDrasiServer {
             storage,
             drasi_core: Arc::new(RwLock::new(None)),
             application_handles: Arc::new(RwLock::new(HashMap::new())),
+            lifecycle_tx,
         };
 
         // Start immediately if configured
@@ -251,6 +256,7 @@ impl TestRunDrasiServer {
                         server.definition.id,
                         e
                     );
+                    server.set_error(e.to_string()).await;
                     return Err(e);
                 }
             }
@@ -449,6 +455,9 @@ impl TestRunDrasiServer {
                     start_time: chrono::Utc::now(),
                 };
 
+                // Emit lifecycle event
+                self.lifecycle_tx.drasi_server_started(self.definition.id.clone());
+
                 // Write server config to storage
                 let config_json = serde_json::to_value(&config)?;
                 self.storage.write_server_config(&config_json).await?;
@@ -497,8 +506,11 @@ impl TestRunDrasiServer {
                 // Update state
                 *state = TestRunDrasiServerState::Stopped {
                     stop_time: chrono::Utc::now(),
-                    reason,
+                    reason: reason.clone(),
                 };
+
+                // Emit lifecycle event
+                self.lifecycle_tx.drasi_server_stopped(self.definition.id.clone());
 
                 log::info!("Drasi Server {} stopped", self.definition.id);
                 Ok(())
@@ -511,6 +523,18 @@ impl TestRunDrasiServer {
 
     pub async fn get_state(&self) -> TestRunDrasiServerState {
         self.state.read().await.clone()
+    }
+
+    /// Transition to error state and emit lifecycle event
+    pub async fn set_error(&self, error_message: String) {
+        let mut state = self.state.write().await;
+        *state = TestRunDrasiServerState::Error {
+            error_time: chrono::Utc::now(),
+            message: error_message.clone(),
+        };
+
+        // Emit lifecycle event
+        self.lifecycle_tx.drasi_server_error(self.definition.id.clone(), error_message);
     }
 
     pub async fn get_server_core(&self) -> Option<Arc<DrasiServerCore>> {

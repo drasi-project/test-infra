@@ -173,7 +173,7 @@ mod tests {
             .unwrap();
 
         // Create and start the server
-        let server = crate::drasi_servers::TestRunDrasiServer::new(definition, storage)
+        let server = crate::drasi_servers::TestRunDrasiServer::new(definition, storage, crate::test_run_completion::LifecycleTx::disabled())
             .await
             .unwrap();
 

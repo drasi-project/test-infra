@@ -246,7 +246,14 @@ impl TestRunDrasiServer {
             Ok(QueryDetails {
                 name: query_runtime.id.clone(),
                 query: query_runtime.query.clone(),
-                sources: query_runtime.sources.clone(),
+                source_subscriptions: query_runtime
+                    .source_subscriptions
+                    .iter()
+                    .map(|sub| SourceSubscriptionConfig {
+                        source_id: sub.source_id.clone(),
+                        pipeline: sub.pipeline.clone(),
+                    })
+                    .collect(),
                 status: match query_runtime.status {
                     drasi_server_core::channels::ComponentStatus::Running => {
                         ComponentStatus::Running

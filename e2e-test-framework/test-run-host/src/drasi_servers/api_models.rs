@@ -119,7 +119,7 @@ pub struct QueryInfo {
 #[schema(example = json!({
     "name": "active-users",
     "query": "MATCH (u:User)-[:LOGGED_IN]->(s:Session) WHERE s.active = true RETURN u",
-    "sources": ["postgresql-source"],
+    "source_subscriptions": [ { "source_id": "my-source", "pipeline": []}],
     "status": "running",
     "auto_start": true,
     "profiling": false
@@ -127,11 +127,22 @@ pub struct QueryInfo {
 pub struct QueryDetails {
     pub name: String,
     pub query: String,
-    pub sources: Vec<String>,
+    pub source_subscriptions: Vec<SourceSubscriptionConfig>,
     pub status: ComponentStatus,
     pub auto_start: bool,
     #[serde(default)]
     pub profiling: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "source_id": "my-source",
+    "pipeline": [""]
+}))]
+pub struct SourceSubscriptionConfig {
+    pub source_id: String,
+    #[serde(default)]
+    pub pipeline: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

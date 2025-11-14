@@ -67,6 +67,16 @@ impl TestRepoConfig {
             TestRepoConfig::LocalStorage { common_config, .. } => common_config.local_tests.clone(),
         }
     }
+
+    pub fn get_force_cache_refresh(&self) -> bool {
+        match self {
+            TestRepoConfig::AzureStorageBlob { unique_config, .. } => {
+                unique_config.force_cache_refresh
+            }
+            TestRepoConfig::GitHub { unique_config, .. } => unique_config.force_cache_refresh,
+            TestRepoConfig::LocalStorage { .. } => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

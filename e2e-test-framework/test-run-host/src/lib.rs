@@ -185,6 +185,13 @@ impl TestRunHost {
             anyhow::bail!("TestRun already exists with ID: {:?}", test_run_id);
         }
 
+        // Ensure test definition is downloaded from remote repo if needed
+        let repo_storage = self.data_store.get_test_repo_storage(&config.test_repo_id).await?;
+        let force_refresh = repo_storage.repo_config.get_force_cache_refresh();
+        self.data_store
+            .add_remote_test(&config.test_repo_id, &config.test_id, force_refresh)
+            .await?;
+
         // Load test definition to check for completion handlers
         let test_definition = self
             .data_store

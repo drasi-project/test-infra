@@ -248,7 +248,7 @@ impl TestRepoStorage {
         log::debug!("Getting Test Definition for ID {:?}", id);
 
         let test_definition_path = self.path.join(format!("{}.test", id));
-        log::trace!("Looking in {:?}", test_definition_path);
+        log::debug!("Looking in {:?}", test_definition_path);
 
         if !test_definition_path.exists() {
             anyhow::bail!("Test with ID {:?} not found", &id);

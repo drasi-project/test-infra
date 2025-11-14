@@ -211,7 +211,7 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
             timestamp: chrono::Utc::now(),
         };
 
-        log::error!("{}", metrics);
+        log::info!("{}", metrics);
 
         // Write metrics to file
         let metrics_json = serde_json::to_string_pretty(&metrics)?;

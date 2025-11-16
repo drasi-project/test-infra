@@ -12,34 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM rust:1.88 AS builder
-
-RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
+FROM mcr.microsoft.com/azurelinux/base/rust:1.86 AS builder
+RUN tdnf update -y && tdnf install -y protobuf-devel cmake openssl-devel clang-devel jq jq-devel oniguruma-devel
 
 WORKDIR /usr/src
 COPY ./infrastructure ./infrastructure
 COPY ./test-data-store ./test-data-store
 COPY ./data-collector ./data-collector
 COPY ./test-run-host ./test-run-host
+COPY ./test-service ./test-service
 
-RUN cargo new test-service
 WORKDIR /usr/src/test-service
+ENV JQ_LIB_DIR=/usr/lib64
 
-COPY ./test-service/Cargo.toml .
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo fetch
-COPY ./test-service .
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/src/target \
-    cargo install --force --path .
+# Generate Cargo.lock and pin home dependency to version compatible with Rust 1.86
+RUN cargo generate-lockfile
+RUN cargo update home --precise 0.5.9
+RUN cargo install --locked --path .
 
-    
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y \
-    gdb curl wget vim net-tools iputils-ping libssl3 \
-    && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+FROM mcr.microsoft.com/azurelinux/distroless/base:3.0
+COPY --from=builder /usr/lib64/libstdc++.so.6 /usr/lib64/
+COPY --from=builder /usr/lib64/libjq.so* /usr/lib64/
+COPY --from=builder /usr/lib64/libonig.so* /usr/lib64/
 ENV RUST_BACKTRACE=1
+ENV JQ_LIB_DIR=/usr/lib64
 COPY --from=builder /usr/local/cargo/bin/test-service /usr/local/bin/test-service
+USER root
 CMD ["test-service"]

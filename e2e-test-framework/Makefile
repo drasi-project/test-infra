@@ -1,47 +1,31 @@
-.PHONY: default docker-build docker-build-parallel docker-tag-and-push kind-load drasi-apply test lint-check
-
-CLUSTER_NAME ?= kind
-IMAGE_PREFIX ?= drasi-project
-DOCKER_TAG_VERSION ?= latest
-# Enable inline cache (registry cache is optional, remove --cache-from if not using a registry)
-DOCKERX_OPTS ?= --load --cache-to type=inline,mode=max
+.PHONY: default docker-build kind-load k3d-load test lint-check drasi-apply
 
 default: docker-build
 
-# Parallel build target (faster)
-docker-build-parallel:
-	@echo "Building Docker images in parallel..."
-	docker buildx build . -f proxy/Dockerfile -t $(IMAGE_PREFIX)/e2e-proxy:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS) & \
-	docker buildx build . -f reactivator/Dockerfile -t $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS) & \
-	docker buildx build . -f test-service/Dockerfile -t $(IMAGE_PREFIX)/e2e-test-service:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS) & \
-	wait
-
-# Sequential build target (for compatibility)
 docker-build:
-	docker buildx build . -f proxy/Dockerfile -t $(IMAGE_PREFIX)/e2e-proxy:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS)
-	docker buildx build . -f reactivator/Dockerfile -t $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS)
-	docker buildx build . -f test-service/Dockerfile -t $(IMAGE_PREFIX)/e2e-test-service:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS)
-
-docker-tag-and-push:
-	docker tag $(IMAGE_PREFIX)/e2e-proxy:latest ghcr.io/$(IMAGE_PREFIX)/e2e-proxy:$(DOCKER_TAG_VERSION)
-	docker push ghcr.io/$(IMAGE_PREFIX)/e2e-proxy:$(DOCKER_TAG_VERSION)
-	docker tag $(IMAGE_PREFIX)/e2e-reactivator:latest ghcr.io/$(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION)
-	docker push ghcr.io/$(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION)
-	docker tag $(IMAGE_PREFIX)/e2e-test-service:latest ghcr.io/$(IMAGE_PREFIX)/e2e-test-service:$(DOCKER_TAG_VERSION)
-	docker push ghcr.io/$(IMAGE_PREFIX)/e2e-test-service:$(DOCKER_TAG_VERSION)
+	$(MAKE) -C proxy $(MAKECMDGOALS)
+	$(MAKE) -C reactivator $(MAKECMDGOALS)
+	$(MAKE) -C test-service $(MAKECMDGOALS)
 
 kind-load:
-	kind load docker-image $(IMAGE_PREFIX)/e2e-test-service:$(DOCKER_TAG_VERSION) --name $(CLUSTER_NAME)
-	kind load docker-image $(IMAGE_PREFIX)/e2e-proxy:$(DOCKER_TAG_VERSION) --name $(CLUSTER_NAME)
-	kind load docker-image $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) --name $(CLUSTER_NAME)
+	$(MAKE) -C proxy $(MAKECMDGOALS)
+	$(MAKE) -C reactivator $(MAKECMDGOALS)
+	$(MAKE) -C test-service $(MAKECMDGOALS)
+
+k3d-load:
+	$(MAKE) -C proxy $(MAKECMDGOALS)
+	$(MAKE) -C reactivator $(MAKECMDGOALS)
+	$(MAKE) -C test-service $(MAKECMDGOALS)
+
+test:
+	$(MAKE) -C proxy $(MAKECMDGOALS)
+	$(MAKE) -C reactivator $(MAKECMDGOALS)
+	$(MAKE) -C test-service $(MAKECMDGOALS)
+
+lint-check:
+	$(MAKE) -C proxy $(MAKECMDGOALS)
+	$(MAKE) -C reactivator $(MAKECMDGOALS)
+	$(MAKE) -C test-service $(MAKECMDGOALS)
 
 drasi-apply:
 	drasi apply -f test-source-provider/e2e-test-service-provider.yaml
-
-lint-check:
-	$(MAKE) -C test-service lint-check
-	$(MAKE) -C reactivator lint-check
-	$(MAKE) -C proxy lint-check
-
-test:
-	cargo test

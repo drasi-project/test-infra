@@ -1,6 +1,6 @@
 # Drasi E2E Test Framework
 
-A comprehensive testing framework for validating Drasi, a Change Processing Platform that makes it easy to build change-driven solutions. The framework enables functional, regression, integration, and performance testing by simulating data sources, dispatching change events, and monitoring query results.
+A comprehensive testing framework for validating Drasi, a Change Processing Platform that makes it easy to build change-driven solutions. The framework enables functional, regression, integration, and performance testing by simulating data sources, dispatching change events, and monitoring query results and reaction output.
 
 ## Table of Contents
 
@@ -54,7 +54,7 @@ The framework supports multiple deployment scenarios:
 
 ---
 
-## Architecture
+## Organization
 
 The framework is organized as a Rust workspace with these components:
 
@@ -64,63 +64,18 @@ e2e-test-framework/
 ├── test-run-host/      # Core test execution engine (library)
 ├── test-data-store/    # Storage abstraction (Local, Azure, GitHub)
 ├── data-collector/     # Records live data for test scenarios
-├── proxy/              # Routes test traffic between components
-├── reactivator/        # Reactivates test scenarios for replay
+├── proxy/              # Source Proxy implementation for Drasi Platform integration
+├── reactivator/        # Source Reactivator implementation for Drasi Platform integration
 └── infrastructure/     # Communication layer (Dapr integration)
 ```
-
-### Test Execution Flow
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Test           │     │  Test Run        │     │  Drasi          │
-│  Repository     │────▶│  Host            │────▶│  Server/Platform│
-│  (Test Data)    │     │  (Orchestration) │     │  (Under Test)   │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-                               │                         │
-                               ▼                         │
-                        ┌──────────────────┐            │
-                        │  Sources         │            │
-                        │  (Data Gen)      │────────────┘
-                        └──────────────────┘
-                               │
-                               ▼
-                        ┌──────────────────┐
-                        │  Queries/        │
-                        │  Reactions       │
-                        │  (Observers)     │
-                        └──────────────────┘
-```
-
-1. **Load Test Definition**: Bootstrap data and change scripts from repository
-2. **Configure Components**: Set up sources, queries, and reactions
-3. **Execute Test**: Dispatch changes and monitor results
-4. **Collect Results**: Profiling metrics, logs, and output files
-
 ---
 
-## Getting Started
-
-### Prerequisites
+## Prerequisites
 
 - Rust toolchain (1.75+)
 - Docker (for container builds)
 - Redis (for query result streaming)
 - Kind/K3D (for Kubernetes testing)
-
-### Quick Start
-
-```bash
-cd e2e-test-framework
-
-# Run the test service locally
-cargo run -p test-service -- --config examples/population/local/config.yaml
-
-# Or with environment variables
-DRASI_CONFIG_FILE=examples/population/local/config.yaml cargo run -p test-service
-```
-
-The REST API will be available at `http://localhost:63123` with interactive documentation at `/docs`.
 
 ---
 
@@ -470,58 +425,87 @@ test_repos:
 
 ---
 
-## Test Definitions
+## Test Definitions vs Test Runs
 
-Test definitions specify the structure of a test including sources, queries, and reactions.
+Understanding the distinction between Test Definitions and Test Runs is fundamental to using the framework effectively.
+
+### Test Definition
+
+A **Test Definition** is the static test specification stored in a test repository. It defines **what** the test does:
+
+- **Sources**: Data sources that generate or replay changes
+- **Queries**: Cypher queries to monitor with their stop triggers
+- **Reactions**: Reaction outputs to capture with their stop triggers
+- **Completion handlers**: Actions to execute when the test finishes
+
+Test definitions are:
+- Stored in test repositories (Local, Azure Blob, GitHub)
+- Reusable across multiple test runs
+- Focused on the test's intrinsic criteria (e.g., stop triggers define when the test is complete)
+
+### Test Run
+
+A **Test Run** is a specific execution of a test definition. It defines **how** the test executes:
+
+- **Start modes**: Whether to start immediately or wait for API trigger
+- **Loggers**: Console, file, profiler, or OpenTelemetry logging
+- **Runtime overrides**: Modify source, query, or reaction behavior for this run
+- **Execution context**: Unique run ID, timestamps, metrics collection
+
+Test runs are:
+- Created at runtime via config file or REST API
+- Ephemeral instances of a test definition
+- Focused on runtime concerns like observability and execution control
+
+### Key Distinction
+
+| Aspect | Test Definition | Test Run |
+|--------|-----------------|----------|
+| Purpose | What to test | How to execute |
+| Storage | Repository (persistent) | Runtime (ephemeral) |
+| Scope | Reusable template | Single execution |
+| Contains | Sources, queries, reactions, stop triggers | Loggers, overrides, start flags |
+
+### What Goes Where
+
+**Test Definition** (stored in repository):
+- Source configurations (data generators, change scripts)
+- Query definitions with stop triggers
+- Reaction definitions with stop triggers
+- Completion handlers
+
+**Test Run** (specified at runtime):
+- `start_immediately` flag
+- Query loggers (Console, JsonlFile, Profiler, OtelMetric, OtelTrace)
+- Reaction output loggers (Console, JsonlFile, PerformanceMetrics)
+- Override configurations for sources, queries, reactions
+
+### Example: Same Definition, Different Runs
+
+A single test definition can be executed multiple ways:
 
 ```yaml
-local_tests:
-  - test_id: building-comfort-test
-    version: 1
-    description: Tests building comfort monitoring queries
-    test_folder: building_comfort_data
+# Run 1: Quick validation with console logging
+run:
+  start_immediately: true
+  queries:
+    - test_query_id: room-comfort
+      loggers:
+        - kind: Console
 
-    # Embedded Drasi server configurations
-    drasi_servers:
-      - id: embedded-server
-        name: Embedded Test Server
-        description: In-process Drasi server
-        config:
-          sources: []
-          queries: []
-          reactions: []
-
-    # Source definitions
-    sources:
-      - test_source_id: facilities-db
-        kind: Model  # or Script
-        # ... source configuration
-
-    # Query definitions
-    queries:
-      - test_query_id: room-comfort
-        result_stream_handler:
-          kind: RedisStream
-          # ... handler configuration
-        stop_trigger:
-          kind: RecordCount
-          record_count: 10000
-
-    # Reaction definitions
-    reactions:
-      - test_reaction_id: comfort-alerts
-        output_handler:
-          kind: Http
-          # ... handler configuration
-        stop_triggers:
-          - kind: RecordCount
-            record_count: 1000
-
-    # Completion handlers (execute when test finishes)
-    completion_handlers:
-      - kind: Log
-        log_level: info
+# Run 2: Performance testing with metrics collection
+run:
+  start_immediately: true
+  queries:
+    - test_query_id: room-comfort
+      loggers:
+        - kind: Profiler
+          filename: perf_results.json
+        - kind: OtelMetric
+          service_name: perf-test
 ```
+
+This separation allows you to define a test once and run it with different logging, timing, or override configurations as needed.
 
 ---
 
@@ -1188,63 +1172,6 @@ The Test Service provides a comprehensive REST API. Interactive documentation is
 | GET | `/api/repos` | List repositories |
 | POST | `/api/repos` | Create repository |
 | GET | `/api/repos/{id}` | Get repository details |
-
----
-
-## Examples
-
-The `examples/` directory contains complete working examples:
-
-### Building Comfort
-
-Building sensor monitoring with various configurations:
-
-```bash
-# Local execution
-./examples/building_comfort/local/run_release_test.sh
-
-# With HTTP dispatcher to Drasi Server
-./examples/building_comfort/drasi_server/drasi_server_http/run_release.sh
-
-# With gRPC dispatcher to Drasi Server
-./examples/building_comfort/drasi_server/drasi_server_grpc/run_release.sh
-
-# With embedded Drasi server
-./examples/building_comfort/drasi_embedded/run_release.sh
-
-# On Drasi Platform (Kind cluster)
-./examples/building_comfort/drasi_platform/query_container_default/run_test_with_worker.sh
-```
-
-### Population Data
-
-Wikidata population data replay:
-
-```bash
-# Local with JSON config
-./examples/population/local/run_test.sh
-
-# Local with YAML config
-./examples/population/local/run_test_yaml.sh
-
-# On Drasi Platform
-./examples/population/drasi/run_test.sh
-```
-
-### Stock Market
-
-Stock trading simulation:
-
-```bash
-# With embedded Drasi server
-./examples/stock_market/drasi_server_internal/run_test.sh
-
-# With HTTP dispatcher
-./examples/stock_market/drasi_server_http/run_test.sh
-
-# With gRPC dispatcher
-./examples/stock_market/drasi_server_grpc/run_test.sh
-```
 
 ---
 

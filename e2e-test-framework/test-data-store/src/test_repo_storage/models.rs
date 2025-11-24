@@ -1318,6 +1318,74 @@ mod tests {
     }
 
     #[test]
+    fn test_script_based_config_file() {
+        // Test parsing a config file that use Script as the source type
+        let script_test = r#"
+        {
+            "test_id": "script_test",
+            "version": 1,
+            "description": "A test defined by scripts",
+            "test_folder": "script_test",
+            "sources": [
+                {
+                    "test_source_id": "script-source",
+                    "kind": "Script",
+                    "bootstrap_data_generator": {
+                        "kind": "Script",
+                        "script_file_folder": "bootstrap_scripts",
+                        "time_mode": "live"
+                    },
+                    "source_change_generator": {
+                        "kind": "Script",
+                        "script_file_folder": "change_scripts",
+                        "spacing_mode": "1000",
+                        "time_mode": "recorded"
+                    }
+                }
+            ],
+            "queries": [],
+            "reactions": []
+        }
+        "#;
+
+        let result: Result<LocalTestDefinition, _> = serde_json::from_str(script_test);
+        assert!(
+            result.is_ok(),
+            "Failed to parse LocalTestDefinition: {:?}",
+            result.err()
+        );
+
+        let local_test_def = result.unwrap();
+        assert_eq!(local_test_def.test_id, "script_test");
+        assert_eq!(local_test_def.sources.len(), 1);
+
+        match &local_test_def.sources[0] {
+            TestSourceDefinition::Script(source) => {
+                assert_eq!(source.common.test_source_id, "script-source");
+
+                match source.bootstrap_data_generator.as_ref().unwrap() {
+                    BootstrapDataGeneratorDefinition::Script(definition) => {
+                        assert_eq!(definition.common.time_mode, TimeMode::Live);
+                        assert_eq!(definition.script_file_folder, "bootstrap_scripts");
+                    }
+                }
+
+                match source.source_change_generator.as_ref().unwrap() {
+                    SourceChangeGeneratorDefinition::Script(definition) => {
+                        assert_eq!(
+                            definition.common.spacing_mode,
+                            SpacingMode::Rate(NonZeroU32::new(1000).unwrap())
+                        );
+                        assert_eq!(definition.common.time_mode, TimeMode::Recorded);
+                        assert_eq!(definition.script_file_folder, "change_scripts");
+                    }
+                }
+            }
+            _ => panic!("Expected ScriptTestSourceDefinition"),
+        }
+    }
+
+    #[test]
     fn test_spacing_mode_from_str() {
         assert_eq!("none".parse::<SpacingMode>().unwrap(), SpacingMode::None);
         assert_eq!(

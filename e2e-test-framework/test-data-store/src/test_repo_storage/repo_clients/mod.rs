@@ -86,11 +86,45 @@ pub struct CommonTestRepoConfig {
     pub local_tests: Vec<LocalTestDefinition>,
 }
 
+/// Azure Storage Blob repository configuration
+///
+/// Supports two authentication methods:
+///
+/// 1. **Access Key Authentication** (provide `access_key`):
+///    ```yaml
+///    kind: AzureStorageBlob
+///    account_name: mystorageaccount
+///    access_key: "your-access-key-here"
+///    container: test-data
+///    root_path: tests
+///    ```
+///
+/// 2. **Identity-Based Authentication** (omit `access_key`):
+///    Uses Azure DefaultAzureCredential chain:
+///    - Managed Identity (in Azure VMs, Container Apps, etc.)
+///    - Azure CLI (`az login`)
+///    - Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET)
+///    - Visual Studio Code
+///    - Azure PowerShell
+///
+///    ```yaml
+///    kind: AzureStorageBlob
+///    account_name: mystorageaccount
+///    # access_key omitted - will use identity
+///    container: test-data
+///    root_path: tests
+///    ```
+///
+///    Requirements for identity-based auth:
+///    - Ensure the identity has "Storage Blob Data Reader" role on the container
+///    - For local development: Run `az login` before running tests
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AzureStorageBlobTestRepoConfig {
     pub account_name: String,
-    #[serde(serialize_with = "mask_secret")]
-    pub access_key: String,
+    /// Optional access key for storage account authentication.
+    /// If not provided, will use Azure identity (managed identity, Azure CLI, environment, etc.)
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "mask_secret_option")]
+    pub access_key: Option<String>,
     pub container: String,
     #[serde(default = "is_false")]
     pub force_cache_refresh: bool,
@@ -104,6 +138,16 @@ where
     S: Serializer,
 {
     serializer.serialize_str("******")
+}
+
+fn mask_secret_option<S>(value: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        Some(_) => serializer.serialize_str("******"),
+        None => serializer.serialize_none(),
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

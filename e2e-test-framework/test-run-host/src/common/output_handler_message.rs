@@ -141,13 +141,9 @@ impl std::fmt::Display for HandlerRecord {
         match serde_json::to_string(self) {
             Ok(json_data) => {
                 let json_data_unescaped = json_data.replace("\\\"", "\"").replace("\\'", "'");
-                write!(f, "{}", json_data_unescaped)
+                write!(f, "{json_data_unescaped}")
             }
-            Err(e) => write!(
-                f,
-                "Error serializing HandlerRecord: {:?}. Error: {}",
-                self, e
-            ),
+            Err(e) => write!(f, "Error serializing HandlerRecord: {self:?}. Error: {e}"),
         }
     }
 }

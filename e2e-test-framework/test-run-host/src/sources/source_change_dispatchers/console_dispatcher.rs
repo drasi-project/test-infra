@@ -48,19 +48,17 @@ impl ConsoleSourceChangeDispatcher {
         def: &ConsoleSourceChangeDispatcherDefinition,
         _output_storage: &TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating ConsoleSourceChangeDispatcher from {:?}, ", def);
+        log::debug!("Creating ConsoleSourceChangeDispatcher from {def:?}, ");
 
         let settings = ConsoleSourceChangeDispatcherSettings::new(def)?;
-        log::trace!(
-            "Creating ConsoleSourceChangeDispatcher with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating ConsoleSourceChangeDispatcher with settings {settings:?}, ");
 
         Ok(Self { settings })
     }
 }
 
 #[async_trait]
+#[allow(clippy::print_stdout)]
 impl SourceChangeDispatcher for ConsoleSourceChangeDispatcher {
     async fn close(&mut self) -> anyhow::Result<()> {
         Ok(())
@@ -81,8 +79,7 @@ impl SourceChangeDispatcher for ConsoleSourceChangeDispatcher {
             .join(",");
 
         println!(
-            "ConsoleSourceChangeDispatcher - Time: {}, SourceChangeEvents: [{}]",
-            time, event_list
+            "ConsoleSourceChangeDispatcher - Time: {time}, SourceChangeEvents: [{event_list}]"
         );
 
         Ok(())

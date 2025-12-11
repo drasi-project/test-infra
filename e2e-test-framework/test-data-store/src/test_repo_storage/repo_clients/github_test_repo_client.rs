@@ -66,16 +66,11 @@ impl GithubTestRepoClient {
         unique_config: GithubTestRepoConfig,
     ) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
         log::debug!(
-            "Creating GithubTestRepoClient from common_config:{:?} and unique_config:{:?}, ",
-            common_config,
-            unique_config
+            "Creating GithubTestRepoClient from common_config:{common_config:?} and unique_config:{unique_config:?}, "
         );
 
         let settings = GithubTestRepoClientSettings::new(common_config, unique_config).await?;
-        log::trace!(
-            "Creating GithubTestRepoClient with settings: {:?}, ",
-            settings
-        );
+        log::trace!("Creating GithubTestRepoClient with settings: {settings:?}, ");
 
         let mut client_builder = Client::builder().user_agent("drasi-test-framework/1.0");
 
@@ -90,7 +85,7 @@ impl GithubTestRepoClient {
         if let Some(token) = &settings.token {
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&format!("token {}", token))?,
+                reqwest::header::HeaderValue::from_str(&format!("token {token}"))?,
             );
         }
 
@@ -171,18 +166,12 @@ impl RemoteTestRepoClient for GithubTestRepoClient {
         test_id: String,
         test_def_path: PathBuf,
     ) -> anyhow::Result<()> {
-        log::debug!(
-            "Copying TestDefinition - {:?} to folder {:?}",
-            test_id,
-            test_def_path
-        );
+        log::debug!("Copying TestDefinition - {test_id:?} to folder {test_def_path:?}");
 
         // If the TestDefinition already exists, return an error.
         if test_def_path.exists() {
             return Err(anyhow::anyhow!(
-                "Test Definition ID: {} already exists in location {:?}",
-                test_id,
-                test_def_path
+                "Test Definition ID: {test_id} already exists in location {test_def_path:?}"
             ));
         }
 
@@ -266,13 +255,11 @@ async fn download_github_repo_file(
     log::debug!(
         "Downloading file {} to {}",
         remote_path,
-        local_file_path.to_str().unwrap()
+        local_file_path.to_string_lossy()
     );
 
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
-        owner, repo, remote_path, branch
-    );
+    let url =
+        format!("https://api.github.com/repos/{owner}/{repo}/contents/{remote_path}?ref={branch}");
 
     let response = client
         .get(&url)

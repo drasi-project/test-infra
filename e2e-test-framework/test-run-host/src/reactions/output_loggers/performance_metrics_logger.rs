@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for performance metrics code
+#![allow(clippy::unwrap_used)]
+
 //! Performance metrics output logger for measuring reaction throughput
 //!
 //! This logger tracks timing information and record counts to calculate
@@ -93,9 +96,7 @@ impl PerformanceMetricsOutputLogger {
         output_storage: &TestRunReactionStorage,
     ) -> anyhow::Result<Box<dyn OutputLogger + Send + Sync>> {
         log::info!(
-            "PerformanceMetricsOutputLogger::new() called for {} with config {:?}",
-            test_run_reaction_id,
-            config
+            "PerformanceMetricsOutputLogger::new() called for {test_run_reaction_id} with config {config:?}"
         );
 
         // Generate output filename
@@ -110,25 +111,19 @@ impl PerformanceMetricsOutputLogger {
         let output_dir = output_storage
             .reaction_output_path
             .join("performance_metrics");
-        log::info!(
-            "PerformanceMetricsOutputLogger checking/creating directory: {:?}",
-            output_dir
-        );
+        log::info!("PerformanceMetricsOutputLogger checking/creating directory: {output_dir:?}");
 
         if !output_dir.exists() {
-            log::info!("Creating directory: {:?}", output_dir);
+            log::info!("Creating directory: {output_dir:?}");
             tokio::fs::create_dir_all(&output_dir).await?;
         } else {
-            log::info!("Directory already exists: {:?}", output_dir);
+            log::info!("Directory already exists: {output_dir:?}");
         }
 
         // Set the output path
         let output_path = output_dir.join(&filename);
 
-        log::info!(
-            "PerformanceMetricsOutputLogger created with output path: {:?}",
-            output_path
-        );
+        log::info!("PerformanceMetricsOutputLogger created with output path: {output_path:?}");
 
         Ok(Box::new(Self {
             start_time_ns: None,
@@ -211,7 +206,7 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
             timestamp: chrono::Utc::now(),
         };
 
-        log::info!("{}", metrics);
+        log::info!("{metrics}");
 
         // Write metrics to file
         let metrics_json = serde_json::to_string_pretty(&metrics)?;
@@ -245,6 +240,7 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::common::HandlerPayload;

@@ -200,7 +200,7 @@ impl HttpSourceChangeDispatcherSettings {
         let endpoint = if let Some(ep) = &definition.endpoint {
             ep.clone()
         } else {
-            format!("/sources/{}/events", source_id)
+            format!("/sources/{source_id}/events")
         };
 
         Ok(Self {
@@ -228,10 +228,7 @@ impl HttpSourceChangeDispatcher {
         definition: &HttpSourceChangeDispatcherDefinition,
         storage: TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!(
-            "Creating HttpSourceChangeDispatcher from {:?}, ",
-            definition
-        );
+        log::debug!("Creating HttpSourceChangeDispatcher from {definition:?}, ");
 
         let source_id = storage.id.test_source_id.clone();
         let settings = HttpSourceChangeDispatcherSettings::new(definition, source_id)?;
@@ -288,7 +285,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
             }
 
             // Use batch endpoint for batch mode
-            let batch_url = format!("{}/batch", url);
+            let batch_url = format!("{url}/batch");
             let batch_request = BatchEventRequest {
                 events: http_events,
             };
@@ -298,7 +295,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                 "HTTP dispatcher sending batch request to {}: {}",
                 batch_url,
                 serde_json::to_string_pretty(&batch_request)
-                    .unwrap_or_else(|e| format!("Failed to serialize: {}", e))
+                    .unwrap_or_else(|e| format!("Failed to serialize: {e}"))
             );
 
             let response = match self
@@ -329,7 +326,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                     "Failed to dispatch events batch to {}: {} - {}",
                     batch_url, status, response_body
                 );
-                anyhow::bail!("HTTP request failed with status: {}", status);
+                anyhow::bail!("HTTP request failed with status: {status}");
             }
 
             log::info!(
@@ -355,7 +352,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                     "HTTP dispatcher sending individual event to {}: {}",
                     url,
                     serde_json::to_string_pretty(&http_event)
-                        .unwrap_or_else(|e| format!("Failed to serialize: {}", e))
+                        .unwrap_or_else(|e| format!("Failed to serialize: {e}"))
                 );
 
                 let response = self.client.post(&url).json(&http_event).send().await?;
@@ -374,7 +371,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                         "Failed to dispatch event to {}: {} - {}",
                         url, status, response_body
                     );
-                    anyhow::bail!("HTTP request failed with status: {}", status);
+                    anyhow::bail!("HTTP request failed with status: {status}");
                 }
             }
 
@@ -390,6 +387,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

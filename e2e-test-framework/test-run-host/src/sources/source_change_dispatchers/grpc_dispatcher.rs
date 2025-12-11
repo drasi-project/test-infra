@@ -68,7 +68,7 @@ impl GrpcSourceChangeDispatcher {
         definition: &GrpcSourceChangeDispatcherDefinition,
         _storage: TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating GrpcSourceChangeDispatcher from {:?}", definition);
+        log::debug!("Creating GrpcSourceChangeDispatcher from {definition:?}");
 
         let settings = GrpcSourceChangeDispatcherSettings::new(definition)?;
         trace!(
@@ -139,7 +139,7 @@ impl GrpcSourceChangeDispatcher {
             }
             Err(e) => {
                 error!("Drasi SourceService health check failed: {}", e);
-                Err(anyhow::anyhow!("Health check failed: {}", e))
+                Err(anyhow::anyhow!("Health check failed: {e}"))
             }
         }
     }
@@ -196,7 +196,7 @@ impl SourceChangeDispatcher for GrpcSourceChangeDispatcher {
             while let Some(response) = response_stream
                 .message()
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to receive stream response: {}", e))?
+                .map_err(|e| anyhow::anyhow!("Failed to receive stream response: {e}"))?
             {
                 if !response.success {
                     error!(
@@ -229,7 +229,7 @@ impl SourceChangeDispatcher for GrpcSourceChangeDispatcher {
 
                 let response = client.submit_event(request).await.map_err(|e| {
                     error!("Failed to submit event to Drasi SourceService: {}", e);
-                    anyhow::anyhow!("Event submission failed: {}", e)
+                    anyhow::anyhow!("Event submission failed: {e}")
                 })?;
 
                 let resp = response.into_inner();
@@ -255,6 +255,7 @@ impl SourceChangeDispatcher for GrpcSourceChangeDispatcher {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -277,9 +278,9 @@ mod tests {
         assert_eq!(settings.host, "localhost");
         assert_eq!(settings.port, 50051);
         assert_eq!(settings.timeout_seconds, 60);
-        assert_eq!(settings.batch_events, true);
+        assert!(settings.batch_events);
         assert_eq!(settings.source_id, "test-source");
-        assert_eq!(settings.tls, false);
+        assert!(!settings.tls);
         assert_eq!(settings.endpoint_url(), "http://localhost:50051");
     }
 
@@ -300,9 +301,8 @@ mod tests {
         let settings = GrpcSourceChangeDispatcherSettings::new(&definition).unwrap();
 
         assert_eq!(settings.timeout_seconds, 30); // default
-        assert_eq!(settings.batch_events, true); // default
-        assert_eq!(settings.tls, true);
+        assert!(settings.batch_events); // default
+        assert!(settings.tls);
         assert_eq!(settings.endpoint_url(), "https://example.com:443");
     }
 }
-

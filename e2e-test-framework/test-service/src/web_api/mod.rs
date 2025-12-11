@@ -79,7 +79,7 @@ impl IntoResponse for TestServiceWebApiError {
             }
             TestServiceWebApiError::NotFound(kind, id) => (
                 StatusCode::NOT_FOUND,
-                Json(format!("{} with ID {} not found", kind, id)),
+                Json(format!("{kind} with ID {id} not found")),
             )
                 .into_response(),
             TestServiceWebApiError::SerdeJsonError(e) => {
@@ -229,12 +229,9 @@ pub(crate) async fn start_web_api(
         .layer(axum::extract::Extension(test_data_store.clone()))
         .layer(axum::extract::Extension(test_run_host));
 
-    log::info!("Test Service Web API listening on http://{}", addr);
-    log::info!("API Documentation available at http://{}/docs", addr);
-    log::info!(
-        "OpenAPI JSON specification available at http://{}/api-docs/openapi.json",
-        addr
-    );
+    log::info!("Test Service Web API listening on http://{addr}");
+    log::info!("API Documentation available at http://{addr}/docs");
+    log::info!("OpenAPI JSON specification available at http://{addr}/api-docs/openapi.json");
 
     let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
@@ -244,7 +241,7 @@ pub(crate) async fn start_web_api(
     log::info!("Press CTRL-C to stop the server...");
 
     if let Err(err) = graceful.await {
-        eprintln!("Server error: {}", err);
+        eprintln!("Server error: {err}");
     }
 }
 
@@ -291,7 +288,7 @@ async fn shutdown_signal(test_data_store: Arc<TestDataStore>) {
     if test_data_store.should_delete_on_stop() {
         log::info!("Performing TestDataStore cleanup on shutdown signal...");
         if let Err(e) = test_data_store.cleanup_async().await {
-            log::error!("Error during TestDataStore cleanup: {}", e);
+            log::error!("Error during TestDataStore cleanup: {e}");
         } else {
             log::info!("TestDataStore cleanup completed successfully.");
         }
@@ -349,7 +346,7 @@ async fn get_service_info_handler(
         if let Some(run_id) = extract_test_run_id(&source_id) {
             if let Some(test_run) = test_runs_map.get_mut(&run_id) {
                 // Extract just the source name
-                if let Some(source_name) = source_id.split('.').last() {
+                if let Some(source_name) = source_id.split('.').next_back() {
                     test_run.sources.push(source_name.to_string());
                 }
             }
@@ -360,7 +357,7 @@ async fn get_service_info_handler(
     for query_id in query_ids {
         if let Some(run_id) = extract_test_run_id(&query_id) {
             if let Some(test_run) = test_runs_map.get_mut(&run_id) {
-                if let Some(query_name) = query_id.split('.').last() {
+                if let Some(query_name) = query_id.split('.').next_back() {
                     test_run.queries.push(query_name.to_string());
                 }
             }
@@ -371,7 +368,7 @@ async fn get_service_info_handler(
     for reaction_id in reaction_ids {
         if let Some(run_id) = extract_test_run_id(&reaction_id) {
             if let Some(test_run) = test_runs_map.get_mut(&run_id) {
-                if let Some(reaction_name) = reaction_id.split('.').last() {
+                if let Some(reaction_name) = reaction_id.split('.').next_back() {
                     test_run.reactions.push(reaction_name.to_string());
                 }
             }
@@ -382,7 +379,7 @@ async fn get_service_info_handler(
     for server_id in drasi_server_ids {
         if let Some(run_id) = extract_test_run_id(&server_id) {
             if let Some(test_run) = test_runs_map.get_mut(&run_id) {
-                if let Some(server_name) = server_id.split('.').last() {
+                if let Some(server_name) = server_id.split('.').next_back() {
                     test_run.drasi_servers.push(server_name.to_string());
                 }
             }

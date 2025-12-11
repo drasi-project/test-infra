@@ -1,0 +1,75 @@
+server:
+  host: 0.0.0.0                                    # Listen on all network interfaces
+  port: 8080                                       # Health check and Web API port
+  disable_persistence: true                        # Disables persistence of runtime changes to Drasi Server config
+  log_level: drasi_server=info,drasi_core=warn     # Logging verbosity
+  # Alternative log levels for debugging or production:
+  # log_level: drasi_server=debug,drasi_core=debug  # For detailed debugging
+  # log_level: drasi_server=warn,drasi_core=error   # For production (minimal logging)
+
+# Core Engine Settings
+server_core:
+  priority_queue_capacity: 10000                   # Default query processing queue capacity
+  # For high-throughput scenarios:
+  # priority_queue_capacity: 10000
+  # broadcast_channel_capacity: 500000             # Result broadcast capacity
+
+# Data Sources
+# Define where Drasi Server receives data changes
+sources:
+- id: facilities-db                                # Unique source identifier
+  source_type: http                                # Source type: http, Http, etc.
+  auto_start: true                                 # Start listening when server starts
+
+  # Http Source Settings
+  host: 0.0.0.0                                    # Listen address
+  port: 9000                                       # Http source endpoint port
+
+# Continuous Queries
+# Define what data transformations to apply and track
+queries:
+- id: building-comfort                             # Unique query identifier
+  auto_start: true                                 # Start processing when server starts
+
+  # Cypher Query Definition
+  query: |
+    MATCH
+      (r:Room)                                     
+    RETURN
+      elementId(r) AS RoomId,                      
+      r.temperature, r.humidity, r.co2             
+
+  # Data Sources
+  sources:                                         # Which sources feed this query
+  - facilities-db
+
+# Reactions
+# Define how and where to send query results
+reactions:
+- id: rooms-http                                   # Unique reaction identifier
+  reaction_type: http                              # Reaction type: Http, etc.
+  auto_start: true                                 # Start sending results when server starts
+  queries:
+    - building-comfort
+  base_url: http://127.0.0.1:9001
+  timeout_ms: 5000
+  routes:
+    building-comfort:
+      added:
+        url: /reaction
+        method: POST
+        body: '{{json after}}'
+        headers:
+          Content-Type: application/json
+      updated:
+        url: /reaction
+        method: POST
+        body: '{{json after}}'
+        headers:
+          Content-Type: application/json
+      deleted:
+        url: /reaction
+        method: POST
+        body: '{{json before}}'
+        headers:
+          Content-Type: application/json

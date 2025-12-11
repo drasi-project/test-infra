@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure library - allow unwraps for test run orchestration code
+#![allow(clippy::unwrap_used)]
+
 use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
@@ -49,7 +52,7 @@ use test_data_store::{
     TestDataStore,
 };
 
-use test_run_completion::{ComponentStateTracker, LifecycleTx, create_completion_handler};
+use test_run_completion::{create_completion_handler, ComponentStateTracker, LifecycleTx};
 
 pub mod common;
 pub mod drasi_server_api_impl;
@@ -124,7 +127,7 @@ impl fmt::Display for TestRunHostStatus {
         match self {
             TestRunHostStatus::Initialized => write!(f, "Initialized"),
             TestRunHostStatus::Running => write!(f, "Running"),
-            TestRunHostStatus::Error(msg) => write!(f, "Error: {}", msg),
+            TestRunHostStatus::Error(msg) => write!(f, "Error: {msg}"),
         }
     }
 }
@@ -141,7 +144,7 @@ impl TestRunHost {
         config: TestRunHostConfig,
         data_store: Arc<TestDataStore>,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating TestRunHost from {:?}", config);
+        log::debug!("Creating TestRunHost from {config:?}");
 
         let test_run_host = TestRunHost {
             data_store: data_store.clone(),
@@ -163,13 +166,13 @@ impl TestRunHost {
             }
             TestRunHostStatus::Running => {
                 let msg = "TestRunHost created with unexpected status: Running";
-                log::error!("{}", msg);
-                anyhow::bail!("{}", msg);
+                log::error!("{msg}");
+                anyhow::bail!("{msg}");
             }
             TestRunHostStatus::Error(_) => {
                 let msg = "TestRunHost is in an Error state, cannot Start.".to_string();
-                log::error!("{}", msg);
-                anyhow::bail!("{}", msg);
+                log::error!("{msg}");
+                anyhow::bail!("{msg}");
             }
         };
 
@@ -182,11 +185,14 @@ impl TestRunHost {
 
         let mut test_runs_lock = self.test_runs.write().await;
         if test_runs_lock.contains_key(&test_run_id) {
-            anyhow::bail!("TestRun already exists with ID: {:?}", test_run_id);
+            anyhow::bail!("TestRun already exists with ID: {test_run_id:?}");
         }
 
         // Ensure test definition is downloaded from remote repo if needed
-        let repo_storage = self.data_store.get_test_repo_storage(&config.test_repo_id).await?;
+        let repo_storage = self
+            .data_store
+            .get_test_repo_storage(&config.test_repo_id)
+            .await?;
         let force_refresh = repo_storage.repo_config.get_force_cache_refresh();
         self.data_store
             .add_remote_test(&config.test_repo_id, &config.test_id, force_refresh)
@@ -199,64 +205,71 @@ impl TestRunHost {
             .await?;
 
         // Create lifecycle channel and monitoring task if completion handlers are defined
-        let (lifecycle_tx, completion_monitoring_task) =
-            if !test_definition.completion_handlers.is_empty() {
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (lifecycle_tx, completion_monitoring_task) = if !test_definition
+            .completion_handlers
+            .is_empty()
+        {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-                // Create completion handlers
-                let handlers: Vec<Box<dyn test_run_completion::CompletionHandler>> = test_definition
-                    .completion_handlers
-                    .iter()
-                    .filter_map(|handler_def| {
-                        create_completion_handler(handler_def)
-                            .inspect_err(|e| log::error!("Failed to create completion handler: {}", e))
-                            .ok()
-                    })
-                    .collect();
+            // Create completion handlers
+            let handlers: Vec<Box<dyn test_run_completion::CompletionHandler>> = test_definition
+                .completion_handlers
+                .iter()
+                .filter_map(|handler_def| {
+                    create_completion_handler(handler_def)
+                        .inspect_err(|e| log::error!("Failed to create completion handler: {e}"))
+                        .ok()
+                })
+                .collect();
 
-                if handlers.is_empty() {
-                    log::warn!("No valid completion handlers could be created for TestRun {}", test_run_id);
-                    (LifecycleTx::disabled(), None)
-                } else {
-                    // Spawn monitoring task
-                    let test_run_id_clone = test_run_id.clone();
-                    let drasi_server_count = config.drasi_servers.len();
-                    let source_count = config.sources.len();
-                    let query_count = config.queries.len();
-                    let reaction_count = config.reactions.len();
-
-                    let task = tokio::spawn(async move {
-                        let mut tracker = ComponentStateTracker::new(
-                            drasi_server_count,
-                            source_count,
-                            query_count,
-                            reaction_count,
-                        );
-
-                        while let Some(event) = rx.recv().await {
-                            tracker.update(&event);
-
-                            if tracker.all_components_finished() {
-                                let summary = tracker.get_completion_summary();
-                                log::info!("All components finished for TestRun {}", test_run_id_clone);
-
-                                // Execute all handlers
-                                for handler in &handlers {
-                                    if let Err(e) = handler.handle_completion(&test_run_id_clone.to_string(), &summary).await {
-                                        log::error!("Completion handler failed: {}", e);
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    });
-
-                    (LifecycleTx::new(tx), Some(task))
-                }
-            } else {
-                log::debug!("No completion handlers defined for TestRun {}", test_run_id);
+            if handlers.is_empty() {
+                log::warn!(
+                    "No valid completion handlers could be created for TestRun {test_run_id}"
+                );
                 (LifecycleTx::disabled(), None)
-            };
+            } else {
+                // Spawn monitoring task
+                let test_run_id_clone = test_run_id.clone();
+                let drasi_server_count = config.drasi_servers.len();
+                let source_count = config.sources.len();
+                let query_count = config.queries.len();
+                let reaction_count = config.reactions.len();
+
+                let task = tokio::spawn(async move {
+                    let mut tracker = ComponentStateTracker::new(
+                        drasi_server_count,
+                        source_count,
+                        query_count,
+                        reaction_count,
+                    );
+
+                    while let Some(event) = rx.recv().await {
+                        tracker.update(&event);
+
+                        if tracker.all_components_finished() {
+                            let summary = tracker.get_completion_summary();
+                            log::info!("All components finished for TestRun {test_run_id_clone}");
+
+                            // Execute all handlers
+                            for handler in &handlers {
+                                if let Err(e) = handler
+                                    .handle_completion(&test_run_id_clone.to_string(), &summary)
+                                    .await
+                                {
+                                    log::error!("Completion handler failed: {e}");
+                                }
+                            }
+                            break;
+                        }
+                    }
+                });
+
+                (LifecycleTx::new(tx), Some(task))
+            }
+        } else {
+            log::debug!("No completion handlers defined for TestRun {test_run_id}");
+            (LifecycleTx::disabled(), None)
+        };
 
         let mut test_run = TestRun {
             id: test_run_id.clone(),
@@ -319,9 +332,7 @@ impl TestRunHost {
             // Set TestRunHost on all sources
             for (source_id, source) in test_run.sources.iter() {
                 log::debug!(
-                    "Setting TestRunHost on source {} in test run {:?}",
-                    source_id,
-                    test_run_id
+                    "Setting TestRunHost on source {source_id} in test run {test_run_id:?}"
                 );
                 source.set_test_run_host(self_ref.clone());
             }
@@ -329,9 +340,7 @@ impl TestRunHost {
             // Set TestRunHost on all reactions (for handlers that need it)
             for (reaction_id, reaction) in test_run.reactions.iter() {
                 log::debug!(
-                    "Setting TestRunHost on reaction {} in test run {:?}",
-                    reaction_id,
-                    test_run_id
+                    "Setting TestRunHost on reaction {reaction_id} in test run {test_run_id:?}"
                 );
                 reaction.set_test_run_host(self_ref.clone());
             }
@@ -340,9 +349,7 @@ impl TestRunHost {
             for (reaction_id, reaction) in test_run.reactions.iter() {
                 if reaction.start_immediately {
                     log::info!(
-                        "Auto-starting reaction {} in test run {:?} (before sources)",
-                        reaction_id,
-                        test_run_id
+                        "Auto-starting reaction {reaction_id} in test run {test_run_id:?} (before sources)"
                     );
                     reaction.start_reaction_observer().await?;
                 }
@@ -359,9 +366,7 @@ impl TestRunHost {
                 let state = source.get_state().await?;
                 if state.start_mode == SourceStartMode::Auto {
                     log::info!(
-                        "Auto-starting source {} in test run {:?} (after reactions are ready)",
-                        source_id,
-                        test_run_id
+                        "Auto-starting source {source_id} in test run {test_run_id:?} (after reactions are ready)"
                     );
                     source.start_source_change_generator().await?;
                 }
@@ -392,10 +397,7 @@ impl TestRunHost {
             .iter()
             .find(|s| s.id == test_drasi_server_id)
             .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Drasi server definition not found: {}",
-                    test_drasi_server_id
-                )
+                anyhow::anyhow!("Drasi server definition not found: {test_drasi_server_id}")
             })?
             .clone();
 
@@ -408,7 +410,9 @@ impl TestRunHost {
             .get_test_run_drasi_server_storage(&id)
             .await?;
 
-        let test_run_drasi_server = TestRunDrasiServer::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
+        let test_run_drasi_server =
+            TestRunDrasiServer::new(definition, output_storage, test_run.lifecycle_tx.clone())
+                .await?;
         test_run
             .drasi_servers
             .insert(test_drasi_server_id, test_run_drasi_server);
@@ -438,7 +442,8 @@ impl TestRunHost {
 
         let definition = TestRunQueryDefinition::new(test_run_query, test_query_definition)?;
         let output_storage = self.data_store.get_test_run_query_storage(&id).await?;
-        let test_run_query = TestRunQuery::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
+        let test_run_query =
+            TestRunQuery::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run.queries.insert(test_query_id, test_run_query);
         Ok(())
@@ -472,10 +477,7 @@ impl TestRunHost {
             .output_handler
             .clone()
             .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No reaction handler defined for reaction {}",
-                    test_reaction_id
-                )
+                anyhow::anyhow!("No reaction handler defined for reaction {test_reaction_id}")
             })?;
 
         let output_loggers = test_run_reaction.output_loggers.clone();
@@ -488,7 +490,8 @@ impl TestRunHost {
 
         let id = TestRunReactionId::new(&test_run.id, &test_reaction_id);
         let output_storage = self.data_store.get_test_run_reaction_storage(&id).await?;
-        let test_run_reaction = TestRunReaction::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
+        let test_run_reaction =
+            TestRunReaction::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run
             .reactions
@@ -539,11 +542,11 @@ impl TestRunHost {
         test_run_id: &TestRunId,
         mut test_run_query: TestRunQueryConfig,
     ) -> anyhow::Result<TestRunQueryId> {
-        log::trace!("Adding TestRunQuery from {:?}", test_run_query);
+        log::trace!("Adding TestRunQuery from {test_run_query:?}");
 
         // If the TestRunHost is in an Error state, return an error.
         if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
+            anyhow::bail!("TestRunHost is in an Error state: {msg}");
         };
 
         // Set the test run IDs from the parent TestRun
@@ -557,13 +560,10 @@ impl TestRunHost {
         let mut test_runs_lock = self.test_runs.write().await;
         let test_run = test_runs_lock
             .get_mut(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         if test_run.queries.contains_key(&query_id) {
-            anyhow::bail!(
-                "TestRun already contains TestRunQuery with ID: {}",
-                query_id
-            );
+            anyhow::bail!("TestRun already contains TestRunQuery with ID: {query_id}");
         }
 
         // Get the TestRepoStorage that is associated with the Repo for the TestRunQuery
@@ -586,7 +586,8 @@ impl TestRunHost {
         let output_storage = self.data_store.get_test_run_query_storage(&id).await?;
 
         // Create the TestRunQuery and add it to the TestRun.
-        let test_run_query_obj = TestRunQuery::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
+        let test_run_query_obj =
+            TestRunQuery::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run.queries.insert(query_id, test_run_query_obj);
 
@@ -598,11 +599,11 @@ impl TestRunHost {
         test_run_id: &TestRunId,
         mut test_run_reaction: TestRunReactionConfig,
     ) -> anyhow::Result<TestRunReactionId> {
-        log::trace!("Adding TestRunReaction from {:?}", test_run_reaction);
+        log::trace!("Adding TestRunReaction from {test_run_reaction:?}");
 
         // If the TestRunHost is in an Error state, return an error.
         if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
+            anyhow::bail!("TestRunHost is in an Error state: {msg}");
         };
 
         // Set the test run IDs from the parent TestRun
@@ -616,13 +617,10 @@ impl TestRunHost {
         let mut test_runs_lock = self.test_runs.write().await;
         let test_run = test_runs_lock
             .get_mut(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         if test_run.reactions.contains_key(&reaction_id) {
-            anyhow::bail!(
-                "TestRun already contains TestRunReaction with ID: {}",
-                reaction_id
-            );
+            anyhow::bail!("TestRun already contains TestRunReaction with ID: {reaction_id}");
         }
 
         // Get the TestRepoStorage that is associated with the Repo for the TestRunReaction
@@ -648,7 +646,7 @@ impl TestRunHost {
             .output_handler
             .clone()
             .ok_or_else(|| {
-                anyhow::anyhow!("No reaction handler defined for reaction {}", reaction_id)
+                anyhow::anyhow!("No reaction handler defined for reaction {reaction_id}")
             })?;
 
         // Get output_loggers from the config
@@ -667,7 +665,8 @@ impl TestRunHost {
         let output_storage = self.data_store.get_test_run_reaction_storage(&id).await?;
 
         // Create the TestRunReaction and add it to the TestRun.
-        let test_run_reaction_obj = TestRunReaction::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
+        let test_run_reaction_obj =
+            TestRunReaction::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
 
         test_run
             .reactions
@@ -681,11 +680,11 @@ impl TestRunHost {
         test_run_id: &TestRunId,
         mut test_run_config: TestRunSourceConfig,
     ) -> anyhow::Result<TestRunSourceId> {
-        log::trace!("Adding TestRunSource from {:?}", test_run_config);
+        log::trace!("Adding TestRunSource from {test_run_config:?}");
 
         // If the TestRunHost is in an Error state, return an error.
         if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
+            anyhow::bail!("TestRunHost is in an Error state: {msg}");
         };
 
         // Set the test run IDs from the parent TestRun
@@ -699,13 +698,10 @@ impl TestRunHost {
         let mut test_runs_lock = self.test_runs.write().await;
         let test_run = test_runs_lock
             .get_mut(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         if test_run.sources.contains_key(&source_id) {
-            anyhow::bail!(
-                "TestRun already contains TestRunSource with ID: {}",
-                source_id
-            );
+            anyhow::bail!("TestRun already contains TestRunSource with ID: {source_id}");
         }
 
         // Get the TestRepoStorage that is associated with the Repo for the TestRunSource
@@ -767,10 +763,7 @@ impl TestRunHost {
         rel_labels: &HashSet<String>,
     ) -> anyhow::Result<BootstrapData> {
         log::debug!(
-            "Source ID: {}, Node Labels: {:?}, Rel Labels: {:?}",
-            test_run_source_id,
-            node_labels,
-            rel_labels
+            "Source ID: {test_run_source_id}, Node Labels: {node_labels:?}, Rel Labels: {rel_labels:?}"
         );
 
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
@@ -778,7 +771,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.get_bootstrap_data(node_labels, rel_labels).await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -804,7 +797,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.get_state().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -822,7 +815,7 @@ impl TestRunHost {
                     .get_query_result_observer_state()
                     .await?
                     .logger_results),
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -848,7 +841,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.get_state().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -868,7 +861,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.pause_query_result_observer().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -883,7 +876,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.reset_query_result_observer().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -898,7 +891,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.start_query_result_observer().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -913,7 +906,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.stop_query_result_observer().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -942,7 +935,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.get_state().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -960,7 +953,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.pause_reaction_observer().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -978,7 +971,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.reset_reaction_observer().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -996,7 +989,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.start_reaction_observer().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -1014,7 +1007,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.stop_reaction_observer().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -1029,7 +1022,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.pause_source_change_generator().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -1044,7 +1037,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.reset_source_change_generator().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -1065,7 +1058,7 @@ impl TestRunHost {
                         .skip_source_change_generator(skips, spacing_mode)
                         .await
                 }
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -1080,7 +1073,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.start_source_change_generator().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -1101,7 +1094,7 @@ impl TestRunHost {
                         .step_source_change_generator(steps, spacing_mode)
                         .await
                 }
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -1116,7 +1109,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.stop_source_change_generator().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -1127,11 +1120,11 @@ impl TestRunHost {
         test_run_id: &TestRunId,
         mut test_run_drasi_server: TestRunDrasiServerConfig,
     ) -> anyhow::Result<TestRunDrasiServerId> {
-        log::trace!("Adding TestRunDrasiServer from {:?}", test_run_drasi_server);
+        log::trace!("Adding TestRunDrasiServer from {test_run_drasi_server:?}");
 
         // If the TestRunHost is in an Error state, return an error.
         if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
+            anyhow::bail!("TestRunHost is in an Error state: {msg}");
         };
 
         // Set the test run IDs from the parent TestRun
@@ -1145,13 +1138,10 @@ impl TestRunHost {
         let mut test_runs_lock = self.test_runs.write().await;
         let test_run = test_runs_lock
             .get_mut(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         if test_run.drasi_servers.contains_key(&server_id) {
-            anyhow::bail!(
-                "TestRun already contains TestRunDrasiServer with ID: {}",
-                server_id
-            );
+            anyhow::bail!("TestRun already contains TestRunDrasiServer with ID: {server_id}");
         }
 
         // Get the test definition and extract the drasi server definition
@@ -1169,7 +1159,7 @@ impl TestRunHost {
             .drasi_servers
             .iter()
             .find(|s| s.id == server_id)
-            .ok_or_else(|| anyhow::anyhow!("Drasi server definition not found: {}", server_id))?
+            .ok_or_else(|| anyhow::anyhow!("Drasi server definition not found: {server_id}"))?
             .clone();
 
         let definition =
@@ -1183,7 +1173,9 @@ impl TestRunHost {
             .await?;
 
         // Create the TestRunDrasiServer and add it to the TestRun.
-        let test_run_drasi_server_obj = TestRunDrasiServer::new(definition, output_storage, test_run.lifecycle_tx.clone()).await?;
+        let test_run_drasi_server_obj =
+            TestRunDrasiServer::new(definition, output_storage, test_run.lifecycle_tx.clone())
+                .await?;
 
         test_run
             .drasi_servers
@@ -1231,10 +1223,7 @@ impl TestRunHost {
                     }
                     Ok(())
                 } else {
-                    anyhow::bail!(
-                        "TestRunDrasiServer not found: {:?}",
-                        test_run_drasi_server_id
-                    );
+                    anyhow::bail!("TestRunDrasiServer not found: {test_run_drasi_server_id:?}");
                 }
             }
             None => anyhow::bail!(
@@ -1290,7 +1279,7 @@ impl TestRunHost {
         let test_runs = self.test_runs.read().await;
         match test_runs.get(test_run_id) {
             Some(test_run) => Ok(test_run.status.clone()),
-            None => anyhow::bail!("TestRun not found: {:?}", test_run_id),
+            None => anyhow::bail!("TestRun not found: {test_run_id:?}"),
         }
     }
 
@@ -1302,7 +1291,7 @@ impl TestRunHost {
                 for server in test_run.drasi_servers.values() {
                     if matches!(
                         server.get_state().await,
-                        TestRunDrasiServerState::Uninitialized { .. }
+                        TestRunDrasiServerState::Uninitialized
                     ) {
                         server.start().await?;
                     }
@@ -1331,7 +1320,7 @@ impl TestRunHost {
                 test_run.status = TestRunStatus::Running;
                 Ok(())
             }
-            None => anyhow::bail!("TestRun not found: {:?}", test_run_id),
+            None => anyhow::bail!("TestRun not found: {test_run_id:?}"),
         }
     }
 
@@ -1367,7 +1356,7 @@ impl TestRunHost {
                 test_run.status = TestRunStatus::Stopped;
                 Ok(())
             }
-            None => anyhow::bail!("TestRun not found: {:?}", test_run_id),
+            None => anyhow::bail!("TestRun not found: {test_run_id:?}"),
         }
     }
 
@@ -1382,13 +1371,14 @@ impl TestRunHost {
         let mut test_runs = self.test_runs.write().await;
         test_runs
             .remove(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         Ok(())
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use std::sync::Arc;
 

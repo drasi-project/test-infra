@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::drasi_servers::{
         TestRunDrasiServerConfig, TestRunDrasiServerDefinition, TestRunDrasiServerOverrides,
@@ -32,7 +33,7 @@ mod tests {
         }"#;
 
         let config: TestRunDrasiServerConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.start_immediately, true);
+        assert!(config.start_immediately);
     }
 
     #[test]
@@ -46,7 +47,7 @@ mod tests {
         }"#;
 
         let config: TestRunDrasiServerConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.start_immediately, false);
+        assert!(!config.start_immediately);
     }
 
     #[test]
@@ -173,14 +174,18 @@ mod tests {
             .unwrap();
 
         // Create and start the server
-        let server = crate::drasi_servers::TestRunDrasiServer::new(definition, storage, crate::test_run_completion::LifecycleTx::disabled())
-            .await
-            .unwrap();
+        let server = crate::drasi_servers::TestRunDrasiServer::new(
+            definition,
+            storage,
+            crate::test_run_completion::LifecycleTx::disabled(),
+        )
+        .await
+        .unwrap();
 
         // Verify server is running
         match server.get_state().await {
             TestRunDrasiServerState::Running { .. } => {}
-            state => panic!("Expected server to be running, but got {:?}", state),
+            state => panic!("Expected server to be running, but got {state:?}"),
         }
 
         // Note: Without actually starting the components (which requires external dependencies),
@@ -196,7 +201,7 @@ mod tests {
         // Verify server is stopped
         match server.get_state().await {
             TestRunDrasiServerState::Stopped { .. } => {}
-            state => panic!("Expected server to be stopped, but got {:?}", state),
+            state => panic!("Expected server to be stopped, but got {state:?}"),
         }
     }
 

@@ -69,18 +69,11 @@ impl JsonlFileOutputLogger {
         def: &JsonlFileOutputLoggerConfig,
         output_storage: &TestRunReactionStorage,
     ) -> anyhow::Result<Box<dyn OutputLogger + Send + Sync>> {
-        log::debug!(
-            "Creating JsonlFileOutputLogger for {} from {:?}, ",
-            test_run_reaction_id,
-            def
-        );
+        log::debug!("Creating JsonlFileOutputLogger for {test_run_reaction_id} from {def:?}, ");
 
         let folder_path = output_storage.reaction_output_path.join("jsonl_file");
         let settings = JsonlFileOutputLoggerSettings::new(test_run_reaction_id, def, folder_path)?;
-        log::trace!(
-            "Creating JsonlFileOutputLogger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating JsonlFileOutputLogger with settings {settings:?}, ");
 
         if !std::path::Path::new(&settings.folder_path).exists() {
             match create_dir_all(&settings.folder_path).await {

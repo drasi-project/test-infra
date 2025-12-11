@@ -16,7 +16,9 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use drasi_server_core::ApplicationSourceHandle;
+// NOTE: ApplicationSourceHandle and PropertyMapBuilder are no longer available in drasi_lib.
+// The new plugin architecture requires sources to be created as instances.
+// This dispatcher is currently non-functional and will log warnings when used.
 
 use test_data_store::{
     scripts::SourceChangeEvent,
@@ -99,7 +101,9 @@ impl DrasiServerChannelSourceChangeDispatcher {
         }
 
         // We need the test run host to get access to the Drasi Server
-        let test_run_host = match self.test_run_host.as_ref() {
+        // NOTE: test_run_host is no longer used since ApplicationSourceHandle is not available.
+        // We keep the check for API consistency but the actual dispatch is no longer functional.
+        let _test_run_host = match self.test_run_host.as_ref() {
             Some(host) => host.clone(),
             None => {
                 // Can't create channel without TestRunHost
@@ -119,91 +123,29 @@ impl DrasiServerChannelSourceChangeDispatcher {
         let drasi_server_id = self.settings.drasi_server_id.clone();
 
         // Start a task to process events from the channel
+        // NOTE: ApplicationSourceHandle is no longer available in drasi_lib.
+        // This receiver task now just logs warnings since the functionality is not available.
         let receiver_task = tokio::spawn(async move {
-            log::info!(
-                "Started channel receiver for source {} on Drasi Server {}",
-                source_id,
-                drasi_server_id
+            log::warn!(
+                "Started channel receiver for source {source_id} on Drasi Server {drasi_server_id}, but ApplicationSourceHandle is no longer available in drasi_lib. Events will be logged but not dispatched."
             );
 
-            // Get the Drasi Server and application handle
-            let test_runs = test_run_host.test_runs.read().await;
-            if let Some(test_run) = test_runs.get(&drasi_server_id.test_run_id) {
-                if let Some(drasi_server) = test_run
-                    .drasi_servers
-                    .get(&drasi_server_id.test_drasi_server_id)
-                {
-                    if let Some(app_handle) = drasi_server.get_application_handle(&source_id).await
-                    {
-                        if let Some(_source_handle) = &app_handle.source {
-                            log::info!(
-                            "Successfully obtained ApplicationSourceHandle for source '{}' on Drasi Server {}",
-                            source_id, drasi_server_id
-                        );
-
-                            // Process events from the channel
-                            while let Some(events) = receiver.recv().await {
-                                log::trace!(
-                                    "Channel receiver for source {} received {} events",
-                                    source_id,
-                                    events.len()
-                                );
-
-                                // Convert and send events to Drasi Server
-                                if let Some(source_handle) = &app_handle.source {
-                                    for event in &events {
-                                        log::trace!(
-                                        "Dispatching event with op '{}' to source '{}' via ApplicationSourceHandle",
-                                        event.op, source_id
-                                    );
-
-                                        // Dispatch the event based on operation and type
-                                        if let Err(e) =
-                                            dispatch_event_to_drasi(source_handle, event).await
-                                        {
-                                            log::error!(
-                                                "Failed to dispatch event to source '{}': {}",
-                                                source_id,
-                                                e
-                                            );
-                                        }
-                                    }
-
-                                    log::trace!(
-                                    "Successfully dispatched {} events to source '{}' via ApplicationSourceHandle",
-                                    events.len(),
-                                    source_id
-                                );
-                                } else {
-                                    log::error!(
-                                        "No source handle available for source '{}'",
-                                        source_id
-                                    );
-                                }
-                            }
-                        } else {
-                            log::error!(
-                                "No source handle found in application handle for source '{}'",
-                                source_id
-                            );
-                        }
-                    } else {
-                        log::error!("No application handle found for source '{}'", source_id);
-                    }
-                } else {
-                    log::error!(
-                        "Drasi Server {} not found in test run",
-                        drasi_server_id.test_drasi_server_id
-                    );
-                }
-            } else {
-                log::error!("Test run {} not found", drasi_server_id.test_run_id);
+            // Process events from the channel - just log them since we can't dispatch
+            let mut event_count = 0;
+            while let Some(events) = receiver.recv().await {
+                event_count += events.len();
+                log::warn!(
+                    "Channel receiver for source '{}' received {} events but cannot dispatch - \
+                     ApplicationSourceHandle is not available in drasi_lib. \
+                     Total events received: {}",
+                    source_id,
+                    events.len(),
+                    event_count
+                );
             }
 
             log::info!(
-                "Channel receiver for source {} on Drasi Server {} stopped",
-                source_id,
-                drasi_server_id
+                "Channel receiver for source {source_id} on Drasi Server {drasi_server_id} stopped. Total events received (not dispatched): {event_count}"
             );
         });
 
@@ -229,7 +171,7 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
                     log::info!("Channel receiver finished successfully");
                 }
                 Err(e) => {
-                    log::error!("Channel receiver task failed: {}", e);
+                    log::error!("Channel receiver task failed: {e}");
                 }
             }
         }
@@ -262,10 +204,10 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
                     log::trace!("Successfully dispatched queued events");
                 }
                 Err(e) => {
-                    log::error!("Failed to dispatch queued events: {}", e);
+                    log::error!("Failed to dispatch queued events: {e}");
                     // Clear the sender so we'll create a new channel next time
                     self.sender = None;
-                    return Err(anyhow::anyhow!("Channel send failed: {}", e));
+                    return Err(anyhow::anyhow!("Channel send failed: {e}"));
                 }
             }
         }
@@ -319,7 +261,7 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
                 );
                 // Clear the sender so we'll create a new channel next time
                 self.sender = None;
-                anyhow::bail!("Channel send failed: {}", e)
+                anyhow::bail!("Channel send failed: {e}")
             }
         }
     }
@@ -339,148 +281,7 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
     }
 }
 
-/// Dispatch a test framework SourceChangeEvent to Drasi using ApplicationSourceHandle helper methods
-async fn dispatch_event_to_drasi(
-    source_handle: &ApplicationSourceHandle,
-    event: &SourceChangeEvent,
-) -> anyhow::Result<()> {
-    use drasi_server_core::PropertyMapBuilder;
-
-    // Log the event structure for debugging
-    log::trace!(
-        "Event structure: op={}, payload.after={:?}",
-        event.op,
-        event.payload.after
-    );
-
-    // Extract data from the payload.after field
-    let after_data = &event.payload.after;
-
-    // Extract id and labels from the after data
-    let id = after_data
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("Missing 'id' field in event payload"))?;
-
-    let labels: Vec<String> = after_data
-        .get("labels")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Determine type based on table field from source info or labels
-    let table = event.payload.source.table.as_str();
-    let typ = match table {
-        "node" => "n",
-        "relation" => "r",
-        _ => {
-            // Fallback: check ID patterns or labels
-            if id.starts_with("B_")
-                || id.starts_with("F_")
-                || id.starts_with("R_")
-                || labels.contains(&"Building".to_string())
-                || labels.contains(&"Floor".to_string())
-                || labels.contains(&"Room".to_string())
-                || labels.contains(&"Stock".to_string())
-            {
-                "n" // Node
-            } else if id.contains("HAS_FLOOR") || id.contains("HAS_ROOM") {
-                "r" // Relation
-            } else {
-                // Default to node if we can't determine
-                log::debug!(
-                    "Using default type 'node' for element {} with labels {:?}",
-                    id,
-                    labels
-                );
-                "n"
-            }
-        }
-    };
-
-    // Convert the properties field to properties using PropertyMapBuilder
-    let mut property_builder = PropertyMapBuilder::new();
-    if let Some(data_obj) = after_data.get("properties").and_then(|v| v.as_object()) {
-        for (key, value) in data_obj {
-            // Add properties based on value type
-            property_builder = match value {
-                serde_json::Value::String(s) => property_builder.with_string(key, s),
-                serde_json::Value::Number(n) => {
-                    if let Some(i) = n.as_i64() {
-                        property_builder.with_integer(key, i)
-                    } else if let Some(f) = n.as_f64() {
-                        property_builder.with_float(key, f)
-                    } else {
-                        property_builder
-                    }
-                }
-                serde_json::Value::Bool(b) => property_builder.with_bool(key, *b),
-                serde_json::Value::Null => property_builder.with_null(key),
-                _ => {
-                    log::warn!(
-                        "Skipping complex property '{}' - only primitive types supported",
-                        key
-                    );
-                    property_builder
-                }
-            };
-        }
-    }
-    let properties = property_builder.build();
-
-    // Dispatch based on operation and type
-    match (event.op.as_str(), typ) {
-        ("i", "n") => {
-            // Insert node
-            source_handle
-                .send_node_insert(id, labels, properties)
-                .await?;
-        }
-        ("u", "n") => {
-            // Update node
-            source_handle
-                .send_node_update(id, labels, properties)
-                .await?;
-        }
-        ("d", _) => {
-            // Delete (node or relation)
-            source_handle.send_delete(id, labels).await?;
-        }
-        ("i", "r") => {
-            // Insert relation
-            let start_id = after_data
-                .get("start_id")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing 'start_id' field for relation"))?;
-
-            let end_id = after_data
-                .get("end_id")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing 'end_id' field for relation"))?;
-
-            source_handle
-                .send_relation_insert(id, labels, properties, start_id, end_id)
-                .await?;
-        }
-        ("u", "r") => {
-            // Update relation - ApplicationSourceHandle doesn't have a specific method for this
-            // We would need to use the generic send() method with a constructed SourceChange
-            // For now, log a warning
-            log::warn!("Relation updates are not yet supported through ApplicationSourceHandle helper methods");
-        }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unknown operation/type combination: {}/{}",
-                event.op,
-                typ
-            ));
-        }
-    }
-
-    Ok(())
-}
+// NOTE: dispatch_event_to_drasi function has been removed.
+// ApplicationSourceHandle and PropertyMapBuilder are no longer available in drasi_lib.
+// The new plugin architecture requires sources to be created as instances implementing
+// the Source trait, with their own mechanisms for receiving data.

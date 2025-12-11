@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for data collection code
+#![allow(clippy::unwrap_used)]
+
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -97,7 +100,7 @@ impl RedisSourceChangeQueueReaderSettings {
         let queue_name = config
             .queue_name
             .clone()
-            .unwrap_or_else(|| format!("{}-change", source_id));
+            .unwrap_or_else(|| format!("{source_id}-change"));
 
         Ok(RedisSourceChangeQueueReaderSettings {
             host,
@@ -122,16 +125,10 @@ impl RedisSourceChangeQueueReader {
         config: RedisSourceChangeQueueReaderConfig,
         source_id: S,
     ) -> anyhow::Result<Box<dyn SourceChangeQueueReader + Send + Sync>> {
-        log::debug!(
-            "Creating RedisSourceChangeQueueReader from config {:?}",
-            config
-        );
+        log::debug!("Creating RedisSourceChangeQueueReader from config {config:?}");
 
         let settings = RedisSourceChangeQueueReaderSettings::new(&config, source_id.into())?;
-        log::trace!(
-            "Creating RedisSourceChangeQueueReader with settings {:?}",
-            settings
-        );
+        log::trace!("Creating RedisSourceChangeQueueReader with settings {settings:?}");
 
         let notifier = Arc::new(Notify::new());
         let status = Arc::new(RwLock::new(SourceChangeQueueReaderStatus::Uninitialized));
@@ -262,7 +259,7 @@ async fn reader_thread(
             client
         }
         Err(e) => {
-            let msg = format!("Client creation error: {:?}", e);
+            let msg = format!("Client creation error: {e:?}");
             log::error!("{}", &msg);
             *status.write().await = SourceChangeQueueReaderStatus::Error;
             match change_tx_channel
@@ -273,7 +270,7 @@ async fn reader_thread(
             {
                 Ok(_) => {}
                 Err(e) => {
-                    log::error!("Error sending error message: {:?}", e);
+                    log::error!("Error sending error message: {e:?}");
                 }
             }
             return;
@@ -288,7 +285,7 @@ async fn reader_thread(
             con
         }
         Err(e) => {
-            let msg = format!("Connection Error: {:?}", e);
+            let msg = format!("Connection Error: {e:?}");
             log::error!("{}", &msg);
             *status.write().await = SourceChangeQueueReaderStatus::Error;
             match change_tx_channel
@@ -299,7 +296,7 @@ async fn reader_thread(
             {
                 Ok(_) => {}
                 Err(e) => {
-                    log::error!("Error sending error message: {:?}", e);
+                    log::error!("Error sending error message: {e:?}");
                 }
             }
             return;
@@ -349,17 +346,15 @@ async fn reader_thread(
                                         {
                                             Ok(_) => {}
                                             Err(e) => {
-                                                let msg = format!(
-                                                    "Error sending change message: {:?}",
-                                                    e
-                                                );
-                                                log::error!("{}", msg);
+                                                let msg =
+                                                    format!("Error sending change message: {e:?}");
+                                                log::error!("{msg}");
                                             }
                                         }
                                     }
                                     None => match result.error {
                                         Some(e) => {
-                                            log::error!("Error reading from Redis stream: {:?}", e);
+                                            log::error!("Error reading from Redis stream: {e:?}");
                                             match change_tx_channel
                                                 .send(SourceChangeQueueReaderMessage::Error(e))
                                                 .await
@@ -367,10 +362,9 @@ async fn reader_thread(
                                                 Ok(_) => {}
                                                 Err(e) => {
                                                     let msg = format!(
-                                                        "Error sending error message: {:?}",
-                                                        e
+                                                        "Error sending error message: {e:?}"
                                                     );
-                                                    log::error!("{}", msg);
+                                                    log::error!("{msg}");
                                                 }
                                             }
                                             continue;
@@ -384,7 +378,7 @@ async fn reader_thread(
                             }
                         }
                         Err(e) => {
-                            log::error!("Error reading from Redis stream: {:?}", e);
+                            log::error!("Error reading from Redis stream: {e:?}");
                             // match change_tx_channel.send(SourceChangeQueueReaderMessage::Error(e)).await {
                             //     Ok(_) => {},
                             //     Err(e) => {
@@ -414,7 +408,7 @@ async fn read_stream(
     let xread_result = match xread_result {
         Ok(xread_result) => xread_result,
         Err(e) => {
-            return Err(anyhow::anyhow!("Error reading from stream: {:?}", e));
+            return Err(anyhow::anyhow!("Error reading from stream: {e:?}"));
         }
     };
 
@@ -450,7 +444,7 @@ async fn read_stream(
                                     });
                                 }
                                 Err(e) => {
-                                    log::error!("Error: {:?}", e);
+                                    log::error!("Error: {e:?}");
                                     records.push(RedisStreamReadResult {
                                         id,
                                         seq: seq.fetch_add(1, Ordering::SeqCst),
@@ -462,7 +456,7 @@ async fn read_stream(
                                 }
                             },
                             Err(e) => {
-                                log::error!("Error: {:?}", e);
+                                log::error!("Error: {e:?}");
                                 records.push(RedisStreamReadResult {
                                     id,
                                     seq: seq.fetch_add(1, Ordering::SeqCst),

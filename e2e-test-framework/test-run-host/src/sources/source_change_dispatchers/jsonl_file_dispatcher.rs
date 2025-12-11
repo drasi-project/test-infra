@@ -59,14 +59,11 @@ impl JsonlFileSourceChangeDispatcher {
         def: &JsonlFileSourceChangeDispatcherDefinition,
         output_storage: &TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating JsonlFileSourceChangeDispatcher from {:?}, ", def);
+        log::debug!("Creating JsonlFileSourceChangeDispatcher from {def:?}, ");
 
         let folder_path = output_storage.source_change_path.clone();
         let settings = JsonlFileSourceChangeDispatcherSettings::new(def, folder_path)?;
-        log::trace!(
-            "Creating JsonlFileSourceChangeDispatcher with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating JsonlFileSourceChangeDispatcher with settings {settings:?}, ");
 
         // Make sure the local change_data_folder exists, if not, create it.
         // If the folder cannot be created, return an error.

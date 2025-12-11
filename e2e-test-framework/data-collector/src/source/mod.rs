@@ -38,7 +38,7 @@ impl DataCollectionSource {
         config: DataCollectionSourceConfig,
         storage: DataCollectionSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating DataCollectionSource from config {:#?}", config);
+        log::debug!("Creating DataCollectionSource from config {config:#?}");
 
         let source_id = config.source_id.clone();
 

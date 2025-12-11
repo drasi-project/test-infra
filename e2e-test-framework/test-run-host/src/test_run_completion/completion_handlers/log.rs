@@ -70,10 +70,10 @@ impl LogCompletionHandler {
         );
 
         match self.log_level {
-            LogLevel::Debug => log::debug!("{}", message),
-            LogLevel::Info => log::info!("{}", message),
-            LogLevel::Warn => log::warn!("{}", message),
-            LogLevel::Error => log::error!("{}", message),
+            LogLevel::Debug => log::debug!("{message}"),
+            LogLevel::Info => log::info!("{message}"),
+            LogLevel::Warn => log::warn!("{message}"),
+            LogLevel::Error => log::error!("{message}"),
         }
     }
 }

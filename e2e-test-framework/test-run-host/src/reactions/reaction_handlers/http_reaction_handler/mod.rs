@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for handler code
+#![allow(clippy::unwrap_used)]
+
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
@@ -85,7 +88,7 @@ impl HttpReactionHandler {
         definition: HttpReactionHandlerDefinition,
     ) -> anyhow::Result<Box<dyn ReactionOutputHandler + Send + Sync>> {
         let settings = HttpReactionHandlerSettings::new(id, definition)?;
-        log::trace!("Creating HttpReactionHandler with settings {:?}", settings);
+        log::trace!("Creating HttpReactionHandler with settings {settings:?}");
 
         let notifier = Arc::new(Notify::new());
         let status = Arc::new(RwLock::new(ReactionHandlerStatus::Uninitialized));
@@ -273,11 +276,11 @@ async fn http_server_thread(
     let addr = match format!("{}:{}", settings.host, settings.port).parse::<SocketAddr>() {
         Ok(addr) => addr,
         Err(e) => {
-            log::error!("Failed to parse server address: {}", e);
+            log::error!("Failed to parse server address: {e}");
             *status.write().await = ReactionHandlerStatus::Error;
             let _ = result_handler_tx_channel
                 .send(ReactionHandlerMessage::Error(ReactionHandlerError::new(
-                    format!("Invalid HTTP server address: {}", e),
+                    format!("Invalid HTTP server address: {e}"),
                     false,
                 )))
                 .await;
@@ -299,11 +302,11 @@ async fn http_server_thread(
         });
 
     if let Err(e) = server.await {
-        log::error!("HTTP server error: {}", e);
+        log::error!("HTTP server error: {e}");
         *status.write().await = ReactionHandlerStatus::Error;
         let _ = result_handler_tx_channel
             .send(ReactionHandlerMessage::Error(ReactionHandlerError::new(
-                format!("HTTP server error: {}", e),
+                format!("HTTP server error: {e}"),
                 false,
             )))
             .await;
@@ -443,7 +446,7 @@ async fn handle_reaction(
                         timestamp: chrono::DateTime::from_timestamp_nanos(
                             invocation_time_ns as i64,
                         ),
-                        invocation_id: Some(format!("{}-{}", query_id, sequence)),
+                        invocation_id: Some(format!("{query_id}-{sequence}")),
                         metadata: Some(metadata),
                     },
                 };
@@ -453,7 +456,7 @@ async fn handle_reaction(
                     .send(ReactionHandlerMessage::Invocation(invocation))
                     .await
                 {
-                    log::error!("Failed to send batch reaction message: {}", e);
+                    log::error!("Failed to send batch reaction message: {e}");
                 }
             }
         }
@@ -513,7 +516,7 @@ async fn handle_reaction(
             payload: ReactionHandlerPayload {
                 value: reaction_data,
                 timestamp: chrono::DateTime::from_timestamp_nanos(invocation_time_ns as i64),
-                invocation_id: Some(format!("{}-{}", query_id, sequence)),
+                invocation_id: Some(format!("{query_id}-{sequence}")),
                 metadata: Some(metadata),
             },
         };
@@ -532,7 +535,7 @@ async fn handle_reaction(
         {
             Ok(_) => (StatusCode::OK, "OK"),
             Err(e) => {
-                log::error!("Failed to send reaction message: {}", e);
+                log::error!("Failed to send reaction message: {e}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
             }
         }

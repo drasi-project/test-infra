@@ -142,7 +142,7 @@ pub(crate) async fn start_web_api(cfg: Params) {
         .route("/acquire", post(post_acquire_handler))
         .layer(axum::extract::Extension(Arc::new(cfg)));
 
-    log::info!("\n\nTest Proxy Web API listening on http://{}", addr);
+    log::info!("\n\nTest Proxy Web API listening on http://{addr}");
 
     let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
@@ -152,7 +152,7 @@ pub(crate) async fn start_web_api(cfg: Params) {
     log::info!("\n\nPress CTRL-C to stop the Test Proxy...\n\n");
 
     if let Err(err) = graceful.await {
-        log::error!("Test Proxy error: {}", err);
+        log::error!("Test Proxy error: {err}");
     }
 }
 
@@ -193,7 +193,7 @@ pub async fn post_acquire_handler(
     cfg: Extension<Arc<Params>>,
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestProxyWebApiError> {
-    log::debug!("Processing call - post_acquire - {:?}", body);
+    log::debug!("Processing call - post_acquire - {body:?}");
 
     let url = format!(
         "http://{}:{}/api/test_runs/{}/sources/{}/bootstrap",
@@ -205,7 +205,7 @@ pub async fn post_acquire_handler(
         node_labels: acquire_body.node_labels,
         rel_labels: acquire_body.rel_labels,
     };
-    log::debug!("Calling Test Service - {:?}, with {:?}", url, src_req_body);
+    log::debug!("Calling Test Service - {url:?}, with {src_req_body:?}");
 
     let client = Client::new();
     let response = client
@@ -225,7 +225,7 @@ pub async fn post_acquire_handler(
             Ok(Json(AcquireResponseBody::from(data)).into_response())
         }
         Err(e) => {
-            log::error!("Error: {:?}", e);
+            log::error!("Error: {e:?}");
             Err(e.into())
         }
     }

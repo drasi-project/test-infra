@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for observer code
+#![allow(clippy::unwrap_used)]
+
 //! QueryResultObserver implementation using query-specific output handlers
 //!
 //! This module provides a QueryResultObserver that uses query-specific
@@ -53,8 +56,8 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::test_run_completion::LifecycleTx;
 use super::{result_stream_loggers::ResultStreamLoggerConfig, TestRunQueryOverrides};
+use crate::test_run_completion::LifecycleTx;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum QueryResultObserverStatus {
@@ -426,14 +429,17 @@ impl QueryResultObserver {
 
         let (observer_tx_channel, observer_rx_channel) = tokio::sync::mpsc::channel(100);
         let lifecycle_tx_clone = lifecycle_tx.clone();
-        let observer_thread_handle =
-            tokio::spawn(observer_thread(observer_rx_channel, settings.clone(), lifecycle_tx_clone));
+        let observer_thread_handle = tokio::spawn(observer_thread(
+            observer_rx_channel,
+            settings.clone(),
+            lifecycle_tx_clone,
+        ));
 
         Ok(Self {
             settings,
             observer_tx_channel,
             _observer_thread_handle: Arc::new(Mutex::new(observer_thread_handle)),
-            _lifecycle_tx: lifecycle_tx
+            _lifecycle_tx: lifecycle_tx,
         })
     }
 
@@ -468,7 +474,7 @@ impl QueryResultObserver {
                     state: observer_response.state,
                 })
             }
-            Err(e) => anyhow::bail!("Error sending command to QueryResultObserver: {:?}", e),
+            Err(e) => anyhow::bail!("Error sending command to QueryResultObserver: {e:?}"),
         }
     }
 
@@ -514,7 +520,7 @@ impl QueryResultObserverInternalState {
         settings: QueryResultObserverSettings,
         lifecycle_tx: LifecycleTx,
     ) -> anyhow::Result<Self> {
-        log::debug!("Initializing QueryResultObserver using {:?}", settings);
+        log::debug!("Initializing QueryResultObserver using {settings:?}");
 
         let metrics = QueryResultObserverMetrics {
             observer_create_time_ns: SystemTime::now()
@@ -650,7 +656,7 @@ impl QueryResultObserverInternalState {
             match serde_json::from_value::<QueryResultRecord>(record.payload.value.clone()) {
                 Ok(result) => result,
                 Err(e) => {
-                    log::error!("Failed to parse query result: {}", e);
+                    log::error!("Failed to parse query result: {e}");
                     return Ok(());
                 }
             };
@@ -743,7 +749,7 @@ impl QueryResultObserverInternalState {
         &mut self,
         message: QueryHandlerMessage,
     ) -> anyhow::Result<()> {
-        log::trace!("Received output handler message: {:?}", message);
+        log::trace!("Received output handler message: {message:?}");
 
         match message {
             QueryHandlerMessage::Control(QueryControlSignal::Stop) => {
@@ -799,7 +805,7 @@ impl QueryResultObserverInternalState {
             }
             QueryHandlerMessage::Error(error) => {
                 self.transition_to_error_state(
-                    &format!("Error in output handler: {:?}", error),
+                    &format!("Error in output handler: {error:?}"),
                     None,
                 );
             }
@@ -825,7 +831,7 @@ impl QueryResultObserverInternalState {
 
             let r = message.response_tx.unwrap().send(message_response);
             if let Err(e) = r {
-                anyhow::bail!("Error sending message response back to caller: {:?}", e);
+                anyhow::bail!("Error sending message response back to caller: {e:?}");
             }
         } else {
             let transition_response = match self.status {
@@ -851,7 +857,7 @@ impl QueryResultObserverInternalState {
 
                 let r = message.response_tx.unwrap().send(message_response);
                 if let Err(e) = r {
-                    anyhow::bail!("Error sending message response back to caller: {:?}", e);
+                    anyhow::bail!("Error sending message response back to caller: {e:?}");
                 }
             }
         }
@@ -1018,7 +1024,7 @@ impl QueryResultObserverInternalState {
                 self.handler_status = QueryHandlerStatus::Stopped;
             }
             Err(e) => {
-                self.transition_to_error_state("Error stopping output handler", Some(&e));
+                self.transition_to_error_state("Error stopping output handler", Some(e));
             }
         }
 
@@ -1036,19 +1042,15 @@ impl QueryResultObserverInternalState {
 
     fn transition_to_error_state(&mut self, error_message: &str, error: Option<&anyhow::Error>) {
         let msg = match error {
-            Some(e) => format!("{}: {:?}", error_message, e),
+            Some(e) => format!("{error_message}: {e:?}"),
             None => error_message.to_string(),
         };
 
         if self.status == QueryResultObserverStatus::Error {
-            log::error!(
-                "QueryResultObserver is already in an Error state. Received error: {}",
-                msg
-            );
+            log::error!("QueryResultObserver is already in an Error state. Received error: {msg}");
         } else {
             log::error!(
-                "QueryResultObserver transitioned to an Error state. Received error: {}",
-                msg
+                "QueryResultObserver transitioned to an Error state. Received error: {msg}"
             );
             self.status = QueryResultObserverStatus::Error;
             let error_time_ns = SystemTime::now()
@@ -1058,7 +1060,8 @@ impl QueryResultObserverInternalState {
             self.metrics.observer_stop_time_ns = error_time_ns;
 
             // Emit lifecycle event
-            self.lifecycle_tx.query_error(self.settings.id.clone(), msg.clone());
+            self.lifecycle_tx
+                .query_error(self.settings.id.clone(), msg.clone());
 
             self.error_message = Some(msg);
         }
@@ -1078,7 +1081,7 @@ impl QueryResultObserverInternalState {
         {
             Ok(_) => {}
             Err(e) => {
-                log::error!("Error writing result summary to output storage: {:?}", e);
+                log::error!("Error writing result summary to output storage: {e:?}");
             }
         }
     }
@@ -1111,7 +1114,7 @@ async fn observer_thread(
                     }
                     None => {
                         // Unrecoverable error.
-                        log::error!("Command channel closed. Exiting QueryResultObserver: {:?}", state);
+                        log::error!("Command channel closed. Exiting QueryResultObserver: {state:?}");
                         break;
                     }
                 }
@@ -1134,7 +1137,7 @@ async fn observer_thread(
                     }
                     None => {
                         // Unrecoverable error.
-                        log::error!("OutputHandler channel closed. Exiting QueryResultObserver: {:?}", state);
+                        log::error!("OutputHandler channel closed. Exiting QueryResultObserver: {state:?}");
                         break;
                     }
                 }

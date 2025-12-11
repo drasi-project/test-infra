@@ -70,14 +70,11 @@ impl AzureStorageBlobTestRepoClient {
         common_config: CommonTestRepoConfig,
         unique_config: AzureStorageBlobTestRepoConfig,
     ) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
-        log::debug!("Creating AzureStorageBlobTestRepoClient from common_config:{:?} and unique_config:{:?}, ", common_config, unique_config);
+        log::debug!("Creating AzureStorageBlobTestRepoClient from common_config:{common_config:?} and unique_config:{unique_config:?}, ");
 
         let settings =
             AzureStorageBlobTestRepoClientSettings::new(common_config, unique_config).await?;
-        log::trace!(
-            "Creating AzureStorageBlobTestRepoClients with settings: {:?}, ",
-            settings
-        );
+        log::trace!("Creating AzureStorageBlobTestRepoClients with settings: {settings:?}, ");
 
         Ok(Box::new(Self { settings }))
     }
@@ -97,41 +94,32 @@ impl AzureStorageBlobTestRepoClient {
         repo_folder: String,
         local_folder: PathBuf,
     ) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
-        log::debug!(
-            "Downloading Bootstrap Script Files from {:?} to {:?}",
-            repo_folder,
-            local_folder
-        );
+        log::debug!("Downloading Bootstrap Script Files from {repo_folder:?} to {local_folder:?}");
 
         let mut file_path_list =
             download_test_repo_folder(self.create_container_client()?, local_folder, repo_folder)
                 .await?;
-        log::trace!("Bootstrap Script Files: {:?}", file_path_list);
+        log::trace!("Bootstrap Script Files: {file_path_list:?}");
 
         // Sort the list of files by the file name to get them in the correct order for processing.
         file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
         // Group the files by the data type name, which is the parent folder name of the file and turn it into a HashMap
         // using the data type name as the key and a vector of file paths as the value.
-        let mut file_path_map = HashMap::new();
+        let mut file_path_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
         for file_path in file_path_list {
             let data_type_name = file_path
                 .parent()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string();
-            if !file_path_map.contains_key(&data_type_name) {
-                file_path_map.insert(data_type_name.clone(), vec![]);
-            }
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
             file_path_map
-                .get_mut(&data_type_name)
-                .unwrap()
+                .entry(data_type_name)
+                .or_default()
                 .push(file_path);
         }
-        log::trace!("Bootstrap Script Map: {:?}", file_path_map);
+        log::trace!("Bootstrap Script Map: {file_path_map:?}");
 
         Ok(file_path_map)
     }
@@ -142,15 +130,13 @@ impl AzureStorageBlobTestRepoClient {
         local_folder: PathBuf,
     ) -> anyhow::Result<Vec<PathBuf>> {
         log::debug!(
-            "Downloading Source Change Script Files from {:?} to {:?}",
-            repo_folder,
-            local_folder
+            "Downloading Source Change Script Files from {repo_folder:?} to {local_folder:?}"
         );
 
         let mut file_path_list =
             download_test_repo_folder(self.create_container_client()?, local_folder, repo_folder)
                 .await?;
-        log::trace!("Change Scripts Files: {:?}", file_path_list);
+        log::trace!("Change Scripts Files: {file_path_list:?}");
 
         // Sort the list of files by the file name to get them in the correct order for processing.
         file_path_list.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
@@ -166,18 +152,12 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
         test_id: String,
         test_def_path: PathBuf,
     ) -> anyhow::Result<()> {
-        log::debug!(
-            "Copying TestDefinition - {:?} to folder {:?}",
-            test_id,
-            test_def_path
-        );
+        log::debug!("Copying TestDefinition - {test_id:?} to folder {test_def_path:?}");
 
         // If the TestDefinition already exists, return an error.
         if test_def_path.exists() {
             return Err(anyhow::anyhow!(
-                "Test Definition ID: {} already exists in location {:?}",
-                test_id,
-                test_def_path
+                "Test Definition ID: {test_id} already exists in location {test_def_path:?}"
             ));
         }
 
@@ -277,8 +257,9 @@ async fn download_test_repo_folder(
                     let blob_name = blob.name;
 
                     // Create the local file path for the blob.
-                    let stripped_blob_file_name =
-                        blob_name.strip_prefix(&remote_repo_folder).unwrap();
+                    let stripped_blob_file_name = blob_name
+                        .strip_prefix(&remote_repo_folder)
+                        .unwrap_or(&blob_name);
                     let local_file_path = local_repo_folder.clone().join(stripped_blob_file_name);
 
                     // Process the blob as a directory if it doesn't have an extension.
@@ -295,7 +276,7 @@ async fn download_test_repo_folder(
                             tasks.push(task);
                         }
                         None => {
-                            log::trace!("Creating directory: {:?}", local_file_path);
+                            log::trace!("Creating directory: {local_file_path:?}");
                             tokio::fs::create_dir_all(local_file_path).await?;
                         }
                         _ => {}
@@ -321,7 +302,7 @@ async fn download_test_repo_file(
     log::debug!(
         "Downloading  file {} to {}",
         blob_client.blob_name(),
-        local_file_path.to_str().unwrap()
+        local_file_path.to_string_lossy()
     );
 
     // Create the local file to hold the blob data.
@@ -339,7 +320,7 @@ async fn download_test_repo_file(
                     let _ = local_file.write_all(&bytes).await;
                 }
                 Err(e) => {
-                    log::error!("Error getting blob data: {}", e);
+                    log::error!("Error getting blob data: {e}");
                     return Err(e.into());
                 }
             };

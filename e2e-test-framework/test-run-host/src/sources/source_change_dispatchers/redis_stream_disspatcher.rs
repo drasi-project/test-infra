@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for dispatcher code
+#![allow(clippy::unwrap_used)]
+
 use async_trait::async_trait;
 use hex;
 use rand::rngs::StdRng;
@@ -92,7 +95,7 @@ impl RedisStreamSourceChangeDispatcherSettings {
             stream_name: def
                 .stream_name
                 .clone()
-                .unwrap_or(format!("{}-change", source_id)),
+                .unwrap_or(format!("{source_id}-change")),
         })
     }
 }
@@ -109,14 +112,11 @@ impl RedisStreamSourceChangeDispatcher {
         def: &RedisStreamSourceChangeDispatcherDefinition,
         output_storage: &TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating RedisStreamSourceChangeDispatcher from {:?}", def);
+        log::debug!("Creating RedisStreamSourceChangeDispatcher from {def:?}");
 
         let source_id = output_storage.id.test_source_id.clone();
         let settings = RedisStreamSourceChangeDispatcherSettings::new(def, source_id)?;
-        log::trace!(
-            "Creating RedisStreamSourceChangeDispatcher with settings {:?}",
-            settings
-        );
+        log::trace!("Creating RedisStreamSourceChangeDispatcher with settings {settings:?}");
 
         let redis_url = format!("redis://{}:{}", &settings.host, &settings.port);
         let client = match redis::Client::open(redis_url) {
@@ -125,7 +125,7 @@ impl RedisStreamSourceChangeDispatcher {
                 client
             }
             Err(e) => {
-                anyhow::bail!("Failed to create Redis client: {:?}", e);
+                anyhow::bail!("Failed to create Redis client: {e:?}");
             }
         };
 
@@ -135,7 +135,7 @@ impl RedisStreamSourceChangeDispatcher {
                 con
             }
             Err(e) => {
-                anyhow::bail!("Failed to connect to Redis: {:?}", e);
+                anyhow::bail!("Failed to connect to Redis: {e:?}");
             }
         };
 
@@ -179,7 +179,7 @@ impl SourceChangeDispatcher for RedisStreamSourceChangeDispatcher {
         // Format traceparent according to W3C trace context spec
         // Format: 00-<trace-id>-<span-id>-01
         // where 00 is version and 01 is flags (sampled)
-        let traceparent = format!("00-{}-{}-01", trace_id_hex, span_id_hex);
+        let traceparent = format!("00-{trace_id_hex}-{span_id_hex}-01");
 
         // For a root span, traceid follows the same format in this schema
         let traceid = traceparent.clone();
@@ -208,7 +208,7 @@ impl SourceChangeDispatcher for RedisStreamSourceChangeDispatcher {
             .xadd(&self.settings.stream_name, "*", &[("data", &q_event_json)])
             .await?;
 
-        log::trace!("Dispatched source change event to Redis Stream: {}", result);
+        log::trace!("Dispatched source change event to Redis Stream: {result}");
 
         Ok(())
     }

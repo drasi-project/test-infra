@@ -247,11 +247,11 @@ impl AdaptiveHttpSourceChangeDispatcher {
         let endpoint = if let Some(ep) = &definition.endpoint {
             ep.clone()
         } else {
-            format!("/sources/{}/events", source_id)
+            format!("/sources/{source_id}/events")
         };
 
         // For Drasi Server adaptive source, batch endpoint has /batch suffix
-        let batch_endpoint = format!("{}/batch", endpoint);
+        let batch_endpoint = format!("{endpoint}/batch");
 
         // Create HTTP client with connection pooling (HTTP/1.1 for compatibility)
         let client = Client::builder()
@@ -305,7 +305,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
             let mut failed_batches = 0u64;
             let mut total_events = 0u64;
 
-            info!("Adaptive HTTP batcher started for source {}", source_id);
+            info!("Adaptive HTTP batcher started for source {source_id}");
 
             while let Some(batch) = batcher.next_batch().await {
                 if batch.is_empty() {
@@ -315,7 +315,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
                 let batch_size = batch.len();
                 total_events += batch_size as u64;
 
-                debug!("Adaptive HTTP batch ready with {} events", batch_size);
+                debug!("Adaptive HTTP batch ready with {batch_size} events");
 
                 // Convert events to HttpChangeEvent Direct Format
                 let http_events: Vec<HttpChangeEvent> = batch
@@ -346,7 +346,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
                 // Send batch or individual events
                 let success = if batch_enabled && http_events.len() > 1 {
                     // Send as batch - Drasi Server adaptive source expects BatchEventRequest
-                    let batch_url = format!("{}:{}{}", url, port, batch_endpoint);
+                    let batch_url = format!("{url}:{port}{batch_endpoint}");
                     let batch_request = BatchEventRequest {
                         events: http_events.clone(),
                     };
@@ -367,7 +367,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
                         Ok(response) => {
                             let status = response.status();
                             if status.is_success() {
-                                debug!("Batch of {} events sent successfully", batch_size);
+                                debug!("Batch of {batch_size} events sent successfully");
                                 true
                             } else {
                                 // Get response body for debugging
@@ -376,20 +376,19 @@ impl AdaptiveHttpSourceChangeDispatcher {
                                     .await
                                     .unwrap_or_else(|_| "Failed to get response body".to_string());
                                 error!(
-                                    "Batch request failed with status: {} - Response: {}",
-                                    status, body
+                                    "Batch request failed with status: {status} - Response: {body}"
                                 );
                                 false
                             }
                         }
                         Err(e) => {
-                            error!("Failed to send batch: {}", e);
+                            error!("Failed to send batch: {e}");
                             false
                         }
                     }
                 } else {
                     // Send individual events
-                    let single_url = format!("{}:{}{}", url, port, endpoint);
+                    let single_url = format!("{url}:{port}{endpoint}");
                     let mut all_success = true;
 
                     for event in http_events {
@@ -404,7 +403,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
                                 }
                             }
                             Err(e) => {
-                                error!("Failed to send event: {}", e);
+                                error!("Failed to send event: {e}");
                                 all_success = false;
                             }
                         }
@@ -420,15 +419,13 @@ impl AdaptiveHttpSourceChangeDispatcher {
 
                 if (successful_batches + failed_batches) % 100 == 0 {
                     info!(
-                        "Adaptive HTTP metrics - Successful: {}, Failed: {}, Total events: {}",
-                        successful_batches, failed_batches, total_events
+                        "Adaptive HTTP metrics - Successful: {successful_batches}, Failed: {failed_batches}, Total events: {total_events}"
                     );
                 }
             }
 
             info!(
-                "Adaptive HTTP batcher completed - Successful: {}, Failed: {}, Total events: {}",
-                successful_batches, failed_batches, total_events
+                "Adaptive HTTP batcher completed - Successful: {successful_batches}, Failed: {failed_batches}, Total events: {total_events}"
             );
         });
 
@@ -452,9 +449,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(anyhow::anyhow!(
-                "HTTP request failed with status {}: {}",
-                status,
-                error_text
+                "HTTP request failed with status {status}: {error_text}"
             ));
         }
 

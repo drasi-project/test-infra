@@ -22,7 +22,7 @@ spec:
       properties:
           PORT: 4002
           SOURCE_ID: "facilities-db"
-          TEST_RUN_ID: "github_dev_repo.building_comfort.test_run_001"
+          TEST_RUN_ID: "github_dev_repo.building_comfort_small.test_run_001"
           TEST_SOURCE_ID: "facilities-db"
           TEST_SERVICE_HOST: "drasi-test-service"
           TEST_SERVICE_PORT: 63123
@@ -31,7 +31,7 @@ spec:
       properties:
           PORT: 80
           SOURCE_ID: "facilities-db"
-          TEST_RUN_ID: "github_dev_repo.building_comfort.test_run_001"
+          TEST_RUN_ID: "github_dev_repo.building_comfort_small.test_run_001"
           TEST_SOURCE_ID: "facilities-db"
           TEST_SERVICE_HOST: "drasi-test-service"
           TEST_SERVICE_PORT: 63123

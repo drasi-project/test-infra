@@ -69,19 +69,12 @@ impl JsonlFileResultStreamLogger {
         def: &JsonlFileResultStreamLoggerConfig,
         output_storage: &TestRunQueryStorage,
     ) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!(
-            "Creating JsonlFileResultStreamLogger for {} from {:?}, ",
-            test_run_query_id,
-            def
-        );
+        log::debug!("Creating JsonlFileResultStreamLogger for {test_run_query_id} from {def:?}, ");
 
         let folder_path = output_storage.result_change_path.join("jsonl_file");
         let settings =
             JsonlFileResultStreamLoggerSettings::new(test_run_query_id, def, folder_path)?;
-        log::trace!(
-            "Creating JsonlFileResultStreamLogger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating JsonlFileResultStreamLogger with settings {settings:?}, ");
 
         if !std::path::Path::new(&settings.folder_path).exists() {
             match create_dir_all(&settings.folder_path).await {

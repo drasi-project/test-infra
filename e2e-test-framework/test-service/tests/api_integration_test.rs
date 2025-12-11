@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::unwrap_used)]
+
 use axum::http::StatusCode;
-use reqwest;
 use serde_json::json;
 
 const BASE_URL: &str = "http://localhost:8080";
@@ -22,7 +23,7 @@ const BASE_URL: &str = "http://localhost:8080";
 #[ignore] // Run with `cargo test -- --ignored` when service is running
 async fn test_service_info_endpoint() {
     let client = reqwest::Client::new();
-    let response = client.get(format!("{}/", BASE_URL)).send().await.unwrap();
+    let response = client.get(format!("{BASE_URL}/")).send().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let body: serde_json::Value = response.json().await.unwrap();
@@ -50,7 +51,7 @@ async fn test_direct_source_endpoints_return_404() {
 
     for endpoint in endpoints {
         let response = client
-            .get(format!("{}{}", BASE_URL, endpoint))
+            .get(format!("{BASE_URL}{endpoint}"))
             .send()
             .await
             .unwrap();
@@ -58,8 +59,7 @@ async fn test_direct_source_endpoints_return_404() {
         assert_eq!(
             response.status(),
             StatusCode::NOT_FOUND,
-            "Endpoint {} should return 404",
-            endpoint
+            "Endpoint {endpoint} should return 404"
         );
     }
 }
@@ -81,7 +81,7 @@ async fn test_test_run_crud_operations() {
     });
 
     let response = client
-        .post(format!("{}/api/test_runs", BASE_URL))
+        .post(format!("{BASE_URL}/api/test_runs"))
         .json(&test_run_config)
         .send()
         .await
@@ -93,7 +93,7 @@ async fn test_test_run_crud_operations() {
 
     // List test runs
     let response = client
-        .get(format!("{}/api/test_runs", BASE_URL))
+        .get(format!("{BASE_URL}/api/test_runs"))
         .send()
         .await
         .unwrap();
@@ -104,7 +104,7 @@ async fn test_test_run_crud_operations() {
 
     // Get specific test run
     let response = client
-        .get(format!("{}/api/test_runs/{}", BASE_URL, run_id))
+        .get(format!("{BASE_URL}/api/test_runs/{run_id}"))
         .send()
         .await
         .unwrap();
@@ -115,7 +115,7 @@ async fn test_test_run_crud_operations() {
 
     // Delete test run
     let response = client
-        .delete(format!("{}/api/test_runs/{}", BASE_URL, run_id))
+        .delete(format!("{BASE_URL}/api/test_runs/{run_id}"))
         .send()
         .await
         .unwrap();
@@ -140,7 +140,7 @@ async fn test_test_run_source_operations() {
     });
 
     let response = client
-        .post(format!("{}/api/test_runs", BASE_URL))
+        .post(format!("{BASE_URL}/api/test_runs"))
         .json(&test_run_config)
         .send()
         .await
@@ -151,7 +151,7 @@ async fn test_test_run_source_operations() {
 
     // List sources (should be empty)
     let response = client
-        .get(format!("{}/api/test_runs/{}/sources", BASE_URL, run_id))
+        .get(format!("{BASE_URL}/api/test_runs/{run_id}/sources"))
         .send()
         .await
         .unwrap();
@@ -173,7 +173,7 @@ async fn test_test_run_source_operations() {
     });
 
     let response = client
-        .post(format!("{}/api/test_runs/{}/sources", BASE_URL, run_id))
+        .post(format!("{BASE_URL}/api/test_runs/{run_id}/sources"))
         .json(&source_config)
         .send()
         .await
@@ -183,7 +183,7 @@ async fn test_test_run_source_operations() {
 
     // Clean up
     client
-        .delete(format!("{}/api/test_runs/{}", BASE_URL, run_id))
+        .delete(format!("{BASE_URL}/api/test_runs/{run_id}"))
         .send()
         .await
         .unwrap();
@@ -206,7 +206,7 @@ async fn test_test_run_query_operations() {
     });
 
     let response = client
-        .post(format!("{}/api/test_runs", BASE_URL))
+        .post(format!("{BASE_URL}/api/test_runs"))
         .json(&test_run_config)
         .send()
         .await
@@ -217,7 +217,7 @@ async fn test_test_run_query_operations() {
 
     // List queries (should be empty)
     let response = client
-        .get(format!("{}/api/test_runs/{}/queries", BASE_URL, run_id))
+        .get(format!("{BASE_URL}/api/test_runs/{run_id}/queries"))
         .send()
         .await
         .unwrap();
@@ -228,7 +228,7 @@ async fn test_test_run_query_operations() {
 
     // Clean up
     client
-        .delete(format!("{}/api/test_runs/{}", BASE_URL, run_id))
+        .delete(format!("{BASE_URL}/api/test_runs/{run_id}"))
         .send()
         .await
         .unwrap();
@@ -241,7 +241,7 @@ async fn test_repos_endpoint_exists() {
 
     // Test that repos endpoint still exists
     let response = client
-        .get(format!("{}/test_repos", BASE_URL))
+        .get(format!("{BASE_URL}/test_repos"))
         .send()
         .await
         .unwrap();

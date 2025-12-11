@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::super::*;
     use crate::{TestDataStore, TestDataStoreConfig};

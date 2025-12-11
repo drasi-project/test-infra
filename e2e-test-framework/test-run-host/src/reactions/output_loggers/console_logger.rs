@@ -57,23 +57,17 @@ impl ConsoleOutputLogger {
         test_run_reaction_id: TestRunReactionId,
         def: &ConsoleOutputLoggerConfig,
     ) -> anyhow::Result<Box<dyn OutputLogger + Send + Sync>> {
-        log::debug!(
-            "Creating ConsoleOutputLogger for {} from {:?}, ",
-            test_run_reaction_id,
-            def
-        );
+        log::debug!("Creating ConsoleOutputLogger for {test_run_reaction_id} from {def:?}, ");
 
         let settings = ConsoleOutputLoggerSettings::new(test_run_reaction_id, def)?;
-        log::trace!(
-            "Creating ConsoleOutputLogger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating ConsoleOutputLogger with settings {settings:?}, ");
 
         Ok(Box::new(Self { settings }))
     }
 }
 
 #[async_trait]
+#[allow(clippy::print_stdout)]
 impl OutputLogger for ConsoleOutputLogger {
     async fn end_test_run(&mut self) -> anyhow::Result<OutputLoggerResult> {
         Ok(OutputLoggerResult {
@@ -100,10 +94,10 @@ impl OutputLogger for ConsoleOutputLogger {
                     time, record.id, record.sequence, reaction_type, query_id, request_method, request_path
                 );
                 if !request_body.is_null() {
-                    println!("  Request Body: {}", request_body);
+                    println!("  Request Body: {request_body}");
                 }
                 if !headers.is_empty() {
-                    println!("  Headers: {:?}", headers);
+                    println!("  Headers: {headers:?}");
                 }
             }
             HandlerPayload::ReactionOutput { reaction_output } => {

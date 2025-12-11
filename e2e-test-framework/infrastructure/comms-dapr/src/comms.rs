@@ -60,7 +60,10 @@ impl Publisher for DaprHttpPublisher {
                 if res.status().is_success() {
                     Ok(())
                 } else {
-                    Err(Box::new(res.error_for_status().unwrap_err()))
+                    match res.error_for_status() {
+                        Err(e) => Err(Box::new(e)),
+                        Ok(_) => Ok(()), // This shouldn't happen if status is not success
+                    }
                 }
             }
             Err(e) => Err(Box::new(e)),
@@ -97,17 +100,22 @@ impl Invoker for DaprHttpInvoker {
         let mut request_headers = reqwest::header::HeaderMap::new();
         let headers = headers.headers.clone();
         for (key, value) in headers.iter() {
-            request_headers.insert(
-                key.parse::<reqwest::header::HeaderName>().unwrap(),
-                value.parse().unwrap(),
-            );
+            if let (Ok(header_name), Ok(header_value)) =
+                (key.parse::<reqwest::header::HeaderName>(), value.parse())
+            {
+                request_headers.insert(header_name, header_value);
+            }
         }
 
         if !request_headers.contains_key("Content-Type") {
-            request_headers.insert("Content-Type", "application/json".parse().unwrap());
+            if let Ok(content_type) = "application/json".parse() {
+                request_headers.insert("Content-Type", content_type);
+            }
         }
 
-        request_headers.insert("dapr-app-id", app_id.parse().unwrap());
+        if let Ok(app_id_value) = app_id.parse() {
+            request_headers.insert("dapr-app-id", app_id_value);
+        }
 
         let response = self
             .client

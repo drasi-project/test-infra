@@ -33,7 +33,6 @@ pub struct ErrorResponse {
     pub details: Option<String>,
 }
 
-
 #[derive(OpenApi)]
 #[openapi(
     paths(

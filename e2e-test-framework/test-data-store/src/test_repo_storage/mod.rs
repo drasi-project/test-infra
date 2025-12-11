@@ -35,29 +35,20 @@ fn parse_test_definition(content: &str, file_path: &str) -> anyhow::Result<TestD
     // Try YAML first
     match serde_yaml::from_str::<TestDefinition>(content) {
         Ok(test_def) => {
-            log::debug!(
-                "Successfully parsed test definition as YAML from: {}",
-                file_path
-            );
+            log::debug!("Successfully parsed test definition as YAML from: {file_path}");
             Ok(test_def)
         }
         Err(yaml_err) => {
             // If YAML fails, try JSON
             match serde_json::from_str::<TestDefinition>(content) {
                 Ok(test_def) => {
-                    log::debug!(
-                        "Successfully parsed test definition as JSON from: {}",
-                        file_path
-                    );
+                    log::debug!("Successfully parsed test definition as JSON from: {file_path}");
                     Ok(test_def)
                 }
                 Err(json_err) => {
                     // Both failed, return detailed error
                     Err(anyhow::anyhow!(
-                        "Failed to parse test definition file '{}':\n  YAML: {}\n  JSON: {}",
-                        file_path,
-                        yaml_err,
-                        json_err
+                        "Failed to parse test definition file '{file_path}':\n  YAML: {yaml_err}\n  JSON: {json_err}"
                     ))
                 }
             }
@@ -98,8 +89,8 @@ impl TestRepoStore {
             test_repos: HashMap::new(),
         };
 
-        if initial_repos.is_some() {
-            for repo in initial_repos.unwrap() {
+        if let Some(repos) = initial_repos {
+            for repo in repos {
                 store.add_test_repo(repo, false).await?;
             }
         }
@@ -151,10 +142,15 @@ impl TestRepoStore {
 
     pub async fn get_test_repo_storage(&self, id: &str) -> anyhow::Result<TestRepoStorage> {
         if self.path.join(id).exists() {
+            let repo_config = self
+                .test_repos
+                .get(id)
+                .ok_or_else(|| anyhow::anyhow!("Test Repo config for ID {id:?} not found"))?
+                .clone();
             Ok(TestRepoStorage {
                 id: id.to_string(),
                 path: self.path.join(id),
-                repo_config: self.test_repos.get(id).unwrap().clone(),
+                repo_config,
             })
         } else {
             anyhow::bail!("Test Repo with ID {:?} not found", &id);
@@ -214,7 +210,7 @@ impl TestRepoStorage {
     pub async fn add_remote_test(&self, id: &str, replace: bool) -> anyhow::Result<TestStorage> {
         log::debug!("Adding Remote ((replace = {}) ) Test ID {:?}", replace, &id);
 
-        let test_def_path = self.path.join(format!("{}.test", id));
+        let test_def_path = self.path.join(format!("{id}.test"));
         let test_path = self.path.join(id);
 
         if replace {
@@ -245,10 +241,10 @@ impl TestRepoStorage {
     }
 
     pub async fn get_test_definition(&self, id: &str) -> anyhow::Result<TestDefinition> {
-        log::debug!("Getting Test Definition for ID {:?}", id);
+        log::debug!("Getting Test Definition for ID {id:?}");
 
-        let test_definition_path = self.path.join(format!("{}.test", id));
-        log::debug!("Looking in {:?}", test_definition_path);
+        let test_definition_path = self.path.join(format!("{id}.test"));
+        log::debug!("Looking in {test_definition_path:?}");
 
         if !test_definition_path.exists() {
             anyhow::bail!("Test with ID {:?} not found", &id);
@@ -277,9 +273,9 @@ impl TestRepoStorage {
     }
 
     pub async fn get_test_storage(&self, id: &str) -> anyhow::Result<TestStorage> {
-        log::debug!("Getting Test Storage for ID {:?}", id);
+        log::debug!("Getting Test Storage for ID {id:?}");
 
-        let test_definition_path = self.path.join(format!("{}.test", id));
+        let test_definition_path = self.path.join(format!("{id}.test"));
 
         if !test_definition_path.exists() {
             anyhow::bail!("Test with ID {:?} not found", &id);
@@ -406,7 +402,7 @@ pub struct TestSourceStorage {
 
 impl TestSourceStorage {
     pub async fn get_script_files(&self) -> anyhow::Result<TestSourceScriptSet> {
-        let mut bootstrap_data_script_files = HashMap::new();
+        let mut bootstrap_data_script_files: HashMap<String, Vec<PathBuf>> = HashMap::new();
         let mut source_change_script_files = Vec::new();
 
         if let models::TestSourceDefinition::Script(def) = &self.test_source_definition {
@@ -432,18 +428,13 @@ impl TestSourceStorage {
                 for file_path in file_path_list {
                     let data_type_name = file_path
                         .parent()
-                        .unwrap()
-                        .file_name()
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                        .to_string();
-                    if !bootstrap_data_script_files.contains_key(&data_type_name) {
-                        bootstrap_data_script_files.insert(data_type_name.clone(), vec![]);
-                    }
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| n.to_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
                     bootstrap_data_script_files
-                        .get_mut(&data_type_name)
-                        .unwrap()
+                        .entry(data_type_name)
+                        .or_default()
                         .push(file_path);
                 }
             }

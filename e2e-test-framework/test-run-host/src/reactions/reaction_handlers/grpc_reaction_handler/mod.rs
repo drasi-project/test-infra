@@ -114,7 +114,7 @@ impl GrpcServerImpl {
             self.tx
                 .send(message)
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to send message to output handler: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to send message to output handler: {e}"))?;
         } else {
             // Send each item as a separate invocation
             for json_result in json_results {
@@ -140,7 +140,7 @@ impl GrpcServerImpl {
 
                 let message = ReactionHandlerMessage::Invocation(invocation);
                 self.tx.send(message).await.map_err(|e| {
-                    anyhow::anyhow!("Failed to send message to output handler: {}", e)
+                    anyhow::anyhow!("Failed to send message to output handler: {e}")
                 })?;
             }
         }
@@ -303,10 +303,7 @@ impl ReactionService for GrpcServerImpl {
 
         let response = ReactionHealthCheckResponse {
             status: 1, // STATUS_HEALTHY = 1 from the proto
-            message: format!(
-                "Reaction handler is healthy. Processed {} invocations",
-                count
-            ),
+            message: format!("Reaction handler is healthy. Processed {count} invocations"),
             version: env!("CARGO_PKG_VERSION").to_string(),
             pending_items: 0, // We don't queue items in this implementation
         };
@@ -441,7 +438,7 @@ impl ReactionOutputHandler for GrpcReactionHandler {
     }
 
     async fn status(&self) -> ReactionHandlerStatus {
-        self.status.read().await.clone()
+        *self.status.read().await
     }
 
     async fn metrics(&self) -> Option<serde_json::Value> {

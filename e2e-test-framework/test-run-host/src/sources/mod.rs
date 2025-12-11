@@ -66,7 +66,7 @@ impl FromStr for SourceStartMode {
             "bootstrap" => Ok(Self::Bootstrap),
             "manual" => Ok(Self::Manual),
             _ => {
-                anyhow::bail!("Invalid SourceStartMode value:{}", s);
+                anyhow::bail!("Invalid SourceStartMode value:{s}");
             }
         }
     }

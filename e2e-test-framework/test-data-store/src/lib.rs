@@ -150,7 +150,7 @@ impl TestDataStore {
             #[allow(deprecated)]
             data_store_path: Some(
                 TempDir::new()
-                    .unwrap()
+                    .expect("Failed to create temporary directory for TestDataStore")
                     .into_path()
                     .to_string_lossy()
                     .to_string(),
@@ -535,7 +535,7 @@ impl Drop for TestDataStore {
 
             match std::fs::remove_dir_all(&self.root_path) {
                 Ok(_) => log::info!("TestDataStore deleted successfully (in Drop)."),
-                Err(err) => log::error!("Error deleting TestDataStore (in Drop): {:?}", err),
+                Err(err) => log::error!("Error deleting TestDataStore (in Drop): {err:?}"),
             }
         }
     }
@@ -575,39 +575,37 @@ mod tests {
 
     #[tokio::test]
     async fn test_temp_testdatastore_initial_test_repos() -> anyhow::Result<()> {
-        let mut test_repos: Vec<TestRepoConfig> = Vec::new();
-
-        test_repos.push(TestRepoConfig::LocalStorage {
-            common_config: CommonTestRepoConfig {
-                id: "test_repo_1".to_string(),
-                local_tests: Vec::new(),
+        let test_repos: Vec<TestRepoConfig> = vec![
+            TestRepoConfig::LocalStorage {
+                common_config: CommonTestRepoConfig {
+                    id: "test_repo_1".to_string(),
+                    local_tests: Vec::new(),
+                },
+                unique_config: LocalStorageTestRepoConfig { source_path: None },
             },
-            unique_config: LocalStorageTestRepoConfig { source_path: None },
-        });
-
-        test_repos.push(TestRepoConfig::LocalStorage {
-            common_config: CommonTestRepoConfig {
-                id: "test_repo_2".to_string(),
-                local_tests: Vec::new(),
+            TestRepoConfig::LocalStorage {
+                common_config: CommonTestRepoConfig {
+                    id: "test_repo_2".to_string(),
+                    local_tests: Vec::new(),
+                },
+                unique_config: LocalStorageTestRepoConfig {
+                    source_path: Some("test_source_path".to_string()),
+                },
             },
-            unique_config: LocalStorageTestRepoConfig {
-                source_path: Some("test_source_path".to_string()),
+            TestRepoConfig::AzureStorageBlob {
+                common_config: CommonTestRepoConfig {
+                    id: "test_repo_3".to_string(),
+                    local_tests: Vec::new(),
+                },
+                unique_config: AzureStorageBlobTestRepoConfig {
+                    account_name: "test_account_name".to_string(),
+                    access_key: "test_access_key".to_string(),
+                    container: "test_container".to_string(),
+                    force_cache_refresh: false,
+                    root_path: "test_root_path".to_string(),
+                },
             },
-        });
-
-        test_repos.push(TestRepoConfig::AzureStorageBlob {
-            common_config: CommonTestRepoConfig {
-                id: "test_repo_3".to_string(),
-                local_tests: Vec::new(),
-            },
-            unique_config: AzureStorageBlobTestRepoConfig {
-                account_name: "test_account_name".to_string(),
-                access_key: "test_access_key".to_string(),
-                container: "test_container".to_string(),
-                force_cache_refresh: false,
-                root_path: "test_root_path".to_string(),
-            },
-        });
+        ];
 
         let data_store = TestDataStore::new_temp(Some(test_repos)).await?;
 
@@ -680,39 +678,37 @@ mod tests {
         let temp_dir = TempDir::new()?;
         let temp_dir_path = temp_dir.path();
 
-        let mut test_repos: Vec<TestRepoConfig> = Vec::new();
-
-        test_repos.push(TestRepoConfig::LocalStorage {
-            common_config: CommonTestRepoConfig {
-                id: "test_repo_1".to_string(),
-                local_tests: Vec::new(),
+        let test_repos: Vec<TestRepoConfig> = vec![
+            TestRepoConfig::LocalStorage {
+                common_config: CommonTestRepoConfig {
+                    id: "test_repo_1".to_string(),
+                    local_tests: Vec::new(),
+                },
+                unique_config: LocalStorageTestRepoConfig { source_path: None },
             },
-            unique_config: LocalStorageTestRepoConfig { source_path: None },
-        });
-
-        test_repos.push(TestRepoConfig::LocalStorage {
-            common_config: CommonTestRepoConfig {
-                id: "test_repo_2".to_string(),
-                local_tests: Vec::new(),
+            TestRepoConfig::LocalStorage {
+                common_config: CommonTestRepoConfig {
+                    id: "test_repo_2".to_string(),
+                    local_tests: Vec::new(),
+                },
+                unique_config: LocalStorageTestRepoConfig {
+                    source_path: Some("test_source_path".to_string()),
+                },
             },
-            unique_config: LocalStorageTestRepoConfig {
-                source_path: Some("test_source_path".to_string()),
+            TestRepoConfig::AzureStorageBlob {
+                common_config: CommonTestRepoConfig {
+                    id: "test_repo_3".to_string(),
+                    local_tests: Vec::new(),
+                },
+                unique_config: AzureStorageBlobTestRepoConfig {
+                    account_name: "test_account_name".to_string(),
+                    access_key: "test_access_key".to_string(),
+                    container: "test_container".to_string(),
+                    force_cache_refresh: false,
+                    root_path: "test_root_path".to_string(),
+                },
             },
-        });
-
-        test_repos.push(TestRepoConfig::AzureStorageBlob {
-            common_config: CommonTestRepoConfig {
-                id: "test_repo_3".to_string(),
-                local_tests: Vec::new(),
-            },
-            unique_config: AzureStorageBlobTestRepoConfig {
-                account_name: "test_account_name".to_string(),
-                access_key: "test_access_key".to_string(),
-                container: "test_container".to_string(),
-                force_cache_refresh: false,
-                root_path: "test_root_path".to_string(),
-            },
-        });
+        ];
 
         let data_store_config = TestDataStoreConfig {
             data_store_path: Some(temp_dir_path.to_string_lossy().to_string()),

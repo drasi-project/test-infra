@@ -27,6 +27,7 @@ on:
             - main
             - release/*
             - feature/*
+            - feature-lib
 
 permissions:
     contents: read

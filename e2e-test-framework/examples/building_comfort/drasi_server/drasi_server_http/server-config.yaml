@@ -1,0 +1,51 @@
+# Drasi Server Configuration for HTTP Test
+server:
+  host: 0.0.0.0
+  port: 8080
+  log_level: info  # Override with RUST_LOG environment variable if needed
+  disable_persistence: true
+
+server_core:
+  priority_queue_capacity: 10000
+
+sources:
+  - id: facilities-db
+    source_type: http
+    auto_start: true
+    properties:
+      host: 0.0.0.0
+      port: 9000
+
+queries:
+  - id: building-comfort
+    query: |
+      MATCH (r:Room)
+      RETURN r
+    sources:
+      - facilities-db
+    auto_start: true
+
+reactions:
+  - id: rooms-http
+    reaction_type: http
+    queries:
+      - building-comfort
+    auto_start: true
+    properties:
+      base_url: http://127.0.0.1:9001
+      method: POST
+      headers:
+        Content-Type: application/json
+      batch_size: 1000
+      timeout_ms: 5000
+      queries:
+        building-comfort:
+          added:
+            url: /reaction
+            method: POST
+          updated:
+            url: /reaction
+            method: POST
+          deleted:
+            url: /reaction
+            method: POST

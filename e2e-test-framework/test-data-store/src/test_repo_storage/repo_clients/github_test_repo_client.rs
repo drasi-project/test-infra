@@ -19,9 +19,11 @@ use reqwest::Client;
 use serde_json::Value;
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::test_repo_storage::models::{BootstrapDataGeneratorDefinition, SourceChangeGeneratorDefinition, TestSourceDefinition};
+use crate::test_repo_storage::models::{
+    BootstrapDataGeneratorDefinition, SourceChangeGeneratorDefinition, TestSourceDefinition,
+};
 
-use super::{GithubTestRepoConfig, CommonTestRepoConfig, RemoteTestRepoClient};
+use super::{CommonTestRepoConfig, GithubTestRepoConfig, RemoteTestRepoClient};
 
 #[derive(Debug)]
 pub struct GithubTestRepoClientSettings {
@@ -35,7 +37,10 @@ pub struct GithubTestRepoClientSettings {
 }
 
 impl GithubTestRepoClientSettings {
-    pub async fn new(common_config: CommonTestRepoConfig, unique_config: GithubTestRepoConfig) -> anyhow::Result<Self> {
+    pub async fn new(
+        common_config: CommonTestRepoConfig,
+        unique_config: GithubTestRepoConfig,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             force_cache_refresh: unique_config.force_cache_refresh,
             owner: unique_config.owner,
@@ -56,38 +61,46 @@ pub struct GithubTestRepoClient {
 
 impl GithubTestRepoClient {
     #[allow(clippy::new_ret_no_self)]
-    pub async fn new(common_config: CommonTestRepoConfig, unique_config: GithubTestRepoConfig) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
-        log::debug!("Creating GithubTestRepoClient from common_config:{:?} and unique_config:{:?}, ", common_config, unique_config);
+    pub async fn new(
+        common_config: CommonTestRepoConfig,
+        unique_config: GithubTestRepoConfig,
+    ) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
+        log::debug!(
+            "Creating GithubTestRepoClient from common_config:{common_config:?} and unique_config:{unique_config:?}, "
+        );
 
         let settings = GithubTestRepoClientSettings::new(common_config, unique_config).await?;
-        log::trace!("Creating GithubTestRepoClient with settings: {:?}, ", settings);
-        
-        let mut client_builder = Client::builder()
-            .user_agent("drasi-test-framework/1.0");
-        
+        log::trace!("Creating GithubTestRepoClient with settings: {settings:?}, ");
+
+        let mut client_builder = Client::builder().user_agent("drasi-test-framework/1.0");
+
         // Add headers
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "X-GitHub-Api-Version",
-            reqwest::header::HeaderValue::from_static("2022-11-28")
+            reqwest::header::HeaderValue::from_static("2022-11-28"),
         );
-        
+
         // Add authorization header if token is provided
         if let Some(token) = &settings.token {
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&format!("token {}", token))?
+                reqwest::header::HeaderValue::from_str(&format!("token {token}"))?,
             );
         }
-        
+
         client_builder = client_builder.default_headers(headers);
-        
+
         let client = client_builder.build()?;
-        
+
         Ok(Box::new(Self { settings, client }))
     }
 
-    async fn download_bootstrap_script_files(&self, _repo_folder: String, _local_folder: PathBuf) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
+    async fn download_bootstrap_script_files(
+        &self,
+        _repo_folder: String,
+        _local_folder: PathBuf,
+    ) -> anyhow::Result<HashMap<String, Vec<PathBuf>>> {
         todo!();
         // This is still WIP; we will work on this when we have fixed the population test.
         // log::debug!("Downloading Bootstrap Script Files from {:?} to {:?}", repo_folder, local_folder);
@@ -120,7 +133,11 @@ impl GithubTestRepoClient {
         // Ok(file_path_map)
     }
 
-    async fn download_change_script_files(&self, _repo_folder: String, _local_folder: PathBuf) -> anyhow::Result<Vec<PathBuf>> {
+    async fn download_change_script_files(
+        &self,
+        _repo_folder: String,
+        _local_folder: PathBuf,
+    ) -> anyhow::Result<Vec<PathBuf>> {
         todo!();
         // This is still WIP; we will work on this when we have fixed the population test.
         // log::debug!("Downloading Source Change Script Files from {:?} to {:?}", repo_folder, local_folder);
@@ -144,17 +161,23 @@ impl GithubTestRepoClient {
 
 #[async_trait]
 impl RemoteTestRepoClient for GithubTestRepoClient {
-    async fn copy_test_definition(&self, test_id: String, test_def_path: PathBuf) -> anyhow::Result<()> {
-        log::debug!("Copying TestDefinition - {:?} to folder {:?}", test_id, test_def_path);
+    async fn copy_test_definition(
+        &self,
+        test_id: String,
+        test_def_path: PathBuf,
+    ) -> anyhow::Result<()> {
+        log::debug!("Copying TestDefinition - {test_id:?} to folder {test_def_path:?}");
 
         // If the TestDefinition already exists, return an error.
         if test_def_path.exists() {
-            return Err(anyhow::anyhow!("Test Definition ID: {} already exists in location {:?}", test_id, test_def_path));
-        }   
-        
+            return Err(anyhow::anyhow!(
+                "Test Definition ID: {test_id} already exists in location {test_def_path:?}"
+            ));
+        }
+
         // Formulate the remote repo path for the test definition file
-        let remote_path = format!("{}/{}.test.json", self.settings.root_path, test_id);
-    
+        let remote_path = format!("{}/{}.test", self.settings.root_path, test_id);
+
         // Download the test definition file
         download_github_repo_file(
             self.client.clone(),
@@ -162,42 +185,58 @@ impl RemoteTestRepoClient for GithubTestRepoClient {
             self.settings.repo.clone(),
             self.settings.branch.clone(),
             remote_path,
-            test_def_path
-        ).await?;
+            test_def_path,
+        )
+        .await?;
 
         Ok(())
     }
 
-    async fn copy_test_source_content(&self, test_data_folder: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
+    async fn copy_test_source_content(
+        &self,
+        test_data_folder: String,
+        test_source_def: &TestSourceDefinition,
+        test_source_data_path: PathBuf,
+    ) -> anyhow::Result<()> {
         if let TestSourceDefinition::Script(def) = test_source_def {
-            log::debug!("Copying Test Source Content for {:?} to {:?}", def.common.test_source_id, test_source_data_path);
+            log::debug!(
+                "Copying Test Source Content for {:?} to {:?}",
+                def.common.test_source_id,
+                test_source_data_path
+            );
 
             // Bootstrap Data Script Files
-            if let Some(BootstrapDataGeneratorDefinition::Script(bs_def)) = &def.bootstrap_data_generator {
-            // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
-            let repo_path = format!(
-                "{}/{}/sources/{}/{}/", 
-                self.settings.root_path, 
-                test_data_folder, 
-                def.common.test_source_id, 
-                &bs_def.script_file_folder
-            );
-            let local_path = test_source_data_path.join(&bs_def.script_file_folder);
-            self.download_bootstrap_script_files(repo_path, local_path).await?;
+            if let Some(BootstrapDataGeneratorDefinition::Script(bs_def)) =
+                &def.bootstrap_data_generator
+            {
+                // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
+                let repo_path = format!(
+                    "{}/{}/sources/{}/{}/",
+                    self.settings.root_path,
+                    test_data_folder,
+                    def.common.test_source_id,
+                    &bs_def.script_file_folder
+                );
+                let local_path = test_source_data_path.join(&bs_def.script_file_folder);
+                self.download_bootstrap_script_files(repo_path, local_path)
+                    .await?;
             }
 
             // Source Change Script Files
-            if let Some(SourceChangeGeneratorDefinition::Script(sc_def)) = &def.source_change_generator {
-            // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
-            let repo_path = format!(
-                "{}/{}/sources/{}/{}/", 
-                self.settings.root_path, 
-                test_data_folder, 
-                def.common.test_source_id, 
-                &sc_def.script_file_folder
-            );
-            let local_path = test_source_data_path.join(&sc_def.script_file_folder);
-            self.download_change_script_files(repo_path, local_path).await?;
+            if let Some(SourceChangeGeneratorDefinition::Script(sc_def)) =
+                &def.source_change_generator
+            {
+                // TODO: Currently we only have a single folder to download. In the future we might have a list of files.
+                let repo_path = format!(
+                    "{}/{}/sources/{}/{}/",
+                    self.settings.root_path,
+                    test_data_folder,
+                    def.common.test_source_id,
+                    &sc_def.script_file_folder
+                );
+                let local_path = test_source_data_path.join(&sc_def.script_file_folder);
+                self.download_change_script_files(repo_path, local_path)
+                    .await?;
             }
         }
 
@@ -211,38 +250,47 @@ async fn download_github_repo_file(
     repo: String,
     branch: String,
     remote_path: String,
-    local_file_path: PathBuf
+    local_file_path: PathBuf,
 ) -> anyhow::Result<()> {
-    log::debug!("Downloading file {} to {}", remote_path, local_file_path.to_str().unwrap());
-
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
-        owner,
-        repo,
+    log::debug!(
+        "Downloading file {} to {}",
         remote_path,
-        branch
+        local_file_path.to_string_lossy()
     );
 
-    let response = client.get(&url)
-                    .header("Accept", "application/vnd.github.v3+json")
-                    .header("X-GitHub-Api-Version", "2022-11-28")
-                    .send().await?;
-    
+    let url =
+        format!("https://api.github.com/repos/{owner}/{repo}/contents/{remote_path}?ref={branch}");
+
+    let response = client
+        .get(&url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await?;
+
     if !response.status().is_success() {
-        return Err(anyhow::anyhow!("Failed to fetch file from GitHub: {} - {}", response.status(), response.text().await.unwrap_or_default()));
+        return Err(anyhow::anyhow!(
+            "Failed to fetch file from GitHub: {} - {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
     }
 
     let json: Value = response.json().await?;
 
-    let download_url = json.get("download_url")
+    let download_url = json
+        .get("download_url")
         .and_then(|url| url.as_str())
         .ok_or_else(|| anyhow::anyhow!("No download URL found in GitHub API response"))?;
 
-    let download_response = client.get(download_url)
-        .send().await?;
+    let download_response = client.get(download_url).send().await?;
 
     if !download_response.status().is_success() {
-        return Err(anyhow::anyhow!("Failed to download file from GitHub: {} -  {}", download_response.status(), download_response.text().await.unwrap_or_default()));
+        return Err(anyhow::anyhow!(
+            "Failed to download file from GitHub: {} -  {}",
+            download_response.status(),
+            download_response.text().await.unwrap_or_default()
+        ));
     }
 
     let content = download_response.bytes().await?;
@@ -255,7 +303,6 @@ async fn download_github_repo_file(
     let mut file = File::create(&local_file_path).await?;
     file.write_all(&content).await?;
     Ok(())
-
 }
 
 // This is still WIP; we will work on this when we have fixed the population test.
@@ -266,7 +313,7 @@ fn download_github_repo_folder(
     _repo: String,
     _branch: String,
     _local_repo_folder: PathBuf,
-    _remote_repo_folder: String, 
+    _remote_repo_folder: String,
 ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<Vec<PathBuf>>> + Send>> {
     todo!();
 }
@@ -277,8 +324,7 @@ async fn list_github_directory_contents(
     _owner: &str,
     _repo: &str,
     _branch: &str,
-    _path: &str
+    _path: &str,
 ) -> anyhow::Result<Vec<Value>> {
     todo!();
 }
-

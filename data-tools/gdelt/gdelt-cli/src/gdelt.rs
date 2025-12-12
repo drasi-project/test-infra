@@ -80,6 +80,7 @@ pub struct GdeltEvent {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct GdeltMention {
     pub global_event_id: i64,         // GlobalEventID
     pub event_time_date: i64,         // EventTimeDate (e.g., 20240920164500). Event.date_added
@@ -100,6 +101,7 @@ pub struct GdeltMention {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct GdeltGraph {
     pub record_id: String,         // GKG Record ID
     pub v21_date: i64,             // Date of the GKG record

@@ -29,8 +29,10 @@ pub struct LocalStorageTestRepoClientSettings {
 }
 
 impl LocalStorageTestRepoClientSettings {
-    pub async fn new(common_config: CommonTestRepoConfig, unique_config: LocalStorageTestRepoConfig) -> anyhow::Result<Self> {
-
+    pub async fn new(
+        common_config: CommonTestRepoConfig,
+        unique_config: LocalStorageTestRepoConfig,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             source_path: unique_config.source_path.map(PathBuf::from),
             test_repo_id: common_config.id.clone(),
@@ -45,61 +47,92 @@ pub struct LocalStorageTestRepoClient {
 
 impl LocalStorageTestRepoClient {
     #[allow(clippy::new_ret_no_self)]
-    pub async fn new(common_config: CommonTestRepoConfig, unique_config: LocalStorageTestRepoConfig) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
-        log::debug!("Creating LocalStorageTestRepoClient from common_config:{:?} and unique_config:{:?}, ", common_config, unique_config);
+    pub async fn new(
+        common_config: CommonTestRepoConfig,
+        unique_config: LocalStorageTestRepoConfig,
+    ) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
+        log::debug!(
+            "Creating LocalStorageTestRepoClient from common_config:{common_config:?} and unique_config:{unique_config:?}, "
+        );
 
-        let settings = LocalStorageTestRepoClientSettings::new(common_config, unique_config).await?;
-        log::trace!("Creating LocalStorageTestRepoClient with settings: {:?}, ", settings);
-        
-        Ok(Box::new( Self { settings }))
+        let settings =
+            LocalStorageTestRepoClientSettings::new(common_config, unique_config).await?;
+        log::trace!("Creating LocalStorageTestRepoClient with settings: {settings:?}, ");
+
+        Ok(Box::new(Self { settings }))
     }
 }
 
 #[async_trait]
 impl RemoteTestRepoClient for LocalStorageTestRepoClient {
-    async fn copy_test_definition(&self, test_id: String, test_def_path: PathBuf) -> anyhow::Result<()> {
-        log::debug!("Copying TestDefinition - {:?} to path {:?}", test_id, test_def_path);
+    async fn copy_test_definition(
+        &self,
+        test_id: String,
+        test_def_path: PathBuf,
+    ) -> anyhow::Result<()> {
+        log::debug!("Copying TestDefinition - {test_id:?} to path {test_def_path:?}");
 
         // If the TestDefinition already exists, return an error.
         if test_def_path.exists() {
-            return Err(anyhow::anyhow!("Test Definition ID: {} already exists in location {:?}", test_id, test_def_path));
-        }   
+            return Err(anyhow::anyhow!(
+                "Test Definition ID: {test_id} already exists in location {test_def_path:?}"
+            ));
+        }
 
         // If there is no source_path configured for the repo client, try to use an existing file.
         // Otherwise, copy the file from the source path to the repo location.
         match self.settings.source_path {
             Some(ref source_path) => {
-                let source_file = source_path.join(format!("{}.test.json", test_id));
+                let source_file = source_path.join(format!("{test_id}.test"));
 
                 if source_file.exists() {
                     fs::copy(source_file, test_def_path).await?;
                     Ok(())
                 } else {
-                    return Err(anyhow::anyhow!("Test Definition ID: {} not found in source location {:?}", test_id, source_file));
+                    return Err(anyhow::anyhow!(
+                        "Test Definition ID: {test_id} not found in source location {source_file:?}"
+                    ));
                 }
-            },
+            }
             None => {
                 if test_def_path.exists() {
                     Ok(())
                 } else {
-                    return Err(anyhow::anyhow!("Test Definition ID: {} not found in location {:?}", test_id, test_def_path));
+                    return Err(anyhow::anyhow!(
+                        "Test Definition ID: {test_id} not found in location {test_def_path:?}"
+                    ));
                 }
             }
         }
     }
 
-    async fn copy_test_source_content(&self, test_data_folder: String, test_source_def: &TestSourceDefinition, test_source_data_path: PathBuf) -> anyhow::Result<()> {
-
+    async fn copy_test_source_content(
+        &self,
+        test_data_folder: String,
+        test_source_def: &TestSourceDefinition,
+        test_source_data_path: PathBuf,
+    ) -> anyhow::Result<()> {
         // If there is no source_path configured for the repo client, use a existing files.
         // Otherwise, copy the files from the source path to the repo location.
         if let Some(ref source_path) = self.settings.source_path {
             if let TestSourceDefinition::Script(def) = test_source_def {
-                log::debug!("Copying Test Source Content for {:?} to {:?}", def.common.test_source_id, test_source_data_path);
+                log::debug!(
+                    "Copying Test Source Content for {:?} to {:?}",
+                    def.common.test_source_id,
+                    test_source_data_path
+                );
 
-                let source = source_path.join(format!("{}/sources/{}", test_data_folder, def.common.test_source_id));
+                let source = source_path.join(format!(
+                    "{}/sources/{}",
+                    test_data_folder, def.common.test_source_id
+                ));
 
                 if !source.exists() {
-                    return Err(anyhow::anyhow!("Content for Test Source ID: {} not found in source location {:?}", def.common.test_source_id, source));
+                    return Err(anyhow::anyhow!(
+                        "Content for Test Source ID: {} not found in source location {:?}",
+                        def.common.test_source_id,
+                        source
+                    ));
                 }
 
                 copy_dir_tree(source, test_source_data_path.clone()).await?;
@@ -111,10 +144,11 @@ impl RemoteTestRepoClient for LocalStorageTestRepoClient {
 }
 
 #[allow(clippy::manual_async_fn)]
-fn copy_dir_tree_task(source: PathBuf, destination: PathBuf) -> impl std::future::Future<Output = io::Result<()>> + Send {
-    async move {
-        copy_dir_tree(source, destination).await
-    }
+fn copy_dir_tree_task(
+    source: PathBuf,
+    destination: PathBuf,
+) -> impl std::future::Future<Output = io::Result<()>> + Send {
+    async move { copy_dir_tree(source, destination).await }
 }
 
 async fn copy_dir_tree(source: PathBuf, destination: PathBuf) -> io::Result<()> {

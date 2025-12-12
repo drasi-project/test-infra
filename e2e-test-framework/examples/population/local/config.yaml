@@ -1,0 +1,91 @@
+# Population Test Configuration - YAML Format
+# This example demonstrates the E2E Test Framework using data from Wikidata
+# This is functionally identical to config.json but in YAML format
+
+data_store:
+  data_store_path: examples/population/local/test_data_cache
+  delete_on_start: true
+  delete_on_stop: true
+  test_repos:
+    - id: local_dev_repo
+      kind: LocalStorage
+      source_path: examples/population/local/dev_repo
+      local_tests:
+        - test_id: population
+          version: 1
+          description: An example of the E2E Test Framework using data from Wikidata.
+          test_folder: population_2024-01-01_small
+
+          # Query definitions
+          queries:
+            - test_query_id: city-population
+              result_stream_handler:
+                kind: RedisStream
+                host: localhost
+                port: 6379
+                stream_name: city-population-results
+                process_old_entries: true
+              stop_trigger:
+                kind: RecordSequenceNumber
+                record_sequence_number: 12411
+
+          # Source definitions
+          sources:
+            - test_source_id: geo-db
+              kind: Script
+
+              # Bootstrap data configuration
+              bootstrap_data_generator:
+                kind: Script
+                script_file_folder: bootstrap_scripts
+                time_mode: recorded
+
+              # Change dispatchers (where to send changes)
+              source_change_dispatchers:
+                - kind: Console
+                - kind: JsonlFile
+
+              # Source change generator configuration
+              source_change_generator:
+                kind: Script
+                script_file_folder: source_change_scripts
+                spacing_mode: none
+                time_mode: recorded
+
+              # Query subscribers (which queries consume this source)
+              subscribers:
+                - node_id: default
+                  query_id: continent-country-population
+                - node_id: default
+                  query_id: country-city-population
+                - node_id: default
+                  query_id: city-population
+
+# Test Run Configuration
+test_run_host:
+  test_runs:
+    - test_id: population
+      test_repo_id: local_dev_repo
+      test_run_id: test_run_001
+
+      # Query runtime configuration
+      queries:
+        - test_query_id: city-population
+          start_immediately: true
+          loggers:
+            - kind: Profiler
+              write_bootstrap_log: false
+              write_change_image: true
+              write_change_log: true
+            - kind: JsonlFile
+              max_lines_per_file: 12411
+
+      # Source runtime configuration
+      sources:
+        - test_source_id: geo-db
+          start_mode: auto
+          # Override settings for this test run
+          test_run_overrides:
+            source_change_generator:
+              spacing_mode: none
+              time_mode: live

@@ -1,0 +1,112 @@
+{
+  "name": "Stock Market Trading Simulation",
+  "id": "stock_market_test",
+  "test_repo": "local",
+  "config": {
+    "test_source_definitions": [
+      {
+        "test_source_id": "stock_trades",
+        "model_data_generator": {
+          "kind": "StockTrade",
+          "stock_definitions": [
+            {
+              "symbol": "MSFT",
+              "name": "Microsoft Corporation"
+            },
+            {
+              "symbol": "AAPL",
+              "name": "Apple Inc."
+            },
+            {
+              "symbol": "GOOGL",
+              "name": "Alphabet Inc."
+            },
+            {
+              "symbol": "AMZN",
+              "name": "Amazon.com Inc."
+            },
+            {
+              "symbol": "NVDA",
+              "name": "NVIDIA Corporation"
+            },
+            {
+              "symbol": "TSLA",
+              "name": "Tesla Inc."
+            },
+            {
+              "symbol": "META",
+              "name": "Meta Platforms Inc."
+            },
+            {
+              "symbol": "BRK.B",
+              "name": "Berkshire Hathaway Inc."
+            },
+            {
+              "symbol": "V",
+              "name": "Visa Inc."
+            },
+            {
+              "symbol": "JPM",
+              "name": "JPMorgan Chase & Co."
+            }
+          ],
+          "price_init": [150.0, 50.0],
+          "price_change": [0.5, 2.0],
+          "price_momentum": [5, 2.0, 0.3],
+          "price_range": [10.0, 5000.0],
+          "volume_init": [10000000, 5000000.0],
+          "volume_change": [100000, 50000.0],
+          "volume_momentum": [3, 1.5, 0.4],
+          "volume_range": [1000, 100000000],
+          "change_count": 10000,
+          "change_interval": [100000000, 50000000.0, 50000000, 200000000],
+          "spacing_mode": "Original",
+          "time_mode": "Live",
+          "seed": 42,
+          "send_initial_inserts": true
+        },
+        "source_change_dispatchers": [
+          {
+            "kind": "Console",
+            "max_lines": 100
+          }
+        ]
+      }
+    ],
+    "test_query_definitions": [
+      {
+        "test_query_id": "stock_prices",
+        "stop_trigger": {
+          "kind": "RecordCount",
+          "record_count": 100
+        }
+      }
+    ]
+  },
+  "test_run_config": {
+    "test_run_id": "stock_market_run_001",
+    "test_run_sources": [
+      {
+        "test_source_id": "stock_trades"
+      }
+    ],
+    "test_run_queries": [
+      {
+        "test_query_id": "stock_prices",
+        "result_stream_handler": {
+          "kind": "RedisStream",
+          "host": "localhost",
+          "port": 6379,
+          "stream_name": "stock_prices_stream",
+          "process_old_entries": false
+        },
+        "output_loggers": [
+          {
+            "kind": "JsonlFile",
+            "max_lines_per_file": 10000
+          }
+        ]
+      }
+    ]
+  }
+}

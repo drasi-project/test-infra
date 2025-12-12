@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf, pin::Pin, task::{Context, Poll}};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    path::PathBuf,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use futures::Stream;
 use serde::Serialize;
 
-use super::{BootstrapScriptRecord, BootstrapFinishRecord, BootstrapHeaderRecord};
+use super::{BootstrapFinishRecord, BootstrapHeaderRecord, BootstrapScriptRecord};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BootstrapScriptReaderError {
@@ -33,9 +39,9 @@ pub enum BootstrapScriptReaderError {
     InvalidScriptFile(String),
 }
 
-// The SequencedBootstrapScriptRecord struct wraps a BootstrapScriptRecord and ensures that each record has a 
+// The SequencedBootstrapScriptRecord struct wraps a BootstrapScriptRecord and ensures that each record has a
 // sequence number and an offset_ns field. The sequence number is the order in which the record was read
-// from the script files. The offset_ns field the nanos since the start of the script starting time, 
+// from the script files. The offset_ns field the nanos since the start of the script starting time,
 // which is the start_time field in the Header record.
 #[derive(Clone, Debug, Serialize)]
 pub struct SequencedBootstrapScriptRecord {
@@ -57,7 +63,10 @@ impl BootstrapScriptReader {
         // Only supports JSONL files. Return error if any of the files are not JSONL files.
         for file in &files {
             if file.extension().map(|ext| ext != "jsonl").unwrap_or(true) {
-                return Err(BootstrapScriptReaderError::InvalidScriptFile(file.to_string_lossy().into_owned()).into());
+                return Err(BootstrapScriptReaderError::InvalidScriptFile(
+                    file.to_string_lossy().into_owned(),
+                )
+                .into());
             }
         }
 
@@ -77,7 +86,10 @@ impl BootstrapScriptReader {
                 reader.header = header;
                 Ok(reader)
             } else {
-                Err(BootstrapScriptReaderError::MissingHeader(reader.get_current_file_name()).into())
+                Err(
+                    BootstrapScriptReaderError::MissingHeader(reader.get_current_file_name())
+                        .into(),
+                )
             }
         } else {
             Err(BootstrapScriptReaderError::MissingHeader(reader.get_current_file_name()).into())
@@ -94,8 +106,8 @@ impl BootstrapScriptReader {
     // If there are no more records to read, None is returned.
     fn get_next_record(&mut self) -> anyhow::Result<SequencedBootstrapScriptRecord> {
         // Once we have reached the end of the script, always return the Finish record.
-        if self.footer.is_some() {
-            return Ok(self.footer.as_ref().unwrap().clone());
+        if let Some(footer) = &self.footer {
+            return Ok(footer.clone());
         }
 
         if self.current_reader.is_none() {
@@ -108,14 +120,18 @@ impl BootstrapScriptReader {
                 Ok(0) => {
                     self.current_reader = None;
                     self.get_next_record()
-                },
+                }
                 Ok(_) => {
                     let record: BootstrapScriptRecord = match serde_json::from_str(&line) {
                         Ok(r) => r,
                         Err(e) => {
                             return Err(BootstrapScriptReaderError::BadRecordFormat(
-                                self.get_current_file_name(), e.to_string(), line).into());
-                        },
+                                self.get_current_file_name(),
+                                e.to_string(),
+                                line,
+                            )
+                            .into());
+                        }
                     };
 
                     let seq_rec = match &record {
@@ -124,7 +140,7 @@ impl BootstrapScriptReader {
                             // Return the next record, but need to increment sequence counter
                             self.seq += 1;
                             return self.get_next_record();
-                        },
+                        }
                         BootstrapScriptRecord::Header(_) => {
                             let seq_rec = SequencedBootstrapScriptRecord {
                                 record: record.clone(),
@@ -133,17 +149,17 @@ impl BootstrapScriptReader {
 
                             // Warn if there is a Header record in the middle of the script.
                             if seq_rec.seq > 0 {
-                                log::warn!("Header record found not at start of the script: {:?}", seq_rec);
+                                log::warn!(
+                                    "Header record found not at start of the script: {seq_rec:?}"
+                                );
                             }
 
                             seq_rec
+                        }
+                        _ => SequencedBootstrapScriptRecord {
+                            record: record.clone(),
+                            seq: self.seq,
                         },
-                        _ => {
-                            SequencedBootstrapScriptRecord {
-                                record: record.clone(),
-                                seq: self.seq,
-                            }
-                        },                   
                     };
                     self.seq += 1;
 
@@ -152,22 +168,25 @@ impl BootstrapScriptReader {
                         self.footer = Some(seq_rec.clone());
                     }
                     Ok(seq_rec)
-                },
+                }
                 Err(e) => Err(BootstrapScriptReaderError::FileReadError(e.to_string()).into()),
             }
         } else {
             // Generate a synthetic Finish record to mark the end of the script.
-            self.footer = Some(SequencedBootstrapScriptRecord {
-                record: BootstrapScriptRecord::Finish(BootstrapFinishRecord { description: "Auto generated at end of script.".to_string() }),
+            let footer = SequencedBootstrapScriptRecord {
+                record: BootstrapScriptRecord::Finish(BootstrapFinishRecord {
+                    description: "Auto generated at end of script.".to_string(),
+                }),
                 seq: self.seq,
-            });
-            Ok(self.footer.as_ref().unwrap().clone())
+            };
+            self.footer = Some(footer.clone());
+            Ok(footer)
         }
     }
 
     fn get_current_file_name(&self) -> String {
         if self.current_reader.is_some() {
-            let path = self.files[self.next_file_index-1].clone();
+            let path = self.files[self.next_file_index - 1].clone();
             path.to_string_lossy().into_owned()
         } else {
             "None".to_string()
@@ -180,7 +199,12 @@ impl BootstrapScriptReader {
             let file_path = &self.files[self.next_file_index];
             let file = match File::open(file_path) {
                 Ok(f) => f,
-                Err(_) => return Err(BootstrapScriptReaderError::CantOpenFile(file_path.to_string_lossy().into_owned()).into()),
+                Err(_) => {
+                    return Err(BootstrapScriptReaderError::CantOpenFile(
+                        file_path.to_string_lossy().into_owned(),
+                    )
+                    .into())
+                }
             };
             self.current_reader = Some(BufReader::new(file));
             self.next_file_index += 1;

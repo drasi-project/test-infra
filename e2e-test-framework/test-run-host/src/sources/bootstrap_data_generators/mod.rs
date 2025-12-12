@@ -20,8 +20,8 @@ use bootstrap_script_player::ScriptBootstrapDataGenerator;
 use serde::{Deserialize, Serialize};
 use test_data_store::{
     scripts::{NodeRecord, RelationRecord},
-    test_repo_storage::{models::BootstrapDataGeneratorDefinition, TestSourceStorage}, 
-    test_run_storage::{TestRunSourceId, TestRunSourceStorage}
+    test_repo_storage::{models::BootstrapDataGeneratorDefinition, TestSourceStorage},
+    test_run_storage::{TestRunSourceId, TestRunSourceStorage},
 };
 
 mod bootstrap_script_player;
@@ -56,31 +56,37 @@ impl BootstrapData {
 }
 
 #[async_trait]
-pub trait BootstrapDataGenerator : Send + Sync + std::fmt::Debug {
-    async fn get_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData>;
+pub trait BootstrapDataGenerator: Send + Sync + std::fmt::Debug {
+    async fn get_data(
+        &self,
+        node_labels: &HashSet<String>,
+        rel_labels: &HashSet<String>,
+    ) -> anyhow::Result<BootstrapData>;
 }
 
 #[async_trait]
 impl BootstrapDataGenerator for Box<dyn BootstrapDataGenerator + Send + Sync> {
-    async fn get_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
+    async fn get_data(
+        &self,
+        node_labels: &HashSet<String>,
+        rel_labels: &HashSet<String>,
+    ) -> anyhow::Result<BootstrapData> {
         (**self).get_data(node_labels, rel_labels).await
     }
 }
 
 pub async fn create_bootstrap_data_generator(
-    id: TestRunSourceId, 
+    id: TestRunSourceId,
     definition: Option<BootstrapDataGeneratorDefinition>,
-    input_storage: TestSourceStorage, 
-    output_storage: TestRunSourceStorage
+    input_storage: TestSourceStorage,
+    output_storage: TestRunSourceStorage,
 ) -> anyhow::Result<Option<Box<dyn BootstrapDataGenerator + Send + Sync>>> {
     match definition {
         None => Ok(None),
-        Some(BootstrapDataGeneratorDefinition::Script(definition)) => {
-            Ok(Some(Box::new(ScriptBootstrapDataGenerator::new(
-                id, 
-                definition, 
-                input_storage, 
-                output_storage).await?) as Box<dyn BootstrapDataGenerator + Send + Sync>))
-        }
+        Some(BootstrapDataGeneratorDefinition::Script(definition)) => Ok(Some(Box::new(
+            ScriptBootstrapDataGenerator::new(id, definition, input_storage, output_storage)
+                .await?,
+        )
+            as Box<dyn BootstrapDataGenerator + Send + Sync>)),
     }
 }

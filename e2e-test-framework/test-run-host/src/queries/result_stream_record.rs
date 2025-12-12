@@ -28,12 +28,8 @@ pub enum QueryResultRecord {
 impl QueryResultRecord {
     pub fn get_source_seq(&self) -> i64 {
         match self {
-            QueryResultRecord::Change(change) => {
-                change.base.sequence
-            },
-            QueryResultRecord::Control(control) => {
-                control.base.sequence
-            }
+            QueryResultRecord::Change(change) => change.base.sequence,
+            QueryResultRecord::Control(control) => control.base.sequence,
         }
     }
 }

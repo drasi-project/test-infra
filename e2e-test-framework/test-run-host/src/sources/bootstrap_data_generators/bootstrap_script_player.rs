@@ -17,10 +17,15 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use serde::Serialize;
 use test_data_store::{
-    scripts::{bootstrap_script_file_reader::BootstrapScriptReader, BootstrapScriptRecord, NodeRecord, RelationRecord}, 
-    test_repo_storage::{models::{ ScriptBootstrapDataGeneratorDefinition, TimeMode }, 
-    TestSourceStorage}, 
-    test_run_storage::{TestRunSourceId, TestRunSourceStorage}
+    scripts::{
+        bootstrap_script_file_reader::BootstrapScriptReader, BootstrapScriptRecord, NodeRecord,
+        RelationRecord,
+    },
+    test_repo_storage::{
+        models::{ScriptBootstrapDataGeneratorDefinition, TimeMode},
+        TestSourceStorage,
+    },
+    test_run_storage::{TestRunSourceId, TestRunSourceStorage},
 };
 
 use super::{BootstrapData, BootstrapDataGenerator};
@@ -34,10 +39,10 @@ pub struct ScriptBootstrapDataGenerator {
 
 impl ScriptBootstrapDataGenerator {
     pub async fn new(
-        test_run_source_id: TestRunSourceId, 
-        definition: ScriptBootstrapDataGeneratorDefinition, 
-        input_storage: TestSourceStorage, 
-        _output_storage: TestRunSourceStorage
+        test_run_source_id: TestRunSourceId,
+        definition: ScriptBootstrapDataGeneratorDefinition,
+        input_storage: TestSourceStorage,
+        _output_storage: TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             input_storage,
@@ -49,8 +54,12 @@ impl ScriptBootstrapDataGenerator {
 
 #[async_trait]
 impl BootstrapDataGenerator for ScriptBootstrapDataGenerator {
-    async fn get_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
-        log::debug!("Node labels: [{:?}], Rel labels: [{:?}]", node_labels, rel_labels);
+    async fn get_data(
+        &self,
+        node_labels: &HashSet<String>,
+        rel_labels: &HashSet<String>,
+    ) -> anyhow::Result<BootstrapData> {
+        log::debug!("Node labels: [{node_labels:?}], Rel labels: [{rel_labels:?}]");
 
         let mut bootstrap_data = BootstrapData::new();
 

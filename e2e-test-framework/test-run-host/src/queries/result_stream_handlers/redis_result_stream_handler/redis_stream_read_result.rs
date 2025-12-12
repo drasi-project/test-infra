@@ -14,57 +14,53 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::queries::{result_stream_handlers::ResultStreamRecord, result_stream_record::QueryResultRecord};
-
-use super::{ResultStreamHandlerError, ResultStreamHandlerMessage};
+use crate::queries::{
+    result_stream_record::QueryResultRecord, QueryHandlerError, QueryHandlerMessage,
+    QueryHandlerPayload, QueryHandlerRecord, QueryHandlerType,
+};
 
 pub struct RedisStreamReadResult {
     pub dequeue_time_ns: u64,
     pub enqueue_time_ns: u64,
-    pub error: Option<ResultStreamHandlerError>,
+    pub error: Option<QueryHandlerError>,
     pub id: String,
     pub record: Option<RedisStreamRecordData>,
     pub seq: usize,
 }
 
-impl TryInto<ResultStreamHandlerMessage> for RedisStreamReadResult {
+impl TryInto<QueryHandlerMessage> for RedisStreamReadResult {
     type Error = anyhow::Error;
 
-    fn try_into(self) -> Result<ResultStreamHandlerMessage, Self::Error> {
+    fn try_into(self) -> Result<QueryHandlerMessage, Self::Error> {
         match self.record {
             Some(record) => {
-                let result_stream_record = ResultStreamRecord {
-                    record_data: record.data,
-                    dequeue_time_ns: self.dequeue_time_ns,
-                    enqueue_time_ns: self.enqueue_time_ns,
-                    id: record.id,
-                    seq: self.seq,
-                    traceparent: record.traceparent,
-                    tracestate: record.tracestate
+                let handler_record = QueryHandlerRecord {
+                    handler_type: QueryHandlerType::RedisStream,
+                    payload: QueryHandlerPayload {
+                        value: serde_json::to_value(&record.data)?,
+                        timestamp: Some(chrono::DateTime::from_timestamp_nanos(
+                            self.dequeue_time_ns as i64,
+                        )),
+                        sequence: Some(self.seq as u64),
+                    },
                 };
 
-                Ok(ResultStreamHandlerMessage::Record(result_stream_record))
-            },
-            None => {
-                match self.error {
-                    Some(e) => {
-                        Ok(ResultStreamHandlerMessage::Error(e))
-                    },
-                    None => {
-                        Err(anyhow::anyhow!("No record or error found in stream entry"))
-                    }
-                }
+                Ok(QueryHandlerMessage::Record(handler_record))
             }
+            None => match self.error {
+                Some(e) => Ok(QueryHandlerMessage::Error(e)),
+                None => Err(anyhow::anyhow!("No record or error found in stream entry")),
+            },
         }
     }
-}    
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RedisStreamRecordData {
     pub data: QueryResultRecord,
     pub id: String,
     pub traceparent: Option<String>,
-    pub tracestate: Option<String>
+    pub tracestate: Option<String>,
 }
 
 impl TryFrom<&str> for RedisStreamRecordData {

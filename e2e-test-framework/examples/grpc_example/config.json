@@ -1,0 +1,52 @@
+{
+  "test_run_host": {
+    "test_runs": [
+      {
+        "test_id": "grpc_example",
+        "test_repo_id": "grpc_test_repo",
+        "test_run_id": "run_001",
+        "sources": [
+          {
+            "test_source_id": "source1",
+            "source_change_dispatchers": [
+              {
+                "kind": "Grpc",
+                "host": "localhost",
+                "port": 50051,
+                "timeout_seconds": 30,
+                "batch_events": true,
+                "tls": false,
+                "source_id": "source1"
+              }
+            ]
+          }
+        ],
+        "queries": [],
+        "reactions": [
+          {
+            "test_reaction_id": "reaction1",
+            "output_handler": {
+              "kind": "Grpc",
+              "host": "0.0.0.0",
+              "port": 50052,
+              "correlation_metadata_key": "x-correlation-id",
+              "query_ids": ["query1"],
+              "include_initial_state": false
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "test_data_cache": {
+    "local": {
+      "data_path": "./test_data",
+      "delete_on_stop": true
+    }
+  },
+  "test_repo": {
+    "local": {
+      "path": "./examples/grpc_example/test_repo"
+    }
+  }
+}

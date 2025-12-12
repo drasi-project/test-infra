@@ -12,27 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for test source code
+#![allow(clippy::unwrap_used)]
+
 use std::collections::HashSet;
 
 use async_trait::async_trait;
 use derive_more::Debug;
 
-use test_data_store::{test_repo_storage::{models::{ModelDataGeneratorDefinition, ModelTestSourceDefinition, QueryId, SourceChangeDispatcherDefinition, SpacingMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{
+    test_repo_storage::{
+        models::{
+            ModelDataGeneratorDefinition, ModelTestSourceDefinition, QueryId,
+            SourceChangeDispatcherDefinition, SpacingMode,
+        },
+        TestSourceStorage,
+    },
+    test_run_storage::{TestRunSourceId, TestRunSourceStorage},
+};
 
-use crate::sources::{bootstrap_data_generators::BootstrapData, model_data_generators::{create_model_data_generator, ModelDataGenerator}, source_change_generators::{ SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState}, SourceStartMode, TestRunSource, TestRunSourceConfig, TestRunSourceState};
+use crate::sources::{
+    bootstrap_data_generators::BootstrapData,
+    model_data_generators::{create_model_data_generator, ModelDataGenerator},
+    source_change_generators::{SourceChangeGeneratorCommandResponse, SourceChangeGeneratorState},
+    SourceStartMode, TestRunSource, TestRunSourceConfig, TestRunSourceState,
+};
 
 #[derive(Clone, Debug)]
 pub struct ModelTestRunSourceSettings {
     pub id: TestRunSourceId,
     pub source_change_dispatcher_defs: Vec<SourceChangeDispatcherDefinition>,
     pub model_data_generator_def: Option<ModelDataGeneratorDefinition>,
-    pub start_mode: SourceStartMode,    
+    pub start_mode: SourceStartMode,
     pub subscribers: Vec<QueryId>,
 }
 
 impl ModelTestRunSourceSettings {
-    pub fn new( cfg: &TestRunSourceConfig, def: &ModelTestSourceDefinition) -> anyhow::Result<Self> {
-            
+    pub fn new(cfg: &TestRunSourceConfig, def: &ModelTestSourceDefinition) -> anyhow::Result<Self> {
         let mut settings = Self {
             id: TestRunSourceId::try_from(cfg)?,
             source_change_dispatcher_defs: def.common.source_change_dispatchers.clone(),
@@ -51,11 +67,19 @@ impl ModelTestRunSourceSettings {
                         if let Some(time_mode) = &mdg_overrides.time_mode {
                             mdg_def.common.time_mode = time_mode.clone();
                         }
-                    },
+                    }
+                    Some(ModelDataGeneratorDefinition::StockTrade(mdg_def)) => {
+                        if let Some(spacing_mode) = &mdg_overrides.spacing_mode {
+                            mdg_def.common.spacing_mode = spacing_mode.clone();
+                        }
+                        if let Some(time_mode) = &mdg_overrides.time_mode {
+                            mdg_def.common.time_mode = time_mode.clone();
+                        }
+                    }
                     None => {}
                 }
             }
-            
+
             if let Some(dispatchers) = &overrides.source_change_dispatchers {
                 settings.source_change_dispatcher_defs = dispatchers.clone();
             }
@@ -72,19 +96,18 @@ impl ModelTestRunSourceSettings {
 #[derive(Debug)]
 pub struct ModelTestRunSource {
     pub id: TestRunSourceId,
-    pub model_data_generator: Option<Box<dyn ModelDataGenerator + Send + Sync>>,    
+    pub model_data_generator: Option<Box<dyn ModelDataGenerator + Send + Sync>>,
     pub start_mode: SourceStartMode,
-    pub subscribers: Vec<QueryId>
+    pub subscribers: Vec<QueryId>,
 }
 
 impl ModelTestRunSource {
     pub async fn new(
         cfg: &TestRunSourceConfig,
         def: &ModelTestSourceDefinition,
-        input_storage: TestSourceStorage, 
-        output_storage: TestRunSourceStorage      
+        input_storage: TestSourceStorage,
+        output_storage: TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-
         let settings = ModelTestRunSourceSettings::new(cfg, def)?;
 
         let model_data_generator = create_model_data_generator(
@@ -92,32 +115,41 @@ impl ModelTestRunSource {
             settings.model_data_generator_def,
             input_storage,
             output_storage,
-            settings.source_change_dispatcher_defs
-        ).await?;
+            settings.source_change_dispatcher_defs,
+        )
+        .await?;
 
-        let trs = Self { 
+        let trs = Self {
             id: settings.id.clone(),
             model_data_generator,
             start_mode: settings.start_mode,
             subscribers: settings.subscribers,
         };
 
-        if trs.start_mode == SourceStartMode::Auto {
-            trs.start_source_change_generator().await?;
-        }
+        // Don't auto-start here - TestRunHost will handle it after setting references
+        // if trs.start_mode == SourceStartMode::Auto {
+        //     trs.start_source_change_generator().await?;
+        // }
 
         Ok(trs)
     }
 }
 
-
 #[async_trait]
 impl TestRunSource for ModelTestRunSource {
-    async fn get_bootstrap_data(&self, node_labels: &HashSet<String>, rel_labels: &HashSet<String>) -> anyhow::Result<BootstrapData> {
-        log::debug!("Node Labels: {:?}, Rel Labels: {:?}", node_labels, rel_labels);
+    async fn get_bootstrap_data(
+        &self,
+        node_labels: &HashSet<String>,
+        rel_labels: &HashSet<String>,
+    ) -> anyhow::Result<BootstrapData> {
+        log::debug!("Node Labels: {node_labels:?}, Rel Labels: {rel_labels:?}");
 
         let bootstrap_data = if self.model_data_generator.is_some() {
-            self.model_data_generator.as_ref().unwrap().get_data(node_labels, rel_labels).await
+            self.model_data_generator
+                .as_ref()
+                .unwrap()
+                .get_data(node_labels, rel_labels)
+                .await
         } else {
             Ok(BootstrapData::new())
         };
@@ -130,7 +162,6 @@ impl TestRunSource for ModelTestRunSource {
     }
 
     async fn get_state(&self) -> anyhow::Result<TestRunSourceState> {
-
         Ok(TestRunSourceState {
             id: self.id.clone(),
             source_change_generator: self.get_source_change_generator_state().await?,
@@ -138,87 +169,133 @@ impl TestRunSource for ModelTestRunSource {
         })
     }
 
-    async fn get_source_change_generator_state(&self) -> anyhow::Result<SourceChangeGeneratorState> {
+    async fn get_source_change_generator_state(
+        &self,
+    ) -> anyhow::Result<SourceChangeGeneratorState> {
         match &self.model_data_generator {
             Some(generator) => {
                 let response = generator.get_state().await?;
                 Ok(response.state)
-            },
+            }
             None => {
-                anyhow::bail!("ModelGenerator not configured for ModelTestRunSource: {:?}", &self.id);
+                anyhow::bail!(
+                    "ModelGenerator not configured for ModelTestRunSource: {:?}",
+                    &self.id
+                );
             }
         }
     }
 
-    async fn pause_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn pause_source_change_generator(
+        &self,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.model_data_generator {
             Some(generator) => {
                 let response = generator.pause().await?;
                 Ok(response)
-            },
+            }
             None => {
-                anyhow::bail!("ModelGenerator not configured for ModelTestRunSource: {:?}", &self.id);
+                anyhow::bail!(
+                    "ModelGenerator not configured for ModelTestRunSource: {:?}",
+                    &self.id
+                );
             }
         }
     }
 
-    async fn reset_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn reset_source_change_generator(
+        &self,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.model_data_generator {
             Some(generator) => {
                 let response = generator.reset().await?;
                 Ok(response)
-            },
+            }
             None => {
-                anyhow::bail!("ModelGenerator not configured for ModelTestRunSource: {:?}", &self.id);
+                anyhow::bail!(
+                    "ModelGenerator not configured for ModelTestRunSource: {:?}",
+                    &self.id
+                );
             }
         }
-    }    
+    }
 
-    async fn skip_source_change_generator(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn skip_source_change_generator(
+        &self,
+        skips: u64,
+        spacing_mode: Option<SpacingMode>,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.model_data_generator {
             Some(generator) => {
                 let response = generator.skip(skips, spacing_mode).await?;
                 Ok(response)
-            },
+            }
             None => {
-                anyhow::bail!("SourceChangeGenerator not configured for ScriptTestRunSource: {:?}", &self.id);
+                anyhow::bail!(
+                    "SourceChangeGenerator not configured for ScriptTestRunSource: {:?}",
+                    &self.id
+                );
             }
         }
     }
 
-    async fn start_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn start_source_change_generator(
+        &self,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.model_data_generator {
             Some(generator) => {
                 let response = generator.start().await?;
                 Ok(response)
-            },
+            }
             None => {
-                anyhow::bail!("ModelGenerator not configured for ModelTestRunSource: {:?}", &self.id);
+                anyhow::bail!(
+                    "ModelGenerator not configured for ModelTestRunSource: {:?}",
+                    &self.id
+                );
             }
         }
     }
 
-    async fn step_source_change_generator(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn step_source_change_generator(
+        &self,
+        steps: u64,
+        spacing_mode: Option<SpacingMode>,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.model_data_generator {
             Some(generator) => {
                 let response = generator.step(steps, spacing_mode).await?;
                 Ok(response)
-            },
+            }
             None => {
-                anyhow::bail!("ModelGenerator not configured for ModelTestRunSource: {:?}", &self.id);
+                anyhow::bail!(
+                    "ModelGenerator not configured for ModelTestRunSource: {:?}",
+                    &self.id
+                );
             }
         }
     }
 
-    async fn stop_source_change_generator(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn stop_source_change_generator(
+        &self,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         match &self.model_data_generator {
             Some(generator) => {
                 let response = generator.stop().await?;
                 Ok(response)
-            },
-            None => {
-                anyhow::bail!("ModelGenerator not configured for ModelTestRunSource: {:?}", &self.id);
             }
+            None => {
+                anyhow::bail!(
+                    "ModelGenerator not configured for ModelTestRunSource: {:?}",
+                    &self.id
+                );
+            }
+        }
+    }
+
+    fn set_test_run_host(&self, test_run_host: std::sync::Arc<crate::TestRunHost>) {
+        // Pass TestRunHost to the model data generator
+        if let Some(generator) = &self.model_data_generator {
+            generator.set_test_run_host_on_dispatchers(test_run_host);
         }
     }
 }

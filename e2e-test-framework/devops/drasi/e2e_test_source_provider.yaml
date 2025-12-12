@@ -19,7 +19,6 @@ spec:
   services:
     proxy:
       image: e2e-proxy    
-      # image: docker.io/drasi-project/e2e-proxy:latest
       # externalImage: true
       deprovisionHandler: false
       dapr:
@@ -32,7 +31,9 @@ spec:
             default: 4002
           SOURCE_ID:
             type: string
-          TEST_RUN_SOURCE_ID:
+          TEST_RUN_ID:
+            type: string
+          TEST_SOURCE_ID:
             type: string
           TEST_SERVICE_HOST:
             type: string
@@ -45,7 +46,6 @@ spec:
             default: "error"
     reactivator:
       image: e2e-reactivator
-      # image: docker.io/drasi-project/e2e-reactivator:latest
       # externalImage: true
       deprovisionHandler: false
       dapr:
@@ -58,7 +58,9 @@ spec:
             default: 80
           SOURCE_ID:
             type: string
-          TEST_RUN_SOURCE_ID:
+          TEST_RUN_ID:
+            type: string
+          TEST_SOURCE_ID:
             type: string
           TEST_SERVICE_HOST:
             type: string

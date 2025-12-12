@@ -17,7 +17,7 @@ use std::{fmt::Write, path::PathBuf};
 use csv::ReaderBuilder;
 use tokio_postgres::{Client, NoTls, types};
 
-use crate::{gdelt::{GdeltEvent, GdeltGraph, GdeltMention}, DataType, FileInfo};
+use crate::{gdelt::GdeltEvent, DataType, FileInfo};
 
 const CREATE_EVENTS_TABLE_QUERY: &str = "
     CREATE TABLE IF NOT EXISTS gdelt_events (

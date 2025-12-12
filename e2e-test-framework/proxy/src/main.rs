@@ -25,8 +25,11 @@ pub struct Params {
     #[arg(env = "SOURCE_ID")]
     pub proxy_source_id: String,
 
-    #[arg(short = 's', long = "test_run_source_id", env = "TEST_RUN_SOURCE_ID")]
-    pub test_run_source_id: String,
+    #[arg(short = 'r', long = "test_run_id", env = "TEST_RUN_ID")]
+    pub test_run_id: String,
+
+    #[arg(short = 's', long = "test_source_id", env = "TEST_SOURCE_ID")]
+    pub test_source_id: String,
 
     #[arg(
         short = 'h',
@@ -50,7 +53,7 @@ async fn main() {
     env_logger::init();
 
     let cfg = Params::parse();
-    log::info!("Started Proxy with - {:?}", cfg);
+    log::info!("Started Proxy with - {cfg:?}");
 
     // Start the Web API.
     web_api::start_web_api(cfg).await;

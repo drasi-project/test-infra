@@ -1,0 +1,40 @@
+{
+  "test_id": "grpc_example",
+  "test_name": "gRPC Example Test",
+  "test_description": "Demonstrates gRPC-based source change dispatching and reaction handling",
+  "sources": [
+    {
+      "test_source_id": "source1",
+      "test_source_name": "gRPC Test Source",
+      "source_type": "Script",
+      "source_change_generator": {
+        "kind": "Script",
+        "generator_type": "jsonl",
+        "scripts": [
+          {
+            "filename": "changes.jsonl",
+            "script_key": "changes_script"
+          }
+        ]
+      }
+    }
+  ],
+  "queries": [],
+  "reactions": [
+    {
+      "test_reaction_id": "reaction1",
+      "test_reaction_name": "gRPC Test Reaction",
+      "output_handler": {
+        "kind": "Grpc",
+        "host": "0.0.0.0",
+        "port": 50052
+      },
+      "stop_triggers": [
+        {
+          "kind": "RecordCount",
+          "record_count": 10
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,702 @@
+# ============================================================================
+# Drasi E2E Test Framework - Comprehensive Configuration Example (YAML)
+# ============================================================================
+#
+# This file documents ALL available configuration options for the E2E Test
+# Framework Test Service. Use this as a reference when creating your own
+# test configurations.
+#
+# Notes:
+# - Fields marked "Optional" can be omitted (defaults will be used)
+# - Fields marked "Required" must be provided
+# - This example shows ALL possible options; real configs typically use a subset
+# - The framework supports both YAML and JSON formats (auto-detected)
+#
+# ============================================================================
+
+# ============================================================================
+# DATA STORE CONFIGURATION
+# ============================================================================
+# Manages test data storage, test repositories, and cache behavior
+data_store:
+  # Path where test data cache is stored
+  # Default: "drasi_data_store"
+  data_store_path: examples/comprehensive/test_data_cache
+
+  # Delete data store at startup
+  # Default: false
+  delete_on_start: true
+
+  # Delete data store when service stops
+  # Default: false
+  delete_on_stop: true
+
+  # Folder for data collection results
+  # Default: "data_collections"
+  data_collection_folder: data_collections
+
+  # Folder for test repository cache
+  # Default: "test_repos"
+  test_repo_folder: test_repos
+
+  # Folder for test run results
+  # Default: "test_runs"
+  test_run_folder: test_runs
+
+  # ============================================================================
+  # TEST REPOSITORIES
+  # ============================================================================
+  # Define where test definitions are stored (local, Azure, or GitHub)
+  test_repos:
+    # ------------------------------------------------------------------------
+    # Local Storage Repository
+    # ------------------------------------------------------------------------
+    - kind: LocalStorage
+      id: local_dev_repo
+      source_path: examples/comprehensive/dev_repo
+
+      # Inline test definitions (can also be loaded from files in source_path)
+      local_tests:
+        - test_id: comprehensive_example
+          version: 1
+          description: |
+            A comprehensive example demonstrating all configuration options
+            available in the E2E Test Framework including sources, queries,
+            reactions, and Drasi server integration.
+
+          # Folder within source_path containing test files
+          test_folder: comprehensive_test
+
+          # ====================================================================
+          # DRASI SERVER DEFINITIONS
+          # ====================================================================
+          # Define embedded Drasi Server instances for testing
+          drasi_servers:
+            - id: embedded-drasi
+              name: Embedded Drasi Server
+              description: In-process Drasi Server for testing reactive queries
+
+              config:
+                # Runtime configuration
+                runtime:
+                  worker_threads: 4
+                  max_blocking_threads: 512
+                  thread_name_prefix: drasi-worker
+                  enable_metrics: true
+
+                # Storage configuration (memory, file, or redis)
+                storage:
+                  type: memory
+                  max_size: 1000000
+
+                # Alternative storage options:
+                # storage:
+                #   type: file
+                #   path: /tmp/drasi-storage
+                #   persist: true
+                #
+                # storage:
+                #   type: redis
+                #   url: redis://localhost:6379
+                #   key_prefix: drasi:
+
+                # Authentication configuration
+                auth:
+                  type: none
+
+                # Alternative auth options:
+                # auth:
+                #   type: basic
+                #   username: admin
+                #   password: secret
+                #
+                # auth:
+                #   type: token
+                #   token: your-api-token
+                #
+                # auth:
+                #   type: oauth2
+                #   provider_url: https://auth.example.com
+                #   client_id: your-client-id
+                #   client_secret: your-client-secret
+                #   scopes: [read, write]
+
+                # Logging level: trace, debug, info, warn, error
+                log_level: info
+
+                # Sources consumed by Drasi queries
+                sources:
+                  - id: test-db
+                    source_type: application
+                    auto_start: true
+                    properties:
+                      buffer_size: 1000
+
+                # Continuous queries
+                queries:
+                  - id: active-items
+                    query: |
+                      MATCH (n:Item)
+                      WHERE n.status = 'active'
+                      RETURN elementId(n) AS ItemId, n.name, n.status
+                    sources:
+                      - test-db
+                    auto_start: true
+                    properties:
+                      output_format: json
+
+                # Reactions to query results
+                reactions:
+                  - id: alert-handler
+                    reaction_type: application
+                    queries:
+                      - active-items
+                    auto_start: true
+                    properties:
+                      notification_enabled: true
+
+                # Additional custom properties
+                extra:
+                  custom_setting: value
+                  feature_flags:
+                    enable_experimental: false
+
+          # ====================================================================
+          # SOURCE DEFINITIONS
+          # ====================================================================
+          # Define test data sources (Model or Script based)
+          sources:
+            # ------------------------------------------------------------------
+            # MODEL SOURCE - Generates synthetic data
+            # ------------------------------------------------------------------
+            - kind: Model
+              test_source_id: building-model
+
+              # Where to dispatch generated changes
+              source_change_dispatchers:
+                # Send to console for debugging
+                - kind: Console
+                  date_time_format: "%Y-%m-%d %H:%M:%S%.3f"
+
+                # Send to Drasi Server via channel
+                - kind: DrasiServerChannel
+                  drasi_server_id: embedded-drasi
+                  source_id: test-db
+                  buffer_size: 2048
+
+                # Send to Redis stream
+                - kind: RedisStream
+                  host: localhost
+                  port: 6379
+                  stream_name: building-changes
+
+                # Write to JSONL file
+                - kind: JsonlFile
+                  max_events_per_file: 10000
+
+                # Send via HTTP
+                - kind: Http
+                  url: http://localhost:8080
+                  port: 8080
+                  endpoint: /api/changes
+                  timeout_seconds: 30
+                  batch_events: true
+                  source_id: test-db
+                  adaptive_enabled: true
+                  batch_size: 100
+                  batch_timeout_ms: 1000
+
+                # Send via gRPC
+                - kind: Grpc
+                  host: localhost
+                  port: 50051
+                  timeout_seconds: 30
+                  batch_events: true
+                  tls: false
+                  source_id: test-db
+                  adaptive_enabled: false
+                  batch_size: 50
+                  batch_timeout_ms: 500
+
+                # Send via Dapr pub/sub
+                - kind: Dapr
+                  host: localhost
+                  port: 3500
+                  pubsub_name: test-pubsub
+                  pubsub_topic: test-changes
+
+              # Model data generator (BuildingHierarchy)
+              model_data_generator:
+                kind: BuildingHierarchy
+
+                # Number of change events to generate
+                change_count: 100000
+
+                # Change interval: (interval_ns, jitter_factor, min_ns, max_ns)
+                change_interval: [5000000000, 1000000000, 1000000000, 10000000000]
+
+                # Random seed for reproducibility
+                seed: 123456789
+
+                # Spacing mode: none | recorded | rate (events/sec)
+                spacing_mode: none
+
+                # Time mode: live | recorded | ISO8601 timestamp
+                time_mode: "2025-01-15T10:00:00Z"
+
+                # Building hierarchy configuration
+                # Each tuple is (mean, std_dev) for normal distribution
+                building_count: [2, 0.5]
+                floor_count: [5, 1.0]
+                room_count: [10, 2.0]
+
+                # Send initial INSERT events before changes
+                send_initial_inserts: true
+
+                # Room sensor definitions
+                room_sensors:
+                  - kind: NormalFloat
+                    id: temperature
+                    # momentum_init: (mean, std_dev, reversal_probability)
+                    momentum_init: [5, 1, 0.5]
+                    # value_change: (mean, std_dev)
+                    value_change: [1, 0.2]
+                    # value_init: (mean, std_dev)
+                    value_init: [5000, 500]
+                    # value_range: (min, max)
+                    value_range: [0, 10000]
+
+                  - kind: NormalFloat
+                    id: humidity
+                    momentum_init: [3, 0.5, 0.3]
+                    value_change: [0.5, 0.1]
+                    value_init: [6000, 400]
+                    value_range: [2000, 8000]
+
+                  - kind: NormalInt
+                    id: occupancy
+                    momentum_init: [2, 0.3, 0.4]
+                    value_change: [1, 0]
+                    value_init: [5, 2]
+                    value_range: [0, 50]
+
+              # Query subscribers (which queries consume this source)
+              subscribers:
+                - node_id: default
+                  query_id: active-items
+
+            # ------------------------------------------------------------------
+            # SCRIPT SOURCE - Replays recorded data
+            # ------------------------------------------------------------------
+            - kind: Script
+              test_source_id: recorded-events
+
+              # Bootstrap data generator (loads initial state)
+              bootstrap_data_generator:
+                kind: Script
+                script_file_folder: bootstrap_scripts
+                time_mode: recorded
+
+              # Source change generator (replays change events)
+              source_change_generator:
+                kind: Script
+                script_file_folder: change_scripts
+                spacing_mode: none  # none | recorded | rate
+                time_mode: live     # live | recorded | timestamp
+                ignore_scripted_pause_commands: false
+
+              # Change dispatchers (same options as Model source)
+              source_change_dispatchers:
+                - kind: Console
+                - kind: JsonlFile
+
+              subscribers:
+                - node_id: default
+                  query_id: active-items
+
+            # ------------------------------------------------------------------
+            # MODEL SOURCE - Stock Trading Example
+            # ------------------------------------------------------------------
+            - kind: Model
+              test_source_id: stock-trades
+
+              source_change_dispatchers:
+                - kind: Console
+
+              model_data_generator:
+                kind: StockTrade
+                change_count: 50000
+                change_interval: [1000000000, 500000000, 100000000, 5000000000]
+                seed: 987654321
+                spacing_mode: none
+                time_mode: live
+
+                # Stock definitions
+                stock_definitions:
+                  - symbol: AAPL
+                    name: Apple Inc.
+                  - symbol: GOOGL
+                    name: Alphabet Inc.
+                  - symbol: MSFT
+                    name: Microsoft Corporation
+
+                # Price configuration (mean, std_dev)
+                price_init: [150.0, 50.0]
+                price_change: [1.0, 0.5]
+                price_momentum: [5, 1.0, 0.4]
+                price_range: [50.0, 500.0]
+
+                # Volume configuration
+                volume_init: [1000000, 500000]
+                volume_change: [10000, 5000]
+                volume_momentum: [3, 0.5, 0.3]
+                volume_range: [100000, 10000000]
+
+                send_initial_inserts: true
+
+              subscribers: []
+
+          # ====================================================================
+          # QUERY DEFINITIONS
+          # ====================================================================
+          # Define queries that monitor and process source changes
+          queries:
+            - test_query_id: monitor-query
+
+              # Result stream handler (where results go)
+              result_stream_handler:
+                kind: RedisStream
+                host: localhost
+                port: 6379
+                stream_name: query-results
+                process_old_entries: false
+
+              # Alternative result stream handlers:
+              # result_stream_handler:
+              #   kind: DaprPubSub
+              #   host: localhost
+              #   port: 3500
+              #   pubsub_name: test-pubsub
+              #   pubsub_topic: query-results
+
+              # Stop trigger (when to stop the query)
+              stop_trigger:
+                kind: RecordSequenceNumber
+                record_sequence_number: 100000
+
+              # Alternative stop triggers:
+              # stop_trigger:
+              #   kind: RecordCount
+              #   record_count: 50000
+
+          # ====================================================================
+          # REACTION DEFINITIONS
+          # ====================================================================
+          # Define reactions that process query results
+          reactions:
+            - test_reaction_id: result-handler
+
+              # Output handler (where reaction results go)
+              output_handler:
+                kind: DrasiServerChannel
+                drasi_server_id: embedded-drasi
+                reaction_id: alert-handler
+                buffer_size: 1024
+
+              # Alternative output handlers:
+              # output_handler:
+              #   kind: Http
+              #   host: localhost
+              #   port: 8080
+              #   path: /api/reactions
+              #   correlation_header: X-Correlation-ID
+              #
+              # output_handler:
+              #   kind: Grpc
+              #   host: localhost
+              #   port: 50051
+              #   correlation_metadata_key: correlation-id
+              #   query_ids: [active-items]
+              #   include_initial_state: true
+              #
+              # output_handler:
+              #   kind: EventGrid
+              #   endpoint: https://example.com/eventgrid
+              #   access_key: your-access-key
+
+              # Stop triggers (multiple allowed for reactions)
+              stop_triggers:
+                - kind: RecordCount
+                  record_count: 90000
+
+    # ------------------------------------------------------------------------
+    # Azure Blob Storage Repository
+    # ------------------------------------------------------------------------
+    - kind: AzureStorageBlob
+      id: azure_repo
+      account_name: myaccount
+      access_key: "your-access-key-here"  # Masked in logs
+      container: test-data
+      root_path: tests/comprehensive
+      force_cache_refresh: false
+      local_tests: []
+
+    # ------------------------------------------------------------------------
+    # GitHub Repository
+    # ------------------------------------------------------------------------
+    - kind: GitHub
+      id: github_repo
+      owner: drasi-project
+      repo: test-repo
+      branch: main
+      root_path: tests
+      token: ghp_yourtokenhere  # Optional
+      force_cache_refresh: false
+      local_tests: []
+
+# ============================================================================
+# TEST RUN HOST CONFIGURATION
+# ============================================================================
+# Defines test runs that execute test definitions with runtime configuration
+test_run_host:
+  test_runs:
+    - test_id: comprehensive_example
+      test_repo_id: local_dev_repo
+      test_run_id: run_001
+
+      # ========================================================================
+      # DRASI SERVER RUNTIME CONFIG
+      # ========================================================================
+      # Runtime configuration for Drasi servers in this test run
+      drasi_servers:
+        - test_drasi_server_id: embedded-drasi
+          start_immediately: true
+
+          # Runtime overrides for this test run
+          test_run_overrides:
+            log_level: debug  # Override log level for this run
+
+            # Override storage configuration
+            storage:
+              type: memory
+              max_size: 2000000
+
+            # Override auth configuration
+            auth:
+              type: none
+
+      # ========================================================================
+      # SOURCE RUNTIME CONFIG
+      # ========================================================================
+      # Runtime configuration for sources in this test run
+      sources:
+        - test_source_id: building-model
+
+          # Start mode: Auto | Bootstrap | Manual
+          # Auto: Start bootstrap then changes automatically
+          # Bootstrap: Only load bootstrap data, wait for manual start
+          # Manual: Wait for manual start signal
+          start_mode: auto
+
+          # Runtime overrides for this test run
+          test_run_overrides:
+            # Override model generator settings
+            model_data_generator:
+              seed: 111111111  # Different seed for this run
+              spacing_mode: 1000  # Rate: 1000 events/sec
+              time_mode: live
+
+            # Override bootstrap generator settings
+            bootstrap_data_generator:
+              time_mode: live
+
+            # Override change generator settings
+            source_change_generator:
+              spacing_mode: none
+              time_mode: recorded
+
+            # Override dispatchers for this run
+            source_change_dispatchers:
+              - kind: Console
+              - kind: JsonlFile
+
+            # Override subscribers
+            subscribers:
+              - node_id: default
+                query_id: active-items
+
+        - test_source_id: recorded-events
+          start_mode: manual
+          test_run_overrides:
+            source_change_generator:
+              spacing_mode: recorded
+              time_mode: live
+
+        - test_source_id: stock-trades
+          start_mode: auto
+
+      # ========================================================================
+      # QUERY RUNTIME CONFIG
+      # ========================================================================
+      # Runtime configuration for queries in this test run
+      queries:
+        - test_query_id: monitor-query
+          start_immediately: true
+
+          # Runtime overrides for this test run
+          test_run_overrides:
+            # Override result stream handler
+            result_stream_handler:
+              kind: RedisStream
+              host: localhost
+              port: 6379
+              stream_name: test-run-001-results
+              process_old_entries: true
+
+            # Override stop trigger
+            stop_trigger:
+              kind: RecordCount
+              record_count: 75000
+
+          # Result stream loggers (runtime concern, not in test definition)
+          loggers:
+            # Console logger
+            - kind: Console
+              date_time_format: "%Y-%m-%d %H:%M:%S%.3f"
+
+            # JSONL file logger
+            - kind: JsonlFile
+              max_lines_per_file: 50000
+
+            # OpenTelemetry metric logger
+            - kind: OtelMetric
+              otel_endpoint: http://localhost:4318
+
+            # OpenTelemetry trace logger
+            - kind: OtelTrace
+              otel_endpoint: http://localhost:4318
+
+            # Profiler logger (comprehensive performance tracking)
+            - kind: Profiler
+              # Output file names (optional)
+              bootstrap_log_name: bootstrap_profile.jsonl
+              change_image_name: change_image.png
+              change_log_name: change_profile.jsonl
+              distribution_log_name: distribution.jsonl
+              rates_log_name: rates.jsonl
+
+              # Image configuration
+              image_width: 1920
+              max_lines_per_file: 100000
+
+              # What to write
+              write_bootstrap_log: true
+              write_change_image: true
+              write_change_log: true
+
+      # ========================================================================
+      # REACTION RUNTIME CONFIG
+      # ========================================================================
+      # Runtime configuration for reactions in this test run
+      reactions:
+        - test_reaction_id: result-handler
+          start_immediately: true
+
+          # Runtime overrides for this test run
+          test_run_overrides:
+            # Override stop triggers
+            stop_triggers:
+              - kind: RecordCount
+                record_count: 80000
+
+          # Output loggers (runtime concern, not in test definition)
+          output_loggers:
+            # Console logger
+            - kind: Console
+              date_time_format: "%Y-%m-%d %H:%M:%S%.3f"
+
+            # JSONL file logger
+            - kind: JsonlFile
+              max_lines_per_file: 25000
+
+            # Performance metrics logger
+            - kind: PerformanceMetrics
+              filename: reaction_metrics.json
+
+# ============================================================================
+# DATA COLLECTOR CONFIGURATION
+# ============================================================================
+# Collects live data from external systems for test creation
+data_collector:
+  data_collections:
+    - id: live_data_collection
+
+      # Sources to collect from
+      sources:
+        - source_id: external-db
+          start_immediately: true
+
+          # Bootstrap data recorder
+          bootstrap_data_recorder:
+            output_folder: collected_data/bootstrap
+            max_events_per_file: 10000
+
+          # Source change recorder
+          source_change_recorder:
+            output_folder: collected_data/changes
+            max_events_per_file: 10000
+
+      # Queries to collect from
+      queries:
+        - query_id: live-query
+
+          # Result event recorder
+          result_event_recorders:
+            - output_folder: collected_data/query_events
+              max_events_per_file: 10000
+
+          # Result set logger
+          result_set_loggers:
+            - output_folder: collected_data/query_results
+              max_lines_per_file: 10000
+
+# ============================================================================
+# ADDITIONAL NOTES
+# ============================================================================
+#
+# Configuration File Format:
+# - Both YAML and JSON formats are supported
+# - Format is auto-detected based on content (not file extension)
+# - YAML-first parsing with JSON fallback
+# - Use YAML for better readability and comments
+# - Use JSON for programmatic generation
+#
+# Environment Variable Overrides:
+# - DRASI_CONFIG_FILE: Config file path
+# - DRASI_DATA_STORE_PATH: Override data_store.data_store_path
+# - DRASI_PRUNE_DATA_STORE: Override data_store.delete_on_start
+# - DRASI_PORT: Web API port (default: 63123)
+#
+# CLI Arguments:
+# - --config, -c: Config file path
+# - --data, -d: Data store path override
+# - --prune, -x: Enable data store pruning
+# - --port, -p: Web API port
+#
+# Web API Endpoints:
+# - http://localhost:63123/docs - Interactive Swagger documentation
+# - http://localhost:63123/api/repos - Repository management
+# - http://localhost:63123/api/sources - Source management
+# - http://localhost:63123/api/queries - Query management
+# - http://localhost:63123/api/runs - Test run management
+#
+# Best Practices:
+# - Use separate configs for different test scenarios
+# - Use test_run_overrides to customize behavior per run
+# - Use loggers at runtime level, not in test definitions
+# - Keep test definitions in repositories for reusability
+# - Use seed values for reproducible random data generation
+# - Monitor performance with Profiler logger
+# - Use appropriate stop triggers to prevent infinite runs
+#
+# ============================================================================

@@ -1,0 +1,215 @@
+{
+  "data_store": {
+      "data_store_path": "examples/stock_market/drasi_server_internal/test_data_cache",
+      "delete_on_start": true,
+      "delete_on_stop": true,
+      "test_repos": [
+          {
+              "id": "drasi_server_dev_repo",
+              "kind": "LocalStorage",
+              "source_path": "examples/stock_market/drasi_server_internal/dev_repo",
+              "local_tests": [
+                {
+                    "test_id": "stock_market",
+                    "version": 1,
+                    "description": "Stock market trading test with internal Drasi Server",
+                    "test_folder": "stock_market",
+                    "drasi_servers": [
+                        {
+                        "id": "internal-drasi-server",
+                        "name": "Internal Drasi Server for Stock Market",
+                        "description": "Embedded Drasi Server instance for stock trading",
+                        "config": {
+                            "runtime": {
+                            "workers": 4,
+                            "queue_size": 1000
+                            },
+                            "storage": {
+                            "type": "memory"
+                            },
+                            "log_level": "info",
+                            "sources": [
+                            {
+                                "id": "stock-trades-db",
+                                "source_type": "internal.application",
+                                "auto_start": true,
+                                "properties": {}
+                            }
+                            ],
+                            "queries": [
+                            {
+                                "id": "all-stocks",
+                                "query": "MATCH (s:Stock) RETURN elementId(s) AS StockId, s.symbol, s.name, s.price, s.volume, s.daily_open, s.price_change",
+                                "sources": ["stock-trades-db"],
+                                "auto_start": true,
+                                "properties": {}
+                            },
+                            {
+                                "id": "high-volume-trades",
+                                "query": "MATCH (s:Stock) WHERE s.volume > 50000000 RETURN elementId(s) AS StockId, s.symbol, s.volume, s.price",
+                                "sources": ["stock-trades-db"],
+                                "auto_start": true,
+                                "properties": {}
+                            },
+                            {
+                                "id": "price-movements",
+                                "query": "MATCH (s:Stock) WHERE abs(s.price - s.daily_open) > (s.daily_open * 0.05) RETURN elementId(s) AS StockId, s.symbol, s.price, s.daily_open, s.price_change",
+                                "sources": ["stock-trades-db"],
+                                "auto_start": true,
+                                "properties": {}
+                            }
+                            ],
+                            "reactions": [
+                            {
+                                "id": "stock-market-alerts",
+                                "reaction_type": "internal.application",
+                                "queries": ["all-stocks", "high-volume-trades", "price-movements"],
+                                "auto_start": true,
+                                "properties": {}
+                            }
+                            ]
+                        }
+                        }
+                    ],
+                    "queries": [],
+                    "sources": [
+                        {
+                        "test_source_id": "stock-trades-db",
+                        "kind": "Model",
+                        "source_change_dispatchers": [ 
+                            {
+                            "kind": "DrasiServerChannel",
+                            "drasi_server_id": "internal-drasi-server",
+                            "source_id": "stock-trades-db",
+                            "buffer_size": 2048
+                            },
+                            {
+                                "kind": "JsonlFile",
+                                "max_lines_per_file": 15000
+                            }
+                        ],
+                        "model_data_generator": {
+                            "kind": "StockTrade",
+                            "stock_definitions": [
+                                {
+                                    "symbol": "MSFT",
+                                    "name": "Microsoft Corporation"
+                                },
+                                {
+                                    "symbol": "AAPL",
+                                    "name": "Apple Inc."
+                                },
+                                {
+                                    "symbol": "GOOGL",
+                                    "name": "Alphabet Inc."
+                                },
+                                {
+                                    "symbol": "AMZN",
+                                    "name": "Amazon.com Inc."
+                                },
+                                {
+                                    "symbol": "NVDA",
+                                    "name": "NVIDIA Corporation"
+                                },
+                                {
+                                    "symbol": "TSLA",
+                                    "name": "Tesla Inc."
+                                },
+                                {
+                                    "symbol": "META",
+                                    "name": "Meta Platforms Inc."
+                                },
+                                {
+                                    "symbol": "BRK.B",
+                                    "name": "Berkshire Hathaway Inc."
+                                },
+                                {
+                                    "symbol": "V",
+                                    "name": "Visa Inc."
+                                },
+                                {
+                                    "symbol": "JPM",
+                                    "name": "JPMorgan Chase & Co."
+                                }
+                            ],
+                            "price_init": [150.0, 50.0],
+                            "price_change": [0.5, 2.0],
+                            "price_momentum": [5, 2.0, 0.3],
+                            "price_range": [10.0, 5000.0],
+                            "volume_init": [10000000, 5000000.0],
+                            "volume_change": [100000, 50000.0],
+                            "volume_momentum": [3, 1.5, 0.4],
+                            "volume_range": [1000, 100000000],
+                            "change_count": 10,
+                            "change_interval": [5000000000, 1000000000, 1000000000, 5000000000],
+                            "spacing_mode": "none",
+                            "time_mode": "2025-01-03T10:03:15.4Z",
+                            "seed": 123456789,
+                            "send_initial_inserts": true
+                        },
+                        "subscribers": []
+                        }
+                    ],
+                    "reactions": [
+                        {
+                        "test_reaction_id": "stock-market",
+                        "output_handler": {
+                            "kind": "DrasiServerChannel",
+                            "drasi_server_id": "internal-drasi-server",
+                            "reaction_id": "stock-market-alerts",
+                            "buffer_size": 1024
+                        },
+                        "stop_triggers": [
+                            {
+                            "kind": "RecordCount",
+                            "record_count": 10
+                            }
+                        ]
+                        }
+                    ]
+                    }
+              ]
+          }                    
+      ]
+  },
+  "test_run_host": {
+      "test_runs": [
+          {
+              "test_id": "stock_market",
+              "test_repo_id": "drasi_server_dev_repo",
+              "test_run_id": "test_run_001",
+              "drasi_servers": [
+                  {
+                      "test_drasi_server_id": "internal-drasi-server",
+                      "start_immediately": true
+                  }
+              ],
+              "queries": [],
+              "reactions": [
+                  {
+                      "test_reaction_id": "stock-market",
+                      "start_immediately": true,
+                      "output_loggers": [
+                          {
+                              "kind": "JsonlFile",
+                              "max_lines_per_file": 15000
+                          },
+                          {
+                              "kind": "PerformanceMetrics"
+                          }
+                      ]
+                  }
+              ],
+              "sources": [
+                  {
+                      "test_source_id": "stock-trades-db",
+                      "start_mode": "auto",
+                      "test_run_overrides" : {
+                        "model_data_generator": {}              
+                      }
+                  }
+              ]
+          }
+      ]
+  }
+}

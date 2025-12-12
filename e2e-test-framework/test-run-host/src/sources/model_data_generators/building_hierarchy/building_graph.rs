@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::{BTreeMap, HashSet}, fmt, str::FromStr};
+// Test data generator module - allow unwraps for data generation code
+#![allow(clippy::unwrap_used)]
+
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt,
+    str::FromStr,
+};
 
 use anyhow::Context;
 use parking_lot::{Mutex, MutexGuard};
@@ -45,9 +52,9 @@ pub enum ModelChange {
 // Compound key for locations
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Location {
-    Building(u32),           // e.g., Building(0) -> "B_000"
-    Floor(u32, u32),       // e.g., Floor(0, 1) -> "F_000_001"
-    Room(u32, u32, u32), // e.g., Room(0, 1, 2) -> "R_000_001_002"
+    Building(u32),                 // e.g., Building(0) -> "B_000"
+    Floor(u32, u32),               // e.g., Floor(0, 1) -> "F_000_001"
+    Room(u32, u32, u32),           // e.g., Room(0, 1, 2) -> "R_000_001_002"
     Sensor(u32, u32, u32, String), // e.g., Sensor(0, 1, 2, "CO2".to_string()) -> "R_000_001_002_CO2"
 }
 
@@ -65,8 +72,8 @@ impl Location {
         match self {
             Location::Building(_) => None,
             Location::Floor(_, _) => Some(self.clone()),
-            Location::Room(b, f, _) => Some(Location::Floor(*b,*f)),
-            Location::Sensor(b, f, _, _) => Some(Location::Floor(*b,*f)),
+            Location::Room(b, f, _) => Some(Location::Floor(*b, *f)),
+            Location::Sensor(b, f, _, _) => Some(Location::Floor(*b, *f)),
         }
     }
 
@@ -75,7 +82,7 @@ impl Location {
             Location::Building(_) => None,
             Location::Floor(_, _) => None,
             Location::Room(_, _, _) => Some(self.clone()),
-            Location::Sensor(b, f, r, _) => Some(Location::Room(*b,*f,*r)),
+            Location::Sensor(b, f, r, _) => Some(Location::Room(*b, *f, *r)),
         }
     }
 
@@ -105,7 +112,6 @@ impl Location {
     }
 
     pub fn contains(&self, other: &Location) -> bool {
-
         if self == other {
             return true;
         };
@@ -113,15 +119,17 @@ impl Location {
         match self {
             Location::Building(b) => match other {
                 Location::Floor(b_other, _) => b == b_other,
-                Location::Room(b_other, _, _) => b == b_other,             
-                _ => false,   
+                Location::Room(b_other, _, _) => b == b_other,
+                _ => false,
             },
             Location::Floor(b, f) => match other {
                 Location::Room(b_other, f_other, _) => b == b_other && f == f_other,
                 _ => false,
             },
             Location::Room(b, f, r) => match other {
-                Location::Sensor(b_other, f_other, r_other, _) => b == b_other && f == f_other && r == r_other,
+                Location::Sensor(b_other, f_other, r_other, _) => {
+                    b == b_other && f == f_other && r == r_other
+                }
                 _ => false,
             },
             _ => false,
@@ -132,7 +140,7 @@ impl Location {
         match self {
             Location::Building(b) => Ok(Location::Floor(*b, floor)),
             _ => {
-                anyhow::bail!("Cannot set floor on non-building location: {}", self);
+                anyhow::bail!("Cannot set floor on non-building location: {self}");
             }
         }
     }
@@ -141,7 +149,7 @@ impl Location {
         match self {
             Location::Floor(b, f) => Ok(Location::Room(*b, *f, room)),
             _ => {
-                anyhow::bail!("Cannot set room on non-floor location: {}", self);
+                anyhow::bail!("Cannot set room on non-floor location: {self}");
             }
         }
     }
@@ -150,7 +158,7 @@ impl Location {
         match self {
             Location::Room(b, f, r) => Ok(Location::Sensor(*b, *f, *r, sensor)),
             _ => {
-                anyhow::bail!("Cannot set sensor on non-room location: {}", self);
+                anyhow::bail!("Cannot set sensor on non-room location: {self}");
             }
         }
     }
@@ -160,10 +168,12 @@ impl Location {
 impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Location::Building(b) => write!(f, "B_{:03}", b),
-            Location::Floor(b, fl) => write!(f, "F_{:03}_{:03}", b, fl),
-            Location::Room(b, fl, r) => write!(f, "R_{:03}_{:03}_{:03}", b, fl, r),
-            Location::Sensor(b, fl, r, sensor) => write!(f, "R_{:03}_{:03}_{:03}_{}", b, fl, r, sensor),
+            Location::Building(b) => write!(f, "B_{b:03}"),
+            Location::Floor(b, fl) => write!(f, "F_{b:03}_{fl:03}"),
+            Location::Room(b, fl, r) => write!(f, "R_{b:03}_{fl:03}_{r:03}"),
+            Location::Sensor(b, fl, r, sensor) => {
+                write!(f, "R_{b:03}_{fl:03}_{r:03}_{sensor}")
+            }
         }
     }
 }
@@ -177,35 +187,35 @@ impl FromStr for Location {
         match parts.as_slice() {
             ["B", b] => {
                 let b_num = b.parse::<u32>()
-                    .context(format!("Invalid building number in '{}'", s))?;
+                    .context(format!("Invalid building number in '{s}'"))?;
                 Ok(Location::Building(b_num))
             }
             ["F", b, f] => {
                 let b_num = b.parse::<u32>()
-                    .context(format!("Invalid building number in '{}'", s))?;
+                    .context(format!("Invalid building number in '{s}'"))?;
                 let f_num = f.parse::<u32>()
-                    .context(format!("Invalid floor number in '{}'", s))?;
+                    .context(format!("Invalid floor number in '{s}'"))?;
                 Ok(Location::Floor(b_num, f_num))
             }
             ["R", b, f, r] => {
                 let b_num = b.parse::<u32>()
-                    .context(format!("Invalid building number in '{}'", s))?;
+                    .context(format!("Invalid building number in '{s}'"))?;
                 let f_num = f.parse::<u32>()
-                    .context(format!("Invalid floor number in '{}'", s))?;
+                    .context(format!("Invalid floor number in '{s}'"))?;
                 let r_num = r.parse::<u32>()
-                    .context(format!("Invalid room number in '{}'", s))?;
+                    .context(format!("Invalid room number in '{s}'"))?;
                 Ok(Location::Room(b_num, f_num, r_num))
             },
             ["S", b, f, r, sensor] => {
                 let b_num = b.parse::<u32>()
-                    .context(format!("Invalid building number in '{}'", s))?;
+                    .context(format!("Invalid building number in '{s}'"))?;
                 let f_num = f.parse::<u32>()
-                    .context(format!("Invalid floor number in '{}'", s))?;
+                    .context(format!("Invalid floor number in '{s}'"))?;
                 let r_num = r.parse::<u32>()
-                    .context(format!("Invalid room number in '{}'", s))?;
+                    .context(format!("Invalid room number in '{s}'"))?;
                 Ok(Location::Sensor(b_num, f_num, r_num, sensor.to_string()))
             }
-            _ => anyhow::bail!("Invalid location format: '{}'. Expected 'B_xxx', 'F_xxx_yyy', 'R_xxx_yyy_zzz', or 'S_xxx_yyy_zzz_sss'", s),
+            _ => anyhow::bail!("Invalid location format: '{s}'. Expected 'B_xxx', 'F_xxx_yyy', 'R_xxx_yyy_zzz', or 'S_xxx_yyy_zzz_sss'"),
         }
     }
 }
@@ -225,9 +235,9 @@ impl GraphElementType {
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildingNode {
     #[serde(skip_serializing)]
-    pub effective_from: u64, 
+    pub effective_from: u64,
     pub id: String,
-    pub labels: Vec<String>,    
+    pub labels: Vec<String>,
 }
 
 impl From<&Building> for BuildingNode {
@@ -243,15 +253,18 @@ impl From<&Building> for BuildingNode {
 // Structs for building, floor, and room
 #[derive(Debug, Clone)]
 pub struct Building {
-    pub effective_from: u64, 
-    pub floors: BTreeMap<Location, Floor>, 
-    pub id: Location, 
-    pub next_floor: u32, 
+    pub effective_from: u64,
+    pub floors: BTreeMap<Location, Floor>,
+    pub id: Location,
+    pub next_floor: u32,
 }
 
 impl Building {
-    pub fn new(id: Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
-
+    pub fn new(
+        id: Location,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<(Self, Vec<ModelChange>)> {
         let mut building = Building {
             id,
             effective_from,
@@ -271,8 +284,11 @@ impl Building {
         Ok((building, changes))
     }
 
-    pub fn add_floor(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
-        
+    pub fn add_floor(
+        &mut self,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<(Location, Vec<ModelChange>)> {
         let floor_id = self.id.with_floor(self.next_floor)?;
 
         let (floor, changes) = Floor::new(floor_id.clone(), effective_from, change_generator)?;
@@ -281,18 +297,23 @@ impl Building {
         self.next_floor += 1;
 
         Ok((floor_id, changes))
-    }        
+    }
 
-    pub fn add_room(&mut self, floor_id: &Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
-
-        let floor = self.floors.get_mut(floor_id)
-            .context(format!("Floor {} not found in building {}", floor_id, self.id))?;
+    pub fn add_room(
+        &mut self,
+        floor_id: &Location,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<(Location, Vec<ModelChange>)> {
+        let floor = self.floors.get_mut(floor_id).context(format!(
+            "Floor {} not found in building {}",
+            floor_id, self.id
+        ))?;
 
         floor.add_room(effective_from, change_generator)
-    }    
+    }
 
     pub fn get_floor(&self, floor_id: &Location) -> Option<&Floor> {
-
         if self.id.contains(floor_id) {
             self.floors.get(floor_id)
         } else {
@@ -301,15 +322,17 @@ impl Building {
     }
 
     pub fn get_room(&self, room_id: &Location) -> Option<&Room> {
-        
         match self.get_floor(room_id) {
             Some(floor) => floor.get_room(room_id),
             None => None,
         }
     }
-    
-    pub fn update_random_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<Option<ModelChange>> {
 
+    pub fn update_random_room(
+        &mut self,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<Option<ModelChange>> {
         match self.floors.len() {
             0 => Ok(None),
             len => {
@@ -325,9 +348,9 @@ impl Building {
 #[derive(Debug, Clone, Serialize)]
 pub struct FloorNode {
     #[serde(skip_serializing)]
-    pub effective_from: u64,  
-    pub id: String,      
-    pub labels: Vec<String>,    
+    pub effective_from: u64,
+    pub id: String,
+    pub labels: Vec<String>,
 }
 
 impl From<&Floor> for FloorNode {
@@ -342,15 +365,18 @@ impl From<&Floor> for FloorNode {
 
 #[derive(Debug, Clone)]
 pub struct Floor {
-    pub id: Location,       // Location::Floor(building, floor)
-    pub effective_from: u64,  // Timestamp of creation or last update
+    pub id: Location,                    // Location::Floor(building, floor)
+    pub effective_from: u64,             // Timestamp of creation or last update
     pub rooms: BTreeMap<Location, Room>, // Maps room IDs to Room objects
-    pub next_room: u32
+    pub next_room: u32,
 }
 
 impl Floor {
-    pub fn new(id: Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
-
+    pub fn new(
+        id: Location,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<(Self, Vec<ModelChange>)> {
         let mut floor = Floor {
             id: id.clone(),
             effective_from,
@@ -360,7 +386,9 @@ impl Floor {
 
         let mut changes = Vec::new();
         changes.push(ModelChange::FloorAdded((&floor).into()));
-        changes.push(ModelChange::BuildingFloorRelationAdded(BuildingFloorRelation::new(effective_from,&id)?));
+        changes.push(ModelChange::BuildingFloorRelationAdded(
+            BuildingFloorRelation::new(effective_from, &id)?,
+        ));
 
         // Create Rooms
         for _ in 0..change_generator.get_random_room_count() {
@@ -371,8 +399,11 @@ impl Floor {
         Ok((floor, changes))
     }
 
-    pub fn add_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Location, Vec<ModelChange>)> {
-        
+    pub fn add_room(
+        &mut self,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<(Location, Vec<ModelChange>)> {
         let room_id = self.id.with_room(self.next_room)?;
 
         let (room, changes) = Room::new(room_id.clone(), effective_from, change_generator)?;
@@ -390,16 +421,21 @@ impl Floor {
             None
         }
     }
-    
-    pub fn update_random_room(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<Option<ModelChange>> {
 
+    pub fn update_random_room(
+        &mut self,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<Option<ModelChange>> {
         match self.rooms.len() {
             0 => Ok(None),
             len => {
                 let idx = change_generator.get_usize_in_range(0, len, false);
                 let (_, room) = self.rooms.iter_mut().nth(idx).unwrap();
 
-                Ok(Some(room.update_sensor_values(effective_from, change_generator)?))
+                Ok(Some(
+                    room.update_sensor_values(effective_from, change_generator)?,
+                ))
             }
         }
     }
@@ -410,22 +446,27 @@ pub struct RoomNode {
     #[serde(skip_serializing)]
     pub effective_from: u64,
     pub id: String,
-    pub labels: Vec<String>,    
-    pub properties: Map<String, Value>
+    pub labels: Vec<String>,
+    pub properties: Map<String, Value>,
 }
 
 impl From<&Room> for RoomNode {
     fn from(room: &Room) -> Self {
-
         let mut properties = Map::new();
 
         for sensor_value in &room.sensor_values {
             match sensor_value {
                 SensorValue::NormalFloat(sensor) => {
-                    properties.insert(sensor.id.get_sensor_id().unwrap(), Value::Number(serde_json::Number::from_f64(sensor.value).unwrap()));
-                },
+                    properties.insert(
+                        sensor.id.get_sensor_id().unwrap(),
+                        Value::Number(serde_json::Number::from_f64(sensor.value).unwrap()),
+                    );
+                }
                 SensorValue::NormalInt(sensor) => {
-                    properties.insert(sensor.id.get_sensor_id().unwrap(), Value::Number(serde_json::Number::from(sensor.value)));
+                    properties.insert(
+                        sensor.id.get_sensor_id().unwrap(),
+                        Value::Number(serde_json::Number::from(sensor.value)),
+                    );
                 }
             }
         }
@@ -434,25 +475,28 @@ impl From<&Room> for RoomNode {
             effective_from: room.effective_from,
             id: room.id.to_string(),
             labels: vec![GraphElementType::ROOM.to_string()],
-            properties
+            properties,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Room {
-    pub effective_from: u64,      
-    pub id: Location,           
-    pub sensor_values: Vec<SensorValue>, 
+    pub effective_from: u64,
+    pub id: Location,
+    pub sensor_values: Vec<SensorValue>,
 }
 
 impl Room {
-    pub fn new(id: Location, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<(Self, Vec<ModelChange>)> {
-
+    pub fn new(
+        id: Location,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<(Self, Vec<ModelChange>)> {
         let room = Room {
             effective_from,
             id: id.clone(),
-            sensor_values: change_generator.initialize_sensor_values(&id, effective_from)?
+            sensor_values: change_generator.initialize_sensor_values(&id, effective_from)?,
         };
 
         let changes = vec![
@@ -463,8 +507,11 @@ impl Room {
         Ok((room, changes))
     }
 
-    pub fn update_sensor_values(&mut self, effective_from: u64, change_generator: &mut GraphChangeGenerator) -> anyhow::Result<ModelChange> {
-
+    pub fn update_sensor_values(
+        &mut self,
+        effective_from: u64,
+        change_generator: &mut GraphChangeGenerator,
+    ) -> anyhow::Result<ModelChange> {
         let old_room_node: RoomNode = (&*self).into();
 
         self.effective_from = effective_from;
@@ -485,19 +532,18 @@ pub struct BuildingFloorRelation {
 
 impl BuildingFloorRelation {
     pub fn new(effective_from: u64, floor_id: &Location) -> anyhow::Result<Self> {
-
         match floor_id {
             Location::Building(_) => anyhow::bail!("Floor ID must be a Floor or Room location"),
             _ => {
                 let building_id = floor_id.get_building_location().unwrap();
 
                 Ok(BuildingFloorRelation {
-                    id: format!("BFR_{}_{}", building_id, floor_id),
+                    id: format!("BFR_{building_id}_{floor_id}"),
                     effective_from,
                     building_id: building_id.to_string(),
                     floor_id: floor_id.to_string(),
                     labels: vec![GraphElementType::BUILDING_FLOOR.to_string()],
-                })        
+                })
             }
         }
     }
@@ -514,19 +560,18 @@ pub struct FloorRoomRelation {
 
 impl FloorRoomRelation {
     pub fn new(effective_from: u64, room_id: &Location) -> anyhow::Result<Self> {
-
         match room_id {
             Location::Room(_, _, _) => {
                 let floor_id = room_id.get_floor_location().unwrap();
 
                 Ok(FloorRoomRelation {
-                    id: format!("BFR_{}_{}", floor_id, room_id),
+                    id: format!("BFR_{floor_id}_{room_id}"),
                     effective_from,
                     floor_id: floor_id.to_string(),
                     room_id: room_id.to_string(),
                     labels: vec![GraphElementType::FLOOR_ROOM.to_string()],
-                })        
-            },
+                })
+            }
             _ => anyhow::bail!("Room ID must be a Room location"),
         }
     }
@@ -543,7 +588,7 @@ pub struct FloatNormalDistSensorValue {
     pub effective_from: u64,
     pub id: Location,
     pub momentum: i32,
-    pub value: f64,    
+    pub value: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -551,7 +596,7 @@ pub struct IntNormalDistSensorValue {
     pub effective_from: u64,
     pub id: Location,
     pub momentum: i32,
-    pub value: i64,    
+    pub value: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -586,19 +631,28 @@ pub struct GraphChangeGenerator {
     pub floor_count_dist: Normal<f64>,
     pub rng: ChaCha8Rng,
     pub room_count_dist: Normal<f64>,
-    pub room_sensor_value_generators: Vec<SensorValueGenerator>
+    pub room_sensor_value_generators: Vec<SensorValueGenerator>,
 }
 
 impl GraphChangeGenerator {
     pub fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> Self {
-        log::debug!("Initialized GraphChangeGenerator with seed: {}", settings.seed);
+        log::debug!(
+            "Initialized GraphChangeGenerator with seed: {}",
+            settings.seed
+        );
 
         let mut change_generator = GraphChangeGenerator {
-            building_count_dist: Normal::new(settings.building_count.0 as f64, settings.building_count.1).unwrap(),
-            floor_count_dist: Normal::new(settings.floor_count.0 as f64, settings.floor_count.1).unwrap(),
+            building_count_dist: Normal::new(
+                settings.building_count.0 as f64,
+                settings.building_count.1,
+            )
+            .unwrap(),
+            floor_count_dist: Normal::new(settings.floor_count.0 as f64, settings.floor_count.1)
+                .unwrap(),
             rng: ChaCha8Rng::seed_from_u64(settings.seed),
-            room_count_dist: Normal::new(settings.room_count.0 as f64, settings.room_count.1).unwrap(),
-            room_sensor_value_generators: Vec::new()
+            room_count_dist: Normal::new(settings.room_count.0 as f64, settings.room_count.1)
+                .unwrap(),
+            room_sensor_value_generators: Vec::new(),
         };
 
         for sensor in &settings.room_sensors {
@@ -606,41 +660,49 @@ impl GraphChangeGenerator {
                 SensorDefinition::NormalFloat(def) => {
                     let (change_mean, change_std_dev) = def.value_change.unwrap_or((3.0, 5.0));
                     let (init_mean, init_std_dev) = def.value_init.unwrap_or((0.0, 1.0));
-                    let (momentum_mean, momentum_std_dev, momentum_reverse_prob) = def.momentum_init.unwrap_or((3, 1.0, 0.5));
+                    let (momentum_mean, momentum_std_dev, momentum_reverse_prob) =
+                        def.momentum_init.unwrap_or((3, 1.0, 0.5));
                     let (range_min, range_max) = def.value_range.unwrap_or((0.0, 100.0));
 
                     let svg = FloatNormalDistSensorValueGenerator {
                         id: def.id.clone(),
-                        momentum_init_dist: Normal::new(momentum_mean as f64, momentum_std_dev).unwrap(),
+                        momentum_init_dist: Normal::new(momentum_mean as f64, momentum_std_dev)
+                            .unwrap(),
                         momentum_reverse_prob,
                         value_change_dist: Normal::new(change_mean, change_std_dev).unwrap(),
                         value_init_dist: Normal::new(init_mean, init_std_dev).unwrap(),
                         value_range: (range_min, range_max),
                     };
-                    change_generator.room_sensor_value_generators.push(SensorValueGenerator::NormalFloat(svg));
-                },
+                    change_generator
+                        .room_sensor_value_generators
+                        .push(SensorValueGenerator::NormalFloat(svg));
+                }
                 SensorDefinition::NormalInt(def) => {
                     let (change_mean, change_std_dev) = def.value_change.unwrap_or((3, 5.0));
                     let (init_mean, init_std_dev) = def.value_init.unwrap_or((0, 1.0));
-                    let (momentum_mean, momentum_std_dev, momentum_reverse_prob) = def.momentum_init.unwrap_or((3, 1.0, 0.5));
+                    let (momentum_mean, momentum_std_dev, momentum_reverse_prob) =
+                        def.momentum_init.unwrap_or((3, 1.0, 0.5));
                     let (range_min, range_max) = def.value_range.unwrap_or((0, 100));
 
                     let svg = IntNormalDistSensorValueGenerator {
                         id: def.id.clone(),
-                        momentum_init_dist: Normal::new(momentum_mean as f64, momentum_std_dev).unwrap(),
+                        momentum_init_dist: Normal::new(momentum_mean as f64, momentum_std_dev)
+                            .unwrap(),
                         momentum_reverse_prob,
                         value_change_dist: Normal::new(change_mean as f64, change_std_dev).unwrap(),
                         value_init_dist: Normal::new(init_mean as f64, init_std_dev).unwrap(),
                         value_range: (range_min, range_max),
                     };
-                    change_generator.room_sensor_value_generators.push(SensorValueGenerator::NormalInt(svg));
+                    change_generator
+                        .room_sensor_value_generators
+                        .push(SensorValueGenerator::NormalInt(svg));
                 }
             }
-        };
+        }
 
         change_generator
     }
-    
+
     pub fn get_random_boolean(&mut self) -> bool {
         self.rng.random_bool(0.5)
     }
@@ -664,10 +726,14 @@ impl GraphChangeGenerator {
         match inclusive {
             true => self.rng.random_range(min..=max),
             false => self.rng.random_range(min..max),
-        }   
+        }
     }
 
-    pub fn initialize_sensor_values(&mut self, room_id: &Location, effective_from: u64) -> anyhow::Result<Vec<SensorValue>> {
+    pub fn initialize_sensor_values(
+        &mut self,
+        room_id: &Location,
+        effective_from: u64,
+    ) -> anyhow::Result<Vec<SensorValue>> {
         let mut sensor_values = Vec::new();
 
         for sensor in &self.room_sensor_value_generators {
@@ -676,23 +742,33 @@ impl GraphChangeGenerator {
                     let mut val = FloatNormalDistSensorValue {
                         effective_from,
                         id: room_id.with_sensor(svg.id.clone())?,
-                        momentum: (svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1),
-                        value: svg.value_init_dist.sample(&mut self.rng).clamp(svg.value_range.0, svg.value_range.1),
+                        momentum: (svg.momentum_init_dist.sample(&mut self.rng).round() as i32)
+                            .max(1),
+                        value: svg
+                            .value_init_dist
+                            .sample(&mut self.rng)
+                            .clamp(svg.value_range.0, svg.value_range.1),
                     };
 
-                    if self.rng.random_bool(svg.momentum_reverse_prob) { val.momentum = -val.momentum; }
+                    if self.rng.random_bool(svg.momentum_reverse_prob) {
+                        val.momentum = -val.momentum;
+                    }
 
                     sensor_values.push(SensorValue::NormalFloat(val));
-                },
+                }
                 SensorValueGenerator::NormalInt(svg) => {
                     let mut val = IntNormalDistSensorValue {
                         effective_from,
                         id: room_id.with_sensor(svg.id.clone())?,
-                        momentum: (svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1),
-                        value: (svg.value_init_dist.sample(&mut self.rng) as i64).clamp(svg.value_range.0, svg.value_range.1)
+                        momentum: (svg.momentum_init_dist.sample(&mut self.rng).round() as i32)
+                            .max(1),
+                        value: (svg.value_init_dist.sample(&mut self.rng) as i64)
+                            .clamp(svg.value_range.0, svg.value_range.1),
                     };
 
-                    if self.rng.random_bool(svg.momentum_reverse_prob) { val.momentum = -val.momentum; }
+                    if self.rng.random_bool(svg.momentum_reverse_prob) {
+                        val.momentum = -val.momentum;
+                    }
 
                     sensor_values.push(SensorValue::NormalInt(val));
                 }
@@ -703,52 +779,66 @@ impl GraphChangeGenerator {
     }
 
     pub fn update_sensor_values(&mut self, effective_from: u64, sensor_values: &mut [SensorValue]) {
-
-        let sensor_to_update = self.get_usize_in_range(0, self.room_sensor_value_generators.len(), false);
+        let sensor_to_update =
+            self.get_usize_in_range(0, self.room_sensor_value_generators.len(), false);
 
         match &mut self.room_sensor_value_generators[sensor_to_update] {
             SensorValueGenerator::NormalFloat(svg) => {
-                if let SensorValue::NormalFloat(ref mut sensor_value) = sensor_values[sensor_to_update] {
-
+                if let SensorValue::NormalFloat(ref mut sensor_value) =
+                    sensor_values[sensor_to_update]
+                {
                     let value_change = svg.value_change_dist.sample(&mut self.rng);
 
                     match sensor_value.momentum.cmp(&0) {
                         std::cmp::Ordering::Greater => {
-                            sensor_value.value = (sensor_value.value + value_change).clamp(svg.value_range.0, svg.value_range.1);
+                            sensor_value.value = (sensor_value.value + value_change)
+                                .clamp(svg.value_range.0, svg.value_range.1);
 
                             if sensor_value.momentum > 1 {
                                 sensor_value.momentum -= 1;
                             } else {
-                                sensor_value.momentum = (svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1);
-                                if self.rng.random_bool(svg.momentum_reverse_prob) { sensor_value.momentum = -sensor_value.momentum; }
+                                sensor_value.momentum =
+                                    (svg.momentum_init_dist.sample(&mut self.rng).round() as i32)
+                                        .max(1);
+                                if self.rng.random_bool(svg.momentum_reverse_prob) {
+                                    sensor_value.momentum = -sensor_value.momentum;
+                                }
                             }
                         }
                         std::cmp::Ordering::Less => {
-                            sensor_value.value = (sensor_value.value - value_change).clamp(svg.value_range.0, svg.value_range.1);
+                            sensor_value.value = (sensor_value.value - value_change)
+                                .clamp(svg.value_range.0, svg.value_range.1);
 
                             if sensor_value.momentum < -1 {
                                 sensor_value.momentum += 1;
                             } else {
-                                sensor_value.momentum = -(svg.momentum_init_dist.sample(&mut self.rng).round() as i32).max(1);
-                                if self.rng.random_bool(svg.momentum_reverse_prob) { sensor_value.momentum = -sensor_value.momentum; }
+                                sensor_value.momentum =
+                                    -(svg.momentum_init_dist.sample(&mut self.rng).round() as i32)
+                                        .max(1);
+                                if self.rng.random_bool(svg.momentum_reverse_prob) {
+                                    sensor_value.momentum = -sensor_value.momentum;
+                                }
                             }
                         }
                         std::cmp::Ordering::Equal => {}
-                    }                    
+                    }
 
                     sensor_value.effective_from = effective_from;
                 }
-            },
+            }
             SensorValueGenerator::NormalInt(svg) => {
-                if let SensorValue::NormalInt(ref mut sensor_value) = sensor_values[sensor_to_update] {
-
+                if let SensorValue::NormalInt(ref mut sensor_value) =
+                    sensor_values[sensor_to_update]
+                {
                     let value_change = svg.value_change_dist.sample(&mut self.rng) as i64;
 
                     if sensor_value.momentum > 0 {
-                        sensor_value.value = (sensor_value.value + value_change).clamp(svg.value_range.0, svg.value_range.1);
+                        sensor_value.value = (sensor_value.value + value_change)
+                            .clamp(svg.value_range.0, svg.value_range.1);
                         sensor_value.momentum -= 1;
                     } else {
-                        sensor_value.value = (sensor_value.value - value_change).clamp(svg.value_range.0, svg.value_range.1);
+                        sensor_value.value = (sensor_value.value - value_change)
+                            .clamp(svg.value_range.0, svg.value_range.1);
                         sensor_value.momentum += 1;
                     }
                     sensor_value.effective_from = effective_from;
@@ -762,13 +852,12 @@ impl GraphChangeGenerator {
 #[derive(Debug)]
 pub struct BuildingGraph {
     buildings: Mutex<BTreeMap<Location, Building>>,
-    change_generator: GraphChangeGenerator,             
-    next_building_num: u32
+    change_generator: GraphChangeGenerator,
+    next_building_num: u32,
 }
 
 impl BuildingGraph {
     pub fn new(settings: &BuildingHierarchyDataGeneratorSettings) -> anyhow::Result<Self> {
-
         let mut building_graph = BuildingGraph {
             buildings: Mutex::new(BTreeMap::new()),
             change_generator: GraphChangeGenerator::new(settings),
@@ -777,27 +866,36 @@ impl BuildingGraph {
 
         for _ in 0..building_graph.change_generator.get_random_building_count() {
             building_graph.add_building(0)?;
-        };
+        }
 
         Ok(building_graph)
     }
 
-    pub fn add_building(&mut self, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
-
+    pub fn add_building(
+        &mut self,
+        effective_from: u64,
+    ) -> anyhow::Result<(Location, Vec<ModelChange>)> {
         let mut buildings = self.buildings.lock();
 
         let building_id = Location::Building(self.next_building_num);
 
-        let (building, changes) = Building::new(building_id.clone(), effective_from, &mut self.change_generator)?;
+        let (building, changes) = Building::new(
+            building_id.clone(),
+            effective_from,
+            &mut self.change_generator,
+        )?;
         buildings.insert(building_id.clone(), building);
         self.next_building_num += 1;
 
         Ok((building_id, changes))
-    }        
+    }
 
     // Add a floor with auto-generated ID
-    pub fn add_floor(&mut self, building_id: &Location, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
-
+    pub fn add_floor(
+        &mut self,
+        building_id: &Location,
+        effective_from: u64,
+    ) -> anyhow::Result<(Location, Vec<ModelChange>)> {
         let mut buildings = self.buildings.lock();
 
         let building = buildings.get_mut(building_id).unwrap();
@@ -806,11 +904,16 @@ impl BuildingGraph {
     }
 
     // Add a room with auto-generated ID, requiring only floor_id
-    pub fn add_room(&mut self, floor_id: &Location, effective_from: u64) -> anyhow::Result<(Location, Vec<ModelChange>)> {
-
+    pub fn add_room(
+        &mut self,
+        floor_id: &Location,
+        effective_from: u64,
+    ) -> anyhow::Result<(Location, Vec<ModelChange>)> {
         let mut buildings = self.buildings.lock();
 
-        let building = buildings.get_mut(&floor_id.get_building_location().unwrap()).unwrap();
+        let building = buildings
+            .get_mut(&floor_id.get_building_location().unwrap())
+            .unwrap();
 
         building.add_room(floor_id, effective_from, &mut self.change_generator)
     }
@@ -818,12 +921,10 @@ impl BuildingGraph {
     pub fn get_current_state(&self, included_types: &HashSet<String>) -> CurrentStateIterator<'_> {
         // Lock the buildings mutex for the duration of the iteration
         let buildings = self.buildings.lock();
-        
+
         // Collect all building IDs for initial state
-        let building_ids = buildings.keys()
-            .map(|k| k.to_string())
-            .collect::<Vec<_>>();
-        
+        let building_ids = buildings.keys().map(|k| k.to_string()).collect::<Vec<_>>();
+
         CurrentStateIterator {
             buildings_guard: buildings,
             state: IterationState::Buildings {
@@ -835,7 +936,6 @@ impl BuildingGraph {
     }
 
     pub fn generate_update(&mut self, effective_from: u64) -> anyhow::Result<Option<ModelChange>> {
-
         let mut buildings = self.buildings.lock();
 
         match buildings.len() {
@@ -844,7 +944,9 @@ impl BuildingGraph {
                 // For now, we will only update a random room in a random building.
                 // Will add more update types later.
 
-                let idx = self.change_generator.get_usize_in_range(0, buildings.len(), false);
+                let idx = self
+                    .change_generator
+                    .get_usize_in_range(0, buildings.len(), false);
                 let (_, building) = buildings.iter_mut().nth(idx).unwrap();
 
                 building.update_random_room(effective_from, &mut self.change_generator)
@@ -855,11 +957,32 @@ impl BuildingGraph {
 
 // Define the possible iteration states
 enum IterationState {
-    Buildings { building_index: usize, buildings: Vec<String> },
-    Floors { building_index: usize, floor_index: usize, buildings: Vec<String>, building_floors: BTreeMap<String, Vec<String>> },
-    Rooms { building_index: usize, floor_index: usize, room_index: usize, buildings: Vec<String>, building_floors: BTreeMap<String, Vec<String>>, floor_rooms: BTreeMap<String, Vec<String>> },
-    BuildingFloorRelations { relation_index: usize, relations: Vec<(String, String)> },
-    FloorRoomRelations { relation_index: usize, relations: Vec<(String, String)> },
+    Buildings {
+        building_index: usize,
+        buildings: Vec<String>,
+    },
+    Floors {
+        building_index: usize,
+        floor_index: usize,
+        buildings: Vec<String>,
+        building_floors: BTreeMap<String, Vec<String>>,
+    },
+    Rooms {
+        building_index: usize,
+        floor_index: usize,
+        room_index: usize,
+        buildings: Vec<String>,
+        building_floors: BTreeMap<String, Vec<String>>,
+        floor_rooms: BTreeMap<String, Vec<String>>,
+    },
+    BuildingFloorRelations {
+        relation_index: usize,
+        relations: Vec<(String, String)>,
+    },
+    FloorRoomRelations {
+        relation_index: usize,
+        relations: Vec<(String, String)>,
+    },
     Done,
 }
 
@@ -878,12 +1001,18 @@ impl Iterator for CurrentStateIterator<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.state {
-            IterationState::Buildings { building_index, buildings } => {
+            IterationState::Buildings {
+                building_index,
+                buildings,
+            } => {
                 if *building_index < buildings.len() {
                     let building_id = &buildings[*building_index];
-                    let building = self.buildings_guard.get(&building_id.parse::<Location>().unwrap()).unwrap();
+                    let building = self
+                        .buildings_guard
+                        .get(&building_id.parse::<Location>().unwrap())
+                        .unwrap();
                     *building_index += 1;
-                    
+
                     // If buildings are included, return a BuildingNode
                     if self.included_types.contains(GraphElementType::BUILDING) {
                         let building_node = BuildingNode::from(building);
@@ -897,34 +1026,47 @@ impl Iterator for CurrentStateIterator<'_> {
                     let mut building_floors = BTreeMap::new();
                     for (building_id, building) in self.buildings_guard.iter() {
                         let building_id_str = building_id.to_string();
-                        let floor_ids = building.floors.keys()
+                        let floor_ids = building
+                            .floors
+                            .keys()
                             .map(|k| k.to_string())
                             .collect::<Vec<_>>();
                         building_floors.insert(building_id_str, floor_ids);
                     }
-                    
-                    self.state = IterationState::Floors { 
-                        building_index: 0, 
-                        floor_index: 0, 
-                        buildings: buildings.clone(), 
-                        building_floors 
+
+                    self.state = IterationState::Floors {
+                        building_index: 0,
+                        floor_index: 0,
+                        buildings: buildings.clone(),
+                        building_floors,
                     };
                     self.next()
                 }
-            },
-            IterationState::Floors { building_index, floor_index, buildings, building_floors } => {
+            }
+            IterationState::Floors {
+                building_index,
+                floor_index,
+                buildings,
+                building_floors,
+            } => {
                 if *building_index < buildings.len() {
                     let building_id = &buildings[*building_index];
                     let empty_vec = Vec::new();
                     let floors = building_floors.get(building_id).unwrap_or(&empty_vec);
-                    
+
                     if *floor_index < floors.len() {
                         let floor_id = &floors[*floor_index];
-                        let building = self.buildings_guard.get(&building_id.parse::<Location>().unwrap()).unwrap();
-                        let floor = building.floors.get(&floor_id.parse::<Location>().unwrap()).unwrap();
-                        
+                        let building = self
+                            .buildings_guard
+                            .get(&building_id.parse::<Location>().unwrap())
+                            .unwrap();
+                        let floor = building
+                            .floors
+                            .get(&floor_id.parse::<Location>().unwrap())
+                            .unwrap();
+
                         *floor_index += 1;
-                        
+
                         // If floors are included, return a FloorNode
                         if self.included_types.contains(GraphElementType::FLOOR) {
                             let floor_node = FloorNode::from(floor);
@@ -945,43 +1087,61 @@ impl Iterator for CurrentStateIterator<'_> {
                     for (_, building) in self.buildings_guard.iter() {
                         for (floor_id, floor) in building.floors.iter() {
                             let floor_id_str = floor_id.to_string();
-                            let room_ids = floor.rooms.keys()
+                            let room_ids = floor
+                                .rooms
+                                .keys()
                                 .map(|k| k.to_string())
                                 .collect::<Vec<_>>();
                             floor_rooms.insert(floor_id_str, room_ids);
                         }
                     }
-                    
-                    self.state = IterationState::Rooms { 
-                        building_index: 0, 
-                        floor_index: 0, 
+
+                    self.state = IterationState::Rooms {
+                        building_index: 0,
+                        floor_index: 0,
                         room_index: 0,
-                        buildings: buildings.clone(), 
+                        buildings: buildings.clone(),
                         building_floors: building_floors.clone(),
-                        floor_rooms
+                        floor_rooms,
                     };
                     self.next()
                 }
-            },
-            IterationState::Rooms { building_index, floor_index, room_index, buildings, building_floors, floor_rooms } => {
+            }
+            IterationState::Rooms {
+                building_index,
+                floor_index,
+                room_index,
+                buildings,
+                building_floors,
+                floor_rooms,
+            } => {
                 if *building_index < buildings.len() {
                     let building_id = &buildings[*building_index];
                     let empty_vec = Vec::new();
                     let floors = building_floors.get(building_id).unwrap_or(&empty_vec);
-                    
+
                     if *floor_index < floors.len() {
                         let floor_id = &floors[*floor_index];
                         let empty_vec = Vec::new();
                         let rooms = floor_rooms.get(floor_id).unwrap_or(&empty_vec);
-                        
+
                         if *room_index < rooms.len() {
                             let room_id = &rooms[*room_index];
-                            let building = self.buildings_guard.get(&building_id.parse::<Location>().unwrap()).unwrap();
-                            let floor = building.floors.get(&floor_id.parse::<Location>().unwrap()).unwrap();
-                            let room = floor.rooms.get(&room_id.parse::<Location>().unwrap()).unwrap();
-                            
+                            let building = self
+                                .buildings_guard
+                                .get(&building_id.parse::<Location>().unwrap())
+                                .unwrap();
+                            let floor = building
+                                .floors
+                                .get(&floor_id.parse::<Location>().unwrap())
+                                .unwrap();
+                            let room = floor
+                                .rooms
+                                .get(&room_id.parse::<Location>().unwrap())
+                                .unwrap();
+
                             *room_index += 1;
-                            
+
                             // If rooms are included, return a RoomNode
                             if self.included_types.contains(GraphElementType::ROOM) {
                                 let room_node = RoomNode::from(room);
@@ -1011,24 +1171,30 @@ impl Iterator for CurrentStateIterator<'_> {
                             relations.push((building.id.to_string(), floor_id.to_string()));
                         }
                     }
-                    
-                    self.state = IterationState::BuildingFloorRelations { 
+
+                    self.state = IterationState::BuildingFloorRelations {
                         relation_index: 0,
-                        relations
+                        relations,
                     };
                     self.next()
                 }
-            },
-            IterationState::BuildingFloorRelations { relation_index, relations } => {
+            }
+            IterationState::BuildingFloorRelations {
+                relation_index,
+                relations,
+            } => {
                 if *relation_index < relations.len() {
                     let (_, floor_id_str) = &relations[*relation_index];
                     *relation_index += 1;
-                    
+
                     // If building-floor relations are included, return one
-                    if self.included_types.contains(GraphElementType::BUILDING_FLOOR) {
+                    if self
+                        .included_types
+                        .contains(GraphElementType::BUILDING_FLOOR)
+                    {
                         let floor_id = floor_id_str.parse::<Location>().unwrap();
                         Some(ModelChange::BuildingFloorRelationAdded(
-                            BuildingFloorRelation::new(0, &floor_id).unwrap()
+                            BuildingFloorRelation::new(0, &floor_id).unwrap(),
                         ))
                     } else {
                         // Skip to next relation if not included
@@ -1044,24 +1210,27 @@ impl Iterator for CurrentStateIterator<'_> {
                             }
                         }
                     }
-                    
-                    self.state = IterationState::FloorRoomRelations { 
+
+                    self.state = IterationState::FloorRoomRelations {
                         relation_index: 0,
-                        relations
+                        relations,
                     };
                     self.next()
                 }
-            },
-            IterationState::FloorRoomRelations { relation_index, relations } => {
+            }
+            IterationState::FloorRoomRelations {
+                relation_index,
+                relations,
+            } => {
                 if *relation_index < relations.len() {
                     let (_, room_id_str) = &relations[*relation_index];
                     *relation_index += 1;
-                    
+
                     // If floor-room relations are included, return one
                     if self.included_types.contains(GraphElementType::FLOOR_ROOM) {
                         let room_id = room_id_str.parse::<Location>().unwrap();
                         Some(ModelChange::FloorRoomRelationAdded(
-                            FloorRoomRelation::new(0, &room_id).unwrap()
+                            FloorRoomRelation::new(0, &room_id).unwrap(),
                         ))
                     } else {
                         // Skip to next relation if not included
@@ -1071,7 +1240,7 @@ impl Iterator for CurrentStateIterator<'_> {
                     self.state = IterationState::Done;
                     None
                 }
-            },
+            }
             IterationState::Done => None,
         }
     }

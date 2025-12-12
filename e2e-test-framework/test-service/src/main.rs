@@ -14,12 +14,14 @@
 
 use std::sync::Arc;
 
+use anyhow::{Context, Result};
 use clap::Parser;
 use data_collector::{config::DataCollectorConfig, DataCollector};
 use serde::{Deserialize, Serialize};
 use test_data_store::{TestDataStore, TestDataStoreConfig};
 use test_run_host::{TestRunHost, TestRunHostConfig};
 
+mod openapi;
 mod web_api;
 
 // A struct to hold parameters obtained from env vars and/or command line arguments.
@@ -63,35 +65,67 @@ pub struct TestServiceConfig {
     pub data_collector: DataCollectorConfig,
 }
 
+/// Loads configuration from a file, supporting both YAML and JSON formats.
+///
+/// This function uses a content-based parsing approach:
+/// 1. Attempts to parse as YAML first (since YAML is a superset of JSON)
+/// 2. Falls back to JSON parsing if YAML fails
+/// 3. Returns detailed error messages from both parsers if both fail
+///
+/// # Arguments
+/// * `path` - Path to the configuration file
+///
+/// # Returns
+/// * `Result<TestServiceConfig>` - The parsed configuration or an error with details
+fn load_config_from_file(path: &str) -> Result<TestServiceConfig> {
+    // Read file content
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config file: {path}"))?;
+
+    // Try YAML first, then JSON
+    match serde_yaml::from_str::<TestServiceConfig>(&content) {
+        Ok(config) => {
+            log::debug!("Successfully parsed config as YAML from: {path}");
+            Ok(config)
+        }
+        Err(yaml_err) => {
+            // If YAML fails, try JSON
+            match serde_json::from_str::<TestServiceConfig>(&content) {
+                Ok(config) => {
+                    log::debug!("Successfully parsed config as JSON from: {path}");
+                    Ok(config)
+                }
+                Err(json_err) => {
+                    // Both failed, return detailed error
+                    Err(anyhow::anyhow!(
+                        "Failed to parse config file '{path}':\n  YAML: {yaml_err}\n  JSON: {json_err}"
+                    ))
+                }
+            }
+        }
+    }
+}
+
 // The main function that starts the starts the Test Service.
 #[tokio::main]
 async fn main() {
+    // Initialize env_logger - back to simple init to respect RUST_LOG env var
     env_logger::init();
 
     // Parse the command line and env var args. If the args are invalid, return an error.
     let host_params = HostParams::parse();
-    log::info!("Started Test Service with - {:?}", host_params);
+    log::info!("Started Test Service with - {host_params:?}");
 
     // Load the config from a file if a path is specified in the HostParams.
     // If the specified file does not exist, return an error.
     // If no config file is specified, create the TestService with a default configuration.
     let mut test_service_config = match host_params.config_file_path.as_ref() {
         Some(config_file_path) => {
-            log::info!("Loading Test Service config from {:#?}", config_file_path);
+            log::info!("Loading Test Service config from {config_file_path:#?}");
 
-            // Validate that the file exists and if not return an error.
-            if !std::path::Path::new(config_file_path).exists() {
-                panic!("Config file not found: {}", config_file_path);
-            }
-
-            // Read the file content into a string.
-            let config_file_json =
-                std::fs::read_to_string(config_file_path).unwrap_or_else(|err| {
-                    panic!("Error reading config file: {}", err);
-                });
-
-            serde_json::from_str::<TestServiceConfig>(&config_file_json).unwrap_or_else(|err| {
-                panic!("Error parsing TestServiceConfig: {}", err);
+            // Load config using the new dual-format parser
+            load_config_from_file(config_file_path).unwrap_or_else(|err| {
+                panic!("Error loading config file: {err}");
             })
         }
         None => {
@@ -113,7 +147,7 @@ async fn main() {
         TestDataStore::new(test_service_config.data_store)
             .await
             .unwrap_or_else(|err| {
-                panic!("Error creating TestDataStore: {}", err);
+                panic!("Error creating TestDataStore: {err}");
             }),
     );
 
@@ -121,22 +155,30 @@ async fn main() {
         DataCollector::new(test_service_config.data_collector, test_data_store.clone())
             .await
             .unwrap_or_else(|err| {
-                panic!("Error creating DataCollector: {}", err);
+                panic!("Error creating DataCollector: {err}");
             }),
     );
 
     // Start the DataCollector. This will start any collectors that are configured to start on launch.
     data_collector.start().await.unwrap_or_else(|err| {
-        panic!("Error starting DataCollector: {}", err);
+        panic!("Error starting DataCollector: {err}");
     });
 
     let test_run_host = Arc::new(
         TestRunHost::new(test_service_config.test_run_host, test_data_store.clone())
             .await
             .unwrap_or_else(|err| {
-                panic!("Error creating TestRunHost: {}", err);
+                panic!("Error creating TestRunHost: {err}");
             }),
     );
+
+    // Now that TestRunHost is wrapped in Arc, set it on sources and start auto-start sources
+    test_run_host
+        .initialize_sources(test_run_host.clone())
+        .await
+        .unwrap_or_else(|err| {
+            panic!("Error initializing sources: {err}");
+        });
 
     // Start the Web API.
     web_api::start_web_api(
@@ -146,4 +188,192 @@ async fn main() {
         data_collector,
     )
     .await;
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_load_valid_json_config() {
+        let json_content = r#"{
+            "data_store": {
+                "data_store_path": "/tmp/test"
+            },
+            "test_run_host": {
+                "test_runs": []
+            },
+            "data_collector": {
+                "data_collections": []
+            }
+        }"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(json_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = load_config_from_file(temp_file.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            config.data_store.data_store_path,
+            Some("/tmp/test".to_string())
+        );
+    }
+
+    #[test]
+    fn test_load_valid_yaml_config() {
+        let yaml_content = r#"
+data_store:
+  data_store_path: /tmp/test
+test_run_host:
+  test_runs: []
+data_collector:
+  data_collections: []
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(yaml_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = load_config_from_file(temp_file.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            config.data_store.data_store_path,
+            Some("/tmp/test".to_string())
+        );
+    }
+
+    #[test]
+    fn test_load_minimal_config_with_defaults() {
+        let yaml_content = "{}";
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(yaml_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = load_config_from_file(temp_file.path().to_str().unwrap()).unwrap();
+        assert!(config.data_store.data_store_path.is_none());
+        assert!(config.test_run_host.test_runs.is_empty());
+    }
+
+    #[test]
+    fn test_load_json_with_yaml_features() {
+        // JSON that's valid YAML but not strict JSON (has comments)
+        let content = r#"
+# This is a YAML comment
+data_store:
+  data_store_path: /tmp/test
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = load_config_from_file(temp_file.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            config.data_store.data_store_path,
+            Some("/tmp/test".to_string())
+        );
+    }
+
+    #[test]
+    fn test_load_invalid_config_both_formats() {
+        // This content is invalid for TestServiceConfig structure
+        let invalid_content = r#"
+data_store: "this should be an object, not a string"
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(invalid_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let result = load_config_from_file(temp_file.path().to_str().unwrap());
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+        // Should contain both YAML and JSON error messages
+        assert!(err_msg.contains("YAML:"));
+        assert!(err_msg.contains("JSON:"));
+    }
+
+    #[test]
+    fn test_load_missing_file() {
+        let result = load_config_from_file("/nonexistent/path/to/config.json");
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("Failed to read config file"));
+    }
+
+    #[test]
+    fn test_load_empty_file() {
+        // Empty file parses as YAML null, which gets default config
+        let empty_content = "";
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(empty_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = load_config_from_file(temp_file.path().to_str().unwrap()).unwrap();
+        // Empty file should produce default config
+        assert!(config.data_store.data_store_path.is_none());
+    }
+
+    #[test]
+    fn test_load_complex_nested_config() {
+        let yaml_content = r#"
+data_store:
+  data_store_path: /tmp/complex/test
+  delete_on_start: true
+  delete_on_stop: false
+  test_repos:
+    - id: repo1
+      kind: LocalStorage
+      source_path: /path/to/repo
+test_run_host:
+  test_runs:
+    - test_id: test1
+      test_repo_id: repo1
+      test_run_id: run001
+      queries: []
+      reactions: []
+      sources: []
+      drasi_servers: []
+data_collector:
+  data_collections: []
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(yaml_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = load_config_from_file(temp_file.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            config.data_store.data_store_path,
+            Some("/tmp/complex/test".to_string())
+        );
+        assert_eq!(config.data_store.delete_on_start, Some(true));
+        assert_eq!(config.data_store.delete_on_stop, Some(false));
+        assert_eq!(config.test_run_host.test_runs.len(), 1);
+        assert_eq!(config.test_run_host.test_runs[0].test_id, "test1");
+    }
+
+    #[test]
+    fn test_load_json_that_fails_yaml_parse() {
+        // Some edge case JSON that might not parse well as YAML
+        let json_content = r#"{"data_store":{"data_store_path":"/tmp/test"}}"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(json_content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+
+        let config = load_config_from_file(temp_file.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            config.data_store.data_store_path,
+            Some("/tmp/test".to_string())
+        );
+    }
 }

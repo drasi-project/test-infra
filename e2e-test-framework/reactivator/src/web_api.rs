@@ -55,7 +55,7 @@ pub(crate) async fn start_web_api(cfg: Params) {
         .route("/", get(get_handler))
         .layer(axum::extract::Extension(Arc::new(cfg)));
 
-    log::info!("\n\nTest Reactivator Web API listening on http://{}", addr);
+    log::info!("\n\nTest Reactivator Web API listening on http://{addr}");
 
     let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
@@ -65,7 +65,7 @@ pub(crate) async fn start_web_api(cfg: Params) {
     log::info!("\n\nPress CTRL-C to stop the Test Reactivator...\n\n");
 
     if let Err(err) = graceful.await {
-        log::error!("Test Reactivator error: {}", err);
+        log::error!("Test Reactivator error: {err}");
     }
 }
 
@@ -105,7 +105,7 @@ async fn shutdown_signal() {
 pub async fn get_handler(
     cfg: Extension<Arc<Params>>,
 ) -> anyhow::Result<impl IntoResponse, TestReactivatorWebApiError> {
-    log::debug!("Processing call - get_handler - {:?}", cfg);
+    log::debug!("Processing call - get_handler - {cfg:?}");
 
     Ok((StatusCode::OK, Json("Test Reactivator Web API")))
 }

@@ -43,7 +43,7 @@ async fn create_bootstrap_data_record(item_type: ItemType, path: PathBuf) -> any
     item_revision_to_bootstrap_data_record(item_type, &item_revision)
 }
 
-async fn create_source_change_record(item_type: ItemType, op: String, offset_ns: u64, ts_ms: u64, source: SourceChangeEventSourceInfo, before: Option<PathBuf>, after: Option<PathBuf>) -> anyhow::Result<ChangeScriptRecord> {
+async fn create_source_change_record(item_type: ItemType, op: String, offset_ns: u64, source: SourceChangeEventSourceInfo, before: Option<PathBuf>, after: Option<PathBuf>) -> anyhow::Result<ChangeScriptRecord> {
     let before = match before {
         Some(path) => {
             let revision_file_str = fs::read_to_string(path).await?;
@@ -66,8 +66,8 @@ async fn create_source_change_record(item_type: ItemType, op: String, offset_ns:
         offset_ns,
         source_change_event: SourceChangeEvent {
             op,
-            ts_ms,
-            schema: "".to_string(),
+            reactivator_start_ns: offset_ns,
+            reactivator_end_ns: offset_ns + 1000000, // 1ms later
             payload: SourceChangeEventPayload {
                 source,
                 before,
@@ -180,8 +180,7 @@ pub async fn create_test_scripts(args: &MakeScriptCommandArgs, item_root_path: P
     let source_info = SourceChangeEventSourceInfo {
         db: source_id.clone(),
         table: "node".to_string(),
-        ts_ms: 0,
-        ts_sec: 0,
+        ts_ns: 0,
         lsn,
     };
 
@@ -191,8 +190,7 @@ pub async fn create_test_scripts(args: &MakeScriptCommandArgs, item_root_path: P
         if timestamp >= start_datetime && timestamp <= end_datetime {
             let ts_ns = timestamp.and_utc().timestamp_nanos_opt().unwrap_or_default() as u64;
             let source_info = SourceChangeEventSourceInfo {
-                ts_ms: ts_ns / 1_000_000,
-                ts_sec: ts_ns / 1_000_000_000,
+                ts_ns,
                 lsn,
                 ..source_info.clone()
             };
@@ -207,7 +205,7 @@ pub async fn create_test_scripts(args: &MakeScriptCommandArgs, item_root_path: P
             }; 
 
             let rec_create = create_source_change_record(
-                item_type, op, ts_ns - start_datetime_ns, source_info.ts_ms, source_info, before_path, after_path);
+                item_type, op, ts_ns - start_datetime_ns, source_info, before_path, after_path);
 
             match rec_create.await {
                 Ok(record) => {

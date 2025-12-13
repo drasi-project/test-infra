@@ -54,7 +54,7 @@ where
         TestRunStatus::Initialized => "Initialized",
         TestRunStatus::Running => "Running",
         TestRunStatus::Stopped => "Stopped",
-        TestRunStatus::Error(msg) => return serializer.serialize_str(&format!("Error: {}", msg)),
+        TestRunStatus::Error(msg) => return serializer.serialize_str(&format!("Error: {msg}")),
     };
     serializer.serialize_str(status_str)
 }
@@ -475,7 +475,7 @@ async fn get_test_run_source(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, source_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, source_id);
+    let full_id = format!("{run_id}.{source_id}");
 
     match test_run_host.get_test_source_state(&full_id).await {
         Ok(state) => Ok(Json(state)),
@@ -505,8 +505,7 @@ async fn delete_test_run_source(
 ) -> Result<StatusCode, TestServiceWebApiError> {
     // TODO: Implement source deletion
     Err(TestServiceWebApiError::NotReady(format!(
-        "Source deletion not implemented: {}",
-        source_id
+        "Source deletion not implemented: {source_id}"
     )))
 }
 
@@ -528,7 +527,7 @@ async fn start_test_run_source(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, source_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, source_id);
+    let full_id = format!("{run_id}.{source_id}");
     test_run_host.test_source_start(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -551,7 +550,7 @@ async fn stop_test_run_source(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, source_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, source_id);
+    let full_id = format!("{run_id}.{source_id}");
     test_run_host.test_source_stop(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -574,7 +573,7 @@ async fn pause_test_run_source(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, source_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, source_id);
+    let full_id = format!("{run_id}.{source_id}");
     test_run_host.test_source_pause(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -597,7 +596,7 @@ async fn reset_test_run_source(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, source_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, source_id);
+    let full_id = format!("{run_id}.{source_id}");
     test_run_host.test_source_reset(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -622,7 +621,7 @@ async fn skip_test_run_source(
     Path((run_id, source_id)): Path<(String, String)>,
     Json(config): Json<TestSkipConfig>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, source_id);
+    let full_id = format!("{run_id}.{source_id}");
     let response = test_run_host
         .test_source_skip(&full_id, config.num_skips, config.spacing_mode)
         .await?;
@@ -649,7 +648,7 @@ async fn step_test_run_source(
     Path((run_id, source_id)): Path<(String, String)>,
     Json(config): Json<TestStepConfig>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, source_id);
+    let full_id = format!("{run_id}.{source_id}");
     let response = test_run_host
         .test_source_step(&full_id, config.num_steps, config.spacing_mode)
         .await?;
@@ -678,7 +677,7 @@ async fn bootstrap_test_run_source(
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
     use std::collections::HashSet;
 
-    let full_id = format!("{}.{}", run_id, source_id);
+    let full_id = format!("{run_id}.{source_id}");
     let node_labels: HashSet<String> = body.node_labels.into_iter().collect();
     let rel_labels: HashSet<String> = body.rel_labels.into_iter().collect();
 
@@ -801,7 +800,7 @@ async fn get_test_run_query(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, query_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, query_id);
+    let full_id = format!("{run_id}.{query_id}");
 
     match test_run_host.get_test_query_state(&full_id).await {
         Ok(state) => Ok(Json(state)),
@@ -831,8 +830,7 @@ async fn delete_test_run_query(
 ) -> Result<StatusCode, TestServiceWebApiError> {
     // TODO: Implement query deletion
     Err(TestServiceWebApiError::NotReady(format!(
-        "Query deletion not implemented: {}",
-        query_id
+        "Query deletion not implemented: {query_id}"
     )))
 }
 
@@ -854,7 +852,7 @@ async fn start_test_run_query(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, query_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, query_id);
+    let full_id = format!("{run_id}.{query_id}");
     test_run_host.test_query_start(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -877,7 +875,7 @@ async fn stop_test_run_query(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, query_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, query_id);
+    let full_id = format!("{run_id}.{query_id}");
     test_run_host.test_query_stop(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -900,7 +898,7 @@ async fn pause_test_run_query(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, query_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, query_id);
+    let full_id = format!("{run_id}.{query_id}");
     test_run_host.test_query_pause(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -923,7 +921,7 @@ async fn reset_test_run_query(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, query_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, query_id);
+    let full_id = format!("{run_id}.{query_id}");
     test_run_host.test_query_reset(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -1012,7 +1010,7 @@ async fn get_test_run_reaction(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, reaction_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, reaction_id);
+    let full_id = format!("{run_id}.{reaction_id}");
 
     match test_run_host.get_test_reaction_state(&full_id).await {
         Ok(state) => Ok(Json(state)),
@@ -1042,8 +1040,7 @@ async fn delete_test_run_reaction(
 ) -> Result<StatusCode, TestServiceWebApiError> {
     // TODO: Implement reaction deletion
     Err(TestServiceWebApiError::NotReady(format!(
-        "Reaction deletion not implemented: {}",
-        reaction_id
+        "Reaction deletion not implemented: {reaction_id}"
     )))
 }
 
@@ -1065,7 +1062,7 @@ async fn start_test_run_reaction(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, reaction_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, reaction_id);
+    let full_id = format!("{run_id}.{reaction_id}");
     test_run_host.test_reaction_start(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -1088,7 +1085,7 @@ async fn stop_test_run_reaction(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, reaction_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, reaction_id);
+    let full_id = format!("{run_id}.{reaction_id}");
     test_run_host.test_reaction_stop(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -1111,7 +1108,7 @@ async fn pause_test_run_reaction(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, reaction_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, reaction_id);
+    let full_id = format!("{run_id}.{reaction_id}");
     test_run_host.test_reaction_pause(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -1134,7 +1131,7 @@ async fn reset_test_run_reaction(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, reaction_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, reaction_id);
+    let full_id = format!("{run_id}.{reaction_id}");
     test_run_host.test_reaction_reset(&full_id).await?;
     Ok(StatusCode::OK)
 }
@@ -1226,7 +1223,7 @@ async fn get_test_run_drasi_server(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, server_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, server_id);
+    let full_id = format!("{run_id}.{server_id}");
     let server_id =
         test_data_store::test_run_storage::TestRunDrasiServerId::try_from(full_id.as_str())
             .map_err(|e| TestServiceWebApiError::AnyhowError(anyhow::anyhow!(e)))?;
@@ -1258,7 +1255,7 @@ async fn delete_test_run_drasi_server(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path((run_id, server_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{}.{}", run_id, server_id);
+    let full_id = format!("{run_id}.{server_id}");
     let server_id =
         test_data_store::test_run_storage::TestRunDrasiServerId::try_from(full_id.as_str())
             .map_err(|e| TestServiceWebApiError::AnyhowError(anyhow::anyhow!(e)))?;

@@ -43,13 +43,10 @@ impl RecordCountStopTrigger {
     pub fn new(
         def: &RecordCountStopTriggerDefinition,
     ) -> anyhow::Result<Box<dyn StopTrigger + Send + Sync>> {
-        log::debug!("Creating RecordCountStopTrigger from {:?}, ", def);
+        log::debug!("Creating RecordCountStopTrigger from {def:?}, ");
 
         let settings = RecordCountStopTriggerSettings::new(def)?;
-        log::trace!(
-            "Creating RecordCountStopTrigger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating RecordCountStopTrigger with settings {settings:?}, ");
 
         Ok(Box::new(Self { settings }))
     }

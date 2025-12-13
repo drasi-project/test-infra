@@ -365,11 +365,7 @@ impl TestRunStorage {
         query_id: &TestRunQueryId,
         replace: bool,
     ) -> anyhow::Result<TestRunQueryStorage> {
-        log::debug!(
-            "Getting (replace = {}) TestRunQueryStorage for ID: {:?}",
-            replace,
-            query_id
-        );
+        log::debug!("Getting (replace = {replace}) TestRunQueryStorage for ID: {query_id:?}");
 
         let query_path = self.queries_path.join(&query_id.test_query_id);
         let result_change_path = query_path.join(QUERY_RESULT_LOG_FOLDER_NAME);
@@ -411,11 +407,7 @@ impl TestRunStorage {
         source_id: &TestRunSourceId,
         replace: bool,
     ) -> anyhow::Result<TestRunSourceStorage> {
-        log::debug!(
-            "Getting (replace = {}) TestRunSourceStorage for ID: {:?}",
-            replace,
-            source_id
-        );
+        log::debug!("Getting (replace = {replace}) TestRunSourceStorage for ID: {source_id:?}");
 
         let source_path = self.sources_path.join(&source_id.test_source_id);
         let source_change_path = source_path.join(SOURCE_CHANGE_LOG_FOLDER_NAME);
@@ -458,11 +450,7 @@ impl TestRunStorage {
         reaction_id: &TestRunReactionId,
         replace: bool,
     ) -> anyhow::Result<TestRunReactionStorage> {
-        log::debug!(
-            "Getting (replace = {}) TestRunReactionStorage for ID: {:?}",
-            replace,
-            reaction_id
-        );
+        log::debug!("Getting (replace = {replace}) TestRunReactionStorage for ID: {reaction_id:?}");
 
         let reaction_path = self.reactions_path.join(&reaction_id.test_reaction_id);
         let reaction_output_path = reaction_path.join(REACTION_OUTPUT_LOG_FOLDER_NAME);
@@ -505,9 +493,7 @@ impl TestRunStorage {
         replace: bool,
     ) -> anyhow::Result<TestRunDrasiServerStorage> {
         log::debug!(
-            "Getting (replace = {}) TestRunDrasiServerStorage for ID: {:?}",
-            replace,
-            drasi_server_id
+            "Getting (replace = {replace}) TestRunDrasiServerStorage for ID: {drasi_server_id:?}"
         );
 
         let drasi_server_path = self

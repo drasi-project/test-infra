@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for otel metric logger code
+#![allow(clippy::unwrap_used)]
+
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -366,16 +369,11 @@ impl OtelMetricResultStreamLogger {
         cfg: &OtelMetricResultStreamLoggerConfig,
     ) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
         log::debug!(
-            "Creating OtelMetricResultStreamLogger for {}, from {:?}, ",
-            test_run_query_id,
-            cfg
+            "Creating OtelMetricResultStreamLogger for {test_run_query_id}, from {cfg:?}, "
         );
 
         let settings = OtelMetricResultStreamLoggerSettings::new(test_run_query_id, cfg)?;
-        log::trace!(
-            "Creating OtelMetricResultStreamLogger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating OtelMetricResultStreamLogger with settings {settings:?}, ");
 
         // Initialize meter provider using pipeline
         let meter_provider = opentelemetry_otlp::new_pipeline()

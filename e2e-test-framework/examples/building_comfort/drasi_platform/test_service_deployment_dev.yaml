@@ -28,8 +28,8 @@ data:
               "kind": "GitHub",
               "owner": "drasi-project",
               "repo": "test-repo",
-              "branch": "main",
-              "force_cache_refresh": false,
+              "branch": "query-host",
+              "force_cache_refresh": true,
               "root_path": "dev_repo"
           }
         ]
@@ -37,7 +37,7 @@ data:
       "test_run_host": {
         "test_runs": [
           {
-            "test_id": "building_comfort",
+            "test_id": "building_comfort_small",
             "test_repo_id": "github_dev_repo",
             "test_run_id": "test_run_001",
             "sources": [

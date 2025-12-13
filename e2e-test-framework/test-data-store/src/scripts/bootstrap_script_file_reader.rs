@@ -106,8 +106,8 @@ impl BootstrapScriptReader {
     // If there are no more records to read, None is returned.
     fn get_next_record(&mut self) -> anyhow::Result<SequencedBootstrapScriptRecord> {
         // Once we have reached the end of the script, always return the Finish record.
-        if self.footer.is_some() {
-            return Ok(self.footer.as_ref().unwrap().clone());
+        if let Some(footer) = &self.footer {
+            return Ok(footer.clone());
         }
 
         if self.current_reader.is_none() {
@@ -150,8 +150,7 @@ impl BootstrapScriptReader {
                             // Warn if there is a Header record in the middle of the script.
                             if seq_rec.seq > 0 {
                                 log::warn!(
-                                    "Header record found not at start of the script: {:?}",
-                                    seq_rec
+                                    "Header record found not at start of the script: {seq_rec:?}"
                                 );
                             }
 
@@ -174,13 +173,14 @@ impl BootstrapScriptReader {
             }
         } else {
             // Generate a synthetic Finish record to mark the end of the script.
-            self.footer = Some(SequencedBootstrapScriptRecord {
+            let footer = SequencedBootstrapScriptRecord {
                 record: BootstrapScriptRecord::Finish(BootstrapFinishRecord {
                     description: "Auto generated at end of script.".to_string(),
                 }),
                 seq: self.seq,
-            });
-            Ok(self.footer.as_ref().unwrap().clone())
+            };
+            self.footer = Some(footer.clone());
+            Ok(footer)
         }
     }
 

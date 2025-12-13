@@ -20,17 +20,12 @@ use serde::{
     Deserialize, Serialize, Serializer,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TimeMode {
     Live,
+    #[default]
     Recorded,
     Rebased(u64),
-}
-
-impl Default for TimeMode {
-    fn default() -> Self {
-        Self::Recorded
-    }
 }
 
 impl FromStr for TimeMode {
@@ -41,9 +36,14 @@ impl FromStr for TimeMode {
             "live" => Ok(Self::Live),
             "recorded" => Ok(Self::Recorded),
             _ => match chrono::DateTime::parse_from_rfc3339(s) {
-                Ok(t) => Ok(Self::Rebased(t.timestamp_nanos_opt().unwrap() as u64)),
+                Ok(t) => {
+                    let nanos = t
+                        .timestamp_nanos_opt()
+                        .ok_or_else(|| anyhow::anyhow!("Timestamp out of range for nanoseconds"))?;
+                    Ok(Self::Rebased(nanos as u64))
+                }
                 Err(e) => {
-                    anyhow::bail!("Error parsing TimeMode - value:{}, error:{}", s, e);
+                    anyhow::bail!("Error parsing TimeMode - value:{s}, error:{e}");
                 }
             },
         }
@@ -55,7 +55,7 @@ impl std::fmt::Display for TimeMode {
         match self {
             Self::Live => write!(f, "live"),
             Self::Recorded => write!(f, "recorded"),
-            Self::Rebased(time) => write!(f, "{}", time),
+            Self::Rebased(time) => write!(f, "{time}"),
         }
     }
 }
@@ -89,17 +89,12 @@ impl Serialize for TimeMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SpacingMode {
     None,
     Rate(NonZeroU32),
+    #[default]
     Recorded,
-}
-
-impl Default for SpacingMode {
-    fn default() -> Self {
-        Self::Recorded
-    }
 }
 
 impl FromStr for SpacingMode {
@@ -114,10 +109,10 @@ impl FromStr for SpacingMode {
                 match s.parse::<u32>() {
                     Ok(num) => match NonZeroU32::new(num) {
                         Some(rate) => Ok(Self::Rate(rate)),
-                        None => anyhow::bail!("Invalid SpacingMode: {}", s),
+                        None => anyhow::bail!("Invalid SpacingMode: {s}"),
                     },
                     Err(e) => {
-                        anyhow::bail!("Error parsing SpacingMode: {}", e);
+                        anyhow::bail!("Error parsing SpacingMode: {e}");
                     }
                 }
             }
@@ -130,7 +125,7 @@ impl std::fmt::Display for SpacingMode {
         match self {
             Self::None => write!(f, "none"),
             Self::Recorded => write!(f, "recorded"),
-            Self::Rate(rate) => write!(f, "{}", rate),
+            Self::Rate(rate) => write!(f, "{rate}"),
         }
     }
 }
@@ -225,7 +220,7 @@ impl TestDefinition {
             .queries
             .iter()
             .find(|query| query.test_query_id == query_id)
-            .ok_or_else(|| anyhow::anyhow!("Test Query with ID {:?} not found", query_id))?;
+            .ok_or_else(|| anyhow::anyhow!("Test Query with ID {query_id:?} not found"))?;
 
         Ok(test_query_definition.clone())
     }
@@ -235,7 +230,7 @@ impl TestDefinition {
             .reactions
             .iter()
             .find(|reaction| reaction.test_reaction_id == reaction_id)
-            .ok_or_else(|| anyhow::anyhow!("Test Reaction with ID {:?} not found", reaction_id))?;
+            .ok_or_else(|| anyhow::anyhow!("Test Reaction with ID {reaction_id:?} not found"))?;
 
         Ok(test_reaction_definition.clone())
     }
@@ -248,7 +243,7 @@ impl TestDefinition {
                 TestSourceDefinition::Model(def) => def.common.test_source_id == source_id,
                 TestSourceDefinition::Script(def) => def.common.test_source_id == source_id,
             })
-            .ok_or_else(|| anyhow::anyhow!("Test Source with ID {:?} not found", source_id))?;
+            .ok_or_else(|| anyhow::anyhow!("Test Source with ID {source_id:?} not found"))?;
 
         Ok(test_source_definition.clone())
     }
@@ -256,6 +251,7 @@ impl TestDefinition {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
+#[allow(clippy::large_enum_variant)]
 pub enum TestSourceDefinition {
     Model(ModelTestSourceDefinition),
     Script(ScriptTestSourceDefinition),
@@ -666,7 +662,7 @@ pub struct TestDrasiServerDefinition {
 }
 
 /// Runtime configuration for a Drasi Server instance
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DrasiServerConfig {
     /// Runtime configuration (thread pool size, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -864,22 +860,8 @@ pub struct DrasiReactionConfig {
     pub properties: HashMap<String, serde_json::Value>,
 }
 
-impl Default for DrasiServerConfig {
-    fn default() -> Self {
-        Self {
-            runtime: None,
-            storage: None,
-            auth: None,
-            sources: Vec::new(),
-            queries: Vec::new(),
-            reactions: Vec::new(),
-            log_level: None,
-            extra: HashMap::new(),
-        }
-    }
-}
-
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use std::{
         fs::File,
@@ -894,7 +876,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("unit_test.test");
         let mut file = File::create(&file_path).unwrap();
-        writeln!(file, "{}", content).unwrap();
+        writeln!(file, "{content}").unwrap();
         file.sync_all().unwrap();
         File::open(file_path).unwrap()
     }
@@ -1011,8 +993,8 @@ mod tests {
         match source {
             TestSourceDefinition::Script(source) => {
                 assert_eq!(source.common.test_source_id, "source1");
-                assert_eq!(source.bootstrap_data_generator.is_none(), true);
-                assert_eq!(source.source_change_generator.is_none(), true);
+                assert!(source.bootstrap_data_generator.is_none());
+                assert!(source.source_change_generator.is_none());
             }
             _ => panic!("Expected ScriptTestSourceDefinition"),
         }

@@ -93,7 +93,7 @@ impl AdaptiveGrpcSourceChangeDispatcher {
             }
             Err(e) => {
                 error!("Failed to connect to Drasi SourceService: {}", e);
-                Err(anyhow::anyhow!("Connection failed: {}", e))
+                Err(anyhow::anyhow!("Connection failed: {e}"))
             }
         }
     }
@@ -134,10 +134,8 @@ impl AdaptiveGrpcSourceChangeDispatcher {
 
         let mut total_processed = 0u64;
         while let Some(response) = response_stream.message().await? {
-            if !response.success {
-                if !response.error.is_empty() {
-                    anyhow::bail!("Batch dispatch failed: {}", response.error);
-                }
+            if !response.success && !response.error.is_empty() {
+                anyhow::bail!("Batch dispatch failed: {}", response.error);
             }
             total_processed += response.events_processed;
         }

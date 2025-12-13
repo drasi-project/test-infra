@@ -64,15 +64,13 @@ pub struct DrasiServerChannelHandler {
 }
 
 impl DrasiServerChannelHandler {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new(
         id: TestRunQueryId,
         definition: DrasiServerChannelReactionHandlerDefinition,
     ) -> anyhow::Result<Box<dyn ReactionOutputHandler + Send + Sync>> {
         let settings = DrasiServerChannelHandlerSettings::new(id, definition)?;
-        log::trace!(
-            "Creating DrasiServerChannelHandler with settings {:?}",
-            settings
-        );
+        log::trace!("Creating DrasiServerChannelHandler with settings {settings:?}");
 
         let status = Arc::new(RwLock::new(ReactionHandlerStatus::Uninitialized));
         let notifier = Arc::new(Notify::new());
@@ -98,125 +96,37 @@ impl DrasiServerChannelHandler {
     ) -> anyhow::Result<Receiver<serde_json::Value>> {
         // Get the test run host
         let test_run_host_lock = test_run_host.lock().await;
-        let test_run_host = test_run_host_lock
+        let _test_run_host = test_run_host_lock
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("TestRunHost not set"))?
             .clone();
         drop(test_run_host_lock);
 
         // Create a channel for receiving reactions
-        let (tx, rx) = channel(settings.buffer_size);
+        let (_tx, rx) = channel(settings.buffer_size);
 
-        log::info!(
-            "Created channel connection for reaction '{}' on Drasi Server {}",
+        // NOTE: ApplicationReactionHandle is no longer available in drasi_lib.
+        // The new plugin architecture requires reactions to be created as instances.
+        // This handler is currently non-functional and will log warnings.
+        log::warn!(
+            "Created channel connection for reaction '{}' on Drasi Server {}, but ApplicationReactionHandle is no longer available in drasi_lib. No data will be received.",
             settings.reaction_id,
             settings.drasi_server_id
         );
 
-        // Start a task to monitor for the reaction handle
+        // Start a task that just logs the situation
         let settings_clone = settings.clone();
-        let test_run_host = test_run_host.clone();
 
         tokio::spawn(async move {
-            log::debug!(
-                "Channel handler starting for reaction {} on server {}",
+            log::warn!(
+                "Channel handler starting for reaction {} on server {}, but ApplicationReactionHandle is no longer available in drasi_lib. \
+                 Reactions must be added as instances implementing the Reaction trait.",
                 settings_clone.reaction_id,
                 settings_clone.drasi_server_id
             );
 
-            // Get the Drasi Server and application handle
-            let test_runs = test_run_host.test_runs.read().await;
-            if let Some(test_run) = test_runs.get(&settings_clone.drasi_server_id.test_run_id) {
-                if let Some(drasi_server) = test_run
-                    .drasi_servers
-                    .get(&settings_clone.drasi_server_id.test_drasi_server_id)
-                {
-                    if let Some(app_handle) = drasi_server
-                        .get_application_handle(&settings_clone.reaction_id)
-                        .await
-                    {
-                        if let Some(reaction_handle) = app_handle.reaction {
-                            log::info!(
-                            "Successfully obtained ApplicationReactionHandle for reaction '{}' on Drasi Server {}",
-                            settings_clone.reaction_id, settings_clone.drasi_server_id
-                        );
-
-                            // Subscribe to query results
-                            match reaction_handle.as_stream().await {
-                                Some(mut stream) => {
-                                    log::info!(
-                                    "Successfully subscribed to query results for reaction '{}'",
-                                    settings_clone.reaction_id
-                                );
-
-                                    while let Some(query_result) = stream.next().await {
-                                        // Send each result item individually so stop triggers can fire mid-batch
-                                        if query_result.results.is_empty() {
-                                            // Send empty result as a single item
-                                            let result_json = serde_json::json!({
-                                                "query_id": query_result.query_id,
-                                                "results": [],
-                                                "metadata": query_result.metadata,
-                                            });
-
-                                            if let Err(e) = tx.send(result_json).await {
-                                                log::debug!(
-                                                    "Channel closed (likely due to stop trigger): {}",
-                                                    e
-                                                );
-                                                break;
-                                            }
-                                        } else {
-                                            // Send each result item as a separate message
-                                            for result_item in &query_result.results {
-                                                let result_json = serde_json::json!({
-                                                    "query_id": query_result.query_id.clone(),
-                                                    "result": result_item,
-                                                    "metadata": query_result.metadata.clone(),
-                                                });
-
-                                                if let Err(e) = tx.send(result_json).await {
-                                                    log::debug!(
-                                                        "Channel closed (likely due to stop trigger): {}",
-                                                        e
-                                                    );
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                None => {
-                                    log::error!("Failed to get stream from reaction handle - receiver may have already been taken");
-                                }
-                            }
-                        } else {
-                            log::error!(
-                                "No reaction handle found in application handle for reaction '{}'",
-                                settings_clone.reaction_id
-                            );
-                        }
-                    } else {
-                        log::warn!("No application handle found for reaction '{}' - this is expected if using API dispatch", settings_clone.reaction_id);
-                    }
-                } else {
-                    log::error!(
-                        "Drasi Server {} not found in test run",
-                        settings_clone.drasi_server_id.test_drasi_server_id
-                    );
-                }
-            } else {
-                log::error!(
-                    "Test run {} not found",
-                    settings_clone.drasi_server_id.test_run_id
-                );
-            }
-
-            log::debug!(
-                "Channel handler stopped for reaction {} on server {}",
-                settings_clone.reaction_id,
-                settings_clone.drasi_server_id
-            );
+            // The channel will remain open but never receive any data
+            // since we can't get reaction handles anymore
         });
 
         Ok(rx)
@@ -259,7 +169,7 @@ impl ReactionOutputHandler for DrasiServerChannelHandler {
                     {
                         Ok(rx) => break rx,
                         Err(e) => {
-                            log::error!("Failed to create channel connection: {}", e);
+                            log::error!("Failed to create channel connection: {e}");
                             // Wait a bit before retrying
                             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                         }
@@ -299,7 +209,7 @@ impl ReactionOutputHandler for DrasiServerChannelHandler {
 
                         // Send the message
                         if let Err(e) = tx_clone.send(message).await {
-                            log::debug!("Channel closed (likely due to stop trigger): {}", e);
+                            log::debug!("Channel closed (likely due to stop trigger): {e}");
                             break;
                         }
                     }
@@ -323,7 +233,7 @@ impl ReactionOutputHandler for DrasiServerChannelHandler {
             ReactionControlSignal::Start,
         ))
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to send start signal: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to send start signal: {e}"))?;
 
         Ok(rx)
     }

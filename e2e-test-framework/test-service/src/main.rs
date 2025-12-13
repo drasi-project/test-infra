@@ -80,28 +80,25 @@ pub struct TestServiceConfig {
 fn load_config_from_file(path: &str) -> Result<TestServiceConfig> {
     // Read file content
     let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read config file: {}", path))?;
+        .with_context(|| format!("Failed to read config file: {path}"))?;
 
     // Try YAML first, then JSON
     match serde_yaml::from_str::<TestServiceConfig>(&content) {
         Ok(config) => {
-            log::debug!("Successfully parsed config as YAML from: {}", path);
+            log::debug!("Successfully parsed config as YAML from: {path}");
             Ok(config)
         }
         Err(yaml_err) => {
             // If YAML fails, try JSON
             match serde_json::from_str::<TestServiceConfig>(&content) {
                 Ok(config) => {
-                    log::debug!("Successfully parsed config as JSON from: {}", path);
+                    log::debug!("Successfully parsed config as JSON from: {path}");
                     Ok(config)
                 }
                 Err(json_err) => {
                     // Both failed, return detailed error
                     Err(anyhow::anyhow!(
-                        "Failed to parse config file '{}':\n  YAML: {}\n  JSON: {}",
-                        path,
-                        yaml_err,
-                        json_err
+                        "Failed to parse config file '{path}':\n  YAML: {yaml_err}\n  JSON: {json_err}"
                     ))
                 }
             }
@@ -117,18 +114,18 @@ async fn main() {
 
     // Parse the command line and env var args. If the args are invalid, return an error.
     let host_params = HostParams::parse();
-    log::info!("Started Test Service with - {:?}", host_params);
+    log::info!("Started Test Service with - {host_params:?}");
 
     // Load the config from a file if a path is specified in the HostParams.
     // If the specified file does not exist, return an error.
     // If no config file is specified, create the TestService with a default configuration.
     let mut test_service_config = match host_params.config_file_path.as_ref() {
         Some(config_file_path) => {
-            log::info!("Loading Test Service config from {:#?}", config_file_path);
+            log::info!("Loading Test Service config from {config_file_path:#?}");
 
             // Load config using the new dual-format parser
             load_config_from_file(config_file_path).unwrap_or_else(|err| {
-                panic!("Error loading config file: {}", err);
+                panic!("Error loading config file: {err}");
             })
         }
         None => {
@@ -150,7 +147,7 @@ async fn main() {
         TestDataStore::new(test_service_config.data_store)
             .await
             .unwrap_or_else(|err| {
-                panic!("Error creating TestDataStore: {}", err);
+                panic!("Error creating TestDataStore: {err}");
             }),
     );
 
@@ -158,20 +155,20 @@ async fn main() {
         DataCollector::new(test_service_config.data_collector, test_data_store.clone())
             .await
             .unwrap_or_else(|err| {
-                panic!("Error creating DataCollector: {}", err);
+                panic!("Error creating DataCollector: {err}");
             }),
     );
 
     // Start the DataCollector. This will start any collectors that are configured to start on launch.
     data_collector.start().await.unwrap_or_else(|err| {
-        panic!("Error starting DataCollector: {}", err);
+        panic!("Error starting DataCollector: {err}");
     });
 
     let test_run_host = Arc::new(
         TestRunHost::new(test_service_config.test_run_host, test_data_store.clone())
             .await
             .unwrap_or_else(|err| {
-                panic!("Error creating TestRunHost: {}", err);
+                panic!("Error creating TestRunHost: {err}");
             }),
     );
 
@@ -180,7 +177,7 @@ async fn main() {
         .initialize_sources(test_run_host.clone())
         .await
         .unwrap_or_else(|err| {
-            panic!("Error initializing sources: {}", err);
+            panic!("Error initializing sources: {err}");
         });
 
     // Start the Web API.
@@ -194,6 +191,7 @@ async fn main() {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use std::io::Write;

@@ -61,7 +61,7 @@ pub struct TimeDistributionTracker {
 impl TimeDistributionTracker {
     pub fn new(folder_path: PathBuf, file_name: String) -> Self {
         Self {
-            file_path: folder_path.join(format!("{}_distributions.csv", file_name)),
+            file_path: folder_path.join(format!("{file_name}_distributions.csv")),
             distributions: [[0; BUCKET_COUNT]; COMPONENT_COUNT],
         }
     }
@@ -124,7 +124,7 @@ impl TimeDistributionTracker {
         // Write header with bucket as first column followed by component names
         let mut header = String::from("bucket");
         for component_name in COMPONENT_NAMES.iter() {
-            header.push_str(&format!(",{}", component_name));
+            header.push_str(&format!(",{component_name}"));
         }
         header.push('\n');
         file.write_all(header.as_bytes()).await?;

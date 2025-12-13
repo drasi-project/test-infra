@@ -47,8 +47,8 @@ pub enum OutputLoggerError {
 impl std::fmt::Display for OutputLoggerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "IO error: {}", e),
-            Self::Serde(e) => write!(f, "Serde error: {}", e),
+            Self::Io(e) => write!(f, "IO error: {e}"),
+            Self::Serde(e) => write!(f, "Serde error: {e}"),
         }
     }
 }
@@ -81,11 +81,7 @@ pub async fn create_output_logger(
     config: &OutputLoggerConfig,
     output_storage: &TestRunReactionStorage,
 ) -> anyhow::Result<Box<dyn OutputLogger + Send + Sync>> {
-    log::info!(
-        "create_output_logger called for {} with config: {:?}",
-        test_run_reaction_id,
-        config
-    );
+    log::info!("create_output_logger called for {test_run_reaction_id} with config: {config:?}");
     match config {
         OutputLoggerConfig::Console(cfg) => ConsoleOutputLogger::new(test_run_reaction_id, cfg),
         OutputLoggerConfig::JsonlFile(cfg) => {

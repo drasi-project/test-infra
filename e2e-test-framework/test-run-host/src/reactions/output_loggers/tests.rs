@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::common::{HandlerPayload, HandlerRecord};
     use crate::reactions::output_loggers::*;
@@ -76,7 +77,7 @@ mod tests {
         // Log 5 records to test file rotation (should create 3 files)
         for i in 0..5 {
             let record = HandlerRecord {
-                id: format!("test-{}", i),
+                id: format!("test-{i}"),
                 sequence: i as u64,
                 created_time_ns: i as u64 * 1000000,
                 processed_time_ns: (i + 1) as u64 * 1000000,
@@ -173,8 +174,8 @@ mod tests {
         // Create test records
         for i in 0..50 {
             let record = HandlerRecord {
-                id: format!("test_{}", i),
-                sequence: i as u64,
+                id: format!("test_{i}"),
+                sequence: i,
                 created_time_ns: 1000 + i,
                 processed_time_ns: 2000 + i,
                 traceparent: None,

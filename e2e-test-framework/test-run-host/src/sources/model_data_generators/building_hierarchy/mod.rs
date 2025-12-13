@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test data generator module - allow unwraps for data generation code
+#![allow(clippy::unwrap_used)]
+
 use std::{
     collections::HashSet,
     fmt::{self, Debug, Formatter},
@@ -287,10 +290,9 @@ impl BuildingHierarchyDataGenerator {
                     },
                 })
             }
-            Err(e) => anyhow::bail!(
-                "Error sending command to BuildingHierarchyDataGenerator: {:?}",
-                e
-            ),
+            Err(e) => {
+                anyhow::bail!("Error sending command to BuildingHierarchyDataGenerator: {e:?}")
+            }
         }
     }
 }
@@ -302,11 +304,7 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
         node_labels: &HashSet<String>,
         rel_labels: &HashSet<String>,
     ) -> anyhow::Result<BootstrapData> {
-        log::debug!(
-            "Node labels: [{:?}], Rel labels: [{:?}]",
-            node_labels,
-            rel_labels
-        );
+        log::debug!("Node labels: [{node_labels:?}], Rel labels: [{rel_labels:?}]");
 
         let mut building_nodes = Vec::new();
         let mut floor_nodes = Vec::new();
@@ -342,7 +340,7 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
                     room_nodes.push(node_record);
                 }
                 _ => {
-                    log::debug!("Other change: {:?}", change);
+                    log::debug!("Other change: {change:?}");
                 }
             }
         }
@@ -374,7 +372,7 @@ impl BootstrapDataGenerator for BuildingHierarchyDataGenerator {
                     floor_room_rels.push(rel_record);
                 }
                 _ => {
-                    log::debug!("Other change: {:?}", change);
+                    log::debug!("Other change: {change:?}");
                 }
             }
         }
@@ -479,7 +477,7 @@ impl SourceChangeGenerator for BuildingHierarchyDataGenerator {
                 })
                 .await
             {
-                log::error!("Failed to send SetTestRunHost command: {}", e);
+                log::error!("Failed to send SetTestRunHost command: {e}");
             }
         });
     }
@@ -587,10 +585,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
         settings: BuildingHierarchyDataGeneratorSettings,
         building_graph: Arc<Mutex<BuildingGraph>>,
     ) -> anyhow::Result<(Self, Receiver<ScheduledChangeEventMessage>)> {
-        log::debug!(
-            "Initializing BuildingHierarchyDataGenerator using {:?}",
-            settings
-        );
+        log::debug!("Initializing BuildingHierarchyDataGenerator using {settings:?}");
 
         // Create the dispatchers
         let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
@@ -598,11 +593,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
             match create_source_change_dispatcher(def, &settings.output_storage).await {
                 Ok(dispatcher) => dispatchers.push(dispatcher),
                 Err(e) => {
-                    anyhow::bail!(
-                        "Error creating SourceChangeDispatcher: {:?}; Error: {:?}",
-                        def,
-                        e
-                    );
+                    anyhow::bail!("Error creating SourceChangeDispatcher: {def:?}; Error: {e:?}");
                 }
             }
         }
@@ -844,8 +835,8 @@ impl BuildingHierarchyDataGeneratorInternalState {
     // Function to log the Player State at varying levels of detail.
     fn log_state(&self, msg: &str) {
         match log::max_level() {
-            log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, self),
-            log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, self),
+            log::LevelFilter::Trace => log::trace!("{msg} - {self:#?}"),
+            log::LevelFilter::Debug => log::debug!("{msg} - {self:?}"),
             _ => {}
         }
     }
@@ -854,7 +845,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
         &mut self,
         message: ScheduledChangeEventMessage,
     ) -> anyhow::Result<()> {
-        log::debug!("Processing next source change event: {:?}", message);
+        log::debug!("Processing next source change event: {message:?}");
 
         // Update times
         self.virtual_time_ns_current = self.virtual_time_ns_next;
@@ -939,7 +930,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
             SourceChangeGeneratorStatus::Skipping => {
                 if self.skips_remaining > 0 {
                     // DON'T dispatch the SourceChangeEvent.
-                    log::trace!("Skipping ChangeScriptRecord: {:?}", source_change_event);
+                    log::trace!("Skipping ChangeScriptRecord: {source_change_event:?}");
 
                     self.previous_event = Some(ProcessedChangeEvent {
                         dispatch_status: self.status,
@@ -992,7 +983,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
 
             let r = message.response_tx.unwrap().send(message_response);
             if let Err(e) = r {
-                anyhow::bail!("Error sending message response back to caller: {:?}", e);
+                anyhow::bail!("Error sending message response back to caller: {e:?}");
             }
         } else {
             let transition_response = match self.status {
@@ -1027,7 +1018,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
 
                 let r = message.response_tx.unwrap().send(message_response);
                 if let Err(e) = r {
-                    anyhow::bail!("Error sending message response back to caller: {:?}", e);
+                    anyhow::bail!("Error sending message response back to caller: {e:?}");
                 }
             }
         }
@@ -1045,11 +1036,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
             match create_source_change_dispatcher(def, &self.settings.output_storage).await {
                 Ok(dispatcher) => dispatchers.push(dispatcher),
                 Err(e) => {
-                    anyhow::bail!(
-                        "Error creating SourceChangeDispatcher: {:?}; Error: {:?}",
-                        def,
-                        e
-                    );
+                    anyhow::bail!("Error creating SourceChangeDispatcher: {def:?}; Error: {e:?}");
                 }
             }
         }
@@ -1148,7 +1135,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
                         }
                     }
                     _ => {
-                        anyhow::bail!("Unexpected model change: {:?}", model_change);
+                        anyhow::bail!("Unexpected model change: {model_change:?}");
                     }
                 }
             }
@@ -1166,10 +1153,10 @@ impl BuildingHierarchyDataGeneratorInternalState {
         // if the status is Running, Skipping, or Stepping, send the message to the change_tx_channel.
         if self.status.is_processing() {
             if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
+                anyhow::bail!("Error sending ScheduledChangeEventMessage: {e:?}");
             }
         } else {
-            log::error!("Not sending ScheduledChangeEventMessage: {:?}", sch_msg);
+            log::error!("Not sending ScheduledChangeEventMessage: {sch_msg:?}");
         }
 
         Ok(())
@@ -1249,7 +1236,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 // If send_initial_inserts is true, send insert events for all current state
                 if self.settings.send_initial_inserts {
                     if let Err(e) = self.send_initial_inserts().await {
-                        log::error!("Failed to send initial inserts: {}", e);
+                        log::error!("Failed to send initial inserts: {e}");
                     }
                 }
 
@@ -1437,7 +1424,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
         self.status = SourceChangeGeneratorStatus::Error;
 
         let msg = match error {
-            Some(e) => format!("{}: {:?}", error_message, e),
+            Some(e) => format!("{error_message}: {e:?}"),
             None => error_message.to_string(),
         };
 
@@ -1459,7 +1446,7 @@ impl BuildingHierarchyDataGeneratorInternalState {
         {
             Ok(_) => Ok(()),
             Err(e) => {
-                log::error!("Error writing result summary to output storage: {:?}", e);
+                log::error!("Error writing result summary to output storage: {e:?}");
                 Err(e)
             }
         }
@@ -1594,8 +1581,8 @@ pub async fn model_host_thread(
             Ok((state, change_rx_channel)) => (state, change_rx_channel),
             Err(e) => {
                 // If initialization fails, don't dont transition to an error state, just log an error and exit the thread.
-                let msg = format!("Error initializing BuildingHierarchyDataGenerator: {:?}", e);
-                log::error!("{}", msg);
+                let msg = format!("Error initializing BuildingHierarchyDataGenerator: {e:?}");
+                log::error!("{msg}");
                 anyhow::bail!(msg);
             }
         };
@@ -1628,7 +1615,7 @@ pub async fn model_host_thread(
                     Some(change_stream_message) => {
                         // Only process the message if the seq_num matches the expected one.
                         // This avoids dealing with delayed messages from the delayer thread that are no longer relevant.
-                        log::trace!("Received change stream message: {:?}", change_stream_message);
+                        log::trace!("Received change stream message: {change_stream_message:?}");
                         if change_stream_message.seq_num == state.event_seq_num && state.status.is_processing() {
                             state.process_change_stream_message(change_stream_message).await
                                 .inspect_err(|e| state.transition_to_error_state("Error calling process_change_stream_message", Some(e))).ok();

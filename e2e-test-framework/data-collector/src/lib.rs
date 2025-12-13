@@ -41,7 +41,7 @@ impl fmt::Display for DataCollectorStatus {
         match self {
             DataCollectorStatus::Initialized => write!(f, "Initialized"),
             DataCollectorStatus::Started => write!(f, "Started"),
-            DataCollectorStatus::Error(msg) => write!(f, "Error: {}", msg),
+            DataCollectorStatus::Error(msg) => write!(f, "Error: {msg}"),
         }
     }
 }
@@ -58,7 +58,7 @@ impl DataCollector {
         config: DataCollectorConfig,
         data_store: Arc<TestDataStore>,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating DataCollector from {:#?}", config);
+        log::debug!("Creating DataCollector from {config:#?}");
 
         let data_collector = DataCollector {
             data_collections: Arc::new(RwLock::new(HashMap::new())),
@@ -83,11 +83,11 @@ impl DataCollector {
         &self,
         data_collection_config: DataCollectionConfig,
     ) -> anyhow::Result<DataCollection> {
-        log::trace!("Adding DataCollection from {:#?}", data_collection_config);
+        log::trace!("Adding DataCollection from {data_collection_config:#?}");
 
         // If the DataCollector is in an Error state, return an error.
         if let DataCollectorStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("DataCollector is in an Error state: {}", msg);
+            anyhow::bail!("DataCollector is in an Error state: {msg}");
         };
 
         let mut collections_lock = self.data_collections.write().await;
@@ -148,11 +148,11 @@ impl DataCollector {
         record_bootstrap_data: bool,
         start_change_recorder: bool,
     ) -> anyhow::Result<()> {
-        log::trace!("Starting DataCollection Sources - data_collection_id:{}, record_bootstrap_data:{}, start_change_recorder:{}", data_collection_id, record_bootstrap_data, start_change_recorder);
+        log::trace!("Starting DataCollection Sources - data_collection_id:{data_collection_id}, record_bootstrap_data:{record_bootstrap_data}, start_change_recorder:{start_change_recorder}");
 
         // If the DataCollector is in an Error state, return an error.
         if let DataCollectorStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("DataCollector is in an Error state: {}", msg);
+            anyhow::bail!("DataCollector is in an Error state: {msg}");
         };
 
         // Get the DataCollection from the DataCollector or fail if it doesn't exist.
@@ -168,7 +168,7 @@ impl DataCollector {
                     .await
             }
             None => {
-                anyhow::bail!("DataCollection not found: {}", data_collection_id);
+                anyhow::bail!("DataCollection not found: {data_collection_id}");
             }
         }
     }
@@ -186,7 +186,7 @@ impl DataCollection {
         config: DataCollectionConfig,
         storage: DataCollectionStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating DataCollection from config {:#?}", config);
+        log::debug!("Creating DataCollection from config {config:#?}");
 
         let data_collection = DataCollection {
             id: config.id.clone(),
@@ -205,7 +205,7 @@ impl DataCollection {
         &self,
         config: DataCollectionSourceConfig,
     ) -> anyhow::Result<DataCollectionSource> {
-        log::trace!("Adding DataCollectionSource from config {:#?}", config);
+        log::trace!("Adding DataCollectionSource from config {config:#?}");
 
         let source_id = config.source_id.clone();
 
@@ -236,9 +236,7 @@ impl DataCollection {
         start_change_recorder: bool,
     ) -> anyhow::Result<()> {
         log::trace!(
-            "Starting DataCollectionSources - record_bootstrap_data:{}, start_change_recorder:{}",
-            record_bootstrap_data,
-            start_change_recorder
+            "Starting DataCollectionSources - record_bootstrap_data:{record_bootstrap_data}, start_change_recorder:{start_change_recorder}"
         );
 
         // TODO: If record_bootstrap_data is true, start the BootstrapDataRecorder for each Source.
@@ -272,6 +270,7 @@ impl DataCollection {
 
 // Unit tests
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use std::path::PathBuf;
 
@@ -282,7 +281,7 @@ mod tests {
     #[tokio::test]
     async fn create_datacollector() -> anyhow::Result<()> {
         // Create a random path to use as the Data Store folder name.
-        let data_store_path = format!("./tests/{}", uuid::Uuid::new_v4().to_string());
+        let data_store_path = format!("./tests/{}", uuid::Uuid::new_v4());
         let data_store_path_buf = PathBuf::from(&data_store_path);
 
         let data_store_config = TestDataStoreConfig {

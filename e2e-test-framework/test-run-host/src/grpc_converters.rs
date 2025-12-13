@@ -20,6 +20,7 @@ use test_data_store::scripts::SourceChangeEvent;
 
 // Include the generated Drasi proto code
 pub mod drasi {
+    #[allow(clippy::unwrap_used)]
     pub mod v1 {
         tonic::include_proto!("drasi.v1");
     }
@@ -71,7 +72,7 @@ pub fn convert_to_drasi_source_change(
                         element_id,
                     }),
                     labels: extract_labels(after_obj),
-                    effective_from: event.payload.source.ts_ns as u64,
+                    effective_from: event.payload.source.ts_ns,
                 };
 
                 source_change.change = Some(drasi::v1::source_change::Change::Metadata(metadata));
@@ -111,7 +112,7 @@ fn create_element_from_json(
             element_id: element_id.clone(),
         }),
         labels: labels.clone(),
-        effective_from: event.payload.source.ts_ns as u64,
+        effective_from: event.payload.source.ts_ns,
     };
 
     // Check if this is a relationship (has startId and endId)
@@ -209,12 +210,10 @@ fn json_to_proto_value(json_val: &JsonValue) -> Option<prost_types::Value> {
                 Some(prost_types::Value {
                     kind: Some(prost_types::value::Kind::NumberValue(i as f64)),
                 })
-            } else if let Some(f) = n.as_f64() {
-                Some(prost_types::Value {
+            } else {
+                n.as_f64().map(|f| prost_types::Value {
                     kind: Some(prost_types::value::Kind::NumberValue(f)),
                 })
-            } else {
-                None
             }
         }
         JsonValue::String(s) => Some(prost_types::Value {
@@ -222,7 +221,7 @@ fn json_to_proto_value(json_val: &JsonValue) -> Option<prost_types::Value> {
         }),
         JsonValue::Array(arr) => {
             let values: Vec<prost_types::Value> =
-                arr.iter().filter_map(|v| json_to_proto_value(v)).collect();
+                arr.iter().filter_map(json_to_proto_value).collect();
             Some(prost_types::Value {
                 kind: Some(prost_types::value::Kind::ListValue(
                     prost_types::ListValue { values },
@@ -299,11 +298,7 @@ fn proto_value_to_json(val: &prost_types::Value) -> Option<JsonValue> {
         }
         Some(prost_types::value::Kind::StringValue(s)) => Some(JsonValue::String(s.clone())),
         Some(prost_types::value::Kind::ListValue(list)) => {
-            let arr: Vec<JsonValue> = list
-                .values
-                .iter()
-                .filter_map(|v| proto_value_to_json(v))
-                .collect();
+            let arr: Vec<JsonValue> = list.values.iter().filter_map(proto_value_to_json).collect();
             Some(JsonValue::Array(arr))
         }
         Some(prost_types::value::Kind::StructValue(s)) => {
@@ -318,4 +313,3 @@ fn proto_value_to_json(val: &prost_types::Value) -> Option<JsonValue> {
         None => None,
     }
 }
-

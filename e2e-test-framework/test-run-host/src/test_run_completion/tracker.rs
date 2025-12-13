@@ -247,10 +247,7 @@ impl ComponentStateTracker {
     }
 
     /// Get the current state of a DrasiServer.
-    pub fn get_drasi_server_state(
-        &self,
-        id: &TestRunDrasiServerId,
-    ) -> Option<&DrasiServerState> {
+    pub fn get_drasi_server_state(&self, id: &TestRunDrasiServerId) -> Option<&DrasiServerState> {
         self.drasi_servers.get(id)
     }
 

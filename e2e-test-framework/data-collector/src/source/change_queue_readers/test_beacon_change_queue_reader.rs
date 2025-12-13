@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for test beacon reader
+#![allow(clippy::unwrap_used)]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -67,16 +70,10 @@ impl TestBeaconSourceChangeQueueReader {
         config: TestBeaconSourceChangeQueueReaderConfig,
         source_id: S,
     ) -> anyhow::Result<Box<dyn SourceChangeQueueReader + Send + Sync>> {
-        log::debug!(
-            "Creating TestBeaconSourceChangeQueueReader from config {:?}",
-            config
-        );
+        log::debug!("Creating TestBeaconSourceChangeQueueReader from config {config:?}");
 
         let settings = TestBeaconSourceChangeQueueReaderSettings::new(&config, source_id.into())?;
-        log::trace!(
-            "Creating TestBeaconSourceChangeQueueReader with settings {:?}",
-            settings
-        );
+        log::trace!("Creating TestBeaconSourceChangeQueueReader with settings {settings:?}");
 
         let notifier = Arc::new(Notify::new());
         let records_generated = Arc::new(RwLock::new(0));
@@ -215,16 +212,16 @@ async fn reader_thread(
                         tokio::time::sleep(tokio::time::Duration::from_nanos(settings.interval_ns))
                             .await;
 
-                        let sce = SourceChangeEvent {  
-                            op: "u".to_string(), 
-                            payload: SourceChangeEventPayload { 
-                                source: SourceChangeEventSourceInfo {  
-                                    db: "facilities".to_string(), 
-                                    lsn: 2, 
-                                    table: "node".to_string(),  
+                        let sce = SourceChangeEvent {
+                            op: "u".to_string(),
+                            payload: SourceChangeEventPayload {
+                                source: SourceChangeEventSourceInfo {
+                                    db: "facilities".to_string(),
+                                    lsn: 2,
+                                    table: "node".to_string(),
                                     ts_ns: 1724694923060000000
-                                }, 
-                                before: serde_json::from_str(r#"{ "id": "room_01_01_02", "labels": ["Room"], "properties": { "name": "Room 01_01_02",  "temp": 72, "humidity": 42, "co2": 500}"#).unwrap(), 
+                                },
+                                before: serde_json::from_str(r#"{ "id": "room_01_01_02", "labels": ["Room"], "properties": { "name": "Room 01_01_02",  "temp": 72, "humidity": 42, "co2": 500}"#).unwrap(),
                                 after: serde_json::from_str(r#"{ "id": "room_01_01_02", "labels": ["Room"], "properties": { "name": "Room 01_01_02", "temp": 71, "humidity": 40, "co2": 495}}"#).unwrap()
                             },
                             reactivator_end_ns: 1724694923070000000,
@@ -249,7 +246,7 @@ async fn reader_thread(
                                 seq += 1;
                             }
                             Err(e) => {
-                                log::error!("Error sending change event to channel: {}", e);
+                                log::error!("Error sending change event to channel: {e}");
                                 return;
                             }
                         }

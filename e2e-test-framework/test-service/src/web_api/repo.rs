@@ -209,10 +209,7 @@ pub async fn get_test_repo_test_list_handler(
     Path(repo_id): Path<String>,
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!(
-        "Processing call - get_test_repo_test_list - repo_id:{}",
-        repo_id
-    );
+    log::info!("Processing call - get_test_repo_test_list - repo_id:{repo_id}");
 
     let test_ids = test_data_store.get_test_repo_test_ids(&repo_id).await?;
     Ok(Json(test_ids).into_response())
@@ -237,9 +234,7 @@ pub async fn get_test_repo_test_source_list_handler(
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!(
-        "Processing call - get_test_repo_test_source_list - repo_id:{}, test_id:{}",
-        repo_id,
-        test_id
+        "Processing call - get_test_repo_test_source_list - repo_id:{repo_id}, test_id:{test_id}"
     );
 
     let source_ids = test_data_store
@@ -267,7 +262,7 @@ pub async fn get_test_repo_handler(
     Path(repo_id): Path<String>,
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - get_test_repo - repo_id:{}", repo_id);
+    log::info!("Processing call - get_test_repo - repo_id:{repo_id}");
 
     let repo = test_data_store.get_test_repo_storage(&repo_id).await?;
     Ok(Json(TestRepoResponse::new(&repo).await?).into_response())
@@ -291,11 +286,7 @@ pub async fn get_test_repo_test_handler(
     Path((repo_id, test_id)): Path<(String, String)>,
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!(
-        "Processing call - get_test_repo_test - repo_id:{}, test_id:{}",
-        repo_id,
-        test_id
-    );
+    log::info!("Processing call - get_test_repo_test - repo_id:{repo_id}, test_id:{test_id}");
 
     let test = test_data_store.get_test_storage(&repo_id, &test_id).await?;
     Ok(Json(TestResponse::new(&test).await?).into_response())
@@ -321,10 +312,7 @@ pub async fn get_test_repo_test_source_handler(
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!(
-        "Processing call - get_test_repo_test_source - repo_id:{}, test_id:{}, source_id:{}",
-        repo_id,
-        test_id,
-        source_id
+        "Processing call - get_test_repo_test_source - repo_id:{repo_id}, test_id:{test_id}, source_id:{source_id}"
     );
 
     let source = test_data_store
@@ -376,10 +364,7 @@ pub async fn post_test_repo_test_handler(
     test_data_store: Extension<Arc<TestDataStore>>,
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!(
-        "Processing call - post_test_repo_test - repo_id:{}",
-        repo_id
-    );
+    log::info!("Processing call - post_test_repo_test - repo_id:{repo_id}");
 
     let test_post_body: TestPostBody = serde_json::from_value(body.0)?;
 
@@ -424,9 +409,7 @@ pub async fn post_test_repo_test_source_handler(
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!(
-        "Processing call - post_test_repo_test_source - repo_id:{}, test_id:{}",
-        repo_id,
-        test_id
+        "Processing call - post_test_repo_test_source - repo_id:{repo_id}, test_id:{test_id}"
     );
 
     let test_source_post_body: TestSourcePostBody = serde_json::from_value(body.0)?;

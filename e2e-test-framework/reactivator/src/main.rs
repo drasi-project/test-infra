@@ -53,7 +53,7 @@ async fn main() {
     env_logger::init();
 
     let cfg = Params::parse();
-    log::info!("Started Test Reactivator with - {:?}", cfg);
+    log::info!("Started Test Reactivator with - {cfg:?}");
 
     // Start the Web API.
     web_api::start_web_api(cfg).await;

@@ -39,8 +39,8 @@ pub enum SourceChangeDispatcherError {
 impl std::fmt::Display for SourceChangeDispatcherError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "IO error: {}:", e),
-            Self::Serde(e) => write!(f, "Serde error: {}:", e),
+            Self::Io(e) => write!(f, "IO error: {e}:"),
+            Self::Serde(e) => write!(f, "Serde error: {e}:"),
         }
     }
 }

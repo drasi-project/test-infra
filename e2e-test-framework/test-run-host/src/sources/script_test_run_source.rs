@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for test source code
+#![allow(clippy::unwrap_used)]
+
 use std::collections::HashSet;
 
 use async_trait::async_trait;
@@ -160,11 +163,7 @@ impl TestRunSource for ScriptTestRunSource {
         node_labels: &HashSet<String>,
         rel_labels: &HashSet<String>,
     ) -> anyhow::Result<BootstrapData> {
-        log::debug!(
-            "Node Labels: {:?}, Rel Labels: {:?}",
-            node_labels,
-            rel_labels
-        );
+        log::debug!("Node Labels: {node_labels:?}, Rel Labels: {rel_labels:?}");
 
         let bootstrap_data = if self.bootstrap_data_generator.is_some() {
             self.bootstrap_data_generator

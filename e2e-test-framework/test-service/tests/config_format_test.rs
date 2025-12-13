@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::unwrap_used)]
+
 //! Integration tests for YAML and JSON configuration file loading
 
 use std::fs;
@@ -28,7 +30,7 @@ fn test_example_json_configs_parse() {
     for config_path in json_configs {
         if Path::new(config_path).exists() {
             let content = fs::read_to_string(config_path)
-                .unwrap_or_else(|e| panic!("Failed to read {}: {}", config_path, e));
+                .unwrap_or_else(|e| panic!("Failed to read {config_path}: {e}"));
 
             // Try parsing as JSON first (original format)
             let json_result: Result<serde_json::Value, _> = serde_json::from_str(&content);
@@ -62,7 +64,7 @@ fn test_example_yaml_configs_parse() {
     for config_path in yaml_configs {
         if Path::new(config_path).exists() {
             let content = fs::read_to_string(config_path)
-                .unwrap_or_else(|e| panic!("Failed to read {}: {}", config_path, e));
+                .unwrap_or_else(|e| panic!("Failed to read {config_path}: {e}"));
 
             // Should parse as YAML
             let yaml_result: Result<serde_yaml::Value, _> = serde_yaml::from_str(&content);
@@ -93,15 +95,15 @@ fn test_json_yaml_equivalence() {
     for (json_path, yaml_path) in config_pairs {
         if Path::new(json_path).exists() && Path::new(yaml_path).exists() {
             let json_content = fs::read_to_string(json_path)
-                .unwrap_or_else(|e| panic!("Failed to read {}: {}", json_path, e));
+                .unwrap_or_else(|e| panic!("Failed to read {json_path}: {e}"));
             let yaml_content = fs::read_to_string(yaml_path)
-                .unwrap_or_else(|e| panic!("Failed to read {}: {}", yaml_path, e));
+                .unwrap_or_else(|e| panic!("Failed to read {yaml_path}: {e}"));
 
             // Parse both as YAML (since YAML can parse JSON)
             let json_as_yaml: serde_yaml::Value = serde_yaml::from_str(&json_content)
-                .unwrap_or_else(|e| panic!("Failed to parse {} as YAML: {}", json_path, e));
+                .unwrap_or_else(|e| panic!("Failed to parse {json_path} as YAML: {e}"));
             let yaml_value: serde_yaml::Value = serde_yaml::from_str(&yaml_content)
-                .unwrap_or_else(|e| panic!("Failed to parse {}: {}", yaml_path, e));
+                .unwrap_or_else(|e| panic!("Failed to parse {yaml_path}: {e}"));
 
             // Convert to JSON strings for comparison (normalizes formatting)
             let json_normalized = serde_json::to_string_pretty(&json_as_yaml).unwrap();
@@ -109,8 +111,7 @@ fn test_json_yaml_equivalence() {
 
             assert_eq!(
                 json_normalized, yaml_normalized,
-                "JSON and YAML configs produce different data structures:\nJSON: {}\nYAML: {}",
-                json_path, yaml_path
+                "JSON and YAML configs produce different data structures:\nJSON: {json_path}\nYAML: {yaml_path}"
             );
         }
     }

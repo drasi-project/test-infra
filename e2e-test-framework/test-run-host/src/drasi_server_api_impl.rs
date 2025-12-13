@@ -37,7 +37,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.list_sources().await
     }
@@ -55,7 +55,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.get_source(source_id).await
     }
@@ -73,7 +73,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.create_source(request).await
     }
@@ -92,7 +92,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.update_source(source_id, request).await
     }
@@ -106,7 +106,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.delete_source(source_id).await
     }
@@ -124,7 +124,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.start_source(source_id).await
     }
@@ -142,7 +142,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.stop_source(source_id).await
     }
@@ -158,7 +158,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.list_queries().await
     }
@@ -176,7 +176,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.get_query(query_id).await
     }
@@ -194,7 +194,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.create_query(request).await
     }
@@ -213,7 +213,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.update_query(query_id, request).await
     }
@@ -227,7 +227,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.delete_query(query_id).await
     }
@@ -245,7 +245,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.start_query(query_id).await
     }
@@ -263,7 +263,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.stop_query(query_id).await
     }
@@ -281,7 +281,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.get_query_results(query_id).await
     }
@@ -297,7 +297,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.list_reactions().await
     }
@@ -315,7 +315,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.get_reaction(reaction_id).await
     }
@@ -333,7 +333,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.create_reaction(request).await
     }
@@ -352,7 +352,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.update_reaction(reaction_id, request).await
     }
@@ -370,7 +370,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.delete_reaction(reaction_id).await
     }
@@ -388,7 +388,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.start_reaction(reaction_id).await
     }
@@ -406,7 +406,7 @@ impl TestRunHost {
         let server = test_run
             .drasi_servers
             .get(&server_id.test_drasi_server_id)
-            .ok_or_else(|| anyhow!("Drasi Server {} not found", server_id))?;
+            .ok_or_else(|| anyhow!("Drasi Server {server_id} not found"))?;
 
         server.stop_reaction(reaction_id).await
     }

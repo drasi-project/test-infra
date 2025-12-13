@@ -63,16 +63,10 @@ impl DrasiServerApiSourceChangeDispatcher {
         definition: &DrasiServerApiSourceChangeDispatcherDefinition,
         storage: &TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!(
-            "Creating DrasiServerApiSourceChangeDispatcher from {:?}",
-            definition
-        );
+        log::debug!("Creating DrasiServerApiSourceChangeDispatcher from {definition:?}");
 
         let settings = DrasiServerApiSourceChangeDispatcherSettings::new(definition, storage)?;
-        log::trace!(
-            "Creating DrasiServerApiSourceChangeDispatcher with settings {:?}",
-            settings
-        );
+        log::trace!("Creating DrasiServerApiSourceChangeDispatcher with settings {settings:?}");
 
         let client = Client::builder()
             .timeout(Duration::from_secs(settings.timeout_seconds))
@@ -169,13 +163,13 @@ impl SourceChangeDispatcher for DrasiServerApiSourceChangeDispatcher {
                 "Drasi Server API dispatcher sending batch request to {}: {}",
                 url,
                 serde_json::to_string_pretty(&events)
-                    .unwrap_or_else(|e| format!("Failed to serialize: {}", e))
+                    .unwrap_or_else(|e| format!("Failed to serialize: {e}"))
             );
 
             let response = match self.client.post(&url).json(&events).send().await {
                 Ok(resp) => resp,
                 Err(e) => {
-                    log::error!("Failed to connect to {}: {}", url, e);
+                    log::error!("Failed to connect to {url}: {e}");
                     return Err(e.into());
                 }
             };
@@ -185,20 +179,12 @@ impl SourceChangeDispatcher for DrasiServerApiSourceChangeDispatcher {
 
             // Log response at debug level
             log::debug!(
-                "Drasi Server API dispatcher received response from {}: Status: {}, Body: {}",
-                url,
-                status,
-                response_body
+                "Drasi Server API dispatcher received response from {url}: Status: {status}, Body: {response_body}"
             );
 
             if !status.is_success() {
-                log::error!(
-                    "Failed to dispatch events batch to {}: {} - {}",
-                    url,
-                    status,
-                    response_body
-                );
-                anyhow::bail!("HTTP request failed with status: {}", status);
+                log::error!("Failed to dispatch events batch to {url}: {status} - {response_body}");
+                anyhow::bail!("HTTP request failed with status: {status}");
             }
 
             log::trace!(
@@ -214,7 +200,7 @@ impl SourceChangeDispatcher for DrasiServerApiSourceChangeDispatcher {
                     "Drasi Server API dispatcher sending individual event to {}: {}",
                     url,
                     serde_json::to_string_pretty(event)
-                        .unwrap_or_else(|e| format!("Failed to serialize: {}", e))
+                        .unwrap_or_else(|e| format!("Failed to serialize: {e}"))
                 );
 
                 let response = self.client.post(&url).json(event).send().await?;
@@ -224,28 +210,16 @@ impl SourceChangeDispatcher for DrasiServerApiSourceChangeDispatcher {
 
                 // Log response at debug level
                 log::debug!(
-                    "Drasi Server API dispatcher received response from {}: Status: {}, Body: {}",
-                    url,
-                    status,
-                    response_body
+                    "Drasi Server API dispatcher received response from {url}: Status: {status}, Body: {response_body}"
                 );
 
                 if !status.is_success() {
-                    log::error!(
-                        "Failed to dispatch event to {}: {} - {}",
-                        url,
-                        status,
-                        response_body
-                    );
-                    anyhow::bail!("HTTP request failed with status: {}", status);
+                    log::error!("Failed to dispatch event to {url}: {status} - {response_body}");
+                    anyhow::bail!("HTTP request failed with status: {status}");
                 }
             }
 
-            log::trace!(
-                "Successfully dispatched {} individual events to {}",
-                event_count,
-                url
-            );
+            log::trace!("Successfully dispatched {event_count} individual events to {url}");
         }
 
         Ok(())

@@ -70,12 +70,11 @@ impl std::fmt::Display for SourceChangeEvent {
             Ok(json_data) => {
                 let json_data_unescaped = json_data.replace("\\\"", "\"").replace("\\'", "'");
 
-                write!(f, "{}", json_data_unescaped)
+                write!(f, "{json_data_unescaped}")
             }
             Err(e) => write!(
                 f,
-                "Error serializing SourceChangeEvent: {:?}. Error: {}",
-                self, e
+                "Error serializing SourceChangeEvent: {self:?}. Error: {e}"
             ),
         }
     }
@@ -118,7 +117,8 @@ pub struct BootstrapHeaderRecord {
 impl Default for BootstrapHeaderRecord {
     fn default() -> Self {
         BootstrapHeaderRecord {
-            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
+            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00")
+                .expect("Failed to parse epoch timestamp"),
             description: "Error: Header record not found.".to_string(),
         }
     }
@@ -134,7 +134,8 @@ pub struct ChangeHeaderRecord {
 impl Default for ChangeHeaderRecord {
     fn default() -> Self {
         ChangeHeaderRecord {
-            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
+            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00")
+                .expect("Failed to parse epoch timestamp"),
             description: "Error: Header record not found.".to_string(),
         }
     }

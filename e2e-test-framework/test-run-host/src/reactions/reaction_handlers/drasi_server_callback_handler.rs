@@ -65,15 +65,13 @@ pub struct DrasiServerCallbackHandler {
 }
 
 impl DrasiServerCallbackHandler {
+    #[allow(clippy::new_ret_no_self)]
     pub async fn new(
         id: TestRunQueryId,
         definition: DrasiServerCallbackReactionHandlerDefinition,
     ) -> anyhow::Result<Box<dyn ReactionOutputHandler + Send + Sync>> {
         let settings = DrasiServerCallbackHandlerSettings::new(id, definition)?;
-        log::trace!(
-            "Creating DrasiServerCallbackHandler with settings {:?}",
-            settings
-        );
+        log::trace!("Creating DrasiServerCallbackHandler with settings {settings:?}");
 
         let status = Arc::new(RwLock::new(ReactionHandlerStatus::Uninitialized));
         let notifier = Arc::new(Notify::new());
@@ -164,7 +162,7 @@ impl ReactionOutputHandler for DrasiServerCallbackHandler {
             ReactionControlSignal::Start,
         ))
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to send start signal: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to send start signal: {e}"))?;
 
         Ok(rx)
     }

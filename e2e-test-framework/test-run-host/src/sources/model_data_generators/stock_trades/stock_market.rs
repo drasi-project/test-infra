@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test data generator module - allow unwraps for data generation code
+#![allow(clippy::unwrap_used)]
+
 use parking_lot::{Mutex, MutexGuard};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -184,9 +187,8 @@ impl StockChangeGenerator {
 
         StockChangeGenerator {
             rng: ChaCha8Rng::seed_from_u64(settings.seed),
-            price_init_dist: Normal::new(settings.price_init.0 as f64, settings.price_init.1)
-                .unwrap(),
-            price_change_dist: Normal::new(settings.price_change.0 as f64, settings.price_change.1)
+            price_init_dist: Normal::new(settings.price_init.0, settings.price_init.1).unwrap(),
+            price_change_dist: Normal::new(settings.price_change.0, settings.price_change.1)
                 .unwrap(),
             price_momentum_dist: Normal::new(
                 settings.price_momentum.0 as f64,

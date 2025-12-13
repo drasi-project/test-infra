@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use crate::reactions::reaction_observer::ReactionObserverMetrics;
     use crate::reactions::reaction_output_handler::ReactionHandlerStatus;

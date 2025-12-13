@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::unwrap_used)]
+
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -44,7 +46,7 @@ async fn test_ctrl_c_cleanup_with_delete_on_stop() -> anyhow::Result<()> {
 
     // Start the test service
     let mut child = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--manifest-path",
             "./test-service/Cargo.toml",
@@ -121,7 +123,7 @@ async fn test_ctrl_c_no_cleanup_without_delete_on_stop() -> anyhow::Result<()> {
 
     // Start the test service
     let mut child = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--manifest-path",
             "./test-service/Cargo.toml",

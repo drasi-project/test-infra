@@ -43,13 +43,10 @@ impl RecordSequenceNumberStopTrigger {
     pub fn new(
         def: &RecordSequenceNumberStopTriggerDefinition,
     ) -> anyhow::Result<Box<dyn StopTrigger + Send + Sync>> {
-        log::debug!("Creating RecordSequenceNumberStopTrigger from {:?}, ", def);
+        log::debug!("Creating RecordSequenceNumberStopTrigger from {def:?}, ");
 
         let settings = RecordSequenceNumberStopTriggerSettings::new(def)?;
-        log::trace!(
-            "Creating RecordSequenceNumberStopTrigger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating RecordSequenceNumberStopTrigger with settings {settings:?}, ");
 
         Ok(Box::new(Self { settings }))
     }

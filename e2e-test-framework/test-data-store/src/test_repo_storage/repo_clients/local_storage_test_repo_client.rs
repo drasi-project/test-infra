@@ -52,17 +52,12 @@ impl LocalStorageTestRepoClient {
         unique_config: LocalStorageTestRepoConfig,
     ) -> anyhow::Result<Box<dyn RemoteTestRepoClient + Send + Sync>> {
         log::debug!(
-            "Creating LocalStorageTestRepoClient from common_config:{:?} and unique_config:{:?}, ",
-            common_config,
-            unique_config
+            "Creating LocalStorageTestRepoClient from common_config:{common_config:?} and unique_config:{unique_config:?}, "
         );
 
         let settings =
             LocalStorageTestRepoClientSettings::new(common_config, unique_config).await?;
-        log::trace!(
-            "Creating LocalStorageTestRepoClient with settings: {:?}, ",
-            settings
-        );
+        log::trace!("Creating LocalStorageTestRepoClient with settings: {settings:?}, ");
 
         Ok(Box::new(Self { settings }))
     }
@@ -75,18 +70,12 @@ impl RemoteTestRepoClient for LocalStorageTestRepoClient {
         test_id: String,
         test_def_path: PathBuf,
     ) -> anyhow::Result<()> {
-        log::debug!(
-            "Copying TestDefinition - {:?} to path {:?}",
-            test_id,
-            test_def_path
-        );
+        log::debug!("Copying TestDefinition - {test_id:?} to path {test_def_path:?}");
 
         // If the TestDefinition already exists, return an error.
         if test_def_path.exists() {
             return Err(anyhow::anyhow!(
-                "Test Definition ID: {} already exists in location {:?}",
-                test_id,
-                test_def_path
+                "Test Definition ID: {test_id} already exists in location {test_def_path:?}"
             ));
         }
 
@@ -94,16 +83,14 @@ impl RemoteTestRepoClient for LocalStorageTestRepoClient {
         // Otherwise, copy the file from the source path to the repo location.
         match self.settings.source_path {
             Some(ref source_path) => {
-                let source_file = source_path.join(format!("{}.test", test_id));
+                let source_file = source_path.join(format!("{test_id}.test"));
 
                 if source_file.exists() {
                     fs::copy(source_file, test_def_path).await?;
                     Ok(())
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Test Definition ID: {} not found in source location {:?}",
-                        test_id,
-                        source_file
+                        "Test Definition ID: {test_id} not found in source location {source_file:?}"
                     ));
                 }
             }
@@ -112,9 +99,7 @@ impl RemoteTestRepoClient for LocalStorageTestRepoClient {
                     Ok(())
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Test Definition ID: {} not found in location {:?}",
-                        test_id,
-                        test_def_path
+                        "Test Definition ID: {test_id} not found in location {test_def_path:?}"
                     ));
                 }
             }

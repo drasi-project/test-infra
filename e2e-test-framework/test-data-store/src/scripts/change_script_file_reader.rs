@@ -107,8 +107,8 @@ impl ChangeScriptReader {
     // If there are no more records to read, None is returned.
     fn get_next_record(&mut self) -> anyhow::Result<SequencedChangeScriptRecord> {
         // Once we have reached the end of the script, always return the Finish record.
-        if self.footer.is_some() {
-            return Ok(self.footer.as_ref().unwrap().clone());
+        if let Some(footer) = &self.footer {
+            return Ok(footer.clone());
         }
 
         if self.current_reader.is_none() {
@@ -152,8 +152,7 @@ impl ChangeScriptReader {
                             // Warn if there is a Header record in the middle of the script.
                             if seq_rec.seq > 0 {
                                 log::warn!(
-                                    "Header record found not at start of the script: {:?}",
-                                    seq_rec
+                                    "Header record found not at start of the script: {seq_rec:?}"
                                 );
                             }
 
@@ -191,7 +190,7 @@ impl ChangeScriptReader {
                     } else {
                         // Throw an error if the offset_ns is less than the previous record's offset_ns.
                         let error_message = format!("Offset_ns for record {:?} is less than the previous record's offset_ns {}.", seq_rec, self.offset_ns);
-                        log::error!("{}", error_message);
+                        log::error!("{error_message}");
                         return Err(ChangeScriptReaderError::RecordOutOfSequence(self.seq).into());
                     }
                     self.offset_ns = seq_rec.offset_ns;
@@ -206,15 +205,16 @@ impl ChangeScriptReader {
             }
         } else {
             // Generate a synthetic Finish record to mark the end of the script.
-            self.footer = Some(SequencedChangeScriptRecord {
+            let footer = SequencedChangeScriptRecord {
                 record: ChangeScriptRecord::Finish(ChangeFinishRecord {
                     offset_ns: self.offset_ns,
                     description: "Auto generated at end of script.".to_string(),
                 }),
                 seq: self.seq,
                 offset_ns: self.offset_ns,
-            });
-            Ok(self.footer.as_ref().unwrap().clone())
+            };
+            self.footer = Some(footer.clone());
+            Ok(footer)
         }
     }
 

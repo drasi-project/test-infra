@@ -19,11 +19,13 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use azure_storage_blob_test_repo_client::AzureStorageBlobTestRepoClient;
 use github_test_repo_client::GithubTestRepoClient;
+use huggingface_test_repo_client::HuggingFaceTestRepoClient;
 
 use super::models::{LocalTestDefinition, TestSourceDefinition};
 
 pub mod azure_storage_blob_test_repo_client;
 pub mod github_test_repo_client;
+pub mod huggingface_test_repo_client;
 pub mod local_storage_test_repo_client;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -41,6 +43,12 @@ pub enum TestRepoConfig {
         #[serde(flatten)]
         unique_config: GithubTestRepoConfig,
     },
+    HuggingFace {
+        #[serde(flatten)]
+        common_config: CommonTestRepoConfig,
+        #[serde(flatten)]
+        unique_config: HuggingFaceTestRepoConfig,
+    },
     LocalStorage {
         #[serde(flatten)]
         common_config: CommonTestRepoConfig,
@@ -54,6 +62,7 @@ impl TestRepoConfig {
         match self {
             TestRepoConfig::AzureStorageBlob { common_config, .. } => common_config.id.clone(),
             TestRepoConfig::GitHub { common_config, .. } => common_config.id.clone(),
+            TestRepoConfig::HuggingFace { common_config, .. } => common_config.id.clone(),
             TestRepoConfig::LocalStorage { common_config, .. } => common_config.id.clone(),
         }
     }
@@ -64,6 +73,7 @@ impl TestRepoConfig {
                 common_config.local_tests.clone()
             }
             TestRepoConfig::GitHub { common_config, .. } => common_config.local_tests.clone(),
+            TestRepoConfig::HuggingFace { common_config, .. } => common_config.local_tests.clone(),
             TestRepoConfig::LocalStorage { common_config, .. } => common_config.local_tests.clone(),
         }
     }
@@ -74,6 +84,7 @@ impl TestRepoConfig {
                 unique_config.force_cache_refresh
             }
             TestRepoConfig::GitHub { unique_config, .. } => unique_config.force_cache_refresh,
+            TestRepoConfig::HuggingFace { unique_config, .. } => unique_config.force_cache_refresh,
             TestRepoConfig::LocalStorage { .. } => false,
         }
     }
@@ -177,6 +188,19 @@ fn main_branch() -> String {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HuggingFaceTestRepoConfig {
+    pub organization: String,
+    pub dataset: String,
+    #[serde(default = "main_branch")]
+    pub revision: String,
+    #[serde(default = "is_false")]
+    pub force_cache_refresh: bool,
+    pub root_path: String,
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "mask_secret_option")]
+    pub token: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LocalStorageTestRepoConfig {
     pub source_path: Option<String>,
 }
@@ -230,6 +254,10 @@ pub async fn create_test_repo_client(
             common_config,
             unique_config,
         } => GithubTestRepoClient::new(common_config, unique_config).await,
+        TestRepoConfig::HuggingFace {
+            common_config,
+            unique_config,
+        } => HuggingFaceTestRepoClient::new(common_config, unique_config).await,
         TestRepoConfig::LocalStorage {
             common_config,
             unique_config,

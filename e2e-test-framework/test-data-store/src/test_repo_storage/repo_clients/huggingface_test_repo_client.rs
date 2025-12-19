@@ -110,10 +110,10 @@ impl HuggingFaceTestRepoClient {
                 .and_then(|name| name.to_str())
                 .ok_or_else(|| anyhow::anyhow!("Invalid path for bootstrap script: {:?}", file_path))?
                 .to_string();
-            if !file_path_map.contains_key(&data_type_name) {
-                file_path_map.insert(data_type_name.clone(), vec![]);
-            }
-            file_path_map.get_mut(&data_type_name).unwrap().push(file_path);
+            file_path_map
+                .entry(data_type_name)
+                .or_insert_with(Vec::new)
+                .push(file_path);
         }
         log::trace!("Bootstrap Script Map: {:?}", file_path_map);
 

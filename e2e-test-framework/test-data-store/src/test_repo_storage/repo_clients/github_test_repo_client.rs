@@ -240,7 +240,7 @@ async fn download_github_repo_file(
         .send().await?;
 
     if !download_response.status().is_success() {
-        return Err(anyhow::anyhow!("Failed to download file from GitHub: {} -  {}", download_response.status(), download_response.text().await.unwrap_or_default()));
+        return Err(anyhow::anyhow!("Failed to download file from GitHub: {} - {}", download_response.status(), download_response.text().await.unwrap_or_default()));
     }
 
     let content = download_response.bytes().await?;

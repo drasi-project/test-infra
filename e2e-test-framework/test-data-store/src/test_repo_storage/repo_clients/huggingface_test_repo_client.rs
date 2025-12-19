@@ -209,7 +209,7 @@ async fn download_huggingface_repo_file(
     remote_path: String,
     local_file_path: PathBuf
 ) -> anyhow::Result<()> {
-    log::debug!("Downloading file {} to {}", remote_path, local_file_path.to_str().unwrap());
+    log::debug!("Downloading file {} to {}", remote_path, local_file_path.display());
 
     // Hugging Face direct file URL pattern
     // https://huggingface.co/datasets/{org}/{dataset}/resolve/{revision}/{path}

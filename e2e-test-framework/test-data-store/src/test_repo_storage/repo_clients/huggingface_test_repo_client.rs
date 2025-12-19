@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::stream::{self, StreamExt};
 use reqwest::Client;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::{fs::File, io::AsyncWriteExt, sync::Semaphore};
 
 use crate::test_repo_storage::models::{BootstrapDataGeneratorDefinition, SourceChangeGeneratorDefinition, TestSourceDefinition};
 
@@ -64,7 +65,9 @@ impl HuggingFaceTestRepoClient {
         log::trace!("Creating HuggingFaceTestRepoClient with settings: {:?}, ", settings);
 
         let mut client_builder = Client::builder()
-            .user_agent("drasi-test-framework/1.0");
+            .user_agent("drasi-test-framework/1.0")
+            .pool_max_idle_per_host(10)  // Limit connection pool to avoid overwhelming the server
+            .timeout(std::time::Duration::from_secs(300));  // 5 min timeout for large files
 
         // Add authorization header if token is provided
         if let Some(token) = &settings.token {
@@ -213,26 +216,45 @@ async fn download_huggingface_repo_file(
         remote_path
     );
 
-    let response = client.get(&url).send().await?;
+    // Retry logic with exponential backoff for rate limiting
+    const MAX_RETRIES: u32 = 3;
+    let mut attempt = 0;
 
-    if !response.status().is_success() {
+    loop {
+        let response = client.get(&url).send().await?;
+
+        if response.status().is_success() {
+            let content = response.bytes().await?;
+
+            // Create parent directories if they don't exist
+            if let Some(parent) = local_file_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+
+            let mut file = File::create(&local_file_path).await?;
+            file.write_all(&content).await?;
+            return Ok(());
+        }
+
+        // Handle rate limiting (429) with retry
+        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
+            attempt += 1;
+            let backoff_ms = 1000 * (2_u64.pow(attempt));  // Exponential backoff: 2s, 4s, 8s
+            log::warn!(
+                "Rate limited downloading {}. Retrying in {}ms (attempt {}/{})",
+                remote_path, backoff_ms, attempt, MAX_RETRIES
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+            continue;
+        }
+
+        // Non-retryable error
         return Err(anyhow::anyhow!(
             "Failed to download file from Hugging Face: {} - {}",
             response.status(),
             response.text().await.unwrap_or_default()
         ));
     }
-
-    let content = response.bytes().await?;
-
-    // Create parent directories if they don't exist
-    if let Some(parent) = local_file_path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-
-    let mut file = File::create(&local_file_path).await?;
-    file.write_all(&content).await?;
-    Ok(())
 }
 
 fn download_huggingface_repo_folder(
@@ -274,55 +296,20 @@ fn download_huggingface_repo_folder(
             tokio::fs::create_dir_all(&local_repo_folder).await?;
         }
 
-        let mut local_file_paths = vec![];
-        let mut tasks = vec![];
+        // Separate files and directories for processing
+        let mut file_items = vec![];
+        let mut directory_items = vec![];
 
         for item in items {
             match item.item_type.as_str() {
                 "file" => {
                     // Only process .jsonl files
                     if item.path.ends_with(".jsonl") {
-                        // Extract just the filename from the full path
-                        let filename = item.path.rsplit('/').next().unwrap_or(&item.path);
-                        let local_file_path = local_repo_folder.join(filename);
-                        local_file_paths.push(local_file_path.clone());
-
-                        let client_clone = client.clone();
-                        let org_clone = organization.clone();
-                        let dataset_clone = dataset.clone();
-                        let revision_clone = revision.clone();
-                        let remote_path = item.path.clone();
-
-                        let task = tokio::spawn(async move {
-                            download_huggingface_repo_file(
-                                client_clone,
-                                org_clone,
-                                dataset_clone,
-                                revision_clone,
-                                remote_path,
-                                local_file_path
-                            ).await
-                        });
-
-                        tasks.push(task);
+                        file_items.push(item);
                     }
                 },
                 "directory" => {
-                    // Recursively download subdirectories
-                    let filename = item.path.rsplit('/').next().unwrap_or(&item.path);
-                    let local_subdir = local_repo_folder.join(filename);
-                    let remote_subdir = item.path.clone();
-
-                    let sub_files = download_huggingface_repo_folder(
-                        client.clone(),
-                        organization.clone(),
-                        dataset.clone(),
-                        revision.clone(),
-                        local_subdir,
-                        remote_subdir
-                    ).await?;
-
-                    local_file_paths.extend(sub_files);
+                    directory_items.push(item);
                 },
                 _ => {
                     log::trace!("Ignoring unknown item type: {}", item.item_type);
@@ -330,9 +317,60 @@ fn download_huggingface_repo_folder(
             }
         }
 
-        // Wait for all file download tasks to complete
-        for task in tasks {
-            task.await??;
+        // Process directories recursively first (they may contain more files)
+        let mut local_file_paths = vec![];
+        for item in directory_items {
+            let filename = item.path.rsplit('/').next().unwrap_or(&item.path);
+            let local_subdir = local_repo_folder.join(filename);
+            let remote_subdir = item.path.clone();
+
+            let sub_files = download_huggingface_repo_folder(
+                client.clone(),
+                organization.clone(),
+                dataset.clone(),
+                revision.clone(),
+                local_subdir,
+                remote_subdir
+            ).await?;
+
+            local_file_paths.extend(sub_files);
+        }
+
+        // Download files with controlled concurrency (max 20 concurrent downloads)
+        const MAX_CONCURRENT_DOWNLOADS: usize = 20;
+
+        let file_download_results: Vec<_> = stream::iter(file_items)
+            .map(|item| {
+                let client = client.clone();
+                let organization = organization.clone();
+                let dataset = dataset.clone();
+                let revision = revision.clone();
+                let local_repo_folder = local_repo_folder.clone();
+
+                async move {
+                    let filename = item.path.rsplit('/').next().unwrap_or(&item.path);
+                    let local_file_path = local_repo_folder.join(filename);
+                    let remote_path = item.path.clone();
+
+                    download_huggingface_repo_file(
+                        client,
+                        organization,
+                        dataset,
+                        revision,
+                        remote_path,
+                        local_file_path.clone()
+                    ).await?;
+
+                    Ok::<PathBuf, anyhow::Error>(local_file_path)
+                }
+            })
+            .buffer_unordered(MAX_CONCURRENT_DOWNLOADS)  // Limit concurrent downloads
+            .collect()
+            .await;
+
+        // Collect successful downloads and propagate errors
+        for result in file_download_results {
+            local_file_paths.push(result?);
         }
 
         Ok(local_file_paths)

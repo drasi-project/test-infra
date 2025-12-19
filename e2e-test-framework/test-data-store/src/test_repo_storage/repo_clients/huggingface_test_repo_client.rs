@@ -104,7 +104,12 @@ impl HuggingFaceTestRepoClient {
         // using the data type name as the key and a vector of file paths as the value.
         let mut file_path_map = HashMap::new();
         for file_path in file_path_list {
-            let data_type_name = file_path.parent().unwrap().file_name().unwrap().to_str().unwrap().to_string();
+            let data_type_name = file_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| anyhow::anyhow!("Invalid path for bootstrap script: {:?}", file_path))?
+                .to_string();
             if !file_path_map.contains_key(&data_type_name) {
                 file_path_map.insert(data_type_name.clone(), vec![]);
             }

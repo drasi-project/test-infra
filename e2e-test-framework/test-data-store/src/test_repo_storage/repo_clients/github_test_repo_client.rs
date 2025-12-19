@@ -211,7 +211,11 @@ async fn download_github_repo_file(
     remote_path: String,
     local_file_path: PathBuf
 ) -> anyhow::Result<()> {
-    log::debug!("Downloading file {} to {}", remote_path, local_file_path.to_str().unwrap());
+    log::debug!(
+        "Downloading file {} to {}",
+        remote_path,
+        local_file_path.to_str().unwrap_or("<invalid UTF-8>")
+    );
 
     let url = format!(
         "https://api.github.com/repos/{}/{}/contents/{}?ref={}",

@@ -57,3 +57,6 @@ opentelemetry-otlp = { version = "0.13", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.20", features = ["rt-tokio", "metrics", "trace"] }
 opentelemetry-semantic-conventions = "0.12"
 portpicker = "0.1"
+
+[lints]
+workspace = true

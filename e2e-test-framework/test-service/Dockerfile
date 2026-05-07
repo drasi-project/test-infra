@@ -14,7 +14,23 @@
 
 FROM rust:1.88 AS builder
 
-RUN apt-get update && apt-get install -y protobuf-compiler libcurl4 && apt-get clean
+# test-run-host enables drasi-core's "middleware-jq" feature, which pulls in
+# jq-sys. jq-sys's build script links against the system libjq and
+# liboniguruma, so we install libjq-dev/libonig-dev plus the usual
+# build-essential / pkg-config / clang toolchain. Mirrors the approach used
+# in drasi-project/drasi-server/Dockerfile.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libjq-dev \
+    libonig-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    cmake \
+    clang \
+    libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src
 COPY ./infrastructure ./infrastructure
@@ -25,15 +41,20 @@ COPY ./test-run-host ./test-run-host
 RUN cargo new test-service
 WORKDIR /usr/src/test-service
 
-COPY ./test-service/Cargo.toml . 
-RUN cargo fetch
+COPY ./test-service/Cargo.toml .
+# Set JQ_LIB_DIR dynamically for multiarch support — Debian's libjq-dev does
+# not ship a pkg-config file, so jq-sys can't autodetect the install path.
+RUN JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1)) \
+    cargo fetch
 COPY ./test-service .
-RUN cargo install --force --path .
+RUN JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1)) \
+    cargo install --force --path .
 
-    
+
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
-    gdb curl wget vim net-tools iputils-ping libssl3 \
+    gdb curl wget vim net-tools iputils-ping \
+    ca-certificates libssl3 libjq1 libonig5 \
     && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 ENV RUST_BACKTRACE=1
 COPY --from=builder /usr/local/cargo/bin/test-service /usr/local/bin/test-service

@@ -18,4 +18,4 @@ GREEN="\033[32m"
 RESET="\033[0m"
 
 echo -e "${GREEN}\nRunning the E2E Test Service as a local process...${RESET}"
-RUST_LOG=debug cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_server_http/config.json
+RUST_LOG=debug cargo run --release --manifest-path "$(dirname "$0")/../../../test-service/Cargo.toml" -- --config "$(dirname "$0")/config.json"

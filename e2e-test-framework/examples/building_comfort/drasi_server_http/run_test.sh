@@ -19,4 +19,4 @@ RESET="\033[0m"
 
 echo -e "${GREEN}\nRunning the E2E Test Service as a local process...${RESET}"
 # Set drasi_core modules to error level to suppress INFO logs from tracing instrumentation
-RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_server_http/config.json
+RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' cargo run --release --manifest-path "$(dirname "$0")/../../../test-service/Cargo.toml" -- --config "$(dirname "$0")/config.json"

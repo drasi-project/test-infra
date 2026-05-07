@@ -77,6 +77,7 @@ impl OutputLogger for ConsoleOutputLogger {
         })
     }
 
+    #[allow(clippy::print_stdout)]
     async fn log_handler_record(&mut self, record: &HandlerRecord) -> anyhow::Result<()> {
         let time = Local::now().format(&self.settings.date_time_format);
 

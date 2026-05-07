@@ -64,6 +64,7 @@ impl SourceChangeDispatcher for ConsoleSourceChangeDispatcher {
         Ok(())
     }
 
+    #[allow(clippy::print_stdout)]
     async fn dispatch_source_change_events(
         &mut self,
         events: Vec<&SourceChangeEvent>,

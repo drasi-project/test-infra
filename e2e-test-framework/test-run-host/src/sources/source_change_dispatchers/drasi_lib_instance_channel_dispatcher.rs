@@ -16,65 +16,66 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use drasi_server_core::ApplicationSourceHandle;
+use drasi_source_application::{ApplicationSourceHandle, PropertyMapBuilder};
 
 use test_data_store::{
     scripts::SourceChangeEvent,
-    test_repo_storage::models::DrasiServerChannelSourceChangeDispatcherDefinition,
-    test_run_storage::{TestRunDrasiServerId, TestRunSourceStorage},
+    test_repo_storage::models::DrasiLibInstanceChannelSourceChangeDispatcherDefinition,
+    test_run_storage::{TestRunDrasiLibInstanceId, TestRunSourceStorage},
 };
 
 use super::SourceChangeDispatcher;
 
 #[derive(Debug)]
-pub struct DrasiServerChannelSourceChangeDispatcherSettings {
-    pub drasi_server_id: TestRunDrasiServerId,
+pub struct DrasiLibInstanceChannelSourceChangeDispatcherSettings {
+    pub drasi_lib_instance_id: TestRunDrasiLibInstanceId,
     pub source_id: String,
     pub buffer_size: usize,
 }
 
-impl DrasiServerChannelSourceChangeDispatcherSettings {
+impl DrasiLibInstanceChannelSourceChangeDispatcherSettings {
     pub fn new(
-        definition: &DrasiServerChannelSourceChangeDispatcherDefinition,
+        definition: &DrasiLibInstanceChannelSourceChangeDispatcherDefinition,
         test_run_source_storage: &TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        // Parse the drasi_server_id from the definition
-        let drasi_server_id = TestRunDrasiServerId::new(
+        // Parse the drasi_lib_instance_id from the definition
+        let drasi_lib_instance_id = TestRunDrasiLibInstanceId::new(
             &test_run_source_storage.id.test_run_id,
-            &definition.drasi_server_id,
+            &definition.drasi_lib_instance_id,
         );
 
         Ok(Self {
-            drasi_server_id,
+            drasi_lib_instance_id,
             source_id: definition.source_id.clone(),
             buffer_size: definition.buffer_size.unwrap_or(1024),
         })
     }
 }
 
-pub struct DrasiServerChannelSourceChangeDispatcher {
-    settings: DrasiServerChannelSourceChangeDispatcherSettings,
+pub struct DrasiLibInstanceChannelSourceChangeDispatcher {
+    settings: DrasiLibInstanceChannelSourceChangeDispatcherSettings,
     test_run_host: Option<std::sync::Arc<crate::TestRunHost>>,
     sender: Option<mpsc::Sender<Vec<SourceChangeEvent>>>,
     queued_events: Vec<SourceChangeEvent>,
     receiver_task: Option<JoinHandle<()>>,
 }
 
-impl DrasiServerChannelSourceChangeDispatcher {
+impl DrasiLibInstanceChannelSourceChangeDispatcher {
     pub fn new(
-        definition: &DrasiServerChannelSourceChangeDispatcherDefinition,
+        definition: &DrasiLibInstanceChannelSourceChangeDispatcherDefinition,
         storage: &TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
         log::info!(
-            "Creating DrasiServerChannelSourceChangeDispatcher for source '{}' on Drasi Server '{}'",
+            "Creating DrasiLibInstanceChannelSourceChangeDispatcher for source '{}' on drasi-lib instance '{}'",
             definition.source_id,
-            definition.drasi_server_id
+            definition.drasi_lib_instance_id
         );
 
-        let settings = DrasiServerChannelSourceChangeDispatcherSettings::new(definition, storage)?;
+        let settings =
+            DrasiLibInstanceChannelSourceChangeDispatcherSettings::new(definition, storage)?;
         log::debug!(
-            "DrasiServerChannelSourceChangeDispatcher created with settings: drasi_server_id={:?}, source_id={}, buffer_size={}",
-            settings.drasi_server_id,
+            "DrasiLibInstanceChannelSourceChangeDispatcher created with settings: drasi_lib_instance_id={:?}, source_id={}, buffer_size={}",
+            settings.drasi_lib_instance_id,
             settings.source_id,
             settings.buffer_size
         );
@@ -98,15 +99,15 @@ impl DrasiServerChannelSourceChangeDispatcher {
             }
         }
 
-        // We need the test run host to get access to the Drasi Server
+        // We need the test run host to get access to the drasi-lib instance
         let test_run_host = match self.test_run_host.as_ref() {
             Some(host) => host.clone(),
             None => {
                 // Can't create channel without TestRunHost
                 return Err(anyhow::anyhow!(
-                    "Cannot create channel for source '{}' on server '{}': TestRunHost not set yet",
+                    "Cannot create channel for source '{}' on instance '{}': TestRunHost not set yet",
                     self.settings.source_id,
-                    self.settings.drasi_server_id
+                    self.settings.drasi_lib_instance_id
                 ));
             }
         };
@@ -116,32 +117,27 @@ impl DrasiServerChannelSourceChangeDispatcher {
             mpsc::channel::<Vec<SourceChangeEvent>>(self.settings.buffer_size);
 
         let source_id = self.settings.source_id.clone();
-        let drasi_server_id = self.settings.drasi_server_id.clone();
+        let drasi_lib_instance_id = self.settings.drasi_lib_instance_id.clone();
 
         // Start a task to process events from the channel
         let receiver_task = tokio::spawn(async move {
             log::info!(
-                "Started channel receiver for source {} on Drasi Server {}",
-                source_id,
-                drasi_server_id
+                "Started channel receiver for source {source_id} on drasi-lib instance {drasi_lib_instance_id}"
             );
 
-            // Get the Drasi Server and application handle
+            // Get the drasi-lib instance and application handle
             let test_runs = test_run_host.test_runs.read().await;
-            if let Some(test_run) = test_runs.get(&drasi_server_id.test_run_id) {
-                if let Some(drasi_server) = test_run
-                    .drasi_servers
-                    .get(&drasi_server_id.test_drasi_server_id)
+            if let Some(test_run) = test_runs.get(&drasi_lib_instance_id.test_run_id) {
+                if let Some(drasi_lib_instance) = test_run
+                    .drasi_lib_instances
+                    .get(&drasi_lib_instance_id.test_drasi_lib_instance_id)
                 {
-                    if let Some(app_handle) = drasi_server.get_application_handle(&source_id).await
-                    {
-                        if let Some(_source_handle) = &app_handle.source {
+                    match drasi_lib_instance.get_source_handle(&source_id).await {
+                        Ok(source_handle) => {
                             log::info!(
-                            "Successfully obtained ApplicationSourceHandle for source '{}' on Drasi Server {}",
-                            source_id, drasi_server_id
-                        );
+                                "Successfully obtained ApplicationSourceHandle for source '{source_id}' on drasi-lib instance {drasi_lib_instance_id}"
+                            );
 
-                            // Process events from the channel
                             while let Some(events) = receiver.recv().await {
                                 log::trace!(
                                     "Channel receiver for source {} received {} events",
@@ -149,61 +145,33 @@ impl DrasiServerChannelSourceChangeDispatcher {
                                     events.len()
                                 );
 
-                                // Convert and send events to Drasi Server
-                                if let Some(source_handle) = &app_handle.source {
-                                    for event in &events {
-                                        log::trace!(
-                                        "Dispatching event with op '{}' to source '{}' via ApplicationSourceHandle",
-                                        event.op, source_id
-                                    );
-
-                                        // Dispatch the event based on operation and type
-                                        if let Err(e) =
-                                            dispatch_event_to_drasi(source_handle, event).await
-                                        {
-                                            log::error!(
-                                                "Failed to dispatch event to source '{}': {}",
-                                                source_id,
-                                                e
-                                            );
-                                        }
+                                for event in &events {
+                                    if let Err(e) =
+                                        dispatch_event_to_drasi(&source_handle, event).await
+                                    {
+                                        log::error!(
+                                            "Failed to dispatch event to source '{source_id}': {e}"
+                                        );
                                     }
-
-                                    log::trace!(
-                                    "Successfully dispatched {} events to source '{}' via ApplicationSourceHandle",
-                                    events.len(),
-                                    source_id
-                                );
-                                } else {
-                                    log::error!(
-                                        "No source handle available for source '{}'",
-                                        source_id
-                                    );
                                 }
                             }
-                        } else {
-                            log::error!(
-                                "No source handle found in application handle for source '{}'",
-                                source_id
-                            );
                         }
-                    } else {
-                        log::error!("No application handle found for source '{}'", source_id);
+                        Err(e) => {
+                            log::error!("No source handle found for source '{source_id}': {e}");
+                        }
                     }
                 } else {
                     log::error!(
-                        "Drasi Server {} not found in test run",
-                        drasi_server_id.test_drasi_server_id
+                        "drasi-lib instance {} not found in test run",
+                        drasi_lib_instance_id.test_drasi_lib_instance_id
                     );
                 }
             } else {
-                log::error!("Test run {} not found", drasi_server_id.test_run_id);
+                log::error!("Test run {} not found", drasi_lib_instance_id.test_run_id);
             }
 
             log::info!(
-                "Channel receiver for source {} on Drasi Server {} stopped",
-                source_id,
-                drasi_server_id
+                "Channel receiver for source {source_id} on drasi-lib instance {drasi_lib_instance_id} stopped"
             );
         });
 
@@ -214,9 +182,9 @@ impl DrasiServerChannelSourceChangeDispatcher {
 }
 
 #[async_trait]
-impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
+impl SourceChangeDispatcher for DrasiLibInstanceChannelSourceChangeDispatcher {
     async fn close(&mut self) -> anyhow::Result<()> {
-        log::debug!("Closing Drasi Server Channel source change dispatcher");
+        log::debug!("Closing drasi-lib instance Channel source change dispatcher");
 
         // Drop the sender to close the channel
         self.sender = None;
@@ -229,7 +197,7 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
                     log::info!("Channel receiver finished successfully");
                 }
                 Err(e) => {
-                    log::error!("Channel receiver task failed: {}", e);
+                    log::error!("Channel receiver task failed: {e}");
                 }
             }
         }
@@ -244,10 +212,10 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
         // First, check if we have queued events to dispatch
         if self.test_run_host.is_some() && !self.queued_events.is_empty() {
             log::debug!(
-                "DrasiServerChannelDispatcher: Dispatching {} previously queued events to source '{}' on Drasi Server {}",
+                "DrasiLibInstanceChannelDispatcher: Dispatching {} previously queued events to source '{}' on drasi-lib instance {}",
                 self.queued_events.len(),
                 self.settings.source_id,
-                self.settings.drasi_server_id
+                self.settings.drasi_lib_instance_id
             );
 
             // Take the queued events and dispatch them
@@ -262,10 +230,10 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
                     log::trace!("Successfully dispatched queued events");
                 }
                 Err(e) => {
-                    log::error!("Failed to dispatch queued events: {}", e);
+                    log::error!("Failed to dispatch queued events: {e}");
                     // Clear the sender so we'll create a new channel next time
                     self.sender = None;
-                    return Err(anyhow::anyhow!("Channel send failed: {}", e));
+                    return Err(anyhow::anyhow!("Channel send failed: {e}"));
                 }
             }
         }
@@ -277,10 +245,10 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
         // Check if TestRunHost is available
         if self.test_run_host.is_none() {
             log::debug!(
-                "DrasiServerChannelDispatcher: Queueing {} events to source '{}' on Drasi Server {} - TestRunHost not yet available",
+                "DrasiLibInstanceChannelDispatcher: Queueing {} events to source '{}' on drasi-lib instance {} - TestRunHost not yet available",
                 events.len(),
                 self.settings.source_id,
-                self.settings.drasi_server_id
+                self.settings.drasi_lib_instance_id
             );
             // Queue the events for later dispatch
             self.queued_events.extend(events.into_iter().cloned());
@@ -288,10 +256,10 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
         }
 
         log::trace!(
-            "DrasiServerChannelDispatcher: Dispatching {} events to source '{}' on Drasi Server {}",
+            "DrasiLibInstanceChannelDispatcher: Dispatching {} events to source '{}' on drasi-lib instance {}",
             events.len(),
             self.settings.source_id,
-            self.settings.drasi_server_id
+            self.settings.drasi_lib_instance_id
         );
 
         // Get or create the channel
@@ -305,7 +273,7 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
         match sender.send(owned_events).await {
             Ok(()) => {
                 log::trace!(
-                    "Successfully dispatched {} events to Drasi Server Channel for source {}",
+                    "Successfully dispatched {} events to drasi-lib instance Channel for source {}",
                     num_events,
                     self.settings.source_id
                 );
@@ -313,13 +281,13 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
             }
             Err(e) => {
                 log::error!(
-                    "Failed to dispatch events to Drasi Server Channel for source {}: {}",
+                    "Failed to dispatch events to drasi-lib instance Channel for source {}: {}",
                     self.settings.source_id,
                     e
                 );
                 // Clear the sender so we'll create a new channel next time
                 self.sender = None;
-                anyhow::bail!("Channel send failed: {}", e)
+                anyhow::bail!("Channel send failed: {e}")
             }
         }
     }
@@ -330,10 +298,10 @@ impl SourceChangeDispatcher for DrasiServerChannelSourceChangeDispatcher {
         // If we have queued events, log that they will be dispatched on next call
         if !self.queued_events.is_empty() {
             log::info!(
-                "DrasiServerChannelDispatcher: TestRunHost is now available, {} queued events for source '{}' on Drasi Server {} will be dispatched on next call",
+                "DrasiLibInstanceChannelDispatcher: TestRunHost is now available, {} queued events for source '{}' on drasi-lib instance {} will be dispatched on next call",
                 self.queued_events.len(),
                 self.settings.source_id,
-                self.settings.drasi_server_id
+                self.settings.drasi_lib_instance_id
             );
         }
     }
@@ -344,8 +312,6 @@ async fn dispatch_event_to_drasi(
     source_handle: &ApplicationSourceHandle,
     event: &SourceChangeEvent,
 ) -> anyhow::Result<()> {
-    use drasi_server_core::PropertyMapBuilder;
-
     // Log the event structure for debugging
     log::trace!(
         "Event structure: op={}, payload.after={:?}",
@@ -380,20 +346,20 @@ async fn dispatch_event_to_drasi(
         "relation" => "r",
         _ => {
             // Fallback: check ID patterns or labels
-            if id.starts_with("B_") || id.starts_with("F_") || id.starts_with("R_") 
-                || labels.contains(&"Building".to_string()) 
+            if id.starts_with("B_")
+                || id.starts_with("F_")
+                || id.starts_with("R_")
+                || labels.contains(&"Building".to_string())
                 || labels.contains(&"Floor".to_string())
                 || labels.contains(&"Room".to_string())
-                || labels.contains(&"Stock".to_string()) {
+                || labels.contains(&"Stock".to_string())
+            {
                 "n" // Node
             } else if id.contains("HAS_FLOOR") || id.contains("HAS_ROOM") {
                 "r" // Relation
             } else {
                 // Default to node if we can't determine
-                log::debug!(
-                    "Using default type 'node' for element {} with labels {:?}",
-                    id, labels
-                );
+                log::debug!("Using default type 'node' for element {id} with labels {labels:?}");
                 "n"
             }
         }
@@ -419,8 +385,7 @@ async fn dispatch_event_to_drasi(
                 serde_json::Value::Null => property_builder.with_null(key),
                 _ => {
                     log::warn!(
-                        "Skipping complex property '{}' - only primitive types supported",
-                        key
+                        "Skipping complex property '{key}' - only primitive types supported"
                     );
                     property_builder
                 }

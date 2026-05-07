@@ -57,17 +57,10 @@ impl ConsoleResultStreamLogger {
         test_run_query_id: TestRunQueryId,
         def: &ConsoleResultStreamLoggerConfig,
     ) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!(
-            "Creating ConsoleResultStreamLogger for {} from {:?}, ",
-            test_run_query_id,
-            def
-        );
+        log::debug!("Creating ConsoleResultStreamLogger for {test_run_query_id} from {def:?}, ");
 
         let settings = ConsoleResultStreamLoggerSettings::new(test_run_query_id, def)?;
-        log::trace!(
-            "Creating ConsoleResultStreamLogger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating ConsoleResultStreamLogger with settings {settings:?}, ");
 
         Ok(Box::new(Self { settings }))
     }

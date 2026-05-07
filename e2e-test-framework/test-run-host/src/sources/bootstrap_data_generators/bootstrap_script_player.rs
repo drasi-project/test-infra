@@ -59,11 +59,7 @@ impl BootstrapDataGenerator for ScriptBootstrapDataGenerator {
         node_labels: &HashSet<String>,
         rel_labels: &HashSet<String>,
     ) -> anyhow::Result<BootstrapData> {
-        log::debug!(
-            "Node labels: [{:?}], Rel labels: [{:?}]",
-            node_labels,
-            rel_labels
-        );
+        log::debug!("Node labels: [{node_labels:?}], Rel labels: [{rel_labels:?}]");
 
         let mut bootstrap_data = BootstrapData::new();
 

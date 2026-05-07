@@ -159,7 +159,7 @@ impl SourceChangeRecorder {
         source_id: String,
         storage: DataCollectionSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating SourceChangeRecorder from config {:?}", config);
+        log::debug!("Creating SourceChangeRecorder from config {config:?}");
 
         let settings = SourceChangeRecorderSettings::new(config, source_id, storage)?;
 
@@ -211,7 +211,7 @@ impl SourceChangeRecorder {
 
         match r {
             Ok(_) => Ok(response_rx.await.unwrap()),
-            Err(e) => anyhow::bail!("Error sending command to SourceChangeRecorder: {:?}", e),
+            Err(e) => anyhow::bail!("Error sending command to SourceChangeRecorder: {e:?}"),
         }
     }
 }
@@ -224,10 +224,7 @@ pub async fn recorder_thread(
     mut recorder_rx_channel: Receiver<SourceChangeRecorderMessage>,
 ) {
     log::info!("SourceChangeRecorder thread started...");
-    log::debug!(
-        "SourceChangeRecorder thread started using settings: {:?}",
-        settings
-    );
+    log::debug!("SourceChangeRecorder thread started using settings: {settings:?}");
 
     // Initialize the SourceChangeRecorderState.
     let mut recorder_state = SourceChangeRecorderState {
@@ -269,7 +266,7 @@ pub async fn recorder_thread(
             Ok(reader) => reader,
             Err(e) => {
                 transition_to_error_state(
-                    format!("Error creating SourceChangeQueueReader: {:?}", e).as_str(),
+                    format!("Error creating SourceChangeQueueReader: {e:?}").as_str(),
                     &mut recorder_state,
                 );
                 NoneSourceChangeQueueReader::new()
@@ -284,7 +281,7 @@ pub async fn recorder_thread(
         Ok(channel) => channel,
         Err(e) => {
             transition_to_error_state(
-                format!("Error initializing SourceChangeQueueReader: {:?}", e).as_str(),
+                format!("Error initializing SourceChangeQueueReader: {e:?}").as_str(),
                 &mut recorder_state,
             );
             NoneSourceChangeQueueReader::new().init().await.unwrap()
@@ -327,7 +324,7 @@ pub async fn recorder_thread(
 
                             let r = message.response_tx.unwrap().send(message_response);
                             if let Err(e) = r {
-                                log::error!("Error in SourceChangeRecorder sending message response back to caller: {:?}", e);
+                                log::error!("Error in SourceChangeRecorder sending message response back to caller: {e:?}");
                             }
                         }
 
@@ -342,7 +339,7 @@ pub async fn recorder_thread(
             change_queue_message = change_queue_reader_channel.recv() => {
                 match change_queue_message {
                     Some(SourceChangeQueueReaderMessage::QueueRecord(queue_record)) => {
-                        log::trace!("Received SOurce Change Queue Record: {:?}", queue_record);
+                        log::trace!("Received SOurce Change Queue Record: {queue_record:?}");
 
                         // let record = SourceChangeRecord {
                         //     offset_ns: recorder_state.current_time_offset,
@@ -350,10 +347,10 @@ pub async fn recorder_thread(
                         // };
 
                         // Display the record to the console
-                        log::debug!("Record In Recorder: {:?}", queue_record);
+                        log::debug!("Record In Recorder: {queue_record:?}");
                     },
                     Some(SourceChangeQueueReaderMessage::Error(e)) => {
-                        log::error!("Error getting next change event: {:?}", e);
+                        log::error!("Error getting next change event: {e:?}");
                     },
                     None => {
                         log::info!("SourceChangeQueueReader channel closed.");
@@ -444,7 +441,7 @@ fn transition_from_error_state(
 }
 
 fn transition_to_error_state(error_message: &str, recorder_state: &mut SourceChangeRecorderState) {
-    log::error!("{}", error_message);
+    log::error!("{error_message}");
     recorder_state.status = SourceChangeRecorderStatus::Error;
     recorder_state.error_message = Some(error_message.to_string());
 }
@@ -452,8 +449,8 @@ fn transition_to_error_state(error_message: &str, recorder_state: &mut SourceCha
 // Function to log the Player State at varying levels of detail.
 fn log_change_script_recorder_state(msg: &str, state: &SourceChangeRecorderState) {
     match log::max_level() {
-        log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, state),
-        log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, state),
+        log::LevelFilter::Trace => log::trace!("{msg} - {state:#?}"),
+        log::LevelFilter::Debug => log::debug!("{msg} - {state:?}"),
         log::LevelFilter::Info => log::info!("{} - status:{:?}, error_message:{:?}, start_replay_time:{:?}, current_time_offset:{:?}",
             msg, state.status, state.error_message, state.start_record_time, state.current_time_offset),
         _ => {}

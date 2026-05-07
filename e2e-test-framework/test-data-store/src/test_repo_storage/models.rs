@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{DateTime, Utc};
-use std::{collections::HashMap, num::NonZeroU32, str::FromStr};
+use std::{num::NonZeroU32, str::FromStr};
 
 use serde::{
     de::{self, Deserializer},
@@ -43,7 +43,7 @@ impl FromStr for TimeMode {
             _ => match chrono::DateTime::parse_from_rfc3339(s) {
                 Ok(t) => Ok(Self::Rebased(t.timestamp_nanos_opt().unwrap() as u64)),
                 Err(e) => {
-                    anyhow::bail!("Error parsing TimeMode - value:{}, error:{}", s, e);
+                    anyhow::bail!("Error parsing TimeMode - value:{s}, error:{e}");
                 }
             },
         }
@@ -55,7 +55,7 @@ impl std::fmt::Display for TimeMode {
         match self {
             Self::Live => write!(f, "live"),
             Self::Recorded => write!(f, "recorded"),
-            Self::Rebased(time) => write!(f, "{}", time),
+            Self::Rebased(time) => write!(f, "{time}"),
         }
     }
 }
@@ -114,10 +114,10 @@ impl FromStr for SpacingMode {
                 match s.parse::<u32>() {
                     Ok(num) => match NonZeroU32::new(num) {
                         Some(rate) => Ok(Self::Rate(rate)),
-                        None => anyhow::bail!("Invalid SpacingMode: {}", s),
+                        None => anyhow::bail!("Invalid SpacingMode: {s}"),
                     },
                     Err(e) => {
-                        anyhow::bail!("Error parsing SpacingMode: {}", e);
+                        anyhow::bail!("Error parsing SpacingMode: {e}");
                     }
                 }
             }
@@ -130,7 +130,7 @@ impl std::fmt::Display for SpacingMode {
         match self {
             Self::None => write!(f, "none"),
             Self::Recorded => write!(f, "recorded"),
-            Self::Rate(rate) => write!(f, "{}", rate),
+            Self::Rate(rate) => write!(f, "{rate}"),
         }
     }
 }
@@ -165,7 +165,7 @@ pub struct LocalTestDefinition {
     pub description: Option<String>,
     pub test_folder: Option<String>,
     #[serde(default)]
-    pub drasi_servers: Vec<TestDrasiServerDefinition>,
+    pub drasi_lib_instances: Vec<TestDrasiLibInstanceDefinition>,
     #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
@@ -183,7 +183,7 @@ pub struct TestDefinition {
     pub description: Option<String>,
     pub test_folder: Option<String>,
     #[serde(default)]
-    pub drasi_servers: Vec<TestDrasiServerDefinition>,
+    pub drasi_lib_instances: Vec<TestDrasiLibInstanceDefinition>,
     #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
@@ -198,7 +198,7 @@ impl TestDefinition {
             .queries
             .iter()
             .find(|query| query.test_query_id == query_id)
-            .ok_or_else(|| anyhow::anyhow!("Test Query with ID {:?} not found", query_id))?;
+            .ok_or_else(|| anyhow::anyhow!("Test Query with ID {query_id:?} not found"))?;
 
         Ok(test_query_definition.clone())
     }
@@ -208,7 +208,7 @@ impl TestDefinition {
             .reactions
             .iter()
             .find(|reaction| reaction.test_reaction_id == reaction_id)
-            .ok_or_else(|| anyhow::anyhow!("Test Reaction with ID {:?} not found", reaction_id))?;
+            .ok_or_else(|| anyhow::anyhow!("Test Reaction with ID {reaction_id:?} not found"))?;
 
         Ok(test_reaction_definition.clone())
     }
@@ -221,13 +221,14 @@ impl TestDefinition {
                 TestSourceDefinition::Model(def) => def.common.test_source_id == source_id,
                 TestSourceDefinition::Script(def) => def.common.test_source_id == source_id,
             })
-            .ok_or_else(|| anyhow::anyhow!("Test Source with ID {:?} not found", source_id))?;
+            .ok_or_else(|| anyhow::anyhow!("Test Source with ID {source_id:?} not found"))?;
 
         Ok(test_source_definition.clone())
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "kind")]
 pub enum TestSourceDefinition {
     Model(ModelTestSourceDefinition),
@@ -389,8 +390,7 @@ pub enum SourceChangeDispatcherDefinition {
     Grpc(GrpcSourceChangeDispatcherDefinition),
     JsonlFile(JsonlFileSourceChangeDispatcherDefinition),
     RedisStream(RedisStreamSourceChangeDispatcherDefinition),
-    DrasiServerApi(DrasiServerApiSourceChangeDispatcherDefinition),
-    DrasiServerChannel(DrasiServerChannelSourceChangeDispatcherDefinition),
+    DrasiLibInstanceChannel(DrasiLibInstanceChannelSourceChangeDispatcherDefinition),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -447,16 +447,8 @@ pub struct GrpcSourceChangeDispatcherDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DrasiServerApiSourceChangeDispatcherDefinition {
-    pub drasi_server_id: String,
-    pub source_id: String,
-    pub timeout_seconds: Option<u64>,
-    pub batch_events: Option<bool>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DrasiServerChannelSourceChangeDispatcherDefinition {
-    pub drasi_server_id: String,
+pub struct DrasiLibInstanceChannelSourceChangeDispatcherDefinition {
+    pub drasi_lib_instance_id: String,
     pub source_id: String,
     pub buffer_size: Option<usize>,
 }
@@ -525,8 +517,8 @@ pub enum ReactionHandlerDefinition {
     Http(HttpReactionHandlerDefinition),
     EventGrid(EventGridReactionHandlerDefinition),
     Grpc(GrpcReactionHandlerDefinition),
-    DrasiServerCallback(DrasiServerCallbackReactionHandlerDefinition),
-    DrasiServerChannel(DrasiServerChannelReactionHandlerDefinition),
+    DrasiLibInstanceCallback(DrasiLibInstanceCallbackReactionHandlerDefinition),
+    DrasiLibInstanceChannel(DrasiLibInstanceChannelReactionHandlerDefinition),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -553,15 +545,15 @@ pub struct GrpcReactionHandlerDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DrasiServerCallbackReactionHandlerDefinition {
-    pub drasi_server_id: String,
+pub struct DrasiLibInstanceCallbackReactionHandlerDefinition {
+    pub drasi_lib_instance_id: String,
     pub reaction_id: String,
     pub callback_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DrasiServerChannelReactionHandlerDefinition {
-    pub drasi_server_id: String,
+pub struct DrasiLibInstanceChannelReactionHandlerDefinition {
+    pub drasi_lib_instance_id: String,
     pub reaction_id: String,
     pub buffer_size: Option<usize>,
 }
@@ -621,235 +613,100 @@ impl TryFrom<&str> for QueryId {
     }
 }
 
-/// Test definition for a Drasi Server stored in test repositories
+/// Test definition for a drasi-lib instance stored in test repositories
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TestDrasiServerDefinition {
-    /// Unique identifier for the server
-    pub id: String,
+pub struct TestDrasiLibInstanceDefinition {
+    /// Unique identifier for the drasi-lib instance.
+    pub test_drasi_lib_instance_id: String,
 
-    /// Human-readable name for the server
-    pub name: String,
+    /// Human-readable name for the drasi-lib instance.
+    pub name: Option<String>,
 
-    /// Description of the server's purpose in the test
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Description of the drasi-lib instance's purpose in the test.
     pub description: Option<String>,
 
-    /// Server configuration
-    pub config: DrasiServerConfig,
+    /// drasi-lib instance configuration.
+    pub config: DrasiLibInstanceConfig,
 }
 
-/// Runtime configuration for a Drasi Server instance
+/// Runtime configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiServerConfig {
-    /// Runtime configuration (thread pool size, etc.)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<DrasiServerRuntimeConfig>,
-
-    /// Storage backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub storage: Option<DrasiServerStorageConfig>,
-
-    /// Authentication settings
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth: Option<DrasiServerAuthConfig>,
-
-    /// Source configurations
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sources: Vec<DrasiSourceConfig>,
-
-    /// Query configurations
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub queries: Vec<DrasiQueryConfig>,
-
-    /// Reaction configurations
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reactions: Vec<DrasiReactionConfig>,
-
-    /// Log level for the server (trace, debug, info, warn, error)
-    #[serde(skip_serializing_if = "Option::is_none")]
+pub struct DrasiLibInstanceConfig {
+    /// Log level for the drasi-lib instance (trace, debug, info, warn, error).
     pub log_level: Option<String>,
 
-    /// Additional server-specific configuration
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
-}
+    /// Source configurations.
+    pub sources: Vec<DrasiLibSourceConfig>,
 
-/// Runtime configuration for Drasi Server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiServerRuntimeConfig {
-    /// Number of worker threads
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worker_threads: Option<usize>,
+    /// Query configurations.
+    pub queries: Vec<DrasiLibQueryConfig>,
 
-    /// Maximum number of blocking threads
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_blocking_threads: Option<usize>,
-
-    /// Thread name prefix
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thread_name_prefix: Option<String>,
-
-    /// Enable runtime metrics
-    #[serde(default)]
-    pub enable_metrics: bool,
-}
-
-/// Storage backend configuration for Drasi Server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum DrasiServerStorageConfig {
-    /// In-memory storage (default for tests)
-    #[serde(rename = "memory")]
-    Memory {
-        /// Maximum memory usage in bytes
-        #[serde(skip_serializing_if = "Option::is_none")]
-        max_size: Option<usize>,
-    },
-
-    /// File-based storage
-    #[serde(rename = "file")]
-    File {
-        /// Base directory for storage
-        path: String,
-
-        /// Enable persistence across restarts
-        #[serde(default = "default_true")]
-        persist: bool,
-    },
-
-    /// Redis storage
-    #[serde(rename = "redis")]
-    Redis {
-        /// Redis connection URL
-        url: String,
-
-        /// Key prefix for this server instance
-        #[serde(skip_serializing_if = "Option::is_none")]
-        key_prefix: Option<String>,
-    },
+    /// Reaction configurations.
+    pub reactions: Vec<DrasiLibReactionConfig>,
 }
 
 fn default_true() -> bool {
     true
 }
 
-/// Authentication configuration for Drasi Server
+/// Source configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum DrasiServerAuthConfig {
-    /// No authentication (default for tests)
-    #[serde(rename = "none")]
-    None,
-
-    /// Basic authentication
-    #[serde(rename = "basic")]
-    Basic {
-        /// Username
-        username: String,
-
-        /// Password
-        password: String,
-    },
-
-    /// Token-based authentication
-    #[serde(rename = "token")]
-    Token {
-        /// Static token value
-        token: String,
-    },
-
-    /// OAuth2 authentication
-    #[serde(rename = "oauth2")]
-    OAuth2 {
-        /// OAuth2 provider URL
-        provider_url: String,
-
-        /// Client ID
-        client_id: String,
-
-        /// Client secret
-        #[serde(skip_serializing_if = "Option::is_none")]
-        client_secret: Option<String>,
-
-        /// Required scopes
-        #[serde(default)]
-        scopes: Vec<String>,
-    },
-}
-
-/// Source configuration for Drasi Server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiSourceConfig {
-    /// Unique identifier for the source
+pub struct DrasiLibSourceConfig {
+    /// Unique identifier for the source.
     pub id: String,
 
-    /// Type of source (e.g., "mock", "kafka", "database")
-    pub source_type: String,
+    /// Source kind, such as application.
+    pub kind: String,
 
-    /// Whether to automatically start this source
+    /// Whether to automatically start this source.
     #[serde(default = "default_true")]
     pub auto_start: bool,
 
-    /// Source-specific configuration properties
+    /// Kind-specific source configuration.
     #[serde(default)]
-    pub properties: HashMap<String, serde_json::Value>,
+    pub config: serde_json::Value,
 }
 
-/// Query configuration for Drasi Server
+/// Query configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiQueryConfig {
-    /// Unique identifier for the query
+pub struct DrasiLibQueryConfig {
+    /// Unique identifier for the query.
     pub id: String,
 
-    /// Cypher query string
+    /// Cypher query string.
     pub query: String,
 
-    /// IDs of sources this query subscribes to
+    /// IDs of sources this query subscribes to.
     pub sources: Vec<String>,
 
-    /// Whether to automatically start this query
+    /// Whether to automatically start this query.
     #[serde(default = "default_true")]
     pub auto_start: bool,
 
-    /// Query-specific configuration properties
+    /// Optional query-specific options.
     #[serde(default)]
-    pub properties: HashMap<String, serde_json::Value>,
+    pub config: serde_json::Value,
 }
 
-/// Reaction configuration for Drasi Server
+/// Reaction configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiReactionConfig {
-    /// Unique identifier for the reaction
+pub struct DrasiLibReactionConfig {
+    /// Unique identifier for the reaction.
     pub id: String,
 
-    /// Type of reaction (e.g., "log", "webhook", "notification")
-    pub reaction_type: String,
+    /// Reaction kind, such as application.
+    pub kind: String,
 
-    /// IDs of queries this reaction subscribes to
+    /// IDs of queries this reaction subscribes to.
     pub queries: Vec<String>,
 
-    /// Whether to automatically start this reaction
+    /// Whether to automatically start this reaction.
     #[serde(default = "default_true")]
     pub auto_start: bool,
 
-    /// Reaction-specific configuration properties
+    /// Kind-specific reaction configuration.
     #[serde(default)]
-    pub properties: HashMap<String, serde_json::Value>,
-}
-
-impl Default for DrasiServerConfig {
-    fn default() -> Self {
-        Self {
-            runtime: None,
-            storage: None,
-            auth: None,
-            sources: Vec::new(),
-            queries: Vec::new(),
-            reactions: Vec::new(),
-            log_level: None,
-            extra: HashMap::new(),
-        }
-    }
+    pub config: serde_json::Value,
 }
 
 #[cfg(test)]
@@ -867,7 +724,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("unit_test.test.json");
         let mut file = File::create(&file_path).unwrap();
-        writeln!(file, "{}", content).unwrap();
+        writeln!(file, "{content}").unwrap();
         file.sync_all().unwrap();
         File::open(file_path).unwrap()
     }
@@ -984,8 +841,8 @@ mod tests {
         match source {
             TestSourceDefinition::Script(source) => {
                 assert_eq!(source.common.test_source_id, "source1");
-                assert_eq!(source.bootstrap_data_generator.is_none(), true);
-                assert_eq!(source.source_change_generator.is_none(), true);
+                assert!(source.bootstrap_data_generator.is_none());
+                assert!(source.source_change_generator.is_none());
             }
             _ => panic!("Expected ScriptTestSourceDefinition"),
         }

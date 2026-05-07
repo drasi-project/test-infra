@@ -150,8 +150,7 @@ impl BootstrapScriptReader {
                             // Warn if there is a Header record in the middle of the script.
                             if seq_rec.seq > 0 {
                                 log::warn!(
-                                    "Header record found not at start of the script: {:?}",
-                                    seq_rec
+                                    "Header record found not at start of the script: {seq_rec:?}"
                                 );
                             }
 

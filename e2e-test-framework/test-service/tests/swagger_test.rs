@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use axum::http::StatusCode;
-use reqwest;
 use serde_json::Value;
 
 const BASE_URL: &str = "http://localhost:8080";
@@ -23,14 +22,14 @@ const BASE_URL: &str = "http://localhost:8080";
 async fn test_openapi_json_endpoint() {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("{}/api-docs/openapi.json", BASE_URL))
+        .get(format!("{BASE_URL}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let openapi: Value = response.json().await.unwrap();
-    
+
     // Verify it's a valid OpenAPI document
     assert_eq!(openapi["openapi"], "3.0.0");
     assert!(openapi.get("info").is_some());
@@ -41,11 +40,7 @@ async fn test_openapi_json_endpoint() {
 #[ignore]
 async fn test_swagger_ui_endpoint() {
     let client = reqwest::Client::new();
-    let response = client
-        .get(format!("{}/docs", BASE_URL))
-        .send()
-        .await
-        .unwrap();
+    let response = client.get(format!("{BASE_URL}/docs")).send().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     // Should return HTML content for Swagger UI
@@ -58,26 +53,26 @@ async fn test_swagger_ui_endpoint() {
 async fn test_only_approved_top_level_paths() {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("{}/api-docs/openapi.json", BASE_URL))
+        .get(format!("{BASE_URL}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
     let openapi: Value = response.json().await.unwrap();
     let paths = openapi["paths"].as_object().unwrap();
-    
+
     // Check that only approved top-level paths exist
     for (path, _) in paths {
         assert!(
-            path == "/" ||
-            path.starts_with("/api/test_runs") ||
-            path.starts_with("/test_repos"),
-            "Unexpected path in API: {}",
-            path
+            path == "/" || path.starts_with("/api/test_runs") || path.starts_with("/test_repos"),
+            "Unexpected path in API: {path}"
         );
-        
+
         // Ensure no legacy direct access paths exist
-        assert!(!path.starts_with("/test_run_host"), "Legacy path found: {}", path);
+        assert!(
+            !path.starts_with("/test_run_host"),
+            "Legacy path found: {path}"
+        );
     }
 }
 
@@ -86,25 +81,24 @@ async fn test_only_approved_top_level_paths() {
 async fn test_only_approved_tags() {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("{}/api-docs/openapi.json", BASE_URL))
+        .get(format!("{BASE_URL}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
     let openapi: Value = response.json().await.unwrap();
     let tags = openapi["tags"].as_array().unwrap();
-    
-    let allowed_tags = vec!["service", "test-runs", "repos"];
-    
+
+    let allowed_tags = ["service", "test-runs", "repos"];
+
     for tag in tags {
         let tag_name = tag["name"].as_str().unwrap();
         assert!(
             allowed_tags.contains(&tag_name),
-            "Unexpected tag in API documentation: {}",
-            tag_name
+            "Unexpected tag in API documentation: {tag_name}"
         );
     }
-    
+
     // Verify only these tags exist
     assert_eq!(tags.len(), allowed_tags.len(), "Unexpected number of tags");
 }
@@ -114,14 +108,14 @@ async fn test_only_approved_tags() {
 async fn test_test_run_nested_paths_documented() {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("{}/api-docs/openapi.json", BASE_URL))
+        .get(format!("{BASE_URL}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
     let openapi: Value = response.json().await.unwrap();
     let paths = openapi["paths"].as_object().unwrap();
-    
+
     // Verify test run nested endpoints are documented
     let expected_nested_paths = vec![
         "/api/test_runs/{run_id}/sources",
@@ -130,15 +124,14 @@ async fn test_test_run_nested_paths_documented() {
         "/api/test_runs/{run_id}/queries/{query_id}",
         "/api/test_runs/{run_id}/reactions",
         "/api/test_runs/{run_id}/reactions/{reaction_id}",
-        "/api/test_runs/{run_id}/drasi_servers",
-        "/api/test_runs/{run_id}/drasi_servers/{server_id}",
+        "/api/test_runs/{run_id}/drasi_lib_instances",
+        "/api/test_runs/{run_id}/drasi_lib_instances/{instance_id}",
     ];
-    
+
     for expected_path in expected_nested_paths {
         assert!(
             paths.contains_key(expected_path),
-            "Missing nested path in documentation: {}",
-            expected_path
+            "Missing nested path in documentation: {expected_path}"
         );
     }
 }
@@ -148,35 +141,29 @@ async fn test_test_run_nested_paths_documented() {
 async fn test_no_direct_resource_schemas() {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("{}/api-docs/openapi.json", BASE_URL))
+        .get(format!("{BASE_URL}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
     let openapi: Value = response.json().await.unwrap();
-    
+
     if let Some(components) = openapi.get("components") {
         if let Some(schemas) = components.get("schemas") {
-            let schema_keys: Vec<String> = schemas
-                .as_object()
-                .unwrap()
-                .keys()
-                .cloned()
-                .collect();
-            
+            let schema_keys: Vec<String> = schemas.as_object().unwrap().keys().cloned().collect();
+
             // These legacy schemas should not be present
             let forbidden_schemas = vec![
                 "SourceStateResponse",
-                "QueryStateResponse", 
+                "QueryStateResponse",
                 "ReactionStateResponse",
                 "SourceBootstrapResponseBody",
             ];
-            
+
             for forbidden in forbidden_schemas {
                 assert!(
                     !schema_keys.contains(&forbidden.to_string()),
-                    "Legacy schema {} should not be in OpenAPI document",
-                    forbidden
+                    "Legacy schema {forbidden} should not be in OpenAPI document"
                 );
             }
         }
@@ -188,14 +175,17 @@ async fn test_no_direct_resource_schemas() {
 async fn test_repository_endpoints_documented() {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("{}/api-docs/openapi.json", BASE_URL))
+        .get(format!("{BASE_URL}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
     let openapi: Value = response.json().await.unwrap();
     let paths = openapi["paths"].as_object().unwrap();
-    
+
     // Ensure repository endpoints are still documented
-    assert!(paths.contains_key("/test_repos"), "Repository endpoint missing");
+    assert!(
+        paths.contains_key("/test_repos"),
+        "Repository endpoint missing"
+    );
 }

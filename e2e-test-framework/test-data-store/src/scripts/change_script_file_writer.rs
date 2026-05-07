@@ -48,10 +48,7 @@ pub struct ChangeScriptWriter {
 
 impl ChangeScriptWriter {
     pub fn new(settings: ChangeScriptWriterSettings) -> anyhow::Result<Self> {
-        log::debug!(
-            "Creating new ChangeScriptWriter with settings: {:?}",
-            settings
-        );
+        log::debug!("Creating new ChangeScriptWriter with settings: {settings:?}");
 
         let ChangeScriptWriterSettings {
             folder_path,
@@ -80,7 +77,7 @@ impl ChangeScriptWriter {
         if let Some(writer) = &mut self.current_writer {
             let record_str = to_string(record)
                 .map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
-            writeln!(writer, "{}", record_str)
+            writeln!(writer, "{record_str}")
                 .map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
 
             self.current_file_record_count += 1;
@@ -160,7 +157,7 @@ mod tests {
 
         for i in 0..12 {
             let record = ChangeScriptRecord::Comment(CommentRecord {
-                comment: format!("record_{}", i),
+                comment: format!("record_{i}"),
             });
             writer.write_record(&record).unwrap();
         }

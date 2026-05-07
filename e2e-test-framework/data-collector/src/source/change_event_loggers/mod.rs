@@ -38,7 +38,7 @@ impl FromStr for StartTimeMode {
             _ => match chrono::DateTime::parse_from_rfc3339(s) {
                 Ok(t) => Ok(Self::Rebased(t.timestamp_nanos_opt().unwrap() as u64)),
                 Err(e) => {
-                    anyhow::bail!("Error parsing StartTimeMode - value:{}, error:{}", s, e);
+                    anyhow::bail!("Error parsing StartTimeMode - value:{s}, error:{e}");
                 }
             },
         }
@@ -50,7 +50,7 @@ impl std::fmt::Display for StartTimeMode {
         match self {
             Self::Live => write!(f, "live"),
             Self::FirstEvent => write!(f, "first_event"),
-            Self::Rebased(time) => write!(f, "{}", time),
+            Self::Rebased(time) => write!(f, "{time}"),
         }
     }
 }
@@ -70,8 +70,8 @@ pub enum SourceChangeEventLoggerError {
 impl std::fmt::Display for SourceChangeEventLoggerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "IO error: {}:", e),
-            Self::Serde(e) => write!(f, "Serde error: {}:", e),
+            Self::Io(e) => write!(f, "IO error: {e}:"),
+            Self::Serde(e) => write!(f, "Serde error: {e}:"),
         }
     }
 }

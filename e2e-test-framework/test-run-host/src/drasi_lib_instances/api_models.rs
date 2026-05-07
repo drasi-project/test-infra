@@ -249,13 +249,13 @@ pub struct ReactionCreatedResponse {
 #[schema(example = json!({
     "error": "ComponentNotFound",
     "message": "Source 'postgresql-source' not found",
-    "server_id": "drasi-server-1",
+    "instance_id": "drasi-instance-1",
     "component_id": "postgresql-source"
 }))]
-pub struct DrasiServerError {
+pub struct DrasiLibInstanceError {
     pub error: String,
     pub message: String,
-    pub server_id: String,
+    pub instance_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub component_id: Option<String>,
 }

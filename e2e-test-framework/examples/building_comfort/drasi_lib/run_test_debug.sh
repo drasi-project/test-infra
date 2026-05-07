@@ -17,8 +17,8 @@
 GREEN="\033[32m"
 RESET="\033[0m"
 
-echo -e "${GREEN}\nRunning the E2E Test Service with Internal Drasi Server (DEBUG)...${RESET}"
+echo -e "${GREEN}\nRunning the E2E Test Service with Internal drasi-lib instance (DEBUG)...${RESET}"
 # Set debug/trace levels but suppress drasi_core INFO logs from tracing instrumentation
 RUST_LOG="off,test_run_host=debug, test_run_service=debug, test_data_store=debug" \
-	cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_server_internal/config.json \
+	cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_lib/config.json \
 	| egrep '^(TRACE|DEBUG|INFO|WARN|ERROR)'

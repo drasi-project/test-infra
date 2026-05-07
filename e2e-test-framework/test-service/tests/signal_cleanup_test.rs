@@ -32,7 +32,7 @@ async fn test_ctrl_c_cleanup_with_delete_on_stop() -> anyhow::Result<()> {
             "test_repos": []
         },
         "test_run_host": {
-            "drasi_servers": [],
+            "drasi_lib_instances": [],
             "queries": [],
             "reactions": [],
             "sources": []
@@ -44,7 +44,7 @@ async fn test_ctrl_c_cleanup_with_delete_on_stop() -> anyhow::Result<()> {
 
     // Start the test service
     let mut child = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--manifest-path",
             "./test-service/Cargo.toml",
@@ -109,7 +109,7 @@ async fn test_ctrl_c_no_cleanup_without_delete_on_stop() -> anyhow::Result<()> {
             "test_repos": []
         },
         "test_run_host": {
-            "drasi_servers": [],
+            "drasi_lib_instances": [],
             "queries": [],
             "reactions": [],
             "sources": []
@@ -121,7 +121,7 @@ async fn test_ctrl_c_no_cleanup_without_delete_on_stop() -> anyhow::Result<()> {
 
     // Start the test service
     let mut child = Command::new("cargo")
-        .args(&[
+        .args([
             "run",
             "--manifest-path",
             "./test-service/Cargo.toml",

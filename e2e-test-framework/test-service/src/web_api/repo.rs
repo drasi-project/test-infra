@@ -177,7 +177,7 @@ pub fn get_test_repo_routes() -> Router {
     tag = "repos",
     responses(
         (status = 200, description = "List of repository IDs", body = Vec<String>),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_list_handler(
@@ -199,17 +199,14 @@ pub async fn get_test_repo_list_handler(
     responses(
         (status = 200, description = "List of test IDs in the repository", body = Vec<String>),
         (status = 404, description = "Repository not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_test_list_handler(
     Path(repo_id): Path<String>,
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!(
-        "Processing call - get_test_repo_test_list - repo_id:{}",
-        repo_id
-    );
+    log::info!("Processing call - get_test_repo_test_list - repo_id:{repo_id}");
 
     let test_ids = test_data_store.get_test_repo_test_ids(&repo_id).await?;
     Ok(Json(test_ids).into_response())
@@ -226,7 +223,7 @@ pub async fn get_test_repo_test_list_handler(
     responses(
         (status = 200, description = "List of source IDs for the test", body = Vec<String>),
         (status = 404, description = "Repository or test not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_test_source_list_handler(
@@ -234,9 +231,7 @@ pub async fn get_test_repo_test_source_list_handler(
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!(
-        "Processing call - get_test_repo_test_source_list - repo_id:{}, test_id:{}",
-        repo_id,
-        test_id
+        "Processing call - get_test_repo_test_source_list - repo_id:{repo_id}, test_id:{test_id}"
     );
 
     let source_ids = test_data_store
@@ -257,14 +252,14 @@ pub async fn get_test_repo_test_source_list_handler(
     responses(
         (status = 200, description = "Repository information", body = TestRepoResponse),
         (status = 404, description = "Repository not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_handler(
     Path(repo_id): Path<String>,
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!("Processing call - get_test_repo - repo_id:{}", repo_id);
+    log::info!("Processing call - get_test_repo - repo_id:{repo_id}");
 
     let repo = test_data_store.get_test_repo_storage(&repo_id).await?;
     Ok(Json(TestRepoResponse::new(&repo).await?).into_response())
@@ -281,18 +276,14 @@ pub async fn get_test_repo_handler(
     responses(
         (status = 200, description = "Test information", body = TestResponse),
         (status = 404, description = "Repository or test not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_test_handler(
     Path((repo_id, test_id)): Path<(String, String)>,
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!(
-        "Processing call - get_test_repo_test - repo_id:{}, test_id:{}",
-        repo_id,
-        test_id
-    );
+    log::info!("Processing call - get_test_repo_test - repo_id:{repo_id}, test_id:{test_id}");
 
     let test = test_data_store.get_test_storage(&repo_id, &test_id).await?;
     Ok(Json(TestResponse::new(&test).await?).into_response())
@@ -310,7 +301,7 @@ pub async fn get_test_repo_test_handler(
     responses(
         (status = 200, description = "Source information", body = TestSourceResponse),
         (status = 404, description = "Repository, test, or source not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_test_source_handler(
@@ -318,10 +309,7 @@ pub async fn get_test_repo_test_source_handler(
     test_data_store: Extension<Arc<TestDataStore>>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!(
-        "Processing call - get_test_repo_test_source - repo_id:{}, test_id:{}, source_id:{}",
-        repo_id,
-        test_id,
-        source_id
+        "Processing call - get_test_repo_test_source - repo_id:{repo_id}, test_id:{test_id}, source_id:{source_id}"
     );
 
     let source = test_data_store
@@ -338,7 +326,7 @@ pub async fn get_test_repo_test_source_handler(
     responses(
         (status = 200, description = "Repository created successfully", body = TestRepoResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn post_test_repo_handler(
@@ -365,7 +353,7 @@ pub async fn post_test_repo_handler(
         (status = 200, description = "Test created successfully", body = TestResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Repository not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn post_test_repo_test_handler(
@@ -373,10 +361,7 @@ pub async fn post_test_repo_test_handler(
     test_data_store: Extension<Arc<TestDataStore>>,
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
-    log::info!(
-        "Processing call - post_test_repo_test - repo_id:{}",
-        repo_id
-    );
+    log::info!("Processing call - post_test_repo_test - repo_id:{repo_id}");
 
     let test_post_body: TestPostBody = serde_json::from_value(body.0)?;
 
@@ -412,7 +397,7 @@ pub async fn post_test_repo_test_handler(
         (status = 200, description = "Source created successfully", body = TestSourceResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Repository or test not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn post_test_repo_test_source_handler(
@@ -421,9 +406,7 @@ pub async fn post_test_repo_test_source_handler(
     body: Json<Value>,
 ) -> anyhow::Result<impl IntoResponse, TestServiceWebApiError> {
     log::info!(
-        "Processing call - post_test_repo_test_source - repo_id:{}, test_id:{}",
-        repo_id,
-        test_id
+        "Processing call - post_test_repo_test_source - repo_id:{repo_id}, test_id:{test_id}"
     );
 
     let test_source_post_body: TestSourcePostBody = serde_json::from_value(body.0)?;

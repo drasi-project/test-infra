@@ -54,7 +54,7 @@ pub struct RateTracker {
 impl RateTracker {
     pub fn new(folder_path: PathBuf, file_name: String) -> Self {
         Self {
-            file_path: folder_path.join(format!("{}_rates.csv", file_name)),
+            file_path: folder_path.join(format!("{file_name}_rates.csv")),
             has_started: false,
             start_time_ns: 0,
             counts: Vec::with_capacity(100), // Initial capacity for 100 time windows

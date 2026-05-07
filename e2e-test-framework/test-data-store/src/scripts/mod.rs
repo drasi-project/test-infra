@@ -70,12 +70,11 @@ impl std::fmt::Display for SourceChangeEvent {
             Ok(json_data) => {
                 let json_data_unescaped = json_data.replace("\\\"", "\"").replace("\\'", "'");
 
-                write!(f, "{}", json_data_unescaped)
+                write!(f, "{json_data_unescaped}")
             }
             Err(e) => write!(
                 f,
-                "Error serializing SourceChangeEvent: {:?}. Error: {}",
-                self, e
+                "Error serializing SourceChangeEvent: {self:?}. Error: {e}"
             ),
         }
     }

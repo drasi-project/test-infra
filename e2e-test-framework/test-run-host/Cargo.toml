@@ -7,10 +7,33 @@ edition = "2021"
 tonic-build = "0.8"
 
 [dependencies]
+# Drasi core library (all middleware, using system libjq instead of bundled-jq)
+drasi-lib = { version = "0.6.0", features = [
+  "middleware-jq",
+  "middleware-decoder",
+  "middleware-map",
+  "middleware-parse-json",
+  "middleware-promote",
+  "middleware-relabel",
+  "middleware-unwind",
+] }
+
+# Core models (for SourceMiddlewareConfig and other shared types)
+drasi-core = "0.4.2"
+
+# Core bootstrap providers (used by the application API)
+drasi-bootstrap-noop = "0.1.12"
+drasi-bootstrap-application = "0.1.13"
+
+# Core reaction (used by the application API)
+drasi-reaction-application = "0.2.11"
+
+# Application source (programmatic event injection into a hosted drasi-lib instance)
+drasi-source-application = "0.1.13"
+
 drasi-comms-abstractions = { path = "../infrastructure/comms-abstractions" }
 drasi-comms-dapr = { path = "../infrastructure/comms-dapr" }
 test-data-store = { path = "../test-data-store" }
-drasi-server-core = { path = "./drasi-core/server-core" }
 
 anyhow = "1.0.86"
 async-trait = "0.1.81"

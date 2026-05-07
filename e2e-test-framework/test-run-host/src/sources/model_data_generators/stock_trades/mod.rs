@@ -44,13 +44,12 @@ use tokio::{
 
 use test_data_store::{
     scripts::{
-        NodeRecord, SourceChangeEvent, SourceChangeEventPayload,
-        SourceChangeEventSourceInfo,
+        NodeRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo,
     },
     test_repo_storage::{
         models::{
-            StockDefinition, StockTradeDataGeneratorDefinition, SourceChangeDispatcherDefinition,
-            SpacingMode, TimeMode,
+            SourceChangeDispatcherDefinition, SpacingMode, StockDefinition,
+            StockTradeDataGeneratorDefinition, TimeMode,
         },
         TestSourceStorage,
     },
@@ -226,11 +225,8 @@ impl StockTradeDataGenerator {
             dispatchers,
         )
         .await?;
-        
-        log::debug!(
-            "Creating StockTradeDataGenerator from {:?}",
-            &settings
-        );
+
+        log::debug!("Creating StockTradeDataGenerator from {:?}", &settings);
 
         let stock_market = Arc::new(Mutex::new(StockMarket::new(&settings)?));
 
@@ -283,10 +279,7 @@ impl StockTradeDataGenerator {
                     },
                 })
             }
-            Err(e) => anyhow::bail!(
-                "Error sending command to StockTradeDataGenerator: {:?}",
-                e
-            ),
+            Err(e) => anyhow::bail!("Error sending command to StockTradeDataGenerator: {e:?}"),
         }
     }
 }
@@ -298,11 +291,7 @@ impl BootstrapDataGenerator for StockTradeDataGenerator {
         node_labels: &HashSet<String>,
         rel_labels: &HashSet<String>,
     ) -> anyhow::Result<BootstrapData> {
-        log::debug!(
-            "Node labels: [{:?}], Rel labels: [{:?}]",
-            node_labels,
-            rel_labels
-        );
+        log::debug!("Node labels: [{node_labels:?}], Rel labels: [{rel_labels:?}]");
 
         let mut stock_nodes = Vec::new();
 
@@ -318,7 +307,7 @@ impl BootstrapDataGenerator for StockTradeDataGenerator {
                     stock_nodes.push(node_record);
                 }
                 _ => {
-                    log::debug!("Other change: {:?}", change);
+                    log::debug!("Other change: {change:?}");
                 }
             }
         }
@@ -400,7 +389,7 @@ impl SourceChangeGenerator for StockTradeDataGenerator {
                 })
                 .await
             {
-                log::error!("Failed to send SetTestRunHost command: {}", e);
+                log::error!("Failed to send SetTestRunHost command: {e}");
             }
         });
     }
@@ -458,9 +447,7 @@ pub struct StockTradeDataGeneratorExternalState {
     pub virtual_time_ns_start: u64,
 }
 
-impl From<&mut StockTradeDataGeneratorInternalState>
-    for StockTradeDataGeneratorExternalState
-{
+impl From<&mut StockTradeDataGeneratorInternalState> for StockTradeDataGeneratorExternalState {
     fn from(state: &mut StockTradeDataGeneratorInternalState) -> Self {
         Self {
             error_messages: state.error_messages.clone(),
@@ -508,10 +495,7 @@ impl StockTradeDataGeneratorInternalState {
         settings: StockTradeDataGeneratorSettings,
         stock_market: Arc<Mutex<StockMarket>>,
     ) -> anyhow::Result<(Self, Receiver<ScheduledChangeEventMessage>)> {
-        log::debug!(
-            "Initializing StockTradeDataGenerator using {:?}",
-            settings
-        );
+        log::debug!("Initializing StockTradeDataGenerator using {settings:?}");
 
         // Create the dispatchers
         let mut dispatchers: Vec<Box<dyn SourceChangeDispatcher + Send>> = Vec::new();
@@ -519,11 +503,7 @@ impl StockTradeDataGeneratorInternalState {
             match create_source_change_dispatcher(def, &settings.output_storage).await {
                 Ok(dispatcher) => dispatchers.push(dispatcher),
                 Err(e) => {
-                    anyhow::bail!(
-                        "Error creating SourceChangeDispatcher: {:?}; Error: {:?}",
-                        def,
-                        e
-                    );
+                    anyhow::bail!("Error creating SourceChangeDispatcher: {def:?}; Error: {e:?}");
                 }
             }
         }
@@ -674,8 +654,8 @@ impl StockTradeDataGeneratorInternalState {
 
     fn log_state(&self, msg: &str) {
         match log::max_level() {
-            log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, self),
-            log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, self),
+            log::LevelFilter::Trace => log::trace!("{msg} - {self:#?}"),
+            log::LevelFilter::Debug => log::debug!("{msg} - {self:?}"),
             _ => {}
         }
     }
@@ -684,7 +664,7 @@ impl StockTradeDataGeneratorInternalState {
         &mut self,
         message: ScheduledChangeEventMessage,
     ) -> anyhow::Result<()> {
-        log::debug!("Processing next source change event: {:?}", message);
+        log::debug!("Processing next source change event: {message:?}");
 
         self.virtual_time_ns_current = self.virtual_time_ns_next;
 
@@ -753,7 +733,7 @@ impl StockTradeDataGeneratorInternalState {
             }
             SourceChangeGeneratorStatus::Skipping => {
                 if self.skips_remaining > 0 {
-                    log::trace!("Skipping ChangeScriptRecord: {:?}", source_change_event);
+                    log::trace!("Skipping ChangeScriptRecord: {source_change_event:?}");
 
                     self.previous_event = Some(ProcessedChangeEvent {
                         dispatch_status: self.status,
@@ -804,7 +784,7 @@ impl StockTradeDataGeneratorInternalState {
 
             let r = message.response_tx.unwrap().send(message_response);
             if let Err(e) = r {
-                anyhow::bail!("Error sending message response back to caller: {:?}", e);
+                anyhow::bail!("Error sending message response back to caller: {e:?}");
             }
         } else {
             let transition_response = match self.status {
@@ -839,7 +819,7 @@ impl StockTradeDataGeneratorInternalState {
 
                 let r = message.response_tx.unwrap().send(message_response);
                 if let Err(e) = r {
-                    anyhow::bail!("Error sending message response back to caller: {:?}", e);
+                    anyhow::bail!("Error sending message response back to caller: {e:?}");
                 }
             }
         }
@@ -856,11 +836,7 @@ impl StockTradeDataGeneratorInternalState {
             match create_source_change_dispatcher(def, &self.settings.output_storage).await {
                 Ok(dispatcher) => dispatchers.push(dispatcher),
                 Err(e) => {
-                    anyhow::bail!(
-                        "Error creating SourceChangeDispatcher: {:?}; Error: {:?}",
-                        def,
-                        e
-                    );
+                    anyhow::bail!("Error creating SourceChangeDispatcher: {def:?}; Error: {e:?}");
                 }
             }
         }
@@ -929,30 +905,26 @@ impl StockTradeDataGeneratorInternalState {
         };
 
         let next_event = match update {
-            Some(model_change) => {
-                match model_change {
-                    ModelChange::StockUpdated(stock_before, stock_after) => {
-                        SourceChangeEvent {
-                            op: "u".to_string(),
-                            reactivator_start_ns: now_ns,
-                            reactivator_end_ns: 0,
-                            payload: SourceChangeEventPayload {
-                                source: SourceChangeEventSourceInfo {
-                                    db: self.settings.id.test_source_id.to_string(),
-                                    lsn: self.event_seq_num,
-                                    table: "node".to_string(),
-                                    ts_ns: self.virtual_time_ns_next,
-                                },
-                                before: serde_json::json!(stock_before),
-                                after: serde_json::json!(stock_after),
-                            },
-                        }
-                    }
-                    _ => {
-                        anyhow::bail!("Unexpected model change: {:?}", model_change);
-                    }
+            Some(model_change) => match model_change {
+                ModelChange::StockUpdated(stock_before, stock_after) => SourceChangeEvent {
+                    op: "u".to_string(),
+                    reactivator_start_ns: now_ns,
+                    reactivator_end_ns: 0,
+                    payload: SourceChangeEventPayload {
+                        source: SourceChangeEventSourceInfo {
+                            db: self.settings.id.test_source_id.to_string(),
+                            lsn: self.event_seq_num,
+                            table: "node".to_string(),
+                            ts_ns: self.virtual_time_ns_next,
+                        },
+                        before: serde_json::json!(stock_before),
+                        after: serde_json::json!(stock_after),
+                    },
+                },
+                _ => {
+                    anyhow::bail!("Unexpected model change: {model_change:?}");
                 }
-            }
+            },
             None => {
                 anyhow::bail!("No model change generated");
             }
@@ -966,10 +938,10 @@ impl StockTradeDataGeneratorInternalState {
 
         if self.status.is_processing() {
             if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                anyhow::bail!("Error sending ScheduledChangeEventMessage: {:?}", e);
+                anyhow::bail!("Error sending ScheduledChangeEventMessage: {e:?}");
             }
         } else {
-            log::error!("Not sending ScheduledChangeEventMessage: {:?}", sch_msg);
+            log::error!("Not sending ScheduledChangeEventMessage: {sch_msg:?}");
         }
 
         Ok(())
@@ -1047,7 +1019,7 @@ impl StockTradeDataGeneratorInternalState {
 
                 if self.settings.send_initial_inserts {
                     if let Err(e) = self.send_initial_inserts().await {
-                        log::error!("Failed to send initial inserts: {}", e);
+                        log::error!("Failed to send initial inserts: {e}");
                     }
                 }
 
@@ -1136,9 +1108,9 @@ impl StockTradeDataGeneratorInternalState {
             StockTradeDataGeneratorCommand::Reset
             | StockTradeDataGeneratorCommand::Skip { .. }
             | StockTradeDataGeneratorCommand::Start
-            | StockTradeDataGeneratorCommand::Step { .. } => Err(
-                StockTradeDataGeneratorError::CurrentlySkipping(self.skips_remaining).into(),
-            ),
+            | StockTradeDataGeneratorCommand::Step { .. } => {
+                Err(StockTradeDataGeneratorError::CurrentlySkipping(self.skips_remaining).into())
+            }
             StockTradeDataGeneratorCommand::SetTestRunHost { test_run_host } => {
                 self.set_test_run_host_on_dispatchers(test_run_host.clone());
                 Ok(())
@@ -1170,9 +1142,9 @@ impl StockTradeDataGeneratorInternalState {
             StockTradeDataGeneratorCommand::Reset
             | StockTradeDataGeneratorCommand::Skip { .. }
             | StockTradeDataGeneratorCommand::Start
-            | StockTradeDataGeneratorCommand::Step { .. } => Err(
-                StockTradeDataGeneratorError::CurrentlyStepping(self.steps_remaining).into(),
-            ),
+            | StockTradeDataGeneratorCommand::Step { .. } => {
+                Err(StockTradeDataGeneratorError::CurrentlyStepping(self.steps_remaining).into())
+            }
             StockTradeDataGeneratorCommand::SetTestRunHost { test_run_host } => {
                 self.set_test_run_host_on_dispatchers(test_run_host.clone());
                 Ok(())
@@ -1234,7 +1206,7 @@ impl StockTradeDataGeneratorInternalState {
         self.status = SourceChangeGeneratorStatus::Error;
 
         let msg = match error {
-            Some(e) => format!("{}: {:?}", error_message, e),
+            Some(e) => format!("{error_message}: {e:?}"),
             None => error_message.to_string(),
         };
 
@@ -1256,7 +1228,7 @@ impl StockTradeDataGeneratorInternalState {
         {
             Ok(_) => Ok(()),
             Err(e) => {
-                log::error!("Error writing result summary to output storage: {:?}", e);
+                log::error!("Error writing result summary to output storage: {e:?}");
                 Err(e)
             }
         }
@@ -1310,9 +1282,7 @@ pub struct StockTradeDataGeneratorResultSummary {
     pub test_run_source_id: String,
 }
 
-impl From<&mut StockTradeDataGeneratorInternalState>
-    for StockTradeDataGeneratorResultSummary
-{
+impl From<&mut StockTradeDataGeneratorInternalState> for StockTradeDataGeneratorResultSummary {
     fn from(state: &mut StockTradeDataGeneratorInternalState) -> Self {
         let run_duration_ns = state.stats.actual_end_time_ns - state.stats.actual_start_time_ns;
         let run_duration_sec = run_duration_ns as f64 / 1_000_000_000.0;
@@ -1384,8 +1354,8 @@ pub async fn model_host_thread(
         match StockTradeDataGeneratorInternalState::initialize(settings, stock_market).await {
             Ok((state, change_rx_channel)) => (state, change_rx_channel),
             Err(e) => {
-                let msg = format!("Error initializing StockTradeDataGenerator: {:?}", e);
-                log::error!("{}", msg);
+                let msg = format!("Error initializing StockTradeDataGenerator: {e:?}");
+                log::error!("{msg}");
                 anyhow::bail!(msg);
             }
         };
@@ -1412,7 +1382,7 @@ pub async fn model_host_thread(
             change_stream_message = change_rx_channel.recv() => {
                 match change_stream_message {
                     Some(change_stream_message) => {
-                        log::trace!("Received change stream message: {:?}", change_stream_message);
+                        log::trace!("Received change stream message: {change_stream_message:?}");
                         if change_stream_message.seq_num == state.event_seq_num && state.status.is_processing() {
                             state.process_change_stream_message(change_stream_message).await
                                 .inspect_err(|e| state.transition_to_error_state("Error calling process_change_stream_message", Some(e))).ok();

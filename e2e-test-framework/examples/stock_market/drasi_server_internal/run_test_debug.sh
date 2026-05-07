@@ -17,7 +17,7 @@
 GREEN="\033[32m"
 RESET="\033[0m"
 
-echo -e "${GREEN}\nRunning the Stock Market E2E Test with Internal Drasi Server (DEBUG MODE)...${RESET}"
+echo -e "${GREEN}\nRunning the Stock Market E2E Test with Internal drasi-lib instance (DEBUG MODE)...${RESET}"
 # Enable debug logging for troubleshooting
 RUST_LOG="debug,test_run_host=debug, test_run_service=debug, test_data_store=debug" \
 	cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/stock_market/drasi_server_internal/config.json

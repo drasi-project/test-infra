@@ -246,10 +246,7 @@ impl ScriptSourceChangeGenerator {
                     },
                 })
             }
-            Err(e) => anyhow::bail!(
-                "Error sending command to ScriptSourceChangeGenerator: {:?}",
-                e
-            ),
+            Err(e) => anyhow::bail!("Error sending command to ScriptSourceChangeGenerator: {e:?}"),
         }
     }
 }
@@ -385,16 +382,13 @@ impl ScriptSourceChangeGeneratorInternalState {
     async fn initialize(
         settings: ScriptSourceChangeGeneratorSettings,
     ) -> anyhow::Result<(Self, Receiver<ScheduledChangeScriptRecordMessage>)> {
-        log::debug!(
-            "Initializing ScriptSourceChangeGenerator using {:?}",
-            settings
-        );
+        log::debug!("Initializing ScriptSourceChangeGenerator using {settings:?}");
 
         // Get the list of script files from the input storage.
         let script_files = match settings.input_storage.get_script_files().await {
             Ok(ds) => ds.source_change_script_files,
             Err(e) => {
-                anyhow::bail!("Error getting script files from input storage: {:?}", e);
+                anyhow::bail!("Error getting script files from input storage: {e:?}");
             }
         };
 
@@ -405,7 +399,7 @@ impl ScriptSourceChangeGeneratorInternalState {
         let next_record = match change_stream.next().await {
             Some(Ok(seq_record)) => Some(seq_record),
             Some(Err(e)) => {
-                anyhow::bail!(format!("Error reading first ChangeStream record: {:?}", e));
+                anyhow::bail!(format!("Error reading first ChangeStream record: {e:?}"));
             }
             None => None,
         };
@@ -416,11 +410,7 @@ impl ScriptSourceChangeGeneratorInternalState {
             match create_source_change_dispatcher(def, &settings.output_storage).await {
                 Ok(dispatcher) => dispatchers.push(dispatcher),
                 Err(e) => {
-                    anyhow::bail!(
-                        "Error creating SourceChangeDispatcher: {:?}; Error: {:?}",
-                        def,
-                        e
-                    );
+                    anyhow::bail!("Error creating SourceChangeDispatcher: {def:?}; Error: {e:?}");
                 }
             }
         }
@@ -554,7 +544,7 @@ impl ScriptSourceChangeGeneratorInternalState {
                 self.next_record = Some(seq_record);
             }
             Some(Err(e)) => {
-                anyhow::bail!(format!("Error reading ChangeScriptRecord: {:?}", e));
+                anyhow::bail!(format!("Error reading ChangeScriptRecord: {e:?}"));
             }
             None => {
                 anyhow::bail!("ChangeScriptReader.next() returned None, shouldn't be seeing this.");
@@ -567,8 +557,8 @@ impl ScriptSourceChangeGeneratorInternalState {
     // Function to log the Player State at varying levels of detail.
     fn log_state(&self, msg: &str) {
         match log::max_level() {
-            log::LevelFilter::Trace => log::trace!("{} - {:#?}", msg, self),
-            log::LevelFilter::Debug => log::debug!("{} - {:?}", msg, self),
+            log::LevelFilter::Trace => log::trace!("{msg} - {self:#?}"),
+            log::LevelFilter::Debug => log::debug!("{msg} - {self:?}"),
             _ => {}
         }
     }
@@ -577,7 +567,7 @@ impl ScriptSourceChangeGeneratorInternalState {
         &mut self,
         message: ScheduledChangeScriptRecordMessage,
     ) -> anyhow::Result<()> {
-        log::trace!("Received change stream message: {:?}", message);
+        log::trace!("Received change stream message: {message:?}");
 
         // Get the next record from the player state. Error if it is None.
         let next_record = match self.next_record.as_ref() {
@@ -633,7 +623,7 @@ impl ScriptSourceChangeGeneratorInternalState {
                     SourceChangeGeneratorStatus::Skipping => {
                         if self.skips_remaining > 0 {
                             // DON'T dispatch the SourceChangeEvent.
-                            log::trace!("Skipping ChangeScriptRecord: {:?}", change_record);
+                            log::trace!("Skipping ChangeScriptRecord: {change_record:?}");
                             self.stats.num_skipped_source_change_records += 1;
 
                             self.load_next_change_stream_record().await?;
@@ -667,7 +657,7 @@ impl ScriptSourceChangeGeneratorInternalState {
 
                 // Process the PauseCommand only if the Player is not configured to ignore them.
                 if self.settings.ignore_scripted_pause_commands {
-                    log::debug!("Ignoring Change Script Pause Command: {:?}", shifted_record);
+                    log::debug!("Ignoring Change Script Pause Command: {shifted_record:?}");
                 } else {
                     self.status = SourceChangeGeneratorStatus::Paused;
                 }
@@ -675,7 +665,7 @@ impl ScriptSourceChangeGeneratorInternalState {
             ChangeScriptRecord::Label(label_record) => {
                 self.stats.num_label_records += 1;
 
-                log::debug!("Reached Source Change Script Label: {:?}", label_record);
+                log::debug!("Reached Source Change Script Label: {label_record:?}");
             }
             ChangeScriptRecord::Finish(_) => {
                 self.transition_to_finished_state().await;
@@ -683,14 +673,14 @@ impl ScriptSourceChangeGeneratorInternalState {
             ChangeScriptRecord::Header(header_record) => {
                 // Transition to an error state.
                 self.transition_to_error_state(
-                    &format!("Unexpected Change Script Header: {:?}", header_record),
+                    &format!("Unexpected Change Script Header: {header_record:?}"),
                     None,
                 );
             }
             ChangeScriptRecord::Comment(comment_record) => {
                 // Transition to an error state.
                 self.transition_to_error_state(
-                    &format!("Unexpected Change Script Comment: {:?}", comment_record),
+                    &format!("Unexpected Change Script Comment: {comment_record:?}"),
                     None,
                 );
             }
@@ -713,7 +703,7 @@ impl ScriptSourceChangeGeneratorInternalState {
 
             let r = message.response_tx.unwrap().send(message_response);
             if let Err(e) = r {
-                anyhow::bail!("Error sending message response back to caller: {:?}", e);
+                anyhow::bail!("Error sending message response back to caller: {e:?}");
             }
         } else {
             let transition_response = match self.status {
@@ -748,7 +738,7 @@ impl ScriptSourceChangeGeneratorInternalState {
 
                 let r = message.response_tx.unwrap().send(message_response);
                 if let Err(e) = r {
-                    anyhow::bail!("Error sending message response back to caller: {:?}", e);
+                    anyhow::bail!("Error sending message response back to caller: {e:?}");
                 }
             }
         }
@@ -761,7 +751,7 @@ impl ScriptSourceChangeGeneratorInternalState {
         let script_files = match self.settings.input_storage.get_script_files().await {
             Ok(ds) => ds.source_change_script_files,
             Err(e) => {
-                anyhow::bail!("Error getting script files from input storage: {:?}", e);
+                anyhow::bail!("Error getting script files from input storage: {e:?}");
             }
         };
 
@@ -772,7 +762,7 @@ impl ScriptSourceChangeGeneratorInternalState {
         let next_record = match change_stream.next().await {
             Some(Ok(seq_record)) => Some(seq_record),
             Some(Err(e)) => {
-                anyhow::bail!(format!("Error reading first ChangeStream record: {:?}", e));
+                anyhow::bail!(format!("Error reading first ChangeStream record: {e:?}"));
             }
             None => None,
         };
@@ -784,11 +774,7 @@ impl ScriptSourceChangeGeneratorInternalState {
             match create_source_change_dispatcher(def, &self.settings.output_storage).await {
                 Ok(dispatcher) => dispatchers.push(dispatcher),
                 Err(e) => {
-                    anyhow::bail!(
-                        "Error creating SourceChangeDispatcher: {:?}; Error: {:?}",
-                        def,
-                        e
-                    );
+                    anyhow::bail!("Error creating SourceChangeDispatcher: {def:?}; Error: {e:?}");
                 }
             }
         }
@@ -839,12 +825,12 @@ impl ScriptSourceChangeGeneratorInternalState {
             SourceChangeGeneratorStatus::Stepping => match self.steps_spacing_mode {
                 Some(SpacingMode::None) => {
                     if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {e:?}");
                     }
                 }
                 Some(SpacingMode::Rate(_)) => {
                     if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {e:?}");
                     }
                 }
                 Some(SpacingMode::Recorded) => {
@@ -854,23 +840,21 @@ impl ScriptSourceChangeGeneratorInternalState {
                     }
 
                     if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {e:?}");
                     };
                 }
                 None => match self.settings.spacing_mode {
                     SpacingMode::None => {
                         if let Err(e) = self.change_tx_channel.send(sch_msg).await {
                             anyhow::bail!(
-                                "Error sending ScheduledChangeScriptRecordMessage: {:?}",
-                                e
+                                "Error sending ScheduledChangeScriptRecordMessage: {e:?}"
                             );
                         }
                     }
                     SpacingMode::Rate(_) => {
                         if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
                             anyhow::bail!(
-                                "Error sending ScheduledChangeScriptRecordMessage: {:?}",
-                                e
+                                "Error sending ScheduledChangeScriptRecordMessage: {e:?}"
                             );
                         }
                     }
@@ -882,8 +866,7 @@ impl ScriptSourceChangeGeneratorInternalState {
 
                         if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
                             anyhow::bail!(
-                                "Error sending ScheduledChangeScriptRecordMessage: {:?}",
-                                e
+                                "Error sending ScheduledChangeScriptRecordMessage: {e:?}"
                             );
                         };
                     }
@@ -892,12 +875,12 @@ impl ScriptSourceChangeGeneratorInternalState {
             SourceChangeGeneratorStatus::Running => match self.settings.spacing_mode {
                 SpacingMode::None => {
                     if let Err(e) = self.change_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {e:?}");
                     }
                 }
                 SpacingMode::Rate(_) => {
                     if let Err(e) = self.rate_limiter_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {e:?}");
                     }
                 }
                 SpacingMode::Recorded => {
@@ -907,7 +890,7 @@ impl ScriptSourceChangeGeneratorInternalState {
                     }
 
                     if let Err(e) = self.delayer_tx_channel.send(sch_msg).await {
-                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {:?}", e);
+                        anyhow::bail!("Error sending ScheduledChangeScriptRecordMessage: {e:?}");
                     };
                 }
             },
@@ -1254,7 +1237,7 @@ impl ScriptSourceChangeGeneratorInternalState {
         self.status = SourceChangeGeneratorStatus::Error;
 
         let msg = match error {
-            Some(e) => format!("{}: {:?}", error_message, e),
+            Some(e) => format!("{error_message}: {e:?}"),
             None => error_message.to_string(),
         };
 
@@ -1276,7 +1259,7 @@ impl ScriptSourceChangeGeneratorInternalState {
         {
             Ok(_) => Ok(()),
             Err(e) => {
-                log::error!("Error writing result summary to output storage: {:?}", e);
+                log::error!("Error writing result summary to output storage: {e:?}");
                 Err(e)
             }
         }
@@ -1418,8 +1401,8 @@ pub async fn script_processor_thread(
             Ok((state, change_rx_channel)) => (state, change_rx_channel),
             Err(e) => {
                 // If initialization fails, don't dont transition to an error state, just log an error and exit the thread.
-                let msg = format!("Error initializing ScriptSourceChangeGenerator: {:?}", e);
-                log::error!("{}", msg);
+                let msg = format!("Error initializing ScriptSourceChangeGenerator: {e:?}");
+                log::error!("{msg}");
                 anyhow::bail!(msg);
             }
         };
@@ -1482,7 +1465,7 @@ pub async fn delayer_thread(
     mut delayer_rx_channel: Receiver<ScheduledChangeScriptRecordMessage>,
     change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
 ) {
-    log::info!("Delayer thread started for TestRunSource {} ...", id);
+    log::info!("Delayer thread started for TestRunSource {id} ...");
 
     loop {
         match delayer_rx_channel.recv().await {
@@ -1490,7 +1473,7 @@ pub async fn delayer_thread(
                 // Sleep for the specified time before sending the message to the change_tx_channel.
                 sleep(Duration::new(0, message.delay_ns as u32)).await;
                 if let Err(e) = change_tx_channel.send(message).await {
-                    log::error!("Error sending ScheduledChangeScriptRecordMessage to change_tx_channel: {:?}", e);
+                    log::error!("Error sending ScheduledChangeScriptRecordMessage to change_tx_channel: {e:?}");
                 }
             }
             None => {
@@ -1507,7 +1490,7 @@ pub async fn rate_limiter_thread(
     mut delayer_rx_channel: Receiver<ScheduledChangeScriptRecordMessage>,
     change_tx_channel: Sender<ScheduledChangeScriptRecordMessage>,
 ) {
-    log::info!("Rate limiter thread started for TestRunSource {} ...", id);
+    log::info!("Rate limiter thread started for TestRunSource {id} ...");
 
     let limiter = match spacing_mode {
         SpacingMode::Rate(rate) => RateLimiter::direct(Quota::per_second(rate)),
@@ -1519,7 +1502,7 @@ pub async fn rate_limiter_thread(
             Some(message) => {
                 limiter.until_ready().await;
                 if let Err(e) = change_tx_channel.send(message).await {
-                    log::error!("Error sending ScheduledChangeScriptRecordMessage to change_tx_channel: {:?}", e);
+                    log::error!("Error sending ScheduledChangeScriptRecordMessage to change_tx_channel: {e:?}");
                 }
             }
             None => {

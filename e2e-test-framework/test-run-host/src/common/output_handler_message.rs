@@ -67,8 +67,8 @@ pub enum HandlerError {
     Serde(#[from] serde_json::Error),
     #[error("Redis error: {0}")]
     RedisError(#[from] redis::RedisError),
-    #[error("HTTP server error: {0}")]
-    HttpServerError(String),
+    #[error("HTTP instance error: {0}")]
+    HttpInstanceError(String),
     #[error("Conversion error")]
     ConversionError,
 }
@@ -141,13 +141,9 @@ impl std::fmt::Display for HandlerRecord {
         match serde_json::to_string(self) {
             Ok(json_data) => {
                 let json_data_unescaped = json_data.replace("\\\"", "\"").replace("\\'", "'");
-                write!(f, "{}", json_data_unescaped)
+                write!(f, "{json_data_unescaped}")
             }
-            Err(e) => write!(
-                f,
-                "Error serializing HandlerRecord: {:?}. Error: {}",
-                self, e
-            ),
+            Err(e) => write!(f, "Error serializing HandlerRecord: {self:?}. Error: {e}"),
         }
     }
 }

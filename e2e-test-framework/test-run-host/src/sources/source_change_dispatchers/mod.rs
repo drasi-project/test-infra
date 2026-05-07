@@ -23,8 +23,7 @@ pub mod adaptive_grpc_dispatcher;
 pub mod adaptive_http_dispatcher;
 pub mod console_dispatcher;
 pub mod dapr_dispatcher;
-pub mod drasi_server_api_dispatcher;
-pub mod drasi_server_channel_dispatcher;
+pub mod drasi_lib_instance_channel_dispatcher;
 pub mod grpc_dispatcher;
 pub mod http_dispatcher;
 pub mod jsonl_file_dispatcher;
@@ -39,8 +38,8 @@ pub enum SourceChangeDispatcherError {
 impl std::fmt::Display for SourceChangeDispatcherError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "IO error: {}:", e),
-            Self::Serde(e) => write!(f, "Serde error: {}:", e),
+            Self::Io(e) => write!(f, "IO error: {e}:"),
+            Self::Serde(e) => write!(f, "Serde error: {e}:"),
         }
     }
 }
@@ -122,15 +121,8 @@ pub async fn create_source_change_dispatcher(
                 .await?,
         )
             as Box<dyn SourceChangeDispatcher + Send + Sync>),
-        SourceChangeDispatcherDefinition::DrasiServerApi(def) => Ok(Box::new(
-            drasi_server_api_dispatcher::DrasiServerApiSourceChangeDispatcher::new(
-                def,
-                output_storage,
-            )?,
-        )
-            as Box<dyn SourceChangeDispatcher + Send + Sync>),
-        SourceChangeDispatcherDefinition::DrasiServerChannel(def) => Ok(Box::new(
-            drasi_server_channel_dispatcher::DrasiServerChannelSourceChangeDispatcher::new(
+        SourceChangeDispatcherDefinition::DrasiLibInstanceChannel(def) => Ok(Box::new(
+            drasi_lib_instance_channel_dispatcher::DrasiLibInstanceChannelSourceChangeDispatcher::new(
                 def,
                 output_storage,
             )?,

@@ -63,17 +63,10 @@ impl OtelTraceResultStreamLogger {
         test_run_query_id: TestRunQueryId,
         def: &OtelTraceResultStreamLoggerConfig,
     ) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!(
-            "Creating OtelTraceResultStreamLogger for {} from {:?}, ",
-            test_run_query_id,
-            def
-        );
+        log::debug!("Creating OtelTraceResultStreamLogger for {test_run_query_id} from {def:?}, ");
 
         let settings = OtelTraceResultStreamLoggerSettings::new(test_run_query_id, def)?;
-        log::trace!(
-            "Creating OtelTraceResultStreamLogger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating OtelTraceResultStreamLogger with settings {settings:?}, ");
 
         let batch_config = BatchConfig::default()
             .with_max_queue_size(16384) // Increase queue size

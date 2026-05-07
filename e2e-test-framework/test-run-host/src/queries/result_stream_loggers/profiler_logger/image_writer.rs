@@ -48,10 +48,10 @@ pub struct ProfileImageWriter {
 impl ProfileImageWriter {
     pub async fn new(folder_path: PathBuf, file_name: String, width: u32) -> anyhow::Result<Self> {
         Ok(Self {
-            all_file_abs_path: folder_path.join(format!("{}_all_abs.png", file_name)),
-            all_file_rel_path: folder_path.join(format!("{}_all_rel.png", file_name)),
-            drasi_only_file_abs_path: folder_path.join(format!("{}_drasi_only_abs.png", file_name)),
-            drasi_only_file_rel_path: folder_path.join(format!("{}_drasi_only_rel.png", file_name)),
+            all_file_abs_path: folder_path.join(format!("{file_name}_all_abs.png")),
+            all_file_rel_path: folder_path.join(format!("{file_name}_all_rel.png")),
+            drasi_only_file_abs_path: folder_path.join(format!("{file_name}_drasi_only_abs.png")),
+            drasi_only_file_rel_path: folder_path.join(format!("{file_name}_drasi_only_rel.png")),
             image_times: Vec::new(),
             max_total_time: 0,
             max_drasi_only_time: 0,

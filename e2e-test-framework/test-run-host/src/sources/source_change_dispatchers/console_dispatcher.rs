@@ -48,13 +48,10 @@ impl ConsoleSourceChangeDispatcher {
         def: &ConsoleSourceChangeDispatcherDefinition,
         _output_storage: &TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating ConsoleSourceChangeDispatcher from {:?}, ", def);
+        log::debug!("Creating ConsoleSourceChangeDispatcher from {def:?}, ");
 
         let settings = ConsoleSourceChangeDispatcherSettings::new(def)?;
-        log::trace!(
-            "Creating ConsoleSourceChangeDispatcher with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating ConsoleSourceChangeDispatcher with settings {settings:?}, ");
 
         Ok(Self { settings })
     }
@@ -81,8 +78,7 @@ impl SourceChangeDispatcher for ConsoleSourceChangeDispatcher {
             .join(",");
 
         println!(
-            "ConsoleSourceChangeDispatcher - Time: {}, SourceChangeEvents: [{}]",
-            time, event_list
+            "ConsoleSourceChangeDispatcher - Time: {time}, SourceChangeEvents: [{event_list}]"
         );
 
         Ok(())

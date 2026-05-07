@@ -139,11 +139,7 @@ impl TestRunSource for ModelTestRunSource {
         node_labels: &HashSet<String>,
         rel_labels: &HashSet<String>,
     ) -> anyhow::Result<BootstrapData> {
-        log::debug!(
-            "Node Labels: {:?}, Rel Labels: {:?}",
-            node_labels,
-            rel_labels
-        );
+        log::debug!("Node Labels: {node_labels:?}, Rel Labels: {rel_labels:?}");
 
         let bootstrap_data = if self.model_data_generator.is_some() {
             self.model_data_generator

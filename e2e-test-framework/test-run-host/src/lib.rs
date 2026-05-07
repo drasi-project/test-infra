@@ -22,9 +22,9 @@ use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use drasi_servers::{
-    TestRunDrasiServer, TestRunDrasiServerConfig, TestRunDrasiServerDefinition,
-    TestRunDrasiServerState,
+use drasi_lib_instances::{
+    TestRunDrasiLibInstance, TestRunDrasiLibInstanceConfig, TestRunDrasiLibInstanceDefinition,
+    TestRunDrasiLibInstanceState,
 };
 use queries::{
     query_result_observer::QueryResultObserverCommandResponse,
@@ -43,14 +43,13 @@ use sources::{
 use test_data_store::{
     test_repo_storage::models::SpacingMode,
     test_run_storage::{
-        TestRunDrasiServerId, TestRunId, TestRunQueryId, TestRunReactionId, TestRunSourceId,
+        TestRunDrasiLibInstanceId, TestRunId, TestRunQueryId, TestRunReactionId, TestRunSourceId,
     },
     TestDataStore,
 };
 
 pub mod common;
-pub mod drasi_server_api_impl;
-pub mod drasi_servers;
+pub mod drasi_lib_instances;
 pub mod grpc_converters;
 pub mod queries;
 pub mod reactions;
@@ -58,7 +57,7 @@ pub mod sources;
 pub mod utils;
 
 // Re-export api_models for use by test-service
-pub use drasi_servers::api_models;
+pub use drasi_lib_instances::api_models;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TestRunConfig {
@@ -66,7 +65,7 @@ pub struct TestRunConfig {
     pub test_repo_id: String,
     pub test_run_id: String,
     #[serde(default)]
-    pub drasi_servers: Vec<TestRunDrasiServerConfig>,
+    pub drasi_lib_instances: Vec<TestRunDrasiLibInstanceConfig>,
     #[serde(default)]
     pub queries: Vec<TestRunQueryConfig>,
     #[serde(default)]
@@ -78,7 +77,7 @@ pub struct TestRunConfig {
 #[derive(Debug)]
 pub struct TestRun {
     pub id: TestRunId,
-    pub drasi_servers: HashMap<String, TestRunDrasiServer>,
+    pub drasi_lib_instances: HashMap<String, TestRunDrasiLibInstance>,
     pub queries: HashMap<String, TestRunQuery>,
     pub reactions: HashMap<String, TestRunReaction>,
     pub sources: HashMap<String, Box<dyn TestRunSource + Send + Sync>>,
@@ -115,7 +114,7 @@ impl fmt::Display for TestRunHostStatus {
         match self {
             TestRunHostStatus::Initialized => write!(f, "Initialized"),
             TestRunHostStatus::Running => write!(f, "Running"),
-            TestRunHostStatus::Error(msg) => write!(f, "Error: {}", msg),
+            TestRunHostStatus::Error(msg) => write!(f, "Error: {msg}"),
         }
     }
 }
@@ -132,7 +131,7 @@ impl TestRunHost {
         config: TestRunHostConfig,
         data_store: Arc<TestDataStore>,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating TestRunHost from {:?}", config);
+        log::debug!("Creating TestRunHost from {config:?}");
 
         let test_run_host = TestRunHost {
             data_store: data_store.clone(),
@@ -154,13 +153,13 @@ impl TestRunHost {
             }
             TestRunHostStatus::Running => {
                 let msg = "TestRunHost created with unexpected status: Running";
-                log::error!("{}", msg);
-                anyhow::bail!("{}", msg);
+                log::error!("{msg}");
+                anyhow::bail!("{msg}");
             }
             TestRunHostStatus::Error(_) => {
                 let msg = "TestRunHost is in an Error state, cannot Start.".to_string();
-                log::error!("{}", msg);
-                anyhow::bail!("{}", msg);
+                log::error!("{msg}");
+                anyhow::bail!("{msg}");
             }
         };
 
@@ -173,24 +172,24 @@ impl TestRunHost {
 
         let mut test_runs_lock = self.test_runs.write().await;
         if test_runs_lock.contains_key(&test_run_id) {
-            anyhow::bail!("TestRun already exists with ID: {:?}", test_run_id);
+            anyhow::bail!("TestRun already exists with ID: {test_run_id:?}");
         }
 
         let mut test_run = TestRun {
             id: test_run_id.clone(),
-            drasi_servers: HashMap::new(),
+            drasi_lib_instances: HashMap::new(),
             queries: HashMap::new(),
             reactions: HashMap::new(),
             sources: HashMap::new(),
             status: TestRunStatus::Initialized,
         };
 
-        // Add drasi servers first (they need to be available for other components)
-        for mut server_config in config.drasi_servers {
-            server_config.test_id = Some(config.test_id.clone());
-            server_config.test_repo_id = Some(config.test_repo_id.clone());
-            server_config.test_run_id = Some(config.test_run_id.clone());
-            self.add_drasi_server_to_test_run(&mut test_run, server_config)
+        // Add drasi instances first (they need to be available for other components)
+        for mut instance_config in config.drasi_lib_instances {
+            instance_config.test_id = Some(config.test_id.clone());
+            instance_config.test_repo_id = Some(config.test_repo_id.clone());
+            instance_config.test_run_id = Some(config.test_run_id.clone());
+            self.add_drasi_lib_instance_to_test_run(&mut test_run, instance_config)
                 .await?;
         }
 
@@ -235,9 +234,7 @@ impl TestRunHost {
             // Set TestRunHost on all sources
             for (source_id, source) in test_run.sources.iter() {
                 log::debug!(
-                    "Setting TestRunHost on source {} in test run {:?}",
-                    source_id,
-                    test_run_id
+                    "Setting TestRunHost on source {source_id} in test run {test_run_id:?}"
                 );
                 source.set_test_run_host(self_ref.clone());
             }
@@ -245,9 +242,7 @@ impl TestRunHost {
             // Set TestRunHost on all reactions (for handlers that need it)
             for (reaction_id, reaction) in test_run.reactions.iter() {
                 log::debug!(
-                    "Setting TestRunHost on reaction {} in test run {:?}",
-                    reaction_id,
-                    test_run_id
+                    "Setting TestRunHost on reaction {reaction_id} in test run {test_run_id:?}"
                 );
                 reaction.set_test_run_host(self_ref.clone());
             }
@@ -256,9 +251,7 @@ impl TestRunHost {
             for (reaction_id, reaction) in test_run.reactions.iter() {
                 if reaction.start_immediately {
                     log::info!(
-                        "Auto-starting reaction {} in test run {:?} (before sources)",
-                        reaction_id,
-                        test_run_id
+                        "Auto-starting reaction {reaction_id} in test run {test_run_id:?} (before sources)"
                     );
                     reaction.start_reaction_observer().await?;
                 }
@@ -275,9 +268,7 @@ impl TestRunHost {
                 let state = source.get_state().await?;
                 if state.start_mode == SourceStartMode::Auto {
                     log::info!(
-                        "Auto-starting source {} in test run {:?} (after reactions are ready)",
-                        source_id,
-                        test_run_id
+                        "Auto-starting source {source_id} in test run {test_run_id:?} (after reactions are ready)"
                     );
                     source.start_source_change_generator().await?;
                 }
@@ -287,47 +278,51 @@ impl TestRunHost {
         Ok(())
     }
 
-    async fn add_drasi_server_to_test_run(
+    async fn add_drasi_lib_instance_to_test_run(
         &self,
         test_run: &mut TestRun,
-        test_run_drasi_server: TestRunDrasiServerConfig,
+        test_run_drasi_lib_instance: TestRunDrasiLibInstanceConfig,
     ) -> anyhow::Result<()> {
-        let test_drasi_server_id = test_run_drasi_server.test_drasi_server_id.clone();
+        let test_drasi_lib_instance_id = test_run_drasi_lib_instance
+            .test_drasi_lib_instance_id
+            .clone();
 
-        // Get the test definition and extract the drasi server definition
+        // Get the test definition and extract the drasi instance definition
         let test_definition = self
             .data_store
             .get_test_definition(
-                test_run_drasi_server.test_repo_id.as_ref().unwrap(),
-                test_run_drasi_server.test_id.as_ref().unwrap(),
+                test_run_drasi_lib_instance.test_repo_id.as_ref().unwrap(),
+                test_run_drasi_lib_instance.test_id.as_ref().unwrap(),
             )
             .await?;
 
-        let test_drasi_server_definition = test_definition
-            .drasi_servers
+        let test_drasi_lib_instance_definition = test_definition
+            .drasi_lib_instances
             .iter()
-            .find(|s| s.id == test_drasi_server_id)
+            .find(|s| s.test_drasi_lib_instance_id == test_drasi_lib_instance_id)
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Drasi server definition not found: {}",
-                    test_drasi_server_id
+                    "drasi-lib instance definition not found: {test_drasi_lib_instance_id}"
                 )
             })?
             .clone();
 
-        let definition =
-            TestRunDrasiServerDefinition::new(test_run_drasi_server, test_drasi_server_definition)?;
+        let definition = TestRunDrasiLibInstanceDefinition::new(
+            test_run_drasi_lib_instance,
+            test_drasi_lib_instance_definition,
+        )?;
 
-        let id = TestRunDrasiServerId::new(&test_run.id, &test_drasi_server_id);
+        let id = TestRunDrasiLibInstanceId::new(&test_run.id, &test_drasi_lib_instance_id);
         let output_storage = self
             .data_store
-            .get_test_run_drasi_server_storage(&id)
+            .get_test_run_drasi_lib_instance_storage(&id)
             .await?;
 
-        let test_run_drasi_server = TestRunDrasiServer::new(definition, output_storage).await?;
+        let test_run_drasi_lib_instance =
+            TestRunDrasiLibInstance::new(definition, output_storage).await?;
         test_run
-            .drasi_servers
-            .insert(test_drasi_server_id, test_run_drasi_server);
+            .drasi_lib_instances
+            .insert(test_drasi_lib_instance_id, test_run_drasi_lib_instance);
 
         Ok(())
     }
@@ -388,10 +383,7 @@ impl TestRunHost {
             .output_handler
             .clone()
             .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No reaction handler defined for reaction {}",
-                    test_reaction_id
-                )
+                anyhow::anyhow!("No reaction handler defined for reaction {test_reaction_id}")
             })?;
 
         let output_loggers = test_run_reaction.output_loggers.clone();
@@ -455,11 +447,11 @@ impl TestRunHost {
         test_run_id: &TestRunId,
         mut test_run_query: TestRunQueryConfig,
     ) -> anyhow::Result<TestRunQueryId> {
-        log::trace!("Adding TestRunQuery from {:?}", test_run_query);
+        log::trace!("Adding TestRunQuery from {test_run_query:?}");
 
         // If the TestRunHost is in an Error state, return an error.
         if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
+            anyhow::bail!("TestRunHost is in an Error state: {msg}");
         };
 
         // Set the test run IDs from the parent TestRun
@@ -473,13 +465,10 @@ impl TestRunHost {
         let mut test_runs_lock = self.test_runs.write().await;
         let test_run = test_runs_lock
             .get_mut(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         if test_run.queries.contains_key(&query_id) {
-            anyhow::bail!(
-                "TestRun already contains TestRunQuery with ID: {}",
-                query_id
-            );
+            anyhow::bail!("TestRun already contains TestRunQuery with ID: {query_id}");
         }
 
         // Get the TestRepoStorage that is associated with the Repo for the TestRunQuery
@@ -514,11 +503,11 @@ impl TestRunHost {
         test_run_id: &TestRunId,
         mut test_run_reaction: TestRunReactionConfig,
     ) -> anyhow::Result<TestRunReactionId> {
-        log::trace!("Adding TestRunReaction from {:?}", test_run_reaction);
+        log::trace!("Adding TestRunReaction from {test_run_reaction:?}");
 
         // If the TestRunHost is in an Error state, return an error.
         if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
+            anyhow::bail!("TestRunHost is in an Error state: {msg}");
         };
 
         // Set the test run IDs from the parent TestRun
@@ -532,13 +521,10 @@ impl TestRunHost {
         let mut test_runs_lock = self.test_runs.write().await;
         let test_run = test_runs_lock
             .get_mut(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         if test_run.reactions.contains_key(&reaction_id) {
-            anyhow::bail!(
-                "TestRun already contains TestRunReaction with ID: {}",
-                reaction_id
-            );
+            anyhow::bail!("TestRun already contains TestRunReaction with ID: {reaction_id}");
         }
 
         // Get the TestRepoStorage that is associated with the Repo for the TestRunReaction
@@ -564,7 +550,7 @@ impl TestRunHost {
             .output_handler
             .clone()
             .ok_or_else(|| {
-                anyhow::anyhow!("No reaction handler defined for reaction {}", reaction_id)
+                anyhow::anyhow!("No reaction handler defined for reaction {reaction_id}")
             })?;
 
         // Get output_loggers from the config
@@ -597,11 +583,11 @@ impl TestRunHost {
         test_run_id: &TestRunId,
         mut test_run_config: TestRunSourceConfig,
     ) -> anyhow::Result<TestRunSourceId> {
-        log::trace!("Adding TestRunSource from {:?}", test_run_config);
+        log::trace!("Adding TestRunSource from {test_run_config:?}");
 
         // If the TestRunHost is in an Error state, return an error.
         if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
+            anyhow::bail!("TestRunHost is in an Error state: {msg}");
         };
 
         // Set the test run IDs from the parent TestRun
@@ -615,13 +601,10 @@ impl TestRunHost {
         let mut test_runs_lock = self.test_runs.write().await;
         let test_run = test_runs_lock
             .get_mut(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         if test_run.sources.contains_key(&source_id) {
-            anyhow::bail!(
-                "TestRun already contains TestRunSource with ID: {}",
-                source_id
-            );
+            anyhow::bail!("TestRun already contains TestRunSource with ID: {source_id}");
         }
 
         // Get the TestRepoStorage that is associated with the Repo for the TestRunSource
@@ -683,10 +666,7 @@ impl TestRunHost {
         rel_labels: &HashSet<String>,
     ) -> anyhow::Result<BootstrapData> {
         log::debug!(
-            "Source ID: {}, Node Labels: {:?}, Rel Labels: {:?}",
-            test_run_source_id,
-            node_labels,
-            rel_labels
+            "Source ID: {test_run_source_id}, Node Labels: {node_labels:?}, Rel Labels: {rel_labels:?}"
         );
 
         let test_run_source_id = TestRunSourceId::try_from(test_run_source_id)?;
@@ -694,7 +674,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.get_bootstrap_data(node_labels, rel_labels).await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -720,7 +700,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.get_state().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -738,7 +718,7 @@ impl TestRunHost {
                     .get_query_result_observer_state()
                     .await?
                     .logger_results),
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -764,7 +744,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.get_state().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -784,7 +764,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.pause_query_result_observer().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -799,7 +779,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.reset_query_result_observer().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -814,7 +794,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.start_query_result_observer().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -829,7 +809,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_query_id.test_run_id) {
             Some(test_run) => match test_run.queries.get(&test_run_query_id.test_query_id) {
                 Some(query) => query.stop_query_result_observer().await,
-                None => anyhow::bail!("TestRunQuery not found: {:?}", test_run_query_id),
+                None => anyhow::bail!("TestRunQuery not found: {test_run_query_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_query_id.test_run_id),
         }
@@ -858,7 +838,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.get_state().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -876,7 +856,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.pause_reaction_observer().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -894,7 +874,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.reset_reaction_observer().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -912,7 +892,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.start_reaction_observer().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -930,7 +910,7 @@ impl TestRunHost {
                 .get(&test_run_reaction_id.test_reaction_id)
             {
                 Some(reaction) => reaction.stop_reaction_observer().await,
-                None => anyhow::bail!("TestRunReaction not found: {:?}", test_run_reaction_id),
+                None => anyhow::bail!("TestRunReaction not found: {test_run_reaction_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_reaction_id.test_run_id),
         }
@@ -945,7 +925,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.pause_source_change_generator().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -960,7 +940,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.reset_source_change_generator().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -981,7 +961,7 @@ impl TestRunHost {
                         .skip_source_change_generator(skips, spacing_mode)
                         .await
                 }
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -996,7 +976,7 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.start_source_change_generator().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -1017,7 +997,7 @@ impl TestRunHost {
                         .step_source_change_generator(steps, spacing_mode)
                         .await
                 }
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
@@ -1032,157 +1012,160 @@ impl TestRunHost {
         match test_runs.get(&test_run_source_id.test_run_id) {
             Some(test_run) => match test_run.sources.get(&test_run_source_id.test_source_id) {
                 Some(source) => source.stop_source_change_generator().await,
-                None => anyhow::bail!("TestRunSource not found: {:?}", test_run_source_id),
+                None => anyhow::bail!("TestRunSource not found: {test_run_source_id:?}"),
             },
             None => anyhow::bail!("TestRun not found: {:?}", test_run_source_id.test_run_id),
         }
     }
 
-    pub async fn add_test_drasi_server(
+    pub async fn add_test_drasi_lib_instance(
         &self,
         test_run_id: &TestRunId,
-        mut test_run_drasi_server: TestRunDrasiServerConfig,
-    ) -> anyhow::Result<TestRunDrasiServerId> {
-        log::trace!("Adding TestRunDrasiServer from {:?}", test_run_drasi_server);
+        mut test_run_drasi_lib_instance: TestRunDrasiLibInstanceConfig,
+    ) -> anyhow::Result<TestRunDrasiLibInstanceId> {
+        log::trace!("Adding TestRunDrasiLibInstance from {test_run_drasi_lib_instance:?}");
 
         // If the TestRunHost is in an Error state, return an error.
         if let TestRunHostStatus::Error(msg) = &self.get_status().await? {
-            anyhow::bail!("TestRunHost is in an Error state: {}", msg);
+            anyhow::bail!("TestRunHost is in an Error state: {msg}");
         };
 
         // Set the test run IDs from the parent TestRun
-        test_run_drasi_server.test_id = Some(test_run_id.test_id.clone());
-        test_run_drasi_server.test_repo_id = Some(test_run_id.test_repo_id.clone());
-        test_run_drasi_server.test_run_id = Some(test_run_id.test_run_id.clone());
+        test_run_drasi_lib_instance.test_id = Some(test_run_id.test_id.clone());
+        test_run_drasi_lib_instance.test_repo_id = Some(test_run_id.test_repo_id.clone());
+        test_run_drasi_lib_instance.test_run_id = Some(test_run_id.test_run_id.clone());
 
-        let server_id = test_run_drasi_server.test_drasi_server_id.clone();
-        let id = TestRunDrasiServerId::new(test_run_id, &server_id);
+        let instance_id = test_run_drasi_lib_instance
+            .test_drasi_lib_instance_id
+            .clone();
+        let id = TestRunDrasiLibInstanceId::new(test_run_id, &instance_id);
 
         let mut test_runs_lock = self.test_runs.write().await;
         let test_run = test_runs_lock
             .get_mut(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
-        if test_run.drasi_servers.contains_key(&server_id) {
+        if test_run.drasi_lib_instances.contains_key(&instance_id) {
             anyhow::bail!(
-                "TestRun already contains TestRunDrasiServer with ID: {}",
-                server_id
+                "TestRun already contains TestRunDrasiLibInstance with ID: {instance_id}"
             );
         }
 
-        // Get the test definition and extract the drasi server definition
+        // Get the test definition and extract the drasi instance definition
         // Note: Local tests are already loaded when the repository is initialized,
         // so we don't need to call add_remote_test here
         let test_definition = self
             .data_store
             .get_test_definition(
-                test_run_drasi_server.test_repo_id.as_ref().unwrap(),
-                test_run_drasi_server.test_id.as_ref().unwrap(),
+                test_run_drasi_lib_instance.test_repo_id.as_ref().unwrap(),
+                test_run_drasi_lib_instance.test_id.as_ref().unwrap(),
             )
             .await?;
 
-        let test_drasi_server_definition = test_definition
-            .drasi_servers
+        let test_drasi_lib_instance_definition = test_definition
+            .drasi_lib_instances
             .iter()
-            .find(|s| s.id == server_id)
-            .ok_or_else(|| anyhow::anyhow!("Drasi server definition not found: {}", server_id))?
+            .find(|s| s.test_drasi_lib_instance_id == instance_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("drasi-lib instance definition not found: {instance_id}")
+            })?
             .clone();
 
-        let definition =
-            TestRunDrasiServerDefinition::new(test_run_drasi_server, test_drasi_server_definition)?;
-        log::trace!("TestRunDrasiServerDefinition: {:?}", &definition);
+        let definition = TestRunDrasiLibInstanceDefinition::new(
+            test_run_drasi_lib_instance,
+            test_drasi_lib_instance_definition,
+        )?;
+        log::trace!("TestRunDrasiLibInstanceDefinition: {:?}", &definition);
 
-        // Get the OUTPUT storage for the new TestRunDrasiServer.
+        // Get the OUTPUT storage for the new TestRunDrasiLibInstance.
         let output_storage = self
             .data_store
-            .get_test_run_drasi_server_storage(&id)
+            .get_test_run_drasi_lib_instance_storage(&id)
             .await?;
 
-        // Create the TestRunDrasiServer and add it to the TestRun.
-        let test_run_drasi_server_obj = TestRunDrasiServer::new(definition, output_storage).await?;
+        // Create the TestRunDrasiLibInstance and add it to the TestRun.
+        let test_run_drasi_lib_instance_obj =
+            TestRunDrasiLibInstance::new(definition, output_storage).await?;
 
         test_run
-            .drasi_servers
-            .insert(server_id, test_run_drasi_server_obj);
+            .drasi_lib_instances
+            .insert(instance_id, test_run_drasi_lib_instance_obj);
 
         Ok(id)
     }
 
-    pub async fn get_test_drasi_server(
+    pub async fn get_test_drasi_lib_instance(
         &self,
-        test_run_drasi_server_id: &TestRunDrasiServerId,
-    ) -> anyhow::Result<Option<TestRunDrasiServerState>> {
+        test_run_drasi_lib_instance_id: &TestRunDrasiLibInstanceId,
+    ) -> anyhow::Result<Option<TestRunDrasiLibInstanceState>> {
         let test_runs = self.test_runs.read().await;
-        match test_runs.get(&test_run_drasi_server_id.test_run_id) {
+        match test_runs.get(&test_run_drasi_lib_instance_id.test_run_id) {
             Some(test_run) => match test_run
-                .drasi_servers
-                .get(&test_run_drasi_server_id.test_drasi_server_id)
+                .drasi_lib_instances
+                .get(&test_run_drasi_lib_instance_id.test_drasi_lib_instance_id)
             {
-                Some(server) => Ok(Some(server.get_state().await)),
+                Some(instance) => Ok(Some(instance.get_state().await)),
                 None => Ok(None),
             },
             None => Ok(None),
         }
     }
 
-    pub async fn remove_test_drasi_server(
+    pub async fn remove_test_drasi_lib_instance(
         &self,
-        test_run_drasi_server_id: &TestRunDrasiServerId,
+        test_run_drasi_lib_instance_id: &TestRunDrasiLibInstanceId,
     ) -> anyhow::Result<()> {
         let mut test_runs_lock = self.test_runs.write().await;
-        match test_runs_lock.get_mut(&test_run_drasi_server_id.test_run_id) {
+        match test_runs_lock.get_mut(&test_run_drasi_lib_instance_id.test_run_id) {
             Some(test_run) => {
-                if let Some(server) = test_run
-                    .drasi_servers
-                    .remove(&test_run_drasi_server_id.test_drasi_server_id)
+                if let Some(instance) = test_run
+                    .drasi_lib_instances
+                    .remove(&test_run_drasi_lib_instance_id.test_drasi_lib_instance_id)
                 {
-                    // Stop the server if it's running
+                    // Stop the instance if it's running
                     if matches!(
-                        server.get_state().await,
-                        TestRunDrasiServerState::Running { .. }
+                        instance.get_state().await,
+                        TestRunDrasiLibInstanceState::Running
                     ) {
-                        server
-                            .stop(Some("Removing from TestRun".to_string()))
-                            .await?;
+                        instance.stop().await?;
                     }
                     Ok(())
                 } else {
                     anyhow::bail!(
-                        "TestRunDrasiServer not found: {:?}",
-                        test_run_drasi_server_id
+                        "TestRunDrasiLibInstance not found: {test_run_drasi_lib_instance_id:?}"
                     );
                 }
             }
             None => anyhow::bail!(
                 "TestRun not found: {:?}",
-                test_run_drasi_server_id.test_run_id
+                test_run_drasi_lib_instance_id.test_run_id
             ),
         }
     }
 
-    pub async fn get_drasi_server_endpoint(
+    pub async fn get_drasi_lib_instance_endpoint(
         &self,
-        test_run_drasi_server_id: &TestRunDrasiServerId,
+        test_run_drasi_lib_instance_id: &TestRunDrasiLibInstanceId,
     ) -> anyhow::Result<Option<String>> {
         let test_runs = self.test_runs.read().await;
-        match test_runs.get(&test_run_drasi_server_id.test_run_id) {
+        match test_runs.get(&test_run_drasi_lib_instance_id.test_run_id) {
             Some(test_run) => match test_run
-                .drasi_servers
-                .get(&test_run_drasi_server_id.test_drasi_server_id)
+                .drasi_lib_instances
+                .get(&test_run_drasi_lib_instance_id.test_drasi_lib_instance_id)
             {
-                Some(server) => Ok(server.get_api_endpoint().await),
+                Some(_instance) => Ok(None),
                 None => Ok(None),
             },
             None => Ok(None),
         }
     }
 
-    pub async fn get_test_drasi_server_ids(&self) -> anyhow::Result<Vec<String>> {
+    pub async fn get_test_drasi_lib_instance_ids(&self) -> anyhow::Result<Vec<String>> {
         let mut ids = Vec::new();
         let test_runs = self.test_runs.read().await;
         for test_run in test_runs.values() {
-            for server_id in test_run.drasi_servers.keys() {
-                ids.push(format!("{}.{}", test_run.id, server_id));
+            for instance_id in test_run.drasi_lib_instances.keys() {
+                ids.push(format!("{}.{}", test_run.id, instance_id));
             }
         }
         Ok(ids)
@@ -1206,7 +1189,7 @@ impl TestRunHost {
         let test_runs = self.test_runs.read().await;
         match test_runs.get(test_run_id) {
             Some(test_run) => Ok(test_run.status.clone()),
-            None => anyhow::bail!("TestRun not found: {:?}", test_run_id),
+            None => anyhow::bail!("TestRun not found: {test_run_id:?}"),
         }
     }
 
@@ -1214,13 +1197,13 @@ impl TestRunHost {
         let mut test_runs = self.test_runs.write().await;
         match test_runs.get_mut(test_run_id) {
             Some(test_run) => {
-                // Start drasi servers first
-                for server in test_run.drasi_servers.values() {
+                // Start drasi instances first
+                for instance in test_run.drasi_lib_instances.values() {
                     if matches!(
-                        server.get_state().await,
-                        TestRunDrasiServerState::Uninitialized { .. }
+                        instance.get_state().await,
+                        TestRunDrasiLibInstanceState::Uninitialized
                     ) {
-                        server.start().await?;
+                        instance.start().await?;
                     }
                 }
 
@@ -1247,7 +1230,7 @@ impl TestRunHost {
                 test_run.status = TestRunStatus::Running;
                 Ok(())
             }
-            None => anyhow::bail!("TestRun not found: {:?}", test_run_id),
+            None => anyhow::bail!("TestRun not found: {test_run_id:?}"),
         }
     }
 
@@ -1270,20 +1253,20 @@ impl TestRunHost {
                     source.stop_source_change_generator().await?;
                 }
 
-                // Stop drasi servers
-                for server in test_run.drasi_servers.values() {
+                // Stop drasi instances
+                for instance in test_run.drasi_lib_instances.values() {
                     if matches!(
-                        server.get_state().await,
-                        TestRunDrasiServerState::Running { .. }
+                        instance.get_state().await,
+                        TestRunDrasiLibInstanceState::Running
                     ) {
-                        server.stop(Some("Stopping TestRun".to_string())).await?;
+                        instance.stop().await?;
                     }
                 }
 
                 test_run.status = TestRunStatus::Stopped;
                 Ok(())
             }
-            None => anyhow::bail!("TestRun not found: {:?}", test_run_id),
+            None => anyhow::bail!("TestRun not found: {test_run_id:?}"),
         }
     }
 
@@ -1298,7 +1281,7 @@ impl TestRunHost {
         let mut test_runs = self.test_runs.write().await;
         test_runs
             .remove(test_run_id)
-            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {:?}", test_run_id))?;
+            .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;
 
         Ok(())
     }

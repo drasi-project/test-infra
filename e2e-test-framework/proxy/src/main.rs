@@ -50,7 +50,7 @@ async fn main() {
     env_logger::init();
 
     let cfg = Params::parse();
-    log::info!("Started Proxy with - {:?}", cfg);
+    log::info!("Started Proxy with - {cfg:?}");
 
     // Start the Web API.
     web_api::start_web_api(cfg).await;

@@ -91,10 +91,7 @@ impl RedisResultStreamHandler {
         definition: RedisStreamResultStreamHandlerDefinition,
     ) -> anyhow::Result<Box<dyn QueryOutputHandler + Send + Sync>> {
         let settings = RedisResultStreamHandlerSettings::new(id, definition)?;
-        log::trace!(
-            "Creating RedisResultStreamHandler with settings {:?}",
-            settings
-        );
+        log::trace!("Creating RedisResultStreamHandler with settings {settings:?}");
 
         let notifier = Arc::new(Notify::new());
         let status = Arc::new(RwLock::new(QueryHandlerStatus::Uninitialized));
@@ -269,19 +266,19 @@ async fn reader_thread(
             client
         }
         Err(e) => {
-            let msg = format!("Client creation error: {:?}", e);
+            let msg = format!("Client creation error: {e:?}");
             log::error!("{}", &msg);
             *status.write().await = QueryHandlerStatus::Error;
             match result_stream_handler_tx_channel
                 .send(QueryHandlerMessage::Error(QueryHandlerError::new(
-                    format!("Redis error: {:?}", e),
+                    format!("Redis error: {e:?}"),
                     false,
                 )))
                 .await
             {
                 Ok(_) => {}
                 Err(e) => {
-                    log::error!("Error sending error message: {:?}", e);
+                    log::error!("Error sending error message: {e:?}");
                 }
             }
             return;
@@ -296,19 +293,19 @@ async fn reader_thread(
             con
         }
         Err(e) => {
-            let msg = format!("Connection Error: {:?}", e);
+            let msg = format!("Connection Error: {e:?}");
             log::error!("{}", &msg);
             *status.write().await = QueryHandlerStatus::Error;
             match result_stream_handler_tx_channel
                 .send(QueryHandlerMessage::Error(QueryHandlerError::new(
-                    format!("Redis error: {:?}", e),
+                    format!("Redis error: {e:?}"),
                     false,
                 )))
                 .await
             {
                 Ok(_) => {}
                 Err(e) => {
-                    log::error!("Error sending error message: {:?}", e);
+                    log::error!("Error sending error message: {e:?}");
                 }
             }
             return;
@@ -348,10 +345,7 @@ async fn reader_thread(
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        log::error!(
-                            "Reader thread error sending StreamStopping message: {:?}",
-                            e
-                        );
+                        log::error!("Reader thread error sending StreamStopping message: {e:?}");
                     }
                 }
                 return;
@@ -377,9 +371,9 @@ async fn reader_thread(
                             {
                                 Ok(msg) => msg,
                                 Err(e) => {
-                                    log::error!("Error converting RedisStreamReadResult to QueryHandlerMessage: {:?}", e);
+                                    log::error!("Error converting RedisStreamReadResult to QueryHandlerMessage: {e:?}");
                                     QueryHandlerMessage::Error(QueryHandlerError::new(
-                                        format!("Conversion error: {:?}", e),
+                                        format!("Conversion error: {e:?}"),
                                         false,
                                     ))
                                 }
@@ -392,14 +386,14 @@ async fn reader_thread(
                                 Ok(_) => {}
                                 Err(e) => match e {
                                     tokio::sync::mpsc::error::SendError(msg) => {
-                                        log::error!("Error sending change message: {:?}", msg);
+                                        log::error!("Error sending change message: {msg:?}");
                                     }
                                 },
                             }
                         }
                     }
                     Err(e) => {
-                        log::error!("Error reading from Redis stream: {:?}", e);
+                        log::error!("Error reading from Redis stream: {e:?}");
                     }
                 }
             }
@@ -421,7 +415,7 @@ async fn read_stream(
     let xread_result = match xread_result {
         Ok(xread_result) => xread_result,
         Err(e) => {
-            return Err(anyhow::anyhow!("Error reading from stream: {:?}", e));
+            return Err(anyhow::anyhow!("Error reading from stream: {e:?}"));
         }
     };
 
@@ -457,7 +451,7 @@ async fn read_stream(
                                     });
                                 }
                                 Err(e) => {
-                                    log::error!("Error: {:?}", e);
+                                    log::error!("Error: {e:?}");
                                     records.push(RedisStreamReadResult {
                                         id,
                                         seq: seq.fetch_add(1, Ordering::SeqCst),
@@ -472,7 +466,7 @@ async fn read_stream(
                                 }
                             },
                             Err(e) => {
-                                log::error!("Error: {:?}", e);
+                                log::error!("Error: {e:?}");
                                 records.push(RedisStreamReadResult {
                                     id,
                                     seq: seq.fetch_add(1, Ordering::SeqCst),

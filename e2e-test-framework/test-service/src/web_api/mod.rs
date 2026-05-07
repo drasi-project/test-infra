@@ -28,11 +28,11 @@ use utoipa::{OpenApi, ToSchema};
 
 use data_collector::DataCollector;
 use repo::get_test_repo_routes;
+use std::collections::HashMap;
 use test_data_store::{test_run_storage::TestRunId, TestDataStore};
 use test_run_host::TestRunHost;
 use test_runs::get_test_runs_routes;
 use utoipa_swagger_ui::SwaggerUi;
-use std::collections::HashMap;
 
 use crate::openapi::ApiDoc;
 
@@ -79,7 +79,7 @@ impl IntoResponse for TestServiceWebApiError {
             }
             TestServiceWebApiError::NotFound(kind, id) => (
                 StatusCode::NOT_FOUND,
-                Json(format!("{} with ID {} not found", kind, id)),
+                Json(format!("{kind} with ID {id} not found")),
             )
                 .into_response(),
             TestServiceWebApiError::SerdeJsonError(e) => {
@@ -116,7 +116,7 @@ impl IntoResponse for TestServiceWebApiError {
                 "sources": ["facilities-db"],
                 "queries": ["query-1"],
                 "reactions": ["building-comfort"],
-                "drasi_servers": []
+                "drasi_lib_instances": []
             },
             {
                 "id": "test_repo.test_id.run_002",
@@ -126,7 +126,7 @@ impl IntoResponse for TestServiceWebApiError {
                 "sources": ["source-1", "source-2"],
                 "queries": [],
                 "reactions": ["reaction-1"],
-                "drasi_servers": ["server-1"]
+                "drasi_lib_instances": ["instance-1"]
             }
         ]
     }
@@ -164,7 +164,7 @@ pub struct TestDataStoreStateResponse {
             "sources": ["facilities-db"],
             "queries": ["query-1"],
             "reactions": ["building-comfort"],
-            "drasi_servers": []
+            "drasi_lib_instances": []
         }
     ]
 }))]
@@ -191,8 +191,8 @@ pub struct TestRunSummary {
     pub queries: Vec<String>,
     /// Reaction IDs within this test run
     pub reactions: Vec<String>,
-    /// Drasi server IDs within this test run
-    pub drasi_servers: Vec<String>,
+    /// drasi-lib instance IDs within this test run
+    pub drasi_lib_instances: Vec<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -229,22 +229,19 @@ pub(crate) async fn start_web_api(
         .layer(axum::extract::Extension(test_data_store.clone()))
         .layer(axum::extract::Extension(test_run_host));
 
-    log::info!("Test Service Web API listening on http://{}", addr);
-    log::info!("API Documentation available at http://{}/docs", addr);
-    log::info!(
-        "OpenAPI JSON specification available at http://{}/api-docs/openapi.json",
-        addr
-    );
+    log::info!("Test Service Web API listening on http://{addr}");
+    log::info!("API Documentation available at http://{addr}/docs");
+    log::info!("OpenAPI JSON specification available at http://{addr}/api-docs/openapi.json");
 
-    let server = axum::Server::bind(&addr).serve(app.into_make_service());
+    let instance = axum::Server::bind(&addr).serve(app.into_make_service());
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
-    let graceful = server.with_graceful_shutdown(shutdown_signal(test_data_store));
+    let graceful = instance.with_graceful_shutdown(shutdown_signal(test_data_store));
 
-    log::info!("Press CTRL-C to stop the server...");
+    log::info!("Press CTRL-C to stop the instance...");
 
     if let Err(err) = graceful.await {
-        eprintln!("Server error: {}", err);
+        eprintln!("Instance error: {err}");
     }
 }
 
@@ -253,7 +250,7 @@ pub(crate) async fn start_web_api(
 /// This function performs the following cleanup operations:
 /// - Listens for both SIGINT (Ctrl+C) and SIGTERM signals
 /// - When a signal is received, explicitly cleans up the TestDataStore if delete_on_stop is enabled
-/// - Ensures cleanup happens before the server shuts down
+/// - Ensures cleanup happens before the instance shuts down
 ///
 /// The cleanup is performed explicitly here rather than relying solely on Drop trait
 /// to ensure it executes reliably during signal-based shutdown.
@@ -291,7 +288,7 @@ async fn shutdown_signal(test_data_store: Arc<TestDataStore>) {
     if test_data_store.should_delete_on_stop() {
         log::info!("Performing TestDataStore cleanup on shutdown signal...");
         if let Err(e) = test_data_store.cleanup_async().await {
-            log::error!("Error during TestDataStore cleanup: {}", e);
+            log::error!("Error during TestDataStore cleanup: {e}");
         } else {
             log::info!("TestDataStore cleanup completed successfully.");
         }
@@ -306,7 +303,7 @@ async fn shutdown_signal(test_data_store: Arc<TestDataStore>) {
     tag = "service",
     responses(
         (status = 200, description = "Service information retrieved successfully", body = TestServiceStateResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 async fn get_service_info_handler(
@@ -321,11 +318,11 @@ async fn get_service_info_handler(
     let source_ids = test_run_host.get_test_source_ids().await?;
     let query_ids = test_run_host.get_test_query_ids().await?;
     let reaction_ids = test_run_host.get_test_reaction_ids().await?;
-    let drasi_server_ids = test_run_host.get_test_drasi_server_ids().await?;
-    
+    let drasi_lib_instance_ids = test_run_host.get_test_drasi_lib_instance_ids().await?;
+
     // Build hierarchical structure
     let mut test_runs_map: HashMap<String, TestRunSummary> = HashMap::new();
-    
+
     // Process each test run
     for run_id_str in test_run_ids {
         if let Ok(run_id) = TestRunId::try_from(run_id_str.as_str()) {
@@ -337,58 +334,58 @@ async fn get_service_info_handler(
                 sources: Vec::new(),
                 queries: Vec::new(),
                 reactions: Vec::new(),
-                drasi_servers: Vec::new(),
+                drasi_lib_instances: Vec::new(),
             };
             test_runs_map.insert(run_id_str, test_run);
         }
     }
-    
+
     // Add sources to their test runs
     for source_id in source_ids {
         // Extract test run ID from source ID (format: test_repo.test_id.run_id.source_id)
         if let Some(run_id) = extract_test_run_id(&source_id) {
             if let Some(test_run) = test_runs_map.get_mut(&run_id) {
                 // Extract just the source name
-                if let Some(source_name) = source_id.split('.').last() {
+                if let Some(source_name) = source_id.split('.').next_back() {
                     test_run.sources.push(source_name.to_string());
                 }
             }
         }
     }
-    
+
     // Add queries to their test runs
     for query_id in query_ids {
         if let Some(run_id) = extract_test_run_id(&query_id) {
             if let Some(test_run) = test_runs_map.get_mut(&run_id) {
-                if let Some(query_name) = query_id.split('.').last() {
+                if let Some(query_name) = query_id.split('.').next_back() {
                     test_run.queries.push(query_name.to_string());
                 }
             }
         }
     }
-    
+
     // Add reactions to their test runs
     for reaction_id in reaction_ids {
         if let Some(run_id) = extract_test_run_id(&reaction_id) {
             if let Some(test_run) = test_runs_map.get_mut(&run_id) {
-                if let Some(reaction_name) = reaction_id.split('.').last() {
+                if let Some(reaction_name) = reaction_id.split('.').next_back() {
                     test_run.reactions.push(reaction_name.to_string());
                 }
             }
         }
     }
-    
-    // Add drasi servers to their test runs
-    for server_id in drasi_server_ids {
-        if let Some(run_id) = extract_test_run_id(&server_id) {
+
+    // Add drasi instances to their test runs
+    for instance_id in drasi_lib_instance_ids {
+        if let Some(run_id) = extract_test_run_id(&instance_id) {
             if let Some(test_run) = test_runs_map.get_mut(&run_id) {
-                if let Some(server_name) = server_id.split('.').last() {
-                    test_run.drasi_servers.push(server_name.to_string());
+                if let Some(instance_name) = instance_id.split('.').next_back() {
+                    test_run.drasi_lib_instances.push(instance_name.to_string());
                 }
             }
         }
     }
-    
+
     let test_runs: Vec<TestRunSummary> = test_runs_map.into_values().collect();
 
     Ok(Json(TestServiceStateResponse {

@@ -189,7 +189,7 @@ impl ReactionObserverMetrics {
         } else if runtime_s > 60.0 {
             format!("{:.1} minutes", runtime_s / 60.0)
         } else if runtime_s > 0.0 {
-            format!("{:.1} seconds", runtime_s)
+            format!("{runtime_s:.1} seconds")
         } else {
             "0 seconds".to_string()
         }
@@ -459,11 +459,20 @@ impl ReactionObserver {
                     create_reaction_stop_triggers(&self.settings.stop_triggers).await?;
 
                 // Initialize and start the handler
-                log::info!("[ReactionObserver] Initializing output handler for reaction: {}", self.settings.id);
+                log::info!(
+                    "[ReactionObserver] Initializing output handler for reaction: {}",
+                    self.settings.id
+                );
                 let handler_rx_channel = self.output_handler.init().await?;
-                log::info!("[ReactionObserver] Starting output handler for reaction: {}", self.settings.id);
+                log::info!(
+                    "[ReactionObserver] Starting output handler for reaction: {}",
+                    self.settings.id
+                );
                 self.output_handler.start().await?;
-                log::info!("[ReactionObserver] Output handler started successfully for reaction: {}", self.settings.id);
+                log::info!(
+                    "[ReactionObserver] Output handler started successfully for reaction: {}",
+                    self.settings.id
+                );
 
                 // Start observer task
                 let (command_tx, command_rx) = tokio::sync::mpsc::channel(100);
@@ -541,14 +550,14 @@ impl ReactionObserver {
                 );
                 let mut results = Vec::new();
                 for (idx, logger) in internal_state.loggers.iter_mut().enumerate() {
-                    log::debug!("Calling end_test_run on logger {} in stop()", idx);
+                    log::debug!("Calling end_test_run on logger {idx} in stop()");
                     match logger.end_test_run().await {
                         Ok(result) => {
-                            log::info!("Logger {} completed in stop(): {:?}", idx, result);
+                            log::info!("Logger {idx} completed in stop(): {result:?}");
                             results.push(result);
                         }
                         Err(e) => {
-                            log::error!("Logger {} failed to end test run in stop(): {}", idx, e);
+                            log::error!("Logger {idx} failed to end test run in stop(): {e}");
                         }
                     }
                 }
@@ -599,7 +608,7 @@ impl ReactionObserver {
         }
     }
 
-    /// Sets the TestRunHost for handlers that need it (e.g., DrasiServerChannelHandler)
+    /// Sets the TestRunHost for handlers that need it (e.g., DrasiLibInstanceChannelHandler)
     pub fn set_test_run_host(&self, test_run_host: std::sync::Arc<crate::TestRunHost>) {
         // Clone the handler reference to move into the async block
         let handler = self.output_handler.clone();
@@ -651,14 +660,14 @@ async fn observe_reaction_handler(
                                 log::info!("Closing {} loggers after stop trigger fired", state.loggers.len());
                                 let mut results = Vec::new();
                                 for (idx, logger) in state.loggers.iter_mut().enumerate() {
-                                    log::debug!("Calling end_test_run on logger {}", idx);
+                                    log::debug!("Calling end_test_run on logger {idx}");
                                     match logger.end_test_run().await {
                                         Ok(result) => {
-                                            log::info!("Logger {} completed: {:?}", idx, result);
+                                            log::info!("Logger {idx} completed: {result:?}");
                                             results.push(result);
                                         }
                                         Err(e) => {
-                                            log::error!("Logger {} failed to end test run: {}", idx, e);
+                                            log::error!("Logger {idx} failed to end test run: {e}");
                                         }
                                     }
                                 }
@@ -675,19 +684,19 @@ async fn observe_reaction_handler(
                                 return;
                                 }
                                 Ok(false) => {
-                                    log::trace!("Stop trigger {} not fired yet", idx);
+                                    log::trace!("Stop trigger {idx} not fired yet");
                                 }
                                 Err(e) => {
-                                    log::error!("Error checking stop trigger {}: {}", idx, e);
+                                    log::error!("Error checking stop trigger {idx}: {e}");
                                 }
                             }
                         }
                     }
                     ReactionHandlerMessage::Error(error) => {
-                        log::error!("Reaction handler error: {}", error);
+                        log::error!("Reaction handler error: {error}");
                         let mut state = internal_state.lock().await;
                         state.status = ReactionObserverStatus::Error;
-                        state.error_message = Some(format!("Handler error: {}", error));
+                        state.error_message = Some(format!("Handler error: {error}"));
                     }
                     _ => {
                         // Ignore other control signals
@@ -804,9 +813,9 @@ async fn handle_reaction_invocation(
     );
 
     for (idx, logger) in state.loggers.iter_mut().enumerate() {
-        log::trace!("Sending record to logger {}", idx);
+        log::trace!("Sending record to logger {idx}");
         if let Err(e) = logger.log_handler_record(&handler_record).await {
-            log::error!("Failed to log reaction invocation to logger {}: {}", idx, e);
+            log::error!("Failed to log reaction invocation to logger {idx}: {e}");
         }
     }
 }
@@ -828,7 +837,7 @@ async fn create_reaction_loggers(
 
     let mut result = Vec::new();
     for config in configs {
-        log::info!("Creating logger with config: {:?}", config);
+        log::info!("Creating logger with config: {config:?}");
         result.push(create_output_logger(reaction_id.clone(), config, output_storage).await?);
     }
 

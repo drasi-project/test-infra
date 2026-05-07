@@ -22,8 +22,8 @@ use test_data_store::{
 use super::SourceChangeDispatcher;
 
 use reqwest::Client;
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 use tracing::{debug, error, trace};
 
@@ -65,7 +65,7 @@ struct BatchEventRequest {
 fn convert_to_direct_format(event: &SourceChangeEvent) -> Option<HttpChangeEvent> {
     // Parse the payload to extract element data
     let payload = serde_json::to_value(&event.payload).ok()?;
-    
+
     // Determine operation type
     let operation = match event.op.as_str() {
         "i" => "insert",
@@ -76,20 +76,20 @@ fn convert_to_direct_format(event: &SourceChangeEvent) -> Option<HttpChangeEvent
             return None;
         }
     };
-    
+
     // Get timestamp in nanoseconds
     let timestamp = Some(event.reactivator_start_ns as i64);
-    
+
     // For delete operations, we need to extract the ID from "before"
     if operation == "delete" {
         if let Some(before) = payload.get("before") {
             if let Some(id) = before.get("id").and_then(|v| v.as_str()) {
-                let labels = before.get("labels")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter()
+                let labels = before.get("labels").and_then(|v| v.as_array()).map(|arr| {
+                    arr.iter()
                         .filter_map(|v| v.as_str().map(String::from))
-                        .collect::<Vec<String>>());
-                
+                        .collect::<Vec<String>>()
+                });
+
                 return Some(HttpChangeEvent {
                     operation: operation.to_string(),
                     element: None,
@@ -102,56 +102,64 @@ fn convert_to_direct_format(event: &SourceChangeEvent) -> Option<HttpChangeEvent
         error!("Delete operation missing 'before' data");
         return None;
     }
-    
+
     // For insert/update, extract element from "after"
     let element_data = if operation == "update" || operation == "insert" {
         payload.get("after")
     } else {
         None
     };
-    
+
     if let Some(elem_value) = element_data {
         // Extract element fields
-        let id = elem_value.get("id")
+        let id = elem_value
+            .get("id")
             .and_then(|v| v.as_str())
             .map(String::from)?;
-        
-        let labels = elem_value.get("labels")
+
+        let labels = elem_value
+            .get("labels")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect::<Vec<String>>())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<String>>()
+            })
             .unwrap_or_default();
-        
-        let properties = elem_value.get("properties")
+
+        let properties = elem_value
+            .get("properties")
             .and_then(|v| v.as_object())
             .cloned()
             .unwrap_or_default();
-        
+
         // Determine element type based on table in source info
-        let element_type = payload.get("source")
+        let element_type = payload
+            .get("source")
             .and_then(|s| s.get("table"))
             .and_then(|t| t.as_str())
             .unwrap_or("node");
-        
+
         let element_type = match element_type {
             "relation" | "edge" => "relation",
             _ => "node",
         };
-        
+
         // Check if it's a relation by looking for from/to fields
-        let from = elem_value.get("from")
+        let from = elem_value
+            .get("from")
             .and_then(|v| v.as_str())
             .map(String::from);
-        let to = elem_value.get("to")
+        let to = elem_value
+            .get("to")
             .and_then(|v| v.as_str())
             .map(String::from);
-        
+
         let element = DirectElement {
-            element_type: if from.is_some() && to.is_some() { 
-                "relation".to_string() 
-            } else { 
-                element_type.to_string() 
+            element_type: if from.is_some() && to.is_some() {
+                "relation".to_string()
+            } else {
+                element_type.to_string()
             },
             id,
             labels,
@@ -159,7 +167,7 @@ fn convert_to_direct_format(event: &SourceChangeEvent) -> Option<HttpChangeEvent
             from,
             to,
         };
-        
+
         Some(HttpChangeEvent {
             operation: operation.to_string(),
             element: Some(element),
@@ -192,7 +200,7 @@ impl HttpSourceChangeDispatcherSettings {
         let endpoint = if let Some(ep) = &definition.endpoint {
             ep.clone()
         } else {
-            format!("/sources/{}/events", source_id)
+            format!("/sources/{source_id}/events")
         };
 
         Ok(Self {
@@ -220,10 +228,7 @@ impl HttpSourceChangeDispatcher {
         definition: &HttpSourceChangeDispatcherDefinition,
         storage: TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!(
-            "Creating HttpSourceChangeDispatcher from {:?}, ",
-            definition
-        );
+        log::debug!("Creating HttpSourceChangeDispatcher from {definition:?}, ");
 
         let source_id = storage.id.test_source_id.clone();
         let settings = HttpSourceChangeDispatcherSettings::new(definition, source_id)?;
@@ -258,7 +263,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
         }
 
         let url = self.settings.full_url();
-        
+
         log::info!(
             "HTTP dispatcher sending {} events to {} (source_id: {}, batch: {})",
             events.len(),
@@ -273,27 +278,33 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                 .iter()
                 .filter_map(|e| convert_to_direct_format(e))
                 .collect();
-            
+
             if http_events.is_empty() {
                 error!("Failed to convert any events to Direct Format");
                 return Err(anyhow::anyhow!("Failed to convert events to Direct Format"));
             }
-            
+
             // Use batch endpoint for batch mode
-            let batch_url = format!("{}/batch", url);
+            let batch_url = format!("{url}/batch");
             let batch_request = BatchEventRequest {
                 events: http_events,
             };
-            
+
             // Log request body at debug level
             debug!(
                 "HTTP dispatcher sending batch request to {}: {}",
                 batch_url,
                 serde_json::to_string_pretty(&batch_request)
-                    .unwrap_or_else(|e| format!("Failed to serialize: {}", e))
+                    .unwrap_or_else(|e| format!("Failed to serialize: {e}"))
             );
 
-            let response = match self.client.post(&batch_url).json(&batch_request).send().await {
+            let response = match self
+                .client
+                .post(&batch_url)
+                .json(&batch_request)
+                .send()
+                .await
+            {
                 Ok(resp) => resp,
                 Err(e) => {
                     error!("Failed to connect to {}: {}", batch_url, e);
@@ -315,7 +326,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                     "Failed to dispatch events batch to {}: {} - {}",
                     batch_url, status, response_body
                 );
-                anyhow::bail!("HTTP request failed with status: {}", status);
+                anyhow::bail!("HTTP request failed with status: {status}");
             }
 
             log::info!(
@@ -335,13 +346,13 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                         continue;
                     }
                 };
-                
+
                 // Log request body at debug level
                 debug!(
                     "HTTP dispatcher sending individual event to {}: {}",
                     url,
                     serde_json::to_string_pretty(&http_event)
-                        .unwrap_or_else(|e| format!("Failed to serialize: {}", e))
+                        .unwrap_or_else(|e| format!("Failed to serialize: {e}"))
                 );
 
                 let response = self.client.post(&url).json(&http_event).send().await?;
@@ -360,13 +371,14 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                         "Failed to dispatch event to {}: {} - {}",
                         url, status, response_body
                     );
-                    anyhow::bail!("HTTP request failed with status: {}", status);
+                    anyhow::bail!("HTTP request failed with status: {status}");
                 }
             }
 
             trace!(
                 "Successfully dispatched {} individual events to {}",
-                event_count, url
+                event_count,
+                url
             );
         }
 

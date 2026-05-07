@@ -137,7 +137,7 @@ impl Location {
         match self {
             Location::Building(b) => Ok(Location::Floor(*b, floor)),
             _ => {
-                anyhow::bail!("Cannot set floor on non-building location: {}", self);
+                anyhow::bail!("Cannot set floor on non-building location: {self}");
             }
         }
     }
@@ -146,7 +146,7 @@ impl Location {
         match self {
             Location::Floor(b, f) => Ok(Location::Room(*b, *f, room)),
             _ => {
-                anyhow::bail!("Cannot set room on non-floor location: {}", self);
+                anyhow::bail!("Cannot set room on non-floor location: {self}");
             }
         }
     }
@@ -155,7 +155,7 @@ impl Location {
         match self {
             Location::Room(b, f, r) => Ok(Location::Sensor(*b, *f, *r, sensor)),
             _ => {
-                anyhow::bail!("Cannot set sensor on non-room location: {}", self);
+                anyhow::bail!("Cannot set sensor on non-room location: {self}");
             }
         }
     }
@@ -165,11 +165,11 @@ impl Location {
 impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Location::Building(b) => write!(f, "B_{:03}", b),
-            Location::Floor(b, fl) => write!(f, "F_{:03}_{:03}", b, fl),
-            Location::Room(b, fl, r) => write!(f, "R_{:03}_{:03}_{:03}", b, fl, r),
+            Location::Building(b) => write!(f, "B_{b:03}"),
+            Location::Floor(b, fl) => write!(f, "F_{b:03}_{fl:03}"),
+            Location::Room(b, fl, r) => write!(f, "R_{b:03}_{fl:03}_{r:03}"),
             Location::Sensor(b, fl, r, sensor) => {
-                write!(f, "R_{:03}_{:03}_{:03}_{}", b, fl, r, sensor)
+                write!(f, "R_{b:03}_{fl:03}_{r:03}_{sensor}")
             }
         }
     }
@@ -184,35 +184,35 @@ impl FromStr for Location {
         match parts.as_slice() {
             ["B", b] => {
                 let b_num = b.parse::<u32>()
-                    .context(format!("Invalid building number in '{}'", s))?;
+                    .context(format!("Invalid building number in '{s}'"))?;
                 Ok(Location::Building(b_num))
             }
             ["F", b, f] => {
                 let b_num = b.parse::<u32>()
-                    .context(format!("Invalid building number in '{}'", s))?;
+                    .context(format!("Invalid building number in '{s}'"))?;
                 let f_num = f.parse::<u32>()
-                    .context(format!("Invalid floor number in '{}'", s))?;
+                    .context(format!("Invalid floor number in '{s}'"))?;
                 Ok(Location::Floor(b_num, f_num))
             }
             ["R", b, f, r] => {
                 let b_num = b.parse::<u32>()
-                    .context(format!("Invalid building number in '{}'", s))?;
+                    .context(format!("Invalid building number in '{s}'"))?;
                 let f_num = f.parse::<u32>()
-                    .context(format!("Invalid floor number in '{}'", s))?;
+                    .context(format!("Invalid floor number in '{s}'"))?;
                 let r_num = r.parse::<u32>()
-                    .context(format!("Invalid room number in '{}'", s))?;
+                    .context(format!("Invalid room number in '{s}'"))?;
                 Ok(Location::Room(b_num, f_num, r_num))
             },
             ["S", b, f, r, sensor] => {
                 let b_num = b.parse::<u32>()
-                    .context(format!("Invalid building number in '{}'", s))?;
+                    .context(format!("Invalid building number in '{s}'"))?;
                 let f_num = f.parse::<u32>()
-                    .context(format!("Invalid floor number in '{}'", s))?;
+                    .context(format!("Invalid floor number in '{s}'"))?;
                 let r_num = r.parse::<u32>()
-                    .context(format!("Invalid room number in '{}'", s))?;
+                    .context(format!("Invalid room number in '{s}'"))?;
                 Ok(Location::Sensor(b_num, f_num, r_num, sensor.to_string()))
             }
-            _ => anyhow::bail!("Invalid location format: '{}'. Expected 'B_xxx', 'F_xxx_yyy', 'R_xxx_yyy_zzz', or 'S_xxx_yyy_zzz_sss'", s),
+            _ => anyhow::bail!("Invalid location format: '{s}'. Expected 'B_xxx', 'F_xxx_yyy', 'R_xxx_yyy_zzz', or 'S_xxx_yyy_zzz_sss'"),
         }
     }
 }
@@ -535,7 +535,7 @@ impl BuildingFloorRelation {
                 let building_id = floor_id.get_building_location().unwrap();
 
                 Ok(BuildingFloorRelation {
-                    id: format!("BFR_{}_{}", building_id, floor_id),
+                    id: format!("BFR_{building_id}_{floor_id}"),
                     effective_from,
                     building_id: building_id.to_string(),
                     floor_id: floor_id.to_string(),
@@ -562,7 +562,7 @@ impl FloorRoomRelation {
                 let floor_id = room_id.get_floor_location().unwrap();
 
                 Ok(FloorRoomRelation {
-                    id: format!("BFR_{}_{}", floor_id, room_id),
+                    id: format!("BFR_{floor_id}_{room_id}"),
                     effective_from,
                     floor_id: floor_id.to_string(),
                     room_id: room_id.to_string(),

@@ -410,19 +410,12 @@ impl ProfilerResultStreamLogger {
         def: &ProfilerResultStreamLoggerConfig,
         output_storage: &TestRunQueryStorage,
     ) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!(
-            "Creating ProfilerResultStreamLogger for {}, from {:?}, ",
-            test_run_query_id,
-            def
-        );
+        log::debug!("Creating ProfilerResultStreamLogger for {test_run_query_id}, from {def:?}, ");
 
         let folder_path = output_storage.result_change_path.join("profiler");
         let settings =
             ProfilerResultStreamLoggerSettings::new(test_run_query_id, def, folder_path)?;
-        log::trace!(
-            "Creating ProfilerResultStreamLogger with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating ProfilerResultStreamLogger with settings {settings:?}, ");
 
         if !std::path::Path::new(&settings.folder_path).exists() {
             match create_dir_all(&settings.folder_path).await {

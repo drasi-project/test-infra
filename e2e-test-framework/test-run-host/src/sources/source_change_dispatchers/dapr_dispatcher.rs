@@ -47,7 +47,7 @@ impl DaprSourceChangeDispatcherSettings {
             pubsub_topic: def
                 .pubsub_topic
                 .clone()
-                .unwrap_or(format!("{}-change", source_id)),
+                .unwrap_or(format!("{source_id}-change")),
         })
     }
 }
@@ -62,14 +62,11 @@ impl DaprSourceChangeDispatcher {
         def: &DaprSourceChangeDispatcherDefinition,
         output_storage: &TestRunSourceStorage,
     ) -> anyhow::Result<Self> {
-        log::debug!("Creating DaprSourceChangeDispatcher from {:?}, ", def);
+        log::debug!("Creating DaprSourceChangeDispatcher from {def:?}, ");
 
         let source_id = output_storage.id.test_source_id.clone();
         let settings = DaprSourceChangeDispatcherSettings::new(def, source_id)?;
-        log::trace!(
-            "Creating DaprSourceChangeDispatcher with settings {:?}, ",
-            settings
-        );
+        log::trace!("Creating DaprSourceChangeDispatcher with settings {settings:?}, ");
 
         let publisher = DaprHttpPublisher::new(
             settings.host.clone(),
@@ -110,8 +107,8 @@ impl SourceChangeDispatcher for DaprSourceChangeDispatcher {
         match publisher.publish(data, _headers).await {
             Ok(_) => Ok(()),
             Err(e) => {
-                let msg = format!("Error dispatching source change event: {:?}", e);
-                log::error!("{}", msg);
+                let msg = format!("Error dispatching source change event: {e:?}");
+                log::error!("{msg}");
                 anyhow::bail!(msg);
             }
         }

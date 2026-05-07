@@ -20,3 +20,15 @@ version = "0.2.0"
 
 [profile.release]
 lto = true
+
+# Local development: use path-based dependencies for drasi-core/drasi-lib and
+# the bootstrap/source/reaction crates that the embedded drasi-lib instances
+# load. Uncomment and adjust the relative paths to point at a local checkout
+# of github.com/drasi-project/drasi-core.
+# [patch.crates-io]
+# drasi-core = { path = "../../drasi-core/core" }
+# drasi-lib = { path = "../../drasi-core/lib" }
+# drasi-bootstrap-noop = { path = "../../drasi-core/components/bootstrappers/noop" }
+# drasi-bootstrap-application = { path = "../../drasi-core/components/bootstrappers/application" }
+# drasi-reaction-application = { path = "../../drasi-core/components/reactions/application" }
+# drasi-source-application = { path = "../../drasi-core/components/sources/application" }

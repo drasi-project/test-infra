@@ -39,20 +39,20 @@ if [ -z "$POD_NAME" ]; then
 fi
 
 # Source
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/sources/facilities-db/test_run_summary.json" "./${TEST_RUN_ID}/source_summary.json"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/sources/facilities-db/test_run_summary.json" "./${TEST_RUN_ID}/source_summary.json"
 
 # Query Observer
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/test_run_summary.json" "./${TEST_RUN_ID}/query_summary.json"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/test_run_summary.json" "./${TEST_RUN_ID}/query_summary.json"
 
 # Query Result Profiler
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/summary.json" "./${TEST_RUN_ID}/query_profiler_summary.json"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/summary.json" "./${TEST_RUN_ID}/query_profiler_summary.json"
 
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_all_abs.png" "./${TEST_RUN_ID}/query_profiler_viz_all_abs.png"
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_all_rel.png" "./${TEST_RUN_ID}/query_profiler_viz_all_rel.png"
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_drasi_only_abs.png" "./${TEST_RUN_ID}/query_profiler_viz_drasi_only_abs.png"
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_drasi_only_rel.png" "./${TEST_RUN_ID}/query_profiler_viz_drasi_only_rel.png"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_all_abs.png" "./${TEST_RUN_ID}/query_profiler_viz_all_abs.png"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_all_rel.png" "./${TEST_RUN_ID}/query_profiler_viz_all_rel.png"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_drasi_only_abs.png" "./${TEST_RUN_ID}/query_profiler_viz_drasi_only_abs.png"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_drasi_only_rel.png" "./${TEST_RUN_ID}/query_profiler_viz_drasi_only_rel.png"
 
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_rates.csv" "./${TEST_RUN_ID}/query_profiler_change_rates.csv"
-kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_distributions.csv" "./${TEST_RUN_ID}/query_profiler_change_distributions.csv"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_rates.csv" "./${TEST_RUN_ID}/query_profiler_change_rates.csv"
+kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_distributions.csv" "./${TEST_RUN_ID}/query_profiler_change_distributions.csv"
 
-# kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/az_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_00000.jsonl" "./${TEST_RUN_ID}/query_profiler_change_log_sample.jsonl"
+# kubectl cp -c "$CONTAINER" "$NAMESPACE/$POD_NAME:/drasi_data_store/test_runs/github_dev_repo.building_comfort.test_run_001/queries/room-comfort-level/result_stream_log/profiler/change_00000.jsonl" "./${TEST_RUN_ID}/query_profiler_change_log_sample.jsonl"

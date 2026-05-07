@@ -1,0 +1,178 @@
+# Copyright 2025 The Drasi Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Building Comfort E2E Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  repository_dispatch:
+    types: [building-comfort-trigger]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CLUSTER_NAME_REDIS: "building-comfort-aks-${{ github.run_number }}-redis"
+  CLUSTER_NAME_ROCKS: "building-comfort-aks-${{ github.run_number }}-rocks"
+  CLUSTER_NAME_MEMORY: "building-comfort-aks-${{ github.run_number }}-memory"
+  RESOURCE_GROUP_NAME: "project-drasi"
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cluster_type: [redis, rocks, memory]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        
+      - name: Deploy AKS cluster
+        run: |
+          az deployment group create \
+            --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+            --template-file infra/aks/aks-cluster.bicep \
+            --parameters clusterName="building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}" \
+            --name "aks-cluster-${{ github.run_number }}-${{ matrix.cluster_type }}"
+
+  deploy-tests:
+    runs-on: ubuntu-latest
+    needs: infra
+    strategy:
+      matrix:
+        cluster_type: [redis, rocks, memory]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+            --name "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}" \
+            --overwrite-existing
+
+      
+      - name: Install Drasi CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/drasi-project/drasi-platform/main/cli/installers/install-drasi-cli.sh | /bin/bash
+
+      
+      - name: Deploy building comfort tests
+        run: |
+          cd e2e-test-framework
+          ./examples/building_comfort/drasi/run_test_with_${{ matrix.cluster_type }}.sh
+          
+          sleep 10
+          
+          # Wait for tests to complete by polling the query status
+          echo "Waiting for tests to complete..."
+          while true; do
+            
+            # Check query status
+            RESPONSE=$(curl -s "http://localhost:63123/test_run_host/queries/github_dev_repo.building_comfort.test_run_001.room-comfort-level")
+            echo "API Response: $RESPONSE"
+            
+            STATUS=$(echo "$RESPONSE" | jq -r '.query_observer.status // "Running"')
+            echo "Current status: $STATUS"
+            if [ "$STATUS" = "Stopped" ]; then
+              echo "Tests completed successfully!"
+              break
+            fi
+            
+            echo "Tests still running, waiting 10 seconds..."
+            sleep 10
+          done
+          
+      - name: Export test results
+        run: |
+          cd e2e-test-framework
+          ./examples/building_comfort/drasi/get_test_run_results.sh "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}"
+          
+      - name: Re-authenticate with Azure (refresh token)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: Upload test results to storage account
+        run: |
+          cd e2e-test-framework
+          CLUSTER_NAME="building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}"
+          CONTAINER_NAME="test-results"
+          STORAGE_ACCOUNT="drasidev"
+          
+          # Create container if it doesn't exist
+          az storage container create \
+            --name $CONTAINER_NAME \
+            --account-name $STORAGE_ACCOUNT \
+            --auth-mode login \
+            --only-show-errors
+          
+          # Upload all files from the results directory with Cold tier
+          az storage blob upload-batch \
+            --destination $CONTAINER_NAME \
+            --source "./$CLUSTER_NAME" \
+            --destination-path "building-comfort/$CLUSTER_NAME" \
+            --account-name $STORAGE_ACCOUNT \
+            --auth-mode login \
+            --tier Cold
+
+        
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: deploy-tests
+    if: always()
+    strategy:
+      matrix:
+        cluster_type: [redis, rocks, memory]
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Delete AKS cluster
+        run: |
+          az aks delete \
+            --resource-group ${{ env.RESOURCE_GROUP_NAME }} \
+            --name "building-comfort-aks-${{ github.run_number }}-${{ matrix.cluster_type }}" \
+            --yes --no-wait

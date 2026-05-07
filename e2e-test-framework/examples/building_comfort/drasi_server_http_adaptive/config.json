@@ -1,13 +1,13 @@
 {
   "data_store": {
-      "data_store_path": "examples/building_comfort/drasi_server_http_adaptive/test_data_cache",
+      "data_store_path": "./test_data_cache",
       "delete_on_start": true,
       "delete_on_stop": true,
       "test_repos": [
           {
               "id": "drasi_server_dev_repo",
               "kind": "LocalStorage",
-              "source_path": "examples/building_comfort/drasi_server_grpc/dev_repo",
+              "source_path": "../drasi_server_grpc/dev_repo",
               "local_tests": [ 
                   {
                       "test_id": "building_comfort",

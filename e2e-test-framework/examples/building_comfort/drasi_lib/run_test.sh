@@ -20,5 +20,5 @@ RESET="\033[0m"
 echo -e "${GREEN}\nRunning the E2E Test Service with Internal drasi-lib instance...${RESET}"
 # Set drasi_core modules to error level to suppress INFO logs from tracing instrumentation
 RUST_LOG="off,test_run_host=info, test_run_service=info, test_data_store=info" \
-	cargo run --release --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_lib/config.json \
+	cargo run --release --manifest-path "$(dirname "$0")/../../../test-service/Cargo.toml" -- --config "$(dirname "$0")/config.json" \
 	| egrep '^(TRACE|DEBUG|INFO|WARN|ERROR)'

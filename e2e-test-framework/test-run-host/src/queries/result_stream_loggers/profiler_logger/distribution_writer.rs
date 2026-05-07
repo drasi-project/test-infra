@@ -61,26 +61,34 @@ pub struct TimeDistributionTracker {
 impl TimeDistributionTracker {
     pub fn new(folder_path: PathBuf, file_name: String) -> Self {
         Self {
-            file_path: folder_path.join(format!("{}_distributions.csv", file_name)),
+            file_path: folder_path.join(format!("{file_name}_distributions.csv")),
             distributions: [[0; BUCKET_COUNT]; COMPONENT_COUNT],
         }
     }
-    
+
     // Process a change record profile and update the distributions
     pub fn process_record(&mut self, profile: &ChangeRecordProfile) {
         // Increment the counts for each component's bucket directly
-        self.distributions[REACTIVATOR_IDX][self.find_bucket_for_time(profile.time_in_reactivator)] += 1;
-        self.distributions[SRC_CHANGE_Q_IDX][self.find_bucket_for_time(profile.time_in_src_change_q)] += 1;
-        self.distributions[SRC_CHANGE_RTR_IDX][self.find_bucket_for_time(profile.time_in_src_change_rtr)] += 1;
-        self.distributions[SRC_DISP_Q_IDX][self.find_bucket_for_time(profile.time_in_src_disp_q)] += 1;
-        self.distributions[SRC_CHANGE_DISP_IDX][self.find_bucket_for_time(profile.time_in_src_change_disp)] += 1;
-        self.distributions[QUERY_PUB_API_IDX][self.find_bucket_for_time(profile.time_in_query_pub_api)] += 1;
-        self.distributions[QUERY_CHANGE_Q_IDX][self.find_bucket_for_time(profile.time_in_query_change_q)] += 1;
-        self.distributions[QUERY_HOST_IDX][self.find_bucket_for_time(profile.time_in_query_host)] += 1;
-        self.distributions[QUERY_SOLVER_IDX][self.find_bucket_for_time(profile.time_in_query_solver)] += 1;
+        self.distributions[REACTIVATOR_IDX]
+            [self.find_bucket_for_time(profile.time_in_reactivator)] += 1;
+        self.distributions[SRC_CHANGE_Q_IDX]
+            [self.find_bucket_for_time(profile.time_in_src_change_q)] += 1;
+        self.distributions[SRC_CHANGE_RTR_IDX]
+            [self.find_bucket_for_time(profile.time_in_src_change_rtr)] += 1;
+        self.distributions[SRC_DISP_Q_IDX]
+            [self.find_bucket_for_time(profile.time_in_src_disp_q)] += 1;
+        self.distributions[SRC_CHANGE_DISP_IDX]
+            [self.find_bucket_for_time(profile.time_in_src_change_disp)] += 1;
+        self.distributions[QUERY_PUB_API_IDX]
+            [self.find_bucket_for_time(profile.time_in_query_pub_api)] += 1;
+        self.distributions[QUERY_CHANGE_Q_IDX]
+            [self.find_bucket_for_time(profile.time_in_query_change_q)] += 1;
+        self.distributions[QUERY_HOST_IDX]
+            [self.find_bucket_for_time(profile.time_in_query_host)] += 1;
+        self.distributions[QUERY_SOLVER_IDX]
+            [self.find_bucket_for_time(profile.time_in_query_solver)] += 1;
         self.distributions[RESULT_Q_IDX][self.find_bucket_for_time(profile.time_in_result_q)] += 1;
     }
-    
 
     // Find the correct bucket index for a given time using logarithm
     fn find_bucket_for_time(&self, time_ns: u64) -> usize {
@@ -89,38 +97,38 @@ impl TimeDistributionTracker {
         if time_ns == 0 {
             return 0;
         }
-        
+
         // Calculate the bucket index using log10
         // Since our buckets are powers of 10, we can use log10 directly
         let log10_time = (time_ns as f64).log10().floor() as usize;
-        
+
         // Ensure we don't exceed maximum bucket (10^11)
         // Anything above bucket 11 goes into bucket 11
         std::cmp::min(log10_time, BUCKET_COUNT - 1)
     }
-    
+
     // Write to CSV with buckets as rows and components as columns
     pub async fn generate_csv(&self) -> Result<()> {
         let file_exists = Path::new(&self.file_path).exists();
-        
+
         let mut file = if file_exists {
             OpenOptions::new()
                 .write(true)
-                .truncate(true)  // Overwrite the file
+                .truncate(true) // Overwrite the file
                 .open(&self.file_path)
                 .await?
         } else {
             File::create(&self.file_path).await?
         };
-        
+
         // Write header with bucket as first column followed by component names
         let mut header = String::from("bucket");
         for component_name in COMPONENT_NAMES.iter() {
-            header.push_str(&format!(",{}", component_name));
+            header.push_str(&format!(",{component_name}"));
         }
         header.push('\n');
         file.write_all(header.as_bytes()).await?;
-        
+
         // Write data for each bucket as a row
         for bucket_idx in 0..BUCKET_COUNT {
             // Get human-readable bucket name
@@ -139,18 +147,21 @@ impl TimeDistributionTracker {
                 11 => "10s+",
                 _ => "unknown",
             };
-            
+
             let mut row = String::from(bucket_name);
-            
+
             // Add counts for each component
             for component_idx in 0..COMPONENT_COUNT {
-                row.push_str(&format!(",{}", self.distributions[component_idx][bucket_idx]));
+                row.push_str(&format!(
+                    ",{}",
+                    self.distributions[component_idx][bucket_idx]
+                ));
             }
-            
+
             row.push('\n');
             file.write_all(row.as_bytes()).await?;
         }
-        
+
         Ok(())
     }
 }

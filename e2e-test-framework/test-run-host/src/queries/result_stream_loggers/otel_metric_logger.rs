@@ -25,7 +25,10 @@ use serde::{Deserialize, Serialize};
 
 use test_data_store::test_run_storage::TestRunQueryId;
 
-use crate::queries::{result_stream_handlers::ResultStreamRecord, result_stream_record::{ChangeEvent, QueryResultRecord}};
+use crate::{
+    common::{HandlerPayload, HandlerRecord},
+    queries::result_stream_record::{ChangeEvent, QueryResultRecord},
+};
 
 use super::{ResultStreamLogger, ResultStreamLoggerResult};
 
@@ -41,10 +44,16 @@ pub struct OtelMetricResultStreamLoggerSettings {
 }
 
 impl OtelMetricResultStreamLoggerSettings {
-    pub fn new(test_run_query_id: TestRunQueryId, config: &OtelMetricResultStreamLoggerConfig) -> anyhow::Result<Self> {
+    pub fn new(
+        test_run_query_id: TestRunQueryId,
+        config: &OtelMetricResultStreamLoggerConfig,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             test_run_query_id,
-            otel_endpoint: config.otel_endpoint.clone().unwrap_or("http://otel-collector:4317".to_string()),
+            otel_endpoint: config
+                .otel_endpoint
+                .clone()
+                .unwrap_or("http://otel-collector:4317".to_string()),
         })
     }
 }
@@ -56,10 +65,12 @@ struct BootstrapRecordProfile {
 }
 
 impl BootstrapRecordProfile {
-    pub fn new(record: &ResultStreamRecord, change: &ChangeEvent) -> Self {
+    pub fn new(record: &HandlerRecord, change: &ChangeEvent) -> Self {
         Self {
             seq: change.base.sequence,
-            time_total: record.dequeue_time_ns.saturating_sub((change.base.source_time_ms as u64) * 1_000_000)
+            time_total: record
+                .processed_time_ns
+                .saturating_sub((change.base.source_time_ms as u64) * 1_000_000),
         }
     }
 }
@@ -80,22 +91,46 @@ struct ChangeRecordProfile {
 }
 
 impl ChangeRecordProfile {
-    pub fn new(record: &ResultStreamRecord, change: &ChangeEvent) -> Self {
-
+    pub fn new(record: &HandlerRecord, change: &ChangeEvent) -> Self {
         let metadata = &change.base.metadata.as_ref().unwrap().tracking;
 
-        let record_dequeue_time_ns = record.dequeue_time_ns;
-        let time_in_query_solver = metadata.query.query_end_ns.saturating_sub(metadata.query.query_start_ns); 
-        let time_in_query_host = (metadata.query.query_end_ns.saturating_sub(metadata.query.dequeue_ns)).saturating_sub(time_in_query_solver);
+        let record_dequeue_time_ns = record.processed_time_ns;
+        let time_in_query_solver = metadata
+            .query
+            .query_end_ns
+            .saturating_sub(metadata.query.query_start_ns);
+        let time_in_query_host = (metadata
+            .query
+            .query_end_ns
+            .saturating_sub(metadata.query.dequeue_ns))
+        .saturating_sub(time_in_query_solver);
 
         Self {
             seq: change.base.sequence,
-            time_in_reactivator: metadata.source.reactivator_end_ns.saturating_sub(metadata.source.reactivator_start_ns),
-            time_in_src_change_q: metadata.source.change_router_start_ns.saturating_sub(metadata.source.reactivator_end_ns),
-            time_in_src_change_rtr: metadata.source.change_router_end_ns.saturating_sub(metadata.source.change_router_start_ns),
-            time_in_src_disp_q: metadata.source.change_dispatcher_start_ns.saturating_sub(metadata.source.change_router_end_ns),
-            time_in_src_change_disp: metadata.source.change_dispatcher_end_ns.saturating_sub(metadata.source.change_dispatcher_start_ns),
-            time_in_query_change_q: metadata.query.dequeue_ns.saturating_sub(metadata.source.change_dispatcher_end_ns),
+            time_in_reactivator: metadata
+                .source
+                .reactivator_end_ns
+                .saturating_sub(metadata.source.reactivator_start_ns),
+            time_in_src_change_q: metadata
+                .source
+                .change_router_start_ns
+                .saturating_sub(metadata.source.reactivator_end_ns),
+            time_in_src_change_rtr: metadata
+                .source
+                .change_router_end_ns
+                .saturating_sub(metadata.source.change_router_start_ns),
+            time_in_src_disp_q: metadata
+                .source
+                .change_dispatcher_start_ns
+                .saturating_sub(metadata.source.change_router_end_ns),
+            time_in_src_change_disp: metadata
+                .source
+                .change_dispatcher_end_ns
+                .saturating_sub(metadata.source.change_dispatcher_start_ns),
+            time_in_query_change_q: metadata
+                .query
+                .dequeue_ns
+                .saturating_sub(metadata.source.change_dispatcher_end_ns),
             time_in_query_host,
             time_in_query_solver,
             time_in_result_q: record_dequeue_time_ns.saturating_sub(metadata.query.query_end_ns),
@@ -123,7 +158,6 @@ struct ProfilerMetrics {
 
 impl ProfilerMetrics {
     pub fn new() -> Self {
-
         // Get a Bootstrap Record meter
         let bootstrap_rec_meter = global::meter("query-result-profiler-bootstrap-meter");
 
@@ -168,43 +202,43 @@ impl ProfilerMetrics {
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_disp_q")
             .with_description("Total time Query Result Change spent in Source Dispatch Queue")
             .with_unit(opentelemetry::metrics::Unit::new("ns"))
-            .init();      
+            .init();
 
         let change_rec_time_in_src_change_disp = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_disp")
             .with_description("Total time Query Result Change spent in Source Change Dispatcher")
             .with_unit(opentelemetry::metrics::Unit::new("ns"))
-            .init();    
+            .init();
 
         let change_rec_time_in_query_change_q = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_change_q")
             .with_description("Total time Query Result Change spent being in Query Change Queue")
             .with_unit(opentelemetry::metrics::Unit::new("ns"))
-            .init();   
+            .init();
 
         let change_rec_time_in_query_host = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_host")
             .with_description("Total time Query Result Change spent in Query Host")
             .with_unit(opentelemetry::metrics::Unit::new("ns"))
-            .init();   
+            .init();
 
         let change_rec_time_in_query_solver = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_solver")
             .with_description("Total time Query Result Change spent in Query Solver")
             .with_unit(opentelemetry::metrics::Unit::new("ns"))
-            .init();   
+            .init();
 
         let change_rec_time_in_result_q = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_result_q")
             .with_description("Total time Query Result Change spent in Query Result Queue")
             .with_unit(opentelemetry::metrics::Unit::new("ns"))
-            .init();              
+            .init();
 
         let change_rec_time_total = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_total")
             .with_description("Total time Query Result Change took to process")
             .with_unit(opentelemetry::metrics::Unit::new("ns"))
-            .init();  
+            .init();
 
         // Get a Control Record meter
         let control_rec_meter = global::meter("query-result-profiler-control-meter");
@@ -234,7 +268,7 @@ impl ProfilerMetrics {
 }
 
 #[derive(Debug, Serialize)]
-struct ProfilerSummary{
+struct ProfilerSummary {
     pub bootstrap_rec_count: usize,
     pub bootstrap_rec_time_total_avg: f64,
     pub bootstrap_rec_time_total_max: u64,
@@ -271,7 +305,6 @@ struct ProfilerSummary{
     pub change_rec_time_total_max: u64,
     pub change_rec_time_total_min: u64,
     pub control_rec_count: usize,
-
 }
 
 impl Default for ProfilerSummary {
@@ -315,7 +348,6 @@ impl Default for ProfilerSummary {
             control_rec_count: 0,
         }
     }
-    
 }
 
 #[allow(dead_code)]
@@ -328,41 +360,47 @@ pub struct OtelMetricResultStreamLogger {
 
 impl OtelMetricResultStreamLogger {
     #[allow(clippy::new_ret_no_self)]
-    pub async fn new(test_run_query_id: TestRunQueryId, cfg: &OtelMetricResultStreamLoggerConfig) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!("Creating OtelMetricResultStreamLogger for {}, from {:?}, ", test_run_query_id, cfg);
+    pub async fn new(
+        test_run_query_id: TestRunQueryId,
+        cfg: &OtelMetricResultStreamLoggerConfig,
+    ) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
+        log::debug!(
+            "Creating OtelMetricResultStreamLogger for {test_run_query_id}, from {cfg:?}, "
+        );
 
         let settings = OtelMetricResultStreamLoggerSettings::new(test_run_query_id, cfg)?;
-        log::trace!("Creating OtelMetricResultStreamLogger with settings {:?}, ", settings);
+        log::trace!("Creating OtelMetricResultStreamLogger with settings {settings:?}, ");
 
         // Initialize meter provider using pipeline
         let meter_provider = opentelemetry_otlp::new_pipeline()
             .metrics(runtime::Tokio)
-            .with_exporter(opentelemetry_otlp::new_exporter().tonic().with_endpoint(&settings.otel_endpoint) )
+            .with_exporter(
+                opentelemetry_otlp::new_exporter()
+                    .tonic()
+                    .with_endpoint(&settings.otel_endpoint),
+            )
             .with_resource(Resource::new(vec![KeyValue::new(
                 opentelemetry_semantic_conventions::resource::SERVICE_NAME,
                 "query-result-profiler",
             )]))
             .with_period(Duration::from_millis(100))
             .with_temporality_selector(DefaultTemporalitySelector::new())
-            .with_aggregation_selector(|kind: InstrumentKind| {
-                match kind {
-                    InstrumentKind::Counter
-                    | InstrumentKind::UpDownCounter
-                    | InstrumentKind::ObservableCounter
-                    | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
-                    InstrumentKind::ObservableGauge => Aggregation::LastValue,
-                    InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
-                        boundaries: vec![
-                            0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0,
-                            2500.0, 5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0, 
-                        ],
-                        record_min_max: true,
-                    },
-                }
-
+            .with_aggregation_selector(|kind: InstrumentKind| match kind {
+                InstrumentKind::Counter
+                | InstrumentKind::UpDownCounter
+                | InstrumentKind::ObservableCounter
+                | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
+                InstrumentKind::ObservableGauge => Aggregation::LastValue,
+                InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
+                    boundaries: vec![
+                        0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0,
+                        2500.0, 5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0,
+                    ],
+                    record_min_max: true,
+                },
             })
             .build()?;
-        
+
         // Set the global meter provider
         global::set_meter_provider(meter_provider.clone());
 
@@ -370,12 +408,18 @@ impl OtelMetricResultStreamLogger {
         let metrics = ProfilerMetrics::new();
 
         let metrics_attributes = vec![
-            KeyValue::new("test_id", settings.test_run_query_id.test_run_id.test_id.to_string()),
-            KeyValue::new("test_run_id", settings.test_run_query_id.test_run_id.to_string()),
+            KeyValue::new(
+                "test_id",
+                settings.test_run_query_id.test_run_id.test_id.to_string(),
+            ),
+            KeyValue::new(
+                "test_run_id",
+                settings.test_run_query_id.test_run_id.to_string(),
+            ),
             KeyValue::new("test_run_query_id", settings.test_run_query_id.to_string()),
         ];
 
-        Ok(Box::new( Self { 
+        Ok(Box::new(Self {
             meter_provider,
             metrics,
             metrics_attributes,
@@ -395,35 +439,69 @@ impl ResultStreamLogger for OtelMetricResultStreamLogger {
             output_folder_path: None,
         })
     }
-    
-    async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {
 
-        match &record.record_data {
-            QueryResultRecord::Change(change) => {
-                if change.base.metadata.is_some() {
-                    let profile = ChangeRecordProfile::new(record, change);
+    async fn log_handler_record(&mut self, record: &HandlerRecord) -> anyhow::Result<()> {
+        // Only process ResultStream payloads
+        if let HandlerPayload::ResultStream { query_result } = &record.payload {
+            match query_result {
+                QueryResultRecord::Change(change) => {
+                    if change.base.metadata.is_some() {
+                        let profile = ChangeRecordProfile::new(record, change);
 
-                    self.metrics.change_rec_count.add(1, &self.metrics_attributes);     
-                    self.metrics.change_rec_time_in_reactivator.record(profile.time_in_reactivator as f64, &self.metrics_attributes);        
-                    self.metrics.change_rec_time_in_src_change_q.record(profile.time_in_src_change_q as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_src_change_rtr.record(profile.time_in_src_change_rtr as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_src_disp_q.record(profile.time_in_src_disp_q as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_src_change_disp.record(profile.time_in_src_change_disp as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_query_change_q.record(profile.time_in_query_change_q as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_query_host.record(profile.time_in_query_host as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_query_solver.record(profile.time_in_query_solver as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_in_result_q.record(profile.time_in_result_q as f64, &self.metrics_attributes);
-                    self.metrics.change_rec_time_total.record(profile.time_total as f64, &self.metrics_attributes);    
+                        self.metrics
+                            .change_rec_count
+                            .add(1, &self.metrics_attributes);
+                        self.metrics
+                            .change_rec_time_in_reactivator
+                            .record(profile.time_in_reactivator as f64, &self.metrics_attributes);
+                        self.metrics.change_rec_time_in_src_change_q.record(
+                            profile.time_in_src_change_q as f64,
+                            &self.metrics_attributes,
+                        );
+                        self.metrics.change_rec_time_in_src_change_rtr.record(
+                            profile.time_in_src_change_rtr as f64,
+                            &self.metrics_attributes,
+                        );
+                        self.metrics
+                            .change_rec_time_in_src_disp_q
+                            .record(profile.time_in_src_disp_q as f64, &self.metrics_attributes);
+                        self.metrics.change_rec_time_in_src_change_disp.record(
+                            profile.time_in_src_change_disp as f64,
+                            &self.metrics_attributes,
+                        );
+                        self.metrics.change_rec_time_in_query_change_q.record(
+                            profile.time_in_query_change_q as f64,
+                            &self.metrics_attributes,
+                        );
+                        self.metrics
+                            .change_rec_time_in_query_host
+                            .record(profile.time_in_query_host as f64, &self.metrics_attributes);
+                        self.metrics.change_rec_time_in_query_solver.record(
+                            profile.time_in_query_solver as f64,
+                            &self.metrics_attributes,
+                        );
+                        self.metrics
+                            .change_rec_time_in_result_q
+                            .record(profile.time_in_result_q as f64, &self.metrics_attributes);
+                        self.metrics
+                            .change_rec_time_total
+                            .record(profile.time_total as f64, &self.metrics_attributes);
+                    } else {
+                        let profile = BootstrapRecordProfile::new(record, change);
 
-                } else {
-                    let profile = BootstrapRecordProfile::new(record, change);
-
-                    self.metrics.bootstrap_rec_count.add(1, &self.metrics_attributes);  
-                    self.metrics.bootstrap_rec_time_total.record(profile.time_total as f64, &self.metrics_attributes);               
+                        self.metrics
+                            .bootstrap_rec_count
+                            .add(1, &self.metrics_attributes);
+                        self.metrics
+                            .bootstrap_rec_time_total
+                            .record(profile.time_total as f64, &self.metrics_attributes);
+                    }
                 }
-            },
-            QueryResultRecord::Control(_) => {
-                self.metrics.control_rec_count.add(1, &self.metrics_attributes);                 
+                QueryResultRecord::Control(_) => {
+                    self.metrics
+                        .control_rec_count
+                        .add(1, &self.metrics_attributes);
+                }
             }
         }
 

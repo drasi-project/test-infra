@@ -52,8 +52,8 @@ impl TryFrom<&String> for SourceChangeEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceChangeEventPayload {
     pub source: SourceChangeEventSourceInfo,
-    pub before: SourceChangeEventBefore, 
-    pub after: SourceChangeEventAfter,  
+    pub before: SourceChangeEventBefore,
+    pub after: SourceChangeEventAfter,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -66,16 +66,16 @@ pub struct SourceChangeEventSourceInfo {
 
 impl std::fmt::Display for SourceChangeEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-
         match serde_json::to_string(self) {
             Ok(json_data) => {
-                let json_data_unescaped = json_data
-                    .replace("\\\"", "\"") 
-                    .replace("\\'", "'"); 
+                let json_data_unescaped = json_data.replace("\\\"", "\"").replace("\\'", "'");
 
-                write!(f, "{}", json_data_unescaped)
-            },
-            Err(e) => write!(f, "Error serializing SourceChangeEvent: {:?}. Error: {}", self, e)
+                write!(f, "{json_data_unescaped}")
+            }
+            Err(e) => write!(
+                f,
+                "Error serializing SourceChangeEvent: {self:?}. Error: {e}"
+            ),
         }
     }
 }
@@ -191,7 +191,7 @@ pub struct NodeRecord {
     pub id: String,
     pub labels: Vec<String>,
     #[serde(default)]
-    pub properties: serde_json::Value
+    pub properties: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -201,7 +201,7 @@ pub struct RelationRecord {
     pub start_id: String,
     pub start_label: Option<String>,
     pub end_id: String,
-    pub end_label: Option<String>,    
+    pub end_label: Option<String>,
     #[serde(default)]
-    pub properties: serde_json::Value
+    pub properties: serde_json::Value,
 }

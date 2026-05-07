@@ -1,0 +1,78 @@
+# Copyright 2025 The Drasi Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This file is for use with the REST Client extension for Visual Studio Code to make it easy to manually 
+# test the Test Service Web API.
+# https://marketplace.visualstudio.com/items?itemName=humao.rest-client
+
+@hostname = localhost
+@port = 63123
+@repo_id = drasi_lib_dev_repo
+@test_id = building_comfort
+@test_run_id = test_run_001
+@drasi_lib_instance_id = internal-drasi-lib
+
+@source_id = facilities-db
+
+@query_id = all-rooms
+
+@reaction_id = building-comfort-alerts
+
+### Homepage
+GET http://{{hostname}}:{{port}}
+
+### GET LIST of test run drasi-lib instances
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances
+
+### GET STATE of test run drasi-lib instance
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}
+
+### START test run drasi-lib instance
+POST http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/start
+Content-Type: application/json
+
+### PAUSE test run drasi-lib instance
+POST http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/pause
+Content-Type: application/json
+
+### STOP test run drasi-lib instance
+POST http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/stop
+Content-Type: application/json
+
+### GET LIST of test run drasi-lib instance sources
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/sources
+
+### GET STATE of test run drasi-lib instance source
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/sources/{{source_id}}
+
+### GET LIST of test run drasi-lib instance queries
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/queries
+
+### GET STATE of test run drasi-lib instance query
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/queries/{{query_id}}
+
+### GET RESULT of test run drasi-lib instance query
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/queries/{{query_id}}/results
+
+### START test run drasi-lib instance query
+POST http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/queries/{{query_id}}/start
+
+### STOP test run drasi-lib instance query
+POST http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/queries/{{query_id}}/stop
+
+### GET LIST of test run drasi-lib instance reactions
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/reactions
+
+### GET STATE of test run drasi-lib instance reaction
+GET http://{{hostname}}:{{port}}/test_run_host/drasi_lib_instances/{{repo_id}}.{{test_id}}.{{test_run_id}}.{{drasi_lib_instance_id}}/reactions/{{reaction_id}}

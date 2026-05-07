@@ -48,14 +48,29 @@ jobs:
       - name: Install specific Rust version
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.83.0 # Pin to a specific Rust version
+          toolchain: 1.88.0 # Pin to match e2e-test-framework/rust-toolchain.toml
           override: true
 
       - name: Install Clippy
         run: rustup component add clippy rustfmt
 
-      - name: Install protobuf-compiler
-        run: sudo apt-get install -y protobuf-compiler
+      # test-run-host enables drasi-core's "middleware-jq" feature, which pulls
+      # in jq-sys; jq-sys's build.rs links against the system libjq + libonig.
+      # Mirror drasi-project/drasi-server/Dockerfile's build deps.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libjq-dev \
+            libonig-dev \
+            libprotobuf-dev \
+            protobuf-compiler \
+            cmake \
+            clang \
+            libclang-dev
 
       # Cache Cargo dependencies
       - name: Cache Cargo registry
@@ -71,4 +86,8 @@ jobs:
       - name: Lint check
         run: |
             cd e2e-test-framework
+            # Debian's libjq-dev ships no pkg-config file, so jq-sys can't
+            # autodetect the install path. Same trick as the test-service
+            # Dockerfile and drasi-server's build.
+            export JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1))
             make lint-check

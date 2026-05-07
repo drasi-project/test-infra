@@ -14,16 +14,19 @@
 
 use async_trait::async_trait;
 use hex;
-use uuid::Uuid;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
+use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
 use serde::Serialize;
+use uuid::Uuid;
 
-use test_data_store::{scripts::SourceChangeEvent, test_repo_storage::models::RedisStreamSourceChangeDispatcherDefinition, test_run_storage::TestRunSourceStorage};
+use test_data_store::{
+    scripts::SourceChangeEvent,
+    test_repo_storage::models::RedisStreamSourceChangeDispatcherDefinition,
+    test_run_storage::TestRunSourceStorage,
+};
 
 use super::SourceChangeDispatcher;
-
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceChangeQueueEvent {
@@ -49,7 +52,7 @@ impl SourceChangeQueueEvent {
     pub fn new(
         data: Vec<SourceChangeEvent>,
         id: String,
-        source_id: String,        
+        source_id: String,
         time: String,
         traceid: String,
         traceparent: String,
@@ -79,11 +82,17 @@ pub struct RedisStreamSourceChangeDispatcherSettings {
 }
 
 impl RedisStreamSourceChangeDispatcherSettings {
-    pub fn new(def: &RedisStreamSourceChangeDispatcherDefinition, source_id: String) -> anyhow::Result<Self> {
+    pub fn new(
+        def: &RedisStreamSourceChangeDispatcherDefinition,
+        source_id: String,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             host: def.host.clone().unwrap_or("127.0.0.1".to_string()),
             port: def.port.unwrap_or(6379),
-            stream_name: def.stream_name.clone().unwrap_or(format!("{}-change", source_id)),
+            stream_name: def
+                .stream_name
+                .clone()
+                .unwrap_or(format!("{source_id}-change")),
         })
     }
 }
@@ -96,31 +105,34 @@ pub struct RedisStreamSourceChangeDispatcher {
 }
 
 impl RedisStreamSourceChangeDispatcher {
-    pub async fn new(def: &RedisStreamSourceChangeDispatcherDefinition, output_storage: &TestRunSourceStorage) -> anyhow::Result<Self> {
-        log::debug!("Creating RedisStreamSourceChangeDispatcher from {:?}", def);
+    pub async fn new(
+        def: &RedisStreamSourceChangeDispatcherDefinition,
+        output_storage: &TestRunSourceStorage,
+    ) -> anyhow::Result<Self> {
+        log::debug!("Creating RedisStreamSourceChangeDispatcher from {def:?}");
 
         let source_id = output_storage.id.test_source_id.clone();
         let settings = RedisStreamSourceChangeDispatcherSettings::new(def, source_id)?;
-        log::trace!("Creating RedisStreamSourceChangeDispatcher with settings {:?}", settings);
+        log::trace!("Creating RedisStreamSourceChangeDispatcher with settings {settings:?}");
 
         let redis_url = format!("redis://{}:{}", &settings.host, &settings.port);
         let client = match redis::Client::open(redis_url) {
             Ok(client) => {
                 log::debug!("Created Redis Client");
                 client
-            },
+            }
             Err(e) => {
-                anyhow::bail!("Failed to create Redis client: {:?}", e);
+                anyhow::bail!("Failed to create Redis client: {e:?}");
             }
         };
-    
+
         let connection = match client.get_multiplexed_async_connection().await {
             Ok(con) => {
                 log::debug!("Connected to Redis");
                 con
-            },
+            }
             Err(e) => {
-                anyhow::bail!("Failed to connect to Redis: {:?}", e);
+                anyhow::bail!("Failed to connect to Redis: {e:?}");
             }
         };
 
@@ -142,34 +154,40 @@ impl SourceChangeDispatcher for RedisStreamSourceChangeDispatcher {
         Ok(())
     }
 
-    async fn dispatch_source_change_events(&mut self, events: Vec<&SourceChangeEvent>) -> anyhow::Result<()> {
-        log::trace!("Dispatching {} source change events to Redis stream", events.len());
-                
+    async fn dispatch_source_change_events(
+        &mut self,
+        events: Vec<&SourceChangeEvent>,
+    ) -> anyhow::Result<()> {
+        log::trace!(
+            "Dispatching {} source change events to Redis stream",
+            events.len()
+        );
+
         // Generate trace ID (16 random bytes for a root span)
         let mut trace_id_bytes = [0u8; 16];
         self.rng.fill(&mut trace_id_bytes);
         let trace_id_hex = hex::encode(trace_id_bytes);
-        
+
         // Generate span ID (8 random bytes)
         let mut span_id_bytes = [0u8; 8];
         self.rng.fill(&mut span_id_bytes);
         let span_id_hex = hex::encode(span_id_bytes);
-        
+
         // Format traceparent according to W3C trace context spec
         // Format: 00-<trace-id>-<span-id>-01
         // where 00 is version and 01 is flags (sampled)
-        let traceparent = format!("00-{}-{}-01", trace_id_hex, span_id_hex);
-        
+        let traceparent = format!("00-{trace_id_hex}-{span_id_hex}-01");
+
         // For a root span, traceid follows the same format in this schema
         let traceid = traceparent.clone();
-        
+
         // Generate a unique ID for the event
         let id = Uuid::new_v4().to_string();
-        
+
         // Get current time in ISO 8601 format
         let now = chrono::Utc::now();
         let time = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-                
+
         let q_event = SourceChangeQueueEvent::new(
             events.iter().cloned().cloned().collect(),
             id,
@@ -178,7 +196,7 @@ impl SourceChangeDispatcher for RedisStreamSourceChangeDispatcher {
             traceid,
             traceparent,
         );
-                
+
         let q_event_json = serde_json::to_string(&q_event)?;
 
         let conn = self.connection.as_mut().unwrap();
@@ -187,8 +205,8 @@ impl SourceChangeDispatcher for RedisStreamSourceChangeDispatcher {
             .xadd(&self.settings.stream_name, "*", &[("data", &q_event_json)])
             .await?;
 
-        log::trace!("Dispatched source change event to Redis Stream: {}", result);
-        
+        log::trace!("Dispatched source change event to Redis Stream: {result}");
+
         Ok(())
     }
 }

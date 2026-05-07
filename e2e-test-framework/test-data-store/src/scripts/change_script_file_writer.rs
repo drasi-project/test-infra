@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fs::File, io::{BufWriter, Write}, path::PathBuf};
 use serde_json::to_string;
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+    path::PathBuf,
+};
 
 use super::ChangeScriptRecord;
 
@@ -44,9 +48,13 @@ pub struct ChangeScriptWriter {
 
 impl ChangeScriptWriter {
     pub fn new(settings: ChangeScriptWriterSettings) -> anyhow::Result<Self> {
-        log::debug!("Creating new ChangeScriptWriter with settings: {:?}", settings);
+        log::debug!("Creating new ChangeScriptWriter with settings: {settings:?}");
 
-        let ChangeScriptWriterSettings { folder_path, script_name, max_size } = settings;
+        let ChangeScriptWriterSettings {
+            folder_path,
+            script_name,
+            max_size,
+        } = settings;
 
         let mut writer = ChangeScriptWriter {
             folder_path: folder_path.join(&script_name),
@@ -67,8 +75,10 @@ impl ChangeScriptWriter {
 
     pub fn write_record(&mut self, record: &ChangeScriptRecord) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
-            let record_str = to_string(record).map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
-            writeln!(writer, "{}", record_str).map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
+            let record_str = to_string(record)
+                .map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
+            writeln!(writer, "{record_str}")
+                .map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
 
             self.current_file_record_count += 1;
 
@@ -83,15 +93,23 @@ impl ChangeScriptWriter {
     fn open_next_file(&mut self) -> anyhow::Result<()> {
         // If there is a current writer, flush it and close it.
         if let Some(writer) = &mut self.current_writer {
-            writer.flush().map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
+            writer
+                .flush()
+                .map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
         }
 
         // Construct the next file name using the folder path as a base, the script file name, and the next file index.
         // The file index is used to create a 5 digit zero-padded number to ensure the files are sorted correctly.
-        let file_path = format!("{}/{}_{:05}.jsonl", self.folder_path.to_string_lossy(), self.script_file_name, self.next_file_index);
+        let file_path = format!(
+            "{}/{}_{:05}.jsonl",
+            self.folder_path.to_string_lossy(),
+            self.script_file_name,
+            self.next_file_index
+        );
 
         // Create the file and open it for writing
-        let file = File::create(&file_path).map_err(|_| ChangeScriptWriterError::CantOpenFile(file_path.clone()))?;
+        let file = File::create(&file_path)
+            .map_err(|_| ChangeScriptWriterError::CantOpenFile(file_path.clone()))?;
         self.current_writer = Some(BufWriter::new(file));
 
         // Increment the file index and record count
@@ -104,7 +122,9 @@ impl ChangeScriptWriter {
 
     pub fn close(&mut self) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
-            writer.flush().map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
+            writer
+                .flush()
+                .map_err(|e| ChangeScriptWriterError::FileWriteError(e.to_string()))?;
         }
         self.current_writer = None;
         Ok(())
@@ -113,7 +133,7 @@ impl ChangeScriptWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;    
+    use std::fs;
     use tempfile::tempdir;
 
     use crate::scripts::CommentRecord;
@@ -136,7 +156,9 @@ mod tests {
         let mut writer = ChangeScriptWriter::new(writer_settings).unwrap();
 
         for i in 0..12 {
-            let record = ChangeScriptRecord::Comment(CommentRecord { comment: format!("record_{}", i) });
+            let record = ChangeScriptRecord::Comment(CommentRecord {
+                comment: format!("record_{i}"),
+            });
             writer.write_record(&record).unwrap();
         }
 
@@ -163,8 +185,11 @@ mod tests {
                 let record: ChangeScriptRecord = serde_json::from_str(line).unwrap();
                 match record {
                     ChangeScriptRecord::Comment(comment) => {
-                        assert_eq!(comment.comment, format!("record_{}", i * max_size as usize + j));
-                    },
+                        assert_eq!(
+                            comment.comment,
+                            format!("record_{}", i * max_size as usize + j)
+                        );
+                    }
                     _ => panic!("Unexpected record type"),
                 }
             }

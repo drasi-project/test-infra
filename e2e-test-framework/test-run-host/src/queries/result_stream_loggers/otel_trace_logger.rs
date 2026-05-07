@@ -22,7 +22,7 @@ use tracing_subscriber::{layer::SubscriberExt, Registry};
 
 use test_data_store::test_run_storage::TestRunQueryId;
 
-use crate::queries::result_stream_handlers::ResultStreamRecord;
+use crate::common::{HandlerPayload, HandlerRecord};
 
 use super::{ResultStreamLogger, ResultStreamLoggerResult};
 
@@ -38,9 +38,15 @@ pub struct OtelTraceResultStreamLoggerSettings {
 }
 
 impl OtelTraceResultStreamLoggerSettings {
-    pub fn new(test_run_query_id: TestRunQueryId, def: &OtelTraceResultStreamLoggerConfig) -> anyhow::Result<Self> {
+    pub fn new(
+        test_run_query_id: TestRunQueryId,
+        def: &OtelTraceResultStreamLoggerConfig,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
-            otel_endpoint: def.otel_endpoint.clone().unwrap_or("http://otel-collector:4317".to_string()),
+            otel_endpoint: def
+                .otel_endpoint
+                .clone()
+                .unwrap_or("http://otel-collector:4317".to_string()),
             test_run_query_id,
         })
     }
@@ -53,11 +59,14 @@ pub struct OtelTraceResultStreamLogger {
 
 impl OtelTraceResultStreamLogger {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(test_run_query_id: TestRunQueryId, def: &OtelTraceResultStreamLoggerConfig) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
-        log::debug!("Creating OtelTraceResultStreamLogger for {} from {:?}, ", test_run_query_id, def);
+    pub fn new(
+        test_run_query_id: TestRunQueryId,
+        def: &OtelTraceResultStreamLoggerConfig,
+    ) -> anyhow::Result<Box<dyn ResultStreamLogger + Send + Sync>> {
+        log::debug!("Creating OtelTraceResultStreamLogger for {test_run_query_id} from {def:?}, ");
 
         let settings = OtelTraceResultStreamLoggerSettings::new(test_run_query_id, def)?;
-        log::trace!("Creating OtelTraceResultStreamLogger with settings {:?}, ", settings);
+        log::trace!("Creating OtelTraceResultStreamLogger with settings {settings:?}, ");
 
         let batch_config = BatchConfig::default()
             .with_max_queue_size(16384) // Increase queue size
@@ -73,10 +82,12 @@ impl OtelTraceResultStreamLogger {
                     .with_endpoint(settings.otel_endpoint.clone()),
             )
             .with_trace_config(
-                opentelemetry_sdk::trace::config().with_resource(Resource::new(vec![KeyValue::new(
-                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                    format!("drasi-query-result-observer-{}", settings.test_run_query_id),
-                )])),
+                opentelemetry_sdk::trace::config().with_resource(Resource::new(vec![
+                    KeyValue::new(
+                        opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                        format!("drasi-query-result-observer-{}", settings.test_run_query_id),
+                    ),
+                ])),
             )
             .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 
@@ -90,10 +101,10 @@ impl OtelTraceResultStreamLogger {
 
         Ok(Box::new(Self {
             settings,
-            // trace_propagator: TraceContextPropagator::new(), 
-        }))        
+            // trace_propagator: TraceContextPropagator::new(),
+        }))
     }
-}  
+}
 
 #[async_trait]
 impl ResultStreamLogger for OtelTraceResultStreamLogger {
@@ -106,21 +117,30 @@ impl ResultStreamLogger for OtelTraceResultStreamLogger {
         })
     }
 
-    async fn log_result_stream_record(&mut self, record: &ResultStreamRecord) -> anyhow::Result<()> {
-        create_span(&self.settings, record);
+    async fn log_handler_record(&mut self, record: &HandlerRecord) -> anyhow::Result<()> {
+        // Only process ResultStream payloads
+        if let HandlerPayload::ResultStream { .. } = &record.payload {
+            create_span(&self.settings, record);
+        }
         Ok(())
     }
 }
 
-fn create_span(settings: &OtelTraceResultStreamLoggerSettings, record: &ResultStreamRecord) {
-
+fn create_span(settings: &OtelTraceResultStreamLoggerSettings, record: &HandlerRecord) {
     // Extract the context using the API's global propagator
-    let parent_context = opentelemetry_api::global::get_text_map_propagator(|propagator| propagator.extract(record));
+    let parent_context =
+        opentelemetry_api::global::get_text_map_propagator(|propagator| propagator.extract(record));
 
     let span = tracing::span!(tracing::Level::INFO, "query_result");
     span.set_parent(parent_context);
-    span.set_attribute("test_id", settings.test_run_query_id.test_run_id.test_id.to_string());
-    span.set_attribute("test_run_id", settings.test_run_query_id.test_run_id.to_string());
+    span.set_attribute(
+        "test_id",
+        settings.test_run_query_id.test_run_id.test_id.to_string(),
+    );
+    span.set_attribute(
+        "test_run_id",
+        settings.test_run_query_id.test_run_id.to_string(),
+    );
     span.set_attribute("test_run_query_id", settings.test_run_query_id.to_string());
     let _ = span.enter();
 }

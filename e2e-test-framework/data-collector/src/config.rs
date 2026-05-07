@@ -52,12 +52,10 @@ pub enum QueryResultEventRecorderConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ConsoleQueryResultEventRecorderConfig {
-}
+pub struct ConsoleQueryResultEventRecorderConfig {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JsonlFileQueryResultEventRecorderConfig {
-}
+pub struct JsonlFileQueryResultEventRecorderConfig {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -67,12 +65,10 @@ pub enum QueryResultSetLoggerConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ConsoleQueryResultSetLoggerConfig {
-}
+pub struct ConsoleQueryResultSetLoggerConfig {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JsonlFileQueryResultSetLoggerConfig {
-}
+pub struct JsonlFileQueryResultSetLoggerConfig {}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DataCollectionSourceConfig {
@@ -83,7 +79,9 @@ pub struct DataCollectionSourceConfig {
     pub bootstrap_data_recorder: Option<SourceBootstrapDataRecorderConfig>,
     pub source_change_recorder: Option<SourceChangeRecorderConfig>,
 }
-fn default_start_immediately() -> bool { false }
+fn default_start_immediately() -> bool {
+    false
+}
 
 impl Default for DataCollectionSourceConfig {
     fn default() -> Self {
@@ -97,8 +95,7 @@ impl Default for DataCollectionSourceConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceBootstrapDataRecorderConfig
-{
+pub struct SourceBootstrapDataRecorderConfig {
     pub node_labels: Option<Vec<String>>,
     pub relation_labels: Option<Vec<String>>,
 }

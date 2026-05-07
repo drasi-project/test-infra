@@ -17,15 +17,31 @@ use std::fmt;
 use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 
+use query_result_observer::{
+    QueryResultObserver, QueryResultObserverCommandResponse, QueryResultObserverExternalState,
+};
 use result_stream_loggers::ResultStreamLoggerConfig;
-use query_result_observer::{QueryResultObserver, QueryResultObserverCommandResponse, QueryResultObserverExternalState};
-use test_data_store::{test_repo_storage::models::{StopTriggerDefinition, TestQueryDefinition}, test_run_storage::{ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId, TestRunQueryStorage}};
+use test_data_store::{
+    test_repo_storage::models::{StopTriggerDefinition, TestQueryDefinition},
+    test_run_storage::{
+        ParseTestRunIdError, ParseTestRunQueryIdError, TestRunId, TestRunQueryId,
+        TestRunQueryStorage,
+    },
+};
 
+pub mod query_output_handler;
 pub mod query_result_observer;
-mod result_stream_handlers;
+pub mod result_stream_handlers;
 pub mod result_stream_loggers;
-mod result_stream_record;
-mod stop_triggers;
+pub mod result_stream_record;
+pub mod stop_triggers;
+
+// Re-export commonly used types from query_output_handler
+pub use query_output_handler::{
+    create_query_handler, QueryControlSignal, QueryHandlerError, QueryHandlerMessage,
+    QueryHandlerPayload, QueryHandlerRecord, QueryHandlerStatus, QueryHandlerType,
+    QueryOutputHandler,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunQueryOverrides {
@@ -34,28 +50,43 @@ pub struct TestRunQueryOverrides {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TestRunQueryConfig {
-    #[serde(default="default_start_immediately")]
-    pub start_immediately: bool,    
-    pub test_id: String,
-    pub test_repo_id: String,
-    pub test_run_id: Option<String>,
+    #[serde(default = "default_start_immediately")]
+    pub start_immediately: bool,
     pub test_query_id: String,
     pub test_run_overrides: Option<TestRunQueryOverrides>,
     #[serde(default)]
     pub loggers: Vec<ResultStreamLoggerConfig>,
+    // Legacy fields for backward compatibility - will be set by TestRun
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub test_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub test_repo_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub test_run_id: Option<String>,
 }
-fn default_start_immediately() -> bool { false }
+fn default_start_immediately() -> bool {
+    false
+}
 
 impl TryFrom<&TestRunQueryConfig> for TestRunId {
     type Error = ParseTestRunIdError;
 
     fn try_from(value: &TestRunQueryConfig) -> Result<Self, Self::Error> {
-        Ok(TestRunId::new(
-            &value.test_repo_id, 
-            &value.test_id, 
-            value.test_run_id
-                .as_deref()
-                .unwrap_or(&chrono::Utc::now().format("%Y%m%d%H%M%S").to_string())))
+        let test_repo_id = value.test_repo_id.as_ref().ok_or_else(|| {
+            ParseTestRunIdError::InvalidValues("test_repo_id is required".to_string())
+        })?;
+        let test_id = value
+            .test_id
+            .as_ref()
+            .ok_or_else(|| ParseTestRunIdError::InvalidValues("test_id is required".to_string()))?;
+        let default_run_id = chrono::Utc::now().format("%Y%m%d%H%M%S").to_string();
+        let test_run_id = value
+            .test_run_id
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or(default_run_id);
+
+        Ok(TestRunId::new(test_repo_id, test_id, &test_run_id))
     }
 }
 
@@ -64,9 +95,7 @@ impl TryFrom<&TestRunQueryConfig> for TestRunQueryId {
 
     fn try_from(value: &TestRunQueryConfig) -> Result<Self, Self::Error> {
         match TestRunId::try_from(value) {
-            Ok(test_run_id) => {
-                Ok(TestRunQueryId::new(&test_run_id, &value.test_query_id))
-            }
+            Ok(test_run_id) => Ok(TestRunQueryId::new(&test_run_id, &value.test_query_id)),
             Err(e) => Err(ParseTestRunQueryIdError::InvalidValues(e.to_string())),
         }
     }
@@ -83,13 +112,16 @@ impl fmt::Display for TestRunQueryConfig {
 pub struct TestRunQueryDefinition {
     pub id: TestRunQueryId,
     pub loggers: Vec<ResultStreamLoggerConfig>,
-    pub start_immediately: bool,    
+    pub start_immediately: bool,
     pub test_query_definition: TestQueryDefinition,
     pub test_run_overrides: Option<TestRunQueryOverrides>,
 }
 
 impl TestRunQueryDefinition {
-    pub fn new( test_run_query_config: TestRunQueryConfig, test_query_definition: TestQueryDefinition) -> anyhow::Result<Self> {
+    pub fn new(
+        test_run_query_config: TestRunQueryConfig,
+        test_query_definition: TestQueryDefinition,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             id: TestRunQueryId::try_from(&test_run_query_config)?,
             loggers: test_run_query_config.loggers,
@@ -116,17 +148,20 @@ pub struct TestRunQuery {
 }
 
 impl TestRunQuery {
-    pub async fn new(definition: TestRunQueryDefinition, output_storage: TestRunQueryStorage) -> anyhow::Result<Self> {
-
+    pub async fn new(
+        definition: TestRunQueryDefinition,
+        output_storage: TestRunQueryStorage,
+    ) -> anyhow::Result<Self> {
         let query_result_observer = QueryResultObserver::new(
             definition.id.clone(),
-            definition.test_query_definition.clone(), 
+            definition.test_query_definition.clone(),
             output_storage,
             definition.loggers,
-            definition.test_run_overrides
-        ).await?;
+            definition.test_run_overrides,
+        )
+        .await?;
 
-        let trr = Self { 
+        let trr = Self {
             id: definition.id.clone(),
             query_result_observer,
             start_immediately: definition.start_immediately,
@@ -147,23 +182,33 @@ impl TestRunQuery {
         })
     }
 
-    pub async fn get_query_result_observer_state(&self) -> anyhow::Result<QueryResultObserverExternalState> {
+    pub async fn get_query_result_observer_state(
+        &self,
+    ) -> anyhow::Result<QueryResultObserverExternalState> {
         Ok(self.query_result_observer.get_state().await?.state)
     }
 
-    pub async fn pause_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+    pub async fn pause_query_result_observer(
+        &self,
+    ) -> anyhow::Result<QueryResultObserverCommandResponse> {
         self.query_result_observer.pause().await
     }
 
-    pub async fn reset_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+    pub async fn reset_query_result_observer(
+        &self,
+    ) -> anyhow::Result<QueryResultObserverCommandResponse> {
         self.query_result_observer.reset().await
-    }    
+    }
 
-    pub async fn start_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+    pub async fn start_query_result_observer(
+        &self,
+    ) -> anyhow::Result<QueryResultObserverCommandResponse> {
         self.query_result_observer.start().await
     }
 
-    pub async fn stop_query_result_observer(&self) -> anyhow::Result<QueryResultObserverCommandResponse> {
+    pub async fn stop_query_result_observer(
+        &self,
+    ) -> anyhow::Result<QueryResultObserverCommandResponse> {
         self.query_result_observer.stop().await
     }
 }

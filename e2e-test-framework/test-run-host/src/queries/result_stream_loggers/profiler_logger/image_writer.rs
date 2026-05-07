@@ -19,17 +19,17 @@ use image::{Rgb, RgbImage};
 use super::ChangeRecordProfile;
 
 const PROFILE_COLORS: [Rgb<u8>; 11] = [
-    Rgb([230, 25, 75]),    // Red - reactivator
-    Rgb([60, 180, 75]),    // Green - source change queue
-    Rgb([255, 225, 25]),   // Yellow - source change router
-    Rgb([0, 130, 200]),    // Blue - source dispatch queue
-    Rgb([245, 130, 48]),   // Orange - source change dispatcher
-    Rgb([255, 105, 180]),  // Pink - query pub api
-    Rgb([145, 30, 180]),   // Purple - query change queue
-    Rgb([70, 240, 240]),   // Cyan - query host
-    Rgb([240, 50, 230]),   // Magenta - query solver
-    Rgb([210, 245, 60]),   // Lime - result queue
-    Rgb([128, 128, 128]),  // Gray - shortfall
+    Rgb([230, 25, 75]),   // Red - reactivator
+    Rgb([60, 180, 75]),   // Green - source change queue
+    Rgb([255, 225, 25]),  // Yellow - source change router
+    Rgb([0, 130, 200]),   // Blue - source dispatch queue
+    Rgb([245, 130, 48]),  // Orange - source change dispatcher
+    Rgb([255, 105, 180]), // Pink - query pub api
+    Rgb([145, 30, 180]),  // Purple - query change queue
+    Rgb([70, 240, 240]),  // Cyan - query host
+    Rgb([240, 50, 230]),  // Magenta - query solver
+    Rgb([210, 245, 60]),  // Lime - result queue
+    Rgb([128, 128, 128]), // Gray - shortfall
 ];
 
 #[allow(dead_code)]
@@ -47,22 +47,23 @@ pub struct ProfileImageWriter {
 
 impl ProfileImageWriter {
     pub async fn new(folder_path: PathBuf, file_name: String, width: u32) -> anyhow::Result<Self> {
-
         Ok(Self {
-            all_file_abs_path: folder_path.join(format!("{}_all_abs.png", file_name)),
-            all_file_rel_path: folder_path.join(format!("{}_all_rel.png", file_name)),
-            drasi_only_file_abs_path: folder_path.join(format!("{}_drasi_only_abs.png", file_name)),
-            drasi_only_file_rel_path: folder_path.join(format!("{}_drasi_only_rel.png", file_name)),
+            all_file_abs_path: folder_path.join(format!("{file_name}_all_abs.png")),
+            all_file_rel_path: folder_path.join(format!("{file_name}_all_rel.png")),
+            drasi_only_file_abs_path: folder_path.join(format!("{file_name}_drasi_only_abs.png")),
+            drasi_only_file_rel_path: folder_path.join(format!("{file_name}_drasi_only_rel.png")),
             image_times: Vec::new(),
             max_total_time: 0,
             max_drasi_only_time: 0,
             record_count: 0,
-            width
+            width,
         })
     }
 
-    pub async fn add_change_profile(&mut self, profile: &ChangeRecordProfile) -> anyhow::Result<()> {
-        
+    pub async fn add_change_profile(
+        &mut self,
+        profile: &ChangeRecordProfile,
+    ) -> anyhow::Result<()> {
         let mut times = [
             profile.time_in_reactivator,
             profile.time_in_src_change_q,
@@ -74,9 +75,9 @@ impl ProfileImageWriter {
             profile.time_in_query_host,
             profile.time_in_query_solver,
             profile.time_in_result_q,
-            0,  // shortfall
+            0, // shortfall
             profile.time_total,
-            0   // total for drasi only components
+            0, // total for drasi only components
         ];
 
         let drasi_sum = times[0] + times[2] + times[4] + times[5] + times[7] + times[8];
@@ -102,9 +103,8 @@ impl ProfileImageWriter {
     }
 
     async fn generate_all_image(&self) -> anyhow::Result<()> {
-
         let header_height: u32 = 20;
-        let header_span_width = self.width / PROFILE_COLORS.len() as u32; 
+        let header_span_width = self.width / PROFILE_COLORS.len() as u32;
         let height = self.record_count as u32 + header_height;
         let times_per_profile: usize = PROFILE_COLORS.len() + 2;
         let mut img_abs = RgbImage::new(self.width, height);
@@ -129,7 +129,6 @@ impl ProfileImageWriter {
             .chunks(times_per_profile)
             .enumerate()
             .for_each(|(y, raw_times)| {
-
                 // Absolute
                 let mut x = 0;
                 let mut pixels_per_unit = self.width as f64 / self.max_total_time as f64;
@@ -141,7 +140,11 @@ impl ProfileImageWriter {
                         if span_width > 0 {
                             for px in x..x + span_width {
                                 if px < self.width {
-                                    img_abs.put_pixel(px, y as u32 + header_height, PROFILE_COLORS[i]);
+                                    img_abs.put_pixel(
+                                        px,
+                                        y as u32 + header_height,
+                                        PROFILE_COLORS[i],
+                                    );
                                 }
                             }
                             x += span_width;
@@ -153,13 +156,17 @@ impl ProfileImageWriter {
                 x = 0;
                 pixels_per_unit = self.width as f64 / raw_times[11] as f64;
                 for i in 0..11 {
-                    if raw_times[i] > 0 {                        
+                    if raw_times[i] > 0 {
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
 
                         if span_width > 0 {
                             for px in x..x + span_width {
                                 if px < self.width {
-                                    img_rel.put_pixel(px, y as u32 + header_height, PROFILE_COLORS[i]);
+                                    img_rel.put_pixel(
+                                        px,
+                                        y as u32 + header_height,
+                                        PROFILE_COLORS[i],
+                                    );
                                 }
                             }
                             x += span_width;
@@ -176,9 +183,8 @@ impl ProfileImageWriter {
     }
 
     async fn generate_drasi_only_image(&self) -> anyhow::Result<()> {
-
         let header_height: u32 = 20;
-        let header_span_width = self.width / PROFILE_COLORS.len() as u32; 
+        let header_span_width = self.width / PROFILE_COLORS.len() as u32;
         let height = self.record_count as u32 + header_height;
         let times_per_profile: usize = PROFILE_COLORS.len() + 2;
         let mut img_abs = RgbImage::new(self.width, height);
@@ -203,7 +209,6 @@ impl ProfileImageWriter {
             .chunks(times_per_profile)
             .enumerate()
             .for_each(|(y, raw_times)| {
-
                 // Absolute
                 let mut x = 0;
                 let mut pixels_per_unit = self.width as f64 / self.max_drasi_only_time as f64;
@@ -215,7 +220,11 @@ impl ProfileImageWriter {
                         if span_width > 0 {
                             for px in x..x + span_width {
                                 if px < self.width {
-                                    img_abs.put_pixel(px, y as u32 + header_height, PROFILE_COLORS[i]);
+                                    img_abs.put_pixel(
+                                        px,
+                                        y as u32 + header_height,
+                                        PROFILE_COLORS[i],
+                                    );
                                 }
                             }
                             x += span_width;
@@ -227,13 +236,17 @@ impl ProfileImageWriter {
                 x = 0;
                 pixels_per_unit = self.width as f64 / raw_times[12] as f64;
                 for i in [0, 2, 4, 5, 7, 8] {
-                    if raw_times[i] > 0 {                        
+                    if raw_times[i] > 0 {
                         span_width = (raw_times[i] as f64 * pixels_per_unit).round() as u32;
 
                         if span_width > 0 {
                             for px in x..x + span_width {
                                 if px < self.width {
-                                    img_rel.put_pixel(px, y as u32 + header_height, PROFILE_COLORS[i]);
+                                    img_rel.put_pixel(
+                                        px,
+                                        y as u32 + header_height,
+                                        PROFILE_COLORS[i],
+                                    );
                                 }
                             }
                             x += span_width;

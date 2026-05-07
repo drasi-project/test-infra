@@ -104,6 +104,7 @@ pub struct ApiResponse {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 pub struct Continuation {
     #[serde(rename = "continue")]
     pub continuation: String,
@@ -116,6 +117,7 @@ pub struct Query {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 pub struct Page {
     pub pageid: u32,
     pub ns: u32,

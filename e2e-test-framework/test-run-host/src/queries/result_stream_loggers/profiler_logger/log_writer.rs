@@ -15,7 +15,10 @@
 use std::path::PathBuf;
 
 use serde_json::to_string;
-use tokio::{fs::File, io::{AsyncWriteExt, BufWriter}};
+use tokio::{
+    fs::File,
+    io::{AsyncWriteExt, BufWriter},
+};
 
 use super::{BootstrapRecordProfile, ChangeRecordProfile};
 
@@ -36,8 +39,12 @@ pub struct ProfileLogWriter {
     current_file_event_count: u64,
 }
 
-impl ProfileLogWriter { 
-    pub async fn new(folder_path: PathBuf, log_file_name: String, max_size: u64) -> anyhow::Result<Self> {
+impl ProfileLogWriter {
+    pub async fn new(
+        folder_path: PathBuf,
+        log_file_name: String,
+        max_size: u64,
+    ) -> anyhow::Result<Self> {
         let mut writer = ProfileLogWriter {
             folder_path,
             log_file_name,
@@ -51,10 +58,20 @@ impl ProfileLogWriter {
         Ok(writer)
     }
 
-    pub async fn write_bootstrap_profile(&mut self, profile: &BootstrapRecordProfile) -> anyhow::Result<()> {
+    pub async fn write_bootstrap_profile(
+        &mut self,
+        profile: &BootstrapRecordProfile,
+    ) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
-            let json = format!("{}\n", to_string(profile).map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?);
-            writer.write_all(json.as_bytes()).await.map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
+            let json = format!(
+                "{}\n",
+                to_string(profile)
+                    .map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?
+            );
+            writer
+                .write_all(json.as_bytes())
+                .await
+                .map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
 
             self.current_file_event_count += 1;
 
@@ -66,10 +83,20 @@ impl ProfileLogWriter {
         Ok(())
     }
 
-    pub async fn write_change_profile(&mut self, profile: &ChangeRecordProfile) -> anyhow::Result<()> {
+    pub async fn write_change_profile(
+        &mut self,
+        profile: &ChangeRecordProfile,
+    ) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
-            let json = format!("{}\n", to_string(profile).map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?);
-            writer.write_all(json.as_bytes()).await.map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
+            let json = format!(
+                "{}\n",
+                to_string(profile)
+                    .map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?
+            );
+            writer
+                .write_all(json.as_bytes())
+                .await
+                .map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
 
             self.current_file_event_count += 1;
 
@@ -84,15 +111,25 @@ impl ProfileLogWriter {
     async fn open_next_file(&mut self) -> anyhow::Result<()> {
         // If there is a current writer, flush it and close it.
         if let Some(writer) = &mut self.current_writer {
-            writer.flush().await.map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
+            writer
+                .flush()
+                .await
+                .map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
         }
 
         // Construct the next file name using the folder path as a base, the script file name, and the next file index.
         // The file index is used to create a 5 digit zero-padded number to ensure the files are sorted correctly.
-        let file_path = format!("{}/{}_{:05}.jsonl", self.folder_path.to_string_lossy(), self.log_file_name, self.next_file_index);
+        let file_path = format!(
+            "{}/{}_{:05}.jsonl",
+            self.folder_path.to_string_lossy(),
+            self.log_file_name,
+            self.next_file_index
+        );
 
         // Create the file and open it for writing
-        let file = File::create(&file_path).await.map_err(|_| ProfileLogWriterError::CantOpenFile(file_path.clone()))?;
+        let file = File::create(&file_path)
+            .await
+            .map_err(|_| ProfileLogWriterError::CantOpenFile(file_path.clone()))?;
         self.current_writer = Some(BufWriter::new(file));
 
         // Increment the file index and event count
@@ -104,7 +141,10 @@ impl ProfileLogWriter {
 
     pub async fn close(&mut self) -> anyhow::Result<()> {
         if let Some(writer) = &mut self.current_writer {
-            writer.flush().await.map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
+            writer
+                .flush()
+                .await
+                .map_err(|e| ProfileLogWriterError::FileWriteError(e.to_string()))?;
         }
         self.current_writer = None;
         Ok(())

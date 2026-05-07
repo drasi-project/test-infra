@@ -62,7 +62,7 @@ impl Publisher for DaprHttpPublisher {
                 } else {
                     Err(Box::new(res.error_for_status().unwrap_err()))
                 }
-            },
+            }
             Err(e) => Err(Box::new(e)),
         }
     }

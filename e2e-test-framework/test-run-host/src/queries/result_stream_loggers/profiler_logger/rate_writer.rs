@@ -18,7 +18,7 @@ use anyhow::Result;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 
-use crate::queries::result_stream_handlers::ResultStreamRecord;
+use crate::common::HandlerRecord;
 use crate::queries::result_stream_record::ChangeEvent;
 
 // Component indices for the 2D array
@@ -52,22 +52,22 @@ pub struct RateTracker {
 }
 
 impl RateTracker {
-    pub fn new(folder_path: PathBuf, file_name: String, ) -> Self {
+    pub fn new(folder_path: PathBuf, file_name: String) -> Self {
         Self {
-            file_path: folder_path.join(format!("{}_rates.csv", file_name)),
+            file_path: folder_path.join(format!("{file_name}_rates.csv")),
             has_started: false,
             start_time_ns: 0,
             counts: Vec::with_capacity(100), // Initial capacity for 100 time windows
         }
     }
-    
+
     // Process a record and update all relevant components
-    pub fn process_record(&mut self, _record: &ResultStreamRecord, change: &ChangeEvent) {
+    pub fn process_record(&mut self, _record: &HandlerRecord, change: &ChangeEvent) {
         // Fixed window size of 1 second in nanoseconds
         const ONE_SECOND_NS: u64 = 1_000_000_000;
 
         let metadata = &change.base.metadata.as_ref().unwrap().tracking;
-        
+
         // Check if this is the first event with a reactivator_start component
         if !self.has_started && metadata.source.reactivator_start_ns > 0 {
             // Initialize with this start time
@@ -76,7 +76,7 @@ impl RateTracker {
             self.counts.push([0; COMPONENT_COUNT]);
             self.has_started = true;
         }
-        
+
         // Only process if we've been initialized
         if !self.has_started {
             return;
@@ -86,16 +86,19 @@ impl RateTracker {
         // First, find the maximum window index needed from the latest timestamp
         // query_start_ns should be the latest timestamp in the sequence
         if metadata.query.query_start_ns > 0 {
-            let elapsed_ns = metadata.query.query_start_ns.saturating_sub(self.start_time_ns);
+            let elapsed_ns = metadata
+                .query
+                .query_start_ns
+                .saturating_sub(self.start_time_ns);
             let window_index = (elapsed_ns / ONE_SECOND_NS) as usize;
-            
+
             // Resize counts vector if needed (only once per record)
             self.ensure_window_capacity(window_index);
-            
+
             // Now process query_solver
             self.counts[window_index][QUERY_SOLVER_IDX] += 1;
         }
-        
+
         // Process query_pub_api
         if metadata.query.enqueue_ns > 0 {
             let elapsed_ns = metadata.query.enqueue_ns.saturating_sub(self.start_time_ns);
@@ -103,7 +106,7 @@ impl RateTracker {
             // No need to check capacity again
             self.counts[window_index][QUERY_PUB_API_IDX] += 1;
         }
-        
+
         // Process query_host
         if metadata.query.dequeue_ns > 0 {
             let elapsed_ns = metadata.query.dequeue_ns.saturating_sub(self.start_time_ns);
@@ -114,29 +117,38 @@ impl RateTracker {
 
         // Process source tracking if available
         // No need to check capacity again - we've already resized for the latest timestamp
-        
+
         // Process reactivator
         if metadata.source.reactivator_start_ns > 0 {
-            let elapsed_ns = metadata.source.reactivator_start_ns.saturating_sub(self.start_time_ns);
+            let elapsed_ns = metadata
+                .source
+                .reactivator_start_ns
+                .saturating_sub(self.start_time_ns);
             let window_index = (elapsed_ns / ONE_SECOND_NS) as usize;
             self.counts[window_index][REACTIVATOR_IDX] += 1;
         }
-        
+
         // Process change_router
         if metadata.source.change_router_start_ns > 0 {
-            let elapsed_ns = metadata.source.change_router_start_ns.saturating_sub(self.start_time_ns);
+            let elapsed_ns = metadata
+                .source
+                .change_router_start_ns
+                .saturating_sub(self.start_time_ns);
             let window_index = (elapsed_ns / ONE_SECOND_NS) as usize;
             self.counts[window_index][CHANGE_ROUTER_IDX] += 1;
         }
-        
+
         // Process change_dispatcher
         if metadata.source.change_dispatcher_start_ns > 0 {
-            let elapsed_ns = metadata.source.change_dispatcher_start_ns.saturating_sub(self.start_time_ns);
+            let elapsed_ns = metadata
+                .source
+                .change_dispatcher_start_ns
+                .saturating_sub(self.start_time_ns);
             let window_index = (elapsed_ns / ONE_SECOND_NS) as usize;
             self.counts[window_index][CHANGE_DISPATCHER_IDX] += 1;
         }
     }
-    
+
     // Ensure we have enough windows to store data at the given index
     fn ensure_window_capacity(&mut self, window_index: usize) {
         if window_index >= self.counts.len() {
@@ -145,29 +157,29 @@ impl RateTracker {
             self.counts.resize(new_size, [0; COMPONENT_COUNT]);
         }
     }
-    
+
     // Write to CSV with each component as a column
     pub async fn generate_csv(&self) -> Result<()> {
         // Don't write anything if we haven't started yet
         if !self.has_started {
             return Ok(());
         }
-        
+
         let file_exists = Path::new(&self.file_path).exists();
-        
+
         let mut file = if file_exists {
             OpenOptions::new()
                 .write(true)
-                .truncate(true)  // Overwrite the file
+                .truncate(true) // Overwrite the file
                 .open(&self.file_path)
                 .await?
         } else {
             File::create(&self.file_path).await?
         };
-        
+
         // Fixed window size of 1 second in nanoseconds
         const ONE_SECOND_NS: u64 = 1_000_000_000;
-        
+
         // Write header
         let header = format!(
             "index,window_start_ns,window_end_ns,{},{},{},{},{},{}\n",
@@ -179,12 +191,12 @@ impl RateTracker {
             COMPONENT_NAMES[QUERY_SOLVER_IDX]
         );
         file.write_all(header.as_bytes()).await?;
-        
+
         // Write each window's data as a row
         for (window_index, window) in self.counts.iter().enumerate() {
             let window_start_ns = self.start_time_ns + (window_index as u64 * ONE_SECOND_NS);
             let window_end_ns = window_start_ns + ONE_SECOND_NS;
-            
+
             let row = format!(
                 "{},{},{},{},{},{},{},{},{}\n",
                 window_index,
@@ -199,7 +211,7 @@ impl RateTracker {
             );
             file.write_all(row.as_bytes()).await?;
         }
-        
+
         Ok(())
     }
 }

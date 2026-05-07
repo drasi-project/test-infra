@@ -17,7 +17,7 @@ use async_trait::async_trait;
 
 use test_data_store::test_repo_storage::models::RecordSequenceNumberStopTriggerDefinition;
 
-use crate::queries::{query_result_observer::QueryResultObserverMetrics, result_stream_handlers::ResultStreamStatus};
+use crate::queries::{query_result_observer::QueryResultObserverMetrics, QueryHandlerStatus};
 
 use super::StopTrigger;
 
@@ -40,20 +40,25 @@ pub struct RecordSequenceNumberStopTrigger {
 
 impl RecordSequenceNumberStopTrigger {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(def: &RecordSequenceNumberStopTriggerDefinition) -> anyhow::Result<Box<dyn StopTrigger + Send + Sync>> {
-        log::debug!("Creating RecordSequenceNumberStopTrigger from {:?}, ", def);
+    pub fn new(
+        def: &RecordSequenceNumberStopTriggerDefinition,
+    ) -> anyhow::Result<Box<dyn StopTrigger + Send + Sync>> {
+        log::debug!("Creating RecordSequenceNumberStopTrigger from {def:?}, ");
 
         let settings = RecordSequenceNumberStopTriggerSettings::new(def)?;
-        log::trace!("Creating RecordSequenceNumberStopTrigger with settings {:?}, ", settings);
+        log::trace!("Creating RecordSequenceNumberStopTrigger with settings {settings:?}, ");
 
         Ok(Box::new(Self { settings }))
     }
-}  
+}
 
 #[async_trait]
 impl StopTrigger for RecordSequenceNumberStopTrigger {
-    async fn is_true(&self, _stream_status: &ResultStreamStatus, stats: &QueryResultObserverMetrics) -> anyhow::Result<bool> {
-
+    async fn is_true(
+        &self,
+        _handler_status: &QueryHandlerStatus,
+        stats: &QueryResultObserverMetrics,
+    ) -> anyhow::Result<bool> {
         Ok(stats.result_stream_record_seq >= self.settings.record_sequence_number)
     }
 }

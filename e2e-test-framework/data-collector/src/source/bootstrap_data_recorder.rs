@@ -25,7 +25,11 @@ pub struct BootstrapDataRecorder {
 }
 
 impl BootstrapDataRecorder {
-    pub async fn new(config: &SourceBootstrapDataRecorderConfig, _source_id: String, storage: DataCollectionSourceStorage) -> anyhow::Result<Self> {
+    pub async fn new(
+        config: &SourceBootstrapDataRecorderConfig,
+        _source_id: String,
+        storage: DataCollectionSourceStorage,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             node_labels: config.node_labels.clone().unwrap_or_default(),
             relation_labels: config.relation_labels.clone().unwrap_or_default(),

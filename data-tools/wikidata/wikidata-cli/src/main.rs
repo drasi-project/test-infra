@@ -21,6 +21,9 @@ use wikidata::{download_item_list, download_item_type, ItemListQueryArgs, ItemTy
 
 mod script;
 mod wikidata;
+mod types;
+
+use types::MakeScriptCommandArgs;
 
 /// String constant representing the default WikiData data cache folder path
 /// This is the folder where WikiData data is downloaded and stored if not provided by the user.
@@ -181,28 +184,6 @@ impl GetItemCommandArgs {
             rev_start: self.rev_start.clone()
         })
     }
-}
-
-#[derive(Args, Debug)]
-struct MakeScriptCommandArgs {
-    /// The types of WikiData Items to script
-    #[arg(short = 't', long, value_enum, value_delimiter=',')]
-    item_types: Vec<ItemType>,
-    
-    /// Supported formats are here https://docs.rs/chrono/latest/chrono/naive/struct.NaiveDateTime.html#method.parse_from_str
-    #[arg(short = 'e', long)]
-    rev_end: Option<NaiveDateTime>,
-
-    /// Supported formats are here https://docs.rs/chrono/latest/chrono/naive/struct.NaiveDateTime.html#method.parse_from_str
-    #[arg(short = 's', long)]
-    rev_start: Option<NaiveDateTime>,
-
-    #[arg(short = 'd', long)]
-    source_id: Option<String>,
-    
-    /// The ID of the test to generate scipts for.
-    #[arg(short = 'i', long, )]
-    test_id: String,
 }
 
 #[tokio::main]

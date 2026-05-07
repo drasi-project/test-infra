@@ -12,11 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fs::File, io::{BufRead, BufReader}, path::PathBuf, pin::Pin, task::{Context, Poll}};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    path::PathBuf,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use futures::Stream;
 
-use super::{ChangeScriptRecord, ChangeFinishRecord, ChangeHeaderRecord, SequencedChangeScriptRecord};
+use super::{
+    ChangeFinishRecord, ChangeHeaderRecord, ChangeScriptRecord, SequencedChangeScriptRecord,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChangeScriptReaderError {
@@ -34,7 +42,6 @@ pub enum ChangeScriptReaderError {
     InvalidScriptFile(String),
 }
 
-
 pub struct ChangeScriptReader {
     files: Vec<PathBuf>,
     next_file_index: usize,
@@ -47,11 +54,13 @@ pub struct ChangeScriptReader {
 
 impl ChangeScriptReader {
     pub fn new(files: Vec<PathBuf>) -> anyhow::Result<Self> {
-
         // Only supports JSONL files. Return error if any of the files are not JSONL files.
         for file in &files {
             if file.extension().map(|ext| ext != "jsonl").unwrap_or(true) {
-                return Err(ChangeScriptReaderError::InvalidScriptFile(file.to_string_lossy().into_owned()).into());
+                return Err(ChangeScriptReaderError::InvalidScriptFile(
+                    file.to_string_lossy().into_owned(),
+                )
+                .into());
             }
         }
 
@@ -112,14 +121,18 @@ impl ChangeScriptReader {
                 Ok(0) => {
                     self.current_reader = None;
                     self.get_next_record()
-                },
+                }
                 Ok(_) => {
                     let record: ChangeScriptRecord = match serde_json::from_str(&line) {
                         Ok(r) => r,
                         Err(e) => {
                             return Err(ChangeScriptReaderError::BadRecordFormat(
-                                self.get_current_file_name(), e.to_string(), line).into());
-                        },
+                                self.get_current_file_name(),
+                                e.to_string(),
+                                line,
+                            )
+                            .into());
+                        }
                     };
 
                     let seq_rec = match &record {
@@ -128,49 +141,43 @@ impl ChangeScriptReader {
                             // Return the next record, but need to increment sequence counter
                             self.seq += 1;
                             return self.get_next_record();
-                        },
+                        }
                         ChangeScriptRecord::Header(_) => {
                             let seq_rec = SequencedChangeScriptRecord {
                                 record: record.clone(),
                                 seq: self.seq,
-                                offset_ns: 0
+                                offset_ns: 0,
                             };
 
                             // Warn if there is a Header record in the middle of the script.
                             if seq_rec.seq > 0 {
-                                log::warn!("Header record found not at start of the script: {:?}", seq_rec);
+                                log::warn!(
+                                    "Header record found not at start of the script: {seq_rec:?}"
+                                );
                             }
 
                             seq_rec
+                        }
+                        ChangeScriptRecord::Finish(r) => SequencedChangeScriptRecord {
+                            record: record.clone(),
+                            seq: self.seq,
+                            offset_ns: r.offset_ns,
                         },
-                        ChangeScriptRecord::Finish(r) => {
-                            SequencedChangeScriptRecord {
-                                record: record.clone(),
-                                seq: self.seq,
-                                offset_ns: r.offset_ns
-                            }
+                        ChangeScriptRecord::Label(r) => SequencedChangeScriptRecord {
+                            record: record.clone(),
+                            seq: self.seq,
+                            offset_ns: r.offset_ns,
                         },
-                        ChangeScriptRecord::Label(r) => {
-                            SequencedChangeScriptRecord {
-                                record: record.clone(),
-                                seq: self.seq,
-                                offset_ns: r.offset_ns
-                            }
+                        ChangeScriptRecord::PauseCommand(r) => SequencedChangeScriptRecord {
+                            record: record.clone(),
+                            seq: self.seq,
+                            offset_ns: r.offset_ns,
                         },
-                        ChangeScriptRecord::PauseCommand(r) => {
-                            SequencedChangeScriptRecord {
-                                record: record.clone(),
-                                seq: self.seq,
-                                offset_ns: r.offset_ns
-                            }
+                        ChangeScriptRecord::SourceChange(r) => SequencedChangeScriptRecord {
+                            record: record.clone(),
+                            seq: self.seq,
+                            offset_ns: r.offset_ns,
                         },
-                        ChangeScriptRecord::SourceChange(r) => {
-                            SequencedChangeScriptRecord {
-                                record: record.clone(),
-                                seq: self.seq,
-                                offset_ns: r.offset_ns
-                            }
-                        },                        
                     };
                     self.seq += 1;
 
@@ -183,7 +190,7 @@ impl ChangeScriptReader {
                     } else {
                         // Throw an error if the offset_ns is less than the previous record's offset_ns.
                         let error_message = format!("Offset_ns for record {:?} is less than the previous record's offset_ns {}.", seq_rec, self.offset_ns);
-                        log::error!("{}", error_message);
+                        log::error!("{error_message}");
                         return Err(ChangeScriptReaderError::RecordOutOfSequence(self.seq).into());
                     }
                     self.offset_ns = seq_rec.offset_ns;
@@ -193,15 +200,18 @@ impl ChangeScriptReader {
                         self.footer = Some(seq_rec.clone());
                     }
                     Ok(seq_rec)
-                },
+                }
                 Err(e) => Err(ChangeScriptReaderError::FileReadError(e.to_string()).into()),
             }
         } else {
             // Generate a synthetic Finish record to mark the end of the script.
             self.footer = Some(SequencedChangeScriptRecord {
-                record: ChangeScriptRecord::Finish(ChangeFinishRecord { offset_ns: self.offset_ns, description: "Auto generated at end of script.".to_string() }),
+                record: ChangeScriptRecord::Finish(ChangeFinishRecord {
+                    offset_ns: self.offset_ns,
+                    description: "Auto generated at end of script.".to_string(),
+                }),
                 seq: self.seq,
-                offset_ns: self.offset_ns
+                offset_ns: self.offset_ns,
             });
             Ok(self.footer.as_ref().unwrap().clone())
         }
@@ -209,7 +219,7 @@ impl ChangeScriptReader {
 
     fn get_current_file_name(&self) -> String {
         if self.current_reader.is_some() {
-            let path = self.files[self.next_file_index-1].clone();
+            let path = self.files[self.next_file_index - 1].clone();
             path.to_string_lossy().into_owned()
         } else {
             "None".to_string()
@@ -222,7 +232,12 @@ impl ChangeScriptReader {
             let file_path = &self.files[self.next_file_index];
             let file = match File::open(file_path) {
                 Ok(f) => f,
-                Err(_) => return Err(ChangeScriptReaderError::CantOpenFile(file_path.to_string_lossy().into_owned()).into()),
+                Err(_) => {
+                    return Err(ChangeScriptReaderError::CantOpenFile(
+                        file_path.to_string_lossy().into_owned(),
+                    )
+                    .into())
+                }
             };
             self.current_reader = Some(BufReader::new(file));
             self.next_file_index += 1;

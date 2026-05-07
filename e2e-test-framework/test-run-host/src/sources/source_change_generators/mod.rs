@@ -14,7 +14,13 @@
 
 use async_trait::async_trait;
 use serde::Serialize;
-use test_data_store::{test_repo_storage::{models::{SourceChangeDispatcherDefinition, SourceChangeGeneratorDefinition, SpacingMode}, TestSourceStorage}, test_run_storage::{TestRunSourceId, TestRunSourceStorage}};
+use test_data_store::{
+    test_repo_storage::{
+        models::{SourceChangeDispatcherDefinition, SourceChangeGeneratorDefinition, SpacingMode},
+        TestSourceStorage,
+    },
+    test_run_storage::{TestRunSourceId, TestRunSourceStorage},
+};
 use tokio::sync::oneshot;
 
 use script_source_change_generator::ScriptSourceChangeGenerator;
@@ -34,22 +40,35 @@ pub enum SourceChangeGeneratorStatus {
     Paused,
     Stopped,
     Finished,
-    Error
+    Error,
 }
 
 impl SourceChangeGeneratorStatus {
     pub fn is_active(&self) -> bool {
-        matches!(self, SourceChangeGeneratorStatus::Running | SourceChangeGeneratorStatus::Skipping | SourceChangeGeneratorStatus::Stepping | SourceChangeGeneratorStatus::Paused)
+        matches!(
+            self,
+            SourceChangeGeneratorStatus::Running
+                | SourceChangeGeneratorStatus::Skipping
+                | SourceChangeGeneratorStatus::Stepping
+                | SourceChangeGeneratorStatus::Paused
+        )
     }
 
     pub fn is_processing(&self) -> bool {
-        matches!(self, SourceChangeGeneratorStatus::Running | SourceChangeGeneratorStatus::Skipping | SourceChangeGeneratorStatus::Stepping)
+        matches!(
+            self,
+            SourceChangeGeneratorStatus::Running
+                | SourceChangeGeneratorStatus::Skipping
+                | SourceChangeGeneratorStatus::Stepping
+        )
     }
 }
 
 impl Serialize for SourceChangeGeneratorStatus {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         match self {
             SourceChangeGeneratorStatus::Running => serializer.serialize_str("Running"),
             SourceChangeGeneratorStatus::Stepping => serializer.serialize_str("Stepping"),
@@ -66,9 +85,15 @@ impl Serialize for SourceChangeGeneratorStatus {
 pub enum SourceChangeGeneratorAction {
     GetState,
     Pause,
-    Skip{skips: u64, spacing_mode: Option<SpacingMode>},
+    Skip {
+        skips: u64,
+        spacing_mode: Option<SpacingMode>,
+    },
     Start,
-    Step{steps: u64, spacing_mode: Option<SpacingMode>},
+    Step {
+        steps: u64,
+        spacing_mode: Option<SpacingMode>,
+    },
     Stop,
 }
 
@@ -85,20 +110,33 @@ pub struct SourceChangeGeneratorCommandResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct SourceChangeGeneratorState {    
+pub struct SourceChangeGeneratorState {
     pub state: serde_json::Value,
     pub status: SourceChangeGeneratorStatus,
 }
 
 #[async_trait]
-pub trait SourceChangeGenerator : Send + Sync + std::fmt::Debug {
+pub trait SourceChangeGenerator: Send + Sync + std::fmt::Debug {
     async fn get_state(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn pause(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn reset(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
-    async fn skip(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
+    async fn skip(
+        &self,
+        skips: u64,
+        spacing_mode: Option<SpacingMode>,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn start(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
-    async fn step(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
+    async fn step(
+        &self,
+        steps: u64,
+        spacing_mode: Option<SpacingMode>,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
     async fn stop(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse>;
+
+    /// Sets the TestRunHost for dispatchers that need it (optional)
+    fn set_test_run_host_on_dispatchers(&self, _test_run_host: std::sync::Arc<crate::TestRunHost>) {
+        // Default implementation does nothing - only some generators need this
+    }
 }
 
 #[async_trait]
@@ -115,7 +153,11 @@ impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
         (**self).reset().await
     }
 
-    async fn skip(&self, skips: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn skip(
+        &self,
+        skips: u64,
+        spacing_mode: Option<SpacingMode>,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         (**self).skip(skips, spacing_mode).await
     }
 
@@ -123,32 +165,42 @@ impl SourceChangeGenerator for Box<dyn SourceChangeGenerator + Send + Sync> {
         (**self).start().await
     }
 
-    async fn step(&self, steps: u64, spacing_mode: Option<SpacingMode>) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
+    async fn step(
+        &self,
+        steps: u64,
+        spacing_mode: Option<SpacingMode>,
+    ) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         (**self).step(steps, spacing_mode).await
     }
 
     async fn stop(&self) -> anyhow::Result<SourceChangeGeneratorCommandResponse> {
         (**self).stop().await
     }
+
+    fn set_test_run_host_on_dispatchers(&self, test_run_host: std::sync::Arc<crate::TestRunHost>) {
+        (**self).set_test_run_host_on_dispatchers(test_run_host)
+    }
 }
 
 pub async fn create_source_change_generator(
-    id: TestRunSourceId, 
+    id: TestRunSourceId,
     definition: Option<SourceChangeGeneratorDefinition>,
-    input_storage: TestSourceStorage, 
+    input_storage: TestSourceStorage,
     output_storage: TestRunSourceStorage,
     dispatchers: Vec<SourceChangeDispatcherDefinition>,
 ) -> anyhow::Result<Option<Box<dyn SourceChangeGenerator + Send + Sync>>> {
     match definition {
         None => Ok(None),
-        Some(SourceChangeGeneratorDefinition::Script(definition)) => {
-            Ok(Some(Box::new(ScriptSourceChangeGenerator::new(
-                id, 
-                definition, 
-                input_storage, 
+        Some(SourceChangeGeneratorDefinition::Script(definition)) => Ok(Some(Box::new(
+            ScriptSourceChangeGenerator::new(
+                id,
+                definition,
+                input_storage,
                 output_storage,
                 dispatchers,
-            ).await?) as Box<dyn SourceChangeGenerator + Send + Sync> ))
-        }
+            )
+            .await?,
+        )
+            as Box<dyn SourceChangeGenerator + Send + Sync>)),
     }
 }

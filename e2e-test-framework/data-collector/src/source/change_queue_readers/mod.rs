@@ -32,7 +32,7 @@ pub enum SourceChangeQueueReaderStatus {
     Running,
     Paused,
     Stopped,
-    Error
+    Error,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -44,7 +44,7 @@ pub enum SourceChangeQueueReaderError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Serde error: {0}")]
-    Serde(#[from]serde_json::Error),
+    Serde(#[from] serde_json::Error),
     #[error("Redis error: {0}")]
     RedisError(#[from] redis::RedisError),
 }
@@ -92,11 +92,11 @@ impl TryFrom<&String> for SourceChangeQueueRecord {
 }
 
 #[async_trait]
-pub trait SourceChangeQueueReader : Send + Sync {
+pub trait SourceChangeQueueReader: Send + Sync {
     async fn init(&self) -> anyhow::Result<Receiver<SourceChangeQueueReaderMessage>>;
     async fn pause(&self) -> anyhow::Result<()>;
     async fn start(&self) -> anyhow::Result<()>;
-    async fn stop(&self) -> anyhow::Result<()>; 
+    async fn stop(&self) -> anyhow::Result<()>;
 }
 
 #[async_trait]
@@ -118,10 +118,17 @@ impl SourceChangeQueueReader for Box<dyn SourceChangeQueueReader + Send + Sync> 
     }
 }
 
-pub async fn get_source_change_queue_reader<S: Into<String>>(config: Option<SourceChangeQueueReaderConfig>, source_id: S) -> anyhow::Result<Box<dyn SourceChangeQueueReader + Send + Sync>> {
+pub async fn get_source_change_queue_reader<S: Into<String>>(
+    config: Option<SourceChangeQueueReaderConfig>,
+    source_id: S,
+) -> anyhow::Result<Box<dyn SourceChangeQueueReader + Send + Sync>> {
     match config {
-        Some(SourceChangeQueueReaderConfig::Redis(config)) => RedisSourceChangeQueueReader::new(config, source_id).await,
-        Some(SourceChangeQueueReaderConfig::TestBeacon(config)) => TestBeaconSourceChangeQueueReader::new(config, source_id).await,
-        None => Ok(NoneSourceChangeQueueReader::new())
+        Some(SourceChangeQueueReaderConfig::Redis(config)) => {
+            RedisSourceChangeQueueReader::new(config, source_id).await
+        }
+        Some(SourceChangeQueueReaderConfig::TestBeacon(config)) => {
+            TestBeaconSourceChangeQueueReader::new(config, source_id).await
+        }
+        None => Ok(NoneSourceChangeQueueReader::new()),
     }
 }

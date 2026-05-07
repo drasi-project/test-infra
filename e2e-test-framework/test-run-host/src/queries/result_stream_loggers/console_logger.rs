@@ -76,6 +76,7 @@ impl ResultStreamLogger for ConsoleResultStreamLogger {
         })
     }
 
+    #[allow(clippy::print_stdout)]
     async fn log_handler_record(&mut self, record: &HandlerRecord) -> anyhow::Result<()> {
         // Only process ResultStream payloads
         if let HandlerPayload::ResultStream { query_result } = &record.payload {

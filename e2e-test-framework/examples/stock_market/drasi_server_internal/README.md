@@ -1,17 +1,17 @@
-# Stock Market Example - Internal Drasi Server Configuration
+# Stock Market Example - Internal drasi-lib instance Configuration
 
-This configuration demonstrates the stock market trading simulation using an **embedded Drasi Server** instance within the test service.
+This configuration demonstrates the stock market trading simulation using an **embedded drasi-lib instance** instance within the test service.
 
 ## Architecture
 
-- **Embedded Drasi Server**: The test service hosts a Drasi Server internally using TestRunDrasiServer
-- **Internal Communication**: Uses `DrasiServerChannel` dispatcher for direct in-memory communication
+- **Embedded drasi-lib instance**: The test service hosts a drasi-lib instance internally using TestRunDrasiServer
+- **Internal Communication**: Uses `DrasiLibInstanceChannel` dispatcher for direct in-memory communication
 - **Self-Contained**: No external dependencies required
 
 ## Configuration Highlights
 
-### Drasi Server Setup
-The configuration embeds a complete Drasi Server with:
+### drasi-lib instance Setup
+The configuration embeds a complete drasi-lib instance with:
 - **Source**: `stock-exchange` - Receives stock market updates via internal channels
 - **Queries**:
   - `all-stocks`: Monitors all stock prices and volumes
@@ -42,7 +42,7 @@ Uses `StockTradeDataGenerator` with:
 
 While the test is running, you can interact with various endpoints:
 
-### Drasi Server Management (Internal Only)
+### drasi-lib instance Management (Internal Only)
 ```bash
 # Get server status
 curl http://localhost:8080/api/drasi-servers/internal-stock-market-server
@@ -77,7 +77,7 @@ curl http://localhost:8080/api/queries/price-movements
 ## Interactive Testing
 
 Use the provided `.http` files with a REST client or VS Code REST Client extension:
-- `web_api_drasi_server.http` - Drasi Server management
+- `web_api_drasi_server.http` - drasi-lib instance management
 - `web_api_source.http` - Source control
 - `web_api_query.http` - Query testing
 - `web_api_reaction.http` - Reaction monitoring
@@ -108,7 +108,7 @@ The system generates realistic stock market updates:
 
 ## Advantages
 
-- **Simple Setup**: No external Drasi Server required
+- **Simple Setup**: No external drasi-lib instance required
 - **Fast Communication**: Direct in-memory channels
 - **Easy Debugging**: All components in single process
 - **Self-Contained Testing**: Complete test environment in one service

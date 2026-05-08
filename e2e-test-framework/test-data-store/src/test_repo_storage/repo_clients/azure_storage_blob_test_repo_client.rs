@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf};
 
 use async_trait::async_trait;
-use azure_identity::{DefaultAzureCredential, TokenCredentialOptions};
 use azure_storage::prelude::*;
 use azure_storage_blobs::container::operations::BlobItem;
 use azure_storage_blobs::prelude::*;
@@ -43,25 +42,11 @@ impl AzureStorageBlobTestRepoClientSettings {
         common_config: CommonTestRepoConfig,
         unique_config: AzureStorageBlobTestRepoConfig,
     ) -> anyhow::Result<Self> {
-        // Create storage credentials based on whether an access key is provided.
-        let storage_credentials = match unique_config.access_key {
-            Some(access_key) => {
-                // Use access key authentication if provided
-                log::info!("Using access key authentication for Azure Storage account: {}", unique_config.account_name);
-                StorageCredentials::access_key(
-                    unique_config.account_name.clone(),
-                    access_key,
-                )
-            }
-            None => {
-                // Use Azure identity (managed identity, Azure CLI, environment variables, etc.)
-                log::info!("Using identity-based authentication (DefaultAzureCredential) for Azure Storage account: {}", unique_config.account_name);
-                let credential = Arc::new(
-                    DefaultAzureCredential::create(TokenCredentialOptions::default())?
-                );
-                StorageCredentials::token_credential(credential)
-            }
-        };
+        // Create storage credentials from the account name and access key.
+        let storage_credentials = StorageCredentials::access_key(
+            unique_config.account_name.clone(),
+            unique_config.access_key.clone(),
+        );
 
         Ok(Self {
             force_cache_refresh: unique_config.force_cache_refresh,
@@ -121,17 +106,22 @@ impl AzureStorageBlobTestRepoClient {
 
         // Group the files by the data type name, which is the parent folder name of the file and turn it into a HashMap
         // using the data type name as the key and a vector of file paths as the value.
-        let mut file_path_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        let mut file_path_map = HashMap::new();
         for file_path in file_path_list {
             let data_type_name = file_path
                 .parent()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            if !file_path_map.contains_key(&data_type_name) {
+                file_path_map.insert(data_type_name.clone(), vec![]);
+            }
             file_path_map
-                .entry(data_type_name)
-                .or_default()
+                .get_mut(&data_type_name)
+                .unwrap()
                 .push(file_path);
         }
         log::trace!("Bootstrap Script Map: {file_path_map:?}");
@@ -177,7 +167,7 @@ impl RemoteTestRepoClient for AzureStorageBlobTestRepoClient {
         }
 
         // Formulate the remote repo path for the test definition file
-        let remote_path = format!("{}/{}.test", self.settings.storage_root_path, test_id);
+        let remote_path = format!("{}/{}.test.json", self.settings.storage_root_path, test_id);
 
         // Download the test definition file
         download_test_repo_file(
@@ -272,15 +262,8 @@ async fn download_test_repo_folder(
                     let blob_name = blob.name;
 
                     // Create the local file path for the blob.
-                    let stripped_blob_file_name = blob_name
-                        .strip_prefix(&remote_repo_folder)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Blob name '{}' does not start with expected prefix '{}'",
-                                blob_name,
-                                remote_repo_folder
-                            )
-                        })?;
+                    let stripped_blob_file_name =
+                        blob_name.strip_prefix(&remote_repo_folder).unwrap();
                     let local_file_path = local_repo_folder.clone().join(stripped_blob_file_name);
 
                     // Process the blob as a directory if it doesn't have an extension.
@@ -323,7 +306,7 @@ async fn download_test_repo_file(
     log::debug!(
         "Downloading  file {} to {}",
         blob_client.blob_name(),
-        local_file_path.to_string_lossy()
+        local_file_path.to_str().unwrap()
     );
 
     // Create the local file to hold the blob data.

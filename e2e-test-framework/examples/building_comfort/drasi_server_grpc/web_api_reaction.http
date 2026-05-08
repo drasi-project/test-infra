@@ -1,0 +1,17 @@
+### Get all reactions for the test run
+GET http://localhost:8080/api/test_runs/test_run_001/reactions
+
+### Get specific reaction details
+GET http://localhost:8080/api/test_runs/test_run_001/reactions/building-comfort
+
+### Start the reaction handler (if not auto-started)
+POST http://localhost:8080/api/test_runs/test_run_001/reactions/building-comfort/start
+
+### Stop the reaction handler
+POST http://localhost:8080/api/test_runs/test_run_001/reactions/building-comfort/stop
+
+### Pause the reaction handler
+POST http://localhost:8080/api/test_runs/test_run_001/reactions/building-comfort/pause
+
+### Resume the reaction handler
+POST http://localhost:8080/api/test_runs/test_run_001/reactions/building-comfort/resume

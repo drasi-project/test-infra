@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test data generator module - allow unwraps for data generation code
-#![allow(clippy::unwrap_used)]
-
 use parking_lot::{Mutex, MutexGuard};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;

@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test infrastructure module - allow unwraps for change generator code
-#![allow(clippy::unwrap_used)]
-
 use std::{
     fmt::{self, Debug, Formatter},
     num::NonZeroU32,

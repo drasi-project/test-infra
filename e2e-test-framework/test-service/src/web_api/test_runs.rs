@@ -21,11 +21,10 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize, Serializer};
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use test_data_store::{test_repo_storage::models::SpacingMode, test_run_storage::TestRunId};
+use test_data_store::test_run_storage::TestRunId;
 use test_run_host::{TestRunConfig, TestRunStatus};
 
 use super::TestServiceWebApiError;
@@ -57,79 +56,6 @@ where
         TestRunStatus::Error(msg) => return serializer.serialize_str(&format!("Error: {msg}")),
     };
     serializer.serialize_str(status_str)
-}
-
-// Request/Response structures for skip, step, and bootstrap endpoints
-
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct TestSkipConfig {
-    #[serde(default = "default_skip_count")]
-    pub num_skips: u64,
-    pub spacing_mode: Option<SpacingMode>,
-}
-
-fn default_skip_count() -> u64 {
-    1
-}
-
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct TestStepConfig {
-    #[serde(default = "default_step_count")]
-    pub num_steps: u64,
-    pub spacing_mode: Option<SpacingMode>,
-}
-
-fn default_step_count() -> u64 {
-    1
-}
-
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct SourceBootstrapRequestBody {
-    #[serde(rename = "nodeLabels")]
-    pub node_labels: Vec<String>,
-    #[serde(rename = "relLabels")]
-    pub rel_labels: Vec<String>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct SourceBootstrapResponseBody {
-    pub nodes: Vec<Node>,
-    pub rels: Vec<Relation>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct Node {
-    pub id: String,
-    pub labels: Vec<String>,
-    #[serde(serialize_with = "serialize_properties")]
-    #[schema(value_type = Value)]
-    pub properties: Value,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct Relation {
-    pub id: String,
-    pub labels: Vec<String>,
-    pub start_id: String,
-    pub start_label: Option<String>,
-    pub end_id: String,
-    pub end_label: Option<String>,
-    #[serde(serialize_with = "serialize_properties")]
-    #[schema(value_type = Value)]
-    pub properties: Value,
-}
-
-fn serialize_properties<S>(value: &Value, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match value {
-        Value::Null => {
-            let empty_obj = json!({});
-            empty_obj.serialize(serializer)
-        }
-        _ => value.serialize(serializer),
-    }
 }
 
 pub fn get_test_runs_routes() -> Router {
@@ -165,18 +91,6 @@ pub fn get_test_runs_routes() -> Router {
         .route(
             "/api/test_runs/:run_id/sources/:source_id/reset",
             post(reset_test_run_source),
-        )
-        .route(
-            "/api/test_runs/:run_id/sources/:source_id/skip",
-            post(skip_test_run_source),
-        )
-        .route(
-            "/api/test_runs/:run_id/sources/:source_id/step",
-            post(step_test_run_source),
-        )
-        .route(
-            "/api/test_runs/:run_id/sources/:source_id/bootstrap",
-            post(bootstrap_test_run_source),
         )
         .route(
             "/api/test_runs/:run_id/queries",
@@ -227,12 +141,12 @@ pub fn get_test_runs_routes() -> Router {
             post(reset_test_run_reaction),
         )
         .route(
-            "/api/test_runs/:run_id/drasi_servers",
-            get(list_test_run_drasi_servers).post(create_test_run_drasi_server),
+            "/api/test_runs/:run_id/drasi_lib_instances",
+            get(list_test_run_drasi_lib_instances).post(create_test_run_drasi_lib_instance),
         )
         .route(
-            "/api/test_runs/:run_id/drasi_servers/:server_id",
-            get(get_test_run_drasi_server).delete(delete_test_run_drasi_server),
+            "/api/test_runs/:run_id/drasi_lib_instances/:instance_id",
+            get(get_test_run_drasi_lib_instance).delete(delete_test_run_drasi_lib_instance),
         )
 }
 
@@ -244,7 +158,7 @@ pub fn get_test_runs_routes() -> Router {
     responses(
         (status = 201, description = "Test run created successfully", body = TestRunCreatedResponse),
         (status = 400, description = "Invalid configuration"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -266,8 +180,8 @@ pub async fn create_test_run(
     get,
     path = "/api/test_runs",
     responses(
-        (status = 200, description = "List of test run IDs", body = Vec<String>),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "List of test runs", body = Vec<TestRunInfo>),
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -275,9 +189,27 @@ pub async fn list_test_runs(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
     let run_ids = test_run_host.get_test_run_ids().await?;
+    let mut runs = Vec::new();
 
-    log::info!("Returning {} test run IDs", run_ids.len());
-    Ok(Json(run_ids))
+    log::info!("Found {} test run IDs", run_ids.len());
+
+    for id_str in run_ids {
+        log::debug!("Processing test run ID: {id_str}");
+        if let Ok(run_id) = TestRunId::try_from(id_str.as_str()) {
+            if let Ok(status) = test_run_host.get_test_run_status(&run_id).await {
+                runs.push(TestRunInfo {
+                    id: id_str,
+                    test_id: run_id.test_id.clone(),
+                    test_repo_id: run_id.test_repo_id.clone(),
+                    test_run_id: run_id.test_run_id.clone(),
+                    status,
+                });
+            }
+        }
+    }
+
+    log::info!("Returning {} test runs", runs.len());
+    Ok(Json(runs))
 }
 
 /// Get a specific test run
@@ -290,7 +222,7 @@ pub async fn list_test_runs(
     responses(
         (status = 200, description = "Test run details", body = TestRunInfo),
         (status = 404, description = "Test run not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -326,7 +258,7 @@ pub async fn get_test_run(
     responses(
         (status = 204, description = "Test run deleted successfully"),
         (status = 404, description = "Test run not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -351,7 +283,7 @@ pub async fn delete_test_run(
     responses(
         (status = 200, description = "Test run started successfully"),
         (status = 404, description = "Test run not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -376,7 +308,7 @@ pub async fn start_test_run(
     responses(
         (status = 200, description = "Test run stopped successfully"),
         (status = 404, description = "Test run not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -400,7 +332,7 @@ pub async fn stop_test_run(
     ),
     responses(
         (status = 200, description = "List of source IDs within the test run", body = Vec<String>),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -431,7 +363,7 @@ async fn list_test_run_sources(
     responses(
         (status = 201, description = "Source created successfully"),
         (status = 400, description = "Invalid configuration"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -467,7 +399,7 @@ async fn create_test_run_source(
     responses(
         (status = 200, description = "Source details"),
         (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -496,7 +428,7 @@ async fn get_test_run_source(
     responses(
         (status = 204, description = "Source deleted successfully"),
         (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -519,7 +451,7 @@ async fn delete_test_run_source(
     responses(
         (status = 200, description = "Source started successfully"),
         (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -542,7 +474,7 @@ async fn start_test_run_source(
     responses(
         (status = 200, description = "Source stopped successfully"),
         (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -565,7 +497,7 @@ async fn stop_test_run_source(
     responses(
         (status = 200, description = "Source paused successfully"),
         (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -588,7 +520,7 @@ async fn pause_test_run_source(
     responses(
         (status = 200, description = "Source reset successfully"),
         (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -601,121 +533,6 @@ async fn reset_test_run_source(
     Ok(StatusCode::OK)
 }
 
-#[utoipa::path(
-    post,
-    path = "/api/test_runs/{run_id}/sources/{source_id}/skip",
-    params(
-        ("run_id" = String, Path, description = "Test run ID"),
-        ("source_id" = String, Path, description = "Source ID")
-    ),
-    request_body = TestSkipConfig,
-    responses(
-        (status = 200, description = "Source skipped successfully", body = test_run_host::sources::source_change_generators::SourceChangeGeneratorState),
-        (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
-    ),
-    tag = "test-runs"
-)]
-async fn skip_test_run_source(
-    Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
-    Path((run_id, source_id)): Path<(String, String)>,
-    Json(config): Json<TestSkipConfig>,
-) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{run_id}.{source_id}");
-    let response = test_run_host
-        .test_source_skip(&full_id, config.num_skips, config.spacing_mode)
-        .await?;
-    Ok(Json(response.state))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/test_runs/{run_id}/sources/{source_id}/step",
-    params(
-        ("run_id" = String, Path, description = "Test run ID"),
-        ("source_id" = String, Path, description = "Source ID")
-    ),
-    request_body = TestStepConfig,
-    responses(
-        (status = 200, description = "Source stepped successfully", body = test_run_host::sources::source_change_generators::SourceChangeGeneratorState),
-        (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
-    ),
-    tag = "test-runs"
-)]
-async fn step_test_run_source(
-    Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
-    Path((run_id, source_id)): Path<(String, String)>,
-    Json(config): Json<TestStepConfig>,
-) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{run_id}.{source_id}");
-    let response = test_run_host
-        .test_source_step(&full_id, config.num_steps, config.spacing_mode)
-        .await?;
-    Ok(Json(response.state))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/test_runs/{run_id}/sources/{source_id}/bootstrap",
-    params(
-        ("run_id" = String, Path, description = "Test run ID"),
-        ("source_id" = String, Path, description = "Source ID")
-    ),
-    request_body = SourceBootstrapRequestBody,
-    responses(
-        (status = 200, description = "Bootstrap data retrieved successfully", body = SourceBootstrapResponseBody),
-        (status = 404, description = "Source not found"),
-        (status = 500, description = "Internal server error")
-    ),
-    tag = "test-runs"
-)]
-async fn bootstrap_test_run_source(
-    Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
-    Path((run_id, source_id)): Path<(String, String)>,
-    Json(body): Json<SourceBootstrapRequestBody>,
-) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    use std::collections::HashSet;
-
-    let full_id = format!("{run_id}.{source_id}");
-    let node_labels: HashSet<String> = body.node_labels.into_iter().collect();
-    let rel_labels: HashSet<String> = body.rel_labels.into_iter().collect();
-
-    let bootstrap_data = test_run_host
-        .get_source_bootstrap_data(&full_id, &node_labels, &rel_labels)
-        .await?;
-
-    // Flatten nodes from the HashMap structure
-    let mut nodes: Vec<Node> = Vec::new();
-    for (_, node_list) in bootstrap_data.nodes {
-        for node in node_list {
-            nodes.push(Node {
-                id: node.id,
-                labels: node.labels,
-                properties: node.properties,
-            });
-        }
-    }
-
-    // Flatten relations from the HashMap structure
-    let mut rels: Vec<Relation> = Vec::new();
-    for (_, rel_list) in bootstrap_data.rels {
-        for rel in rel_list {
-            rels.push(Relation {
-                id: rel.id,
-                labels: rel.labels,
-                start_id: rel.start_id,
-                start_label: rel.start_label,
-                end_id: rel.end_id,
-                end_label: rel.end_label,
-                properties: rel.properties,
-            });
-        }
-    }
-
-    Ok(Json(SourceBootstrapResponseBody { nodes, rels }))
-}
-
 // Query-related endpoints
 #[utoipa::path(
     get,
@@ -725,7 +542,7 @@ async fn bootstrap_test_run_source(
     ),
     responses(
         (status = 200, description = "List of query IDs within the test run", body = Vec<String>),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -756,7 +573,7 @@ async fn list_test_run_queries(
     responses(
         (status = 201, description = "Query created successfully"),
         (status = 400, description = "Invalid configuration"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -792,7 +609,7 @@ async fn create_test_run_query(
     responses(
         (status = 200, description = "Query details"),
         (status = 404, description = "Query not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -821,7 +638,7 @@ async fn get_test_run_query(
     responses(
         (status = 204, description = "Query deleted successfully"),
         (status = 404, description = "Query not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -844,7 +661,7 @@ async fn delete_test_run_query(
     responses(
         (status = 200, description = "Query started successfully"),
         (status = 404, description = "Query not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -867,7 +684,7 @@ async fn start_test_run_query(
     responses(
         (status = 200, description = "Query stopped successfully"),
         (status = 404, description = "Query not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -890,7 +707,7 @@ async fn stop_test_run_query(
     responses(
         (status = 200, description = "Query paused successfully"),
         (status = 404, description = "Query not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -913,7 +730,7 @@ async fn pause_test_run_query(
     responses(
         (status = 200, description = "Query reset successfully"),
         (status = 404, description = "Query not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -935,7 +752,7 @@ async fn reset_test_run_query(
     ),
     responses(
         (status = 200, description = "List of reaction IDs within the test run", body = Vec<String>),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -966,7 +783,7 @@ async fn list_test_run_reactions(
     responses(
         (status = 201, description = "Reaction created successfully"),
         (status = 400, description = "Invalid configuration"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -1002,7 +819,7 @@ async fn create_test_run_reaction(
     responses(
         (status = 200, description = "Reaction details"),
         (status = 404, description = "Reaction not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -1031,7 +848,7 @@ async fn get_test_run_reaction(
     responses(
         (status = 204, description = "Reaction deleted successfully"),
         (status = 404, description = "Reaction not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -1054,7 +871,7 @@ async fn delete_test_run_reaction(
     responses(
         (status = 200, description = "Reaction started successfully"),
         (status = 404, description = "Reaction not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -1077,7 +894,7 @@ async fn start_test_run_reaction(
     responses(
         (status = 200, description = "Reaction stopped successfully"),
         (status = 404, description = "Reaction not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -1100,7 +917,7 @@ async fn stop_test_run_reaction(
     responses(
         (status = 200, description = "Reaction paused successfully"),
         (status = 404, description = "Reaction not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -1123,7 +940,7 @@ async fn pause_test_run_reaction(
     responses(
         (status = 200, description = "Reaction reset successfully"),
         (status = 404, description = "Reaction not found"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
@@ -1136,28 +953,28 @@ async fn reset_test_run_reaction(
     Ok(StatusCode::OK)
 }
 
-// Drasi Server-related endpoints
+// drasi-lib instance-related endpoints
 #[utoipa::path(
     get,
-    path = "/api/test_runs/{run_id}/drasi_servers",
+    path = "/api/test_runs/{run_id}/drasi_lib_instances",
     params(
         ("run_id" = String, Path, description = "Test run ID")
     ),
     responses(
-        (status = 200, description = "List of Drasi server IDs within the test run", body = Vec<String>),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "List of drasi-lib instance IDs within the test run", body = Vec<String>),
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
-async fn list_test_run_drasi_servers(
+async fn list_test_run_drasi_lib_instances(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path(run_id): Path<String>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
     let _test_run_id = TestRunId::try_from(run_id.as_str())
         .map_err(|e| TestServiceWebApiError::AnyhowError(anyhow::anyhow!(e)))?;
 
-    // Get all server IDs and filter by test run
-    let all_ids = test_run_host.get_test_drasi_server_ids().await?;
+    // Get all instance IDs and filter by test run
+    let all_ids = test_run_host.get_test_drasi_lib_instance_ids().await?;
     let filtered: Vec<String> = all_ids
         .into_iter()
         .filter(|id| id.starts_with(&run_id))
@@ -1168,22 +985,22 @@ async fn list_test_run_drasi_servers(
 
 #[utoipa::path(
     post,
-    path = "/api/test_runs/{run_id}/drasi_servers",
+    path = "/api/test_runs/{run_id}/drasi_lib_instances",
     params(
         ("run_id" = String, Path, description = "Test run ID")
     ),
-    request_body = test_run_host::drasi_servers::TestRunDrasiServerConfig,
+    request_body = test_run_host::drasi_lib_instances::TestRunDrasiLibInstanceConfig,
     responses(
-        (status = 201, description = "Drasi server created successfully"),
+        (status = 201, description = "drasi-lib instance created successfully"),
         (status = 400, description = "Invalid configuration"),
-        (status = 500, description = "Internal server error")
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
-async fn create_test_run_drasi_server(
+async fn create_test_run_drasi_lib_instance(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
     Path(run_id): Path<String>,
-    Json(mut config): Json<test_run_host::drasi_servers::TestRunDrasiServerConfig>,
+    Json(mut config): Json<test_run_host::drasi_lib_instances::TestRunDrasiLibInstanceConfig>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
     let test_run_id = TestRunId::try_from(run_id.as_str())
         .map_err(|e| TestServiceWebApiError::AnyhowError(anyhow::anyhow!(e)))?;
@@ -1194,7 +1011,7 @@ async fn create_test_run_drasi_server(
     config.test_run_id = Some(test_run_id.test_run_id.clone());
 
     match test_run_host
-        .add_test_drasi_server(&test_run_id, config)
+        .add_test_drasi_lib_instance(&test_run_id, config)
         .await
     {
         Ok(id) => Ok((
@@ -1207,31 +1024,34 @@ async fn create_test_run_drasi_server(
 
 #[utoipa::path(
     get,
-    path = "/api/test_runs/{run_id}/drasi_servers/{server_id}",
+    path = "/api/test_runs/{run_id}/drasi_lib_instances/{instance_id}",
     params(
         ("run_id" = String, Path, description = "Test run ID"),
-        ("server_id" = String, Path, description = "Drasi server ID")
+        ("instance_id" = String, Path, description = "drasi-lib instance ID")
     ),
     responses(
-        (status = 200, description = "Drasi server details"),
-        (status = 404, description = "Drasi server not found"),
-        (status = 500, description = "Internal server error")
+        (status = 200, description = "drasi-lib instance details"),
+        (status = 404, description = "drasi-lib instance not found"),
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
-async fn get_test_run_drasi_server(
+async fn get_test_run_drasi_lib_instance(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
-    Path((run_id, server_id)): Path<(String, String)>,
+    Path((run_id, instance_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{run_id}.{server_id}");
-    let server_id =
-        test_data_store::test_run_storage::TestRunDrasiServerId::try_from(full_id.as_str())
+    let full_id = format!("{run_id}.{instance_id}");
+    let instance_id =
+        test_data_store::test_run_storage::TestRunDrasiLibInstanceId::try_from(full_id.as_str())
             .map_err(|e| TestServiceWebApiError::AnyhowError(anyhow::anyhow!(e)))?;
 
-    match test_run_host.get_test_drasi_server(&server_id).await? {
+    match test_run_host
+        .get_test_drasi_lib_instance(&instance_id)
+        .await?
+    {
         Some(state) => Ok(Json(state)),
         None => Err(TestServiceWebApiError::NotFound(
-            "DrasiServer".to_string(),
+            "DrasiLibInstance".to_string(),
             full_id,
         )),
     }
@@ -1239,27 +1059,29 @@ async fn get_test_run_drasi_server(
 
 #[utoipa::path(
     delete,
-    path = "/api/test_runs/{run_id}/drasi_servers/{server_id}",
+    path = "/api/test_runs/{run_id}/drasi_lib_instances/{instance_id}",
     params(
         ("run_id" = String, Path, description = "Test run ID"),
-        ("server_id" = String, Path, description = "Drasi server ID")
+        ("instance_id" = String, Path, description = "drasi-lib instance ID")
     ),
     responses(
-        (status = 204, description = "Drasi server deleted successfully"),
-        (status = 404, description = "Drasi server not found"),
-        (status = 500, description = "Internal server error")
+        (status = 204, description = "drasi-lib instance deleted successfully"),
+        (status = 404, description = "drasi-lib instance not found"),
+        (status = 500, description = "Internal instance error")
     ),
     tag = "test-runs"
 )]
-async fn delete_test_run_drasi_server(
+async fn delete_test_run_drasi_lib_instance(
     Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
-    Path((run_id, server_id)): Path<(String, String)>,
+    Path((run_id, instance_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, TestServiceWebApiError> {
-    let full_id = format!("{run_id}.{server_id}");
-    let server_id =
-        test_data_store::test_run_storage::TestRunDrasiServerId::try_from(full_id.as_str())
+    let full_id = format!("{run_id}.{instance_id}");
+    let instance_id =
+        test_data_store::test_run_storage::TestRunDrasiLibInstanceId::try_from(full_id.as_str())
             .map_err(|e| TestServiceWebApiError::AnyhowError(anyhow::anyhow!(e)))?;
 
-    test_run_host.remove_test_drasi_server(&server_id).await?;
+    test_run_host
+        .remove_test_drasi_lib_instance(&instance_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }

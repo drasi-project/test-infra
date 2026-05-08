@@ -19,13 +19,11 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use azure_storage_blob_test_repo_client::AzureStorageBlobTestRepoClient;
 use github_test_repo_client::GithubTestRepoClient;
-use huggingface_test_repo_client::HuggingFaceTestRepoClient;
 
 use super::models::{LocalTestDefinition, TestSourceDefinition};
 
 pub mod azure_storage_blob_test_repo_client;
 pub mod github_test_repo_client;
-pub mod huggingface_test_repo_client;
 pub mod local_storage_test_repo_client;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,12 +41,6 @@ pub enum TestRepoConfig {
         #[serde(flatten)]
         unique_config: GithubTestRepoConfig,
     },
-    HuggingFace {
-        #[serde(flatten)]
-        common_config: CommonTestRepoConfig,
-        #[serde(flatten)]
-        unique_config: HuggingFaceTestRepoConfig,
-    },
     LocalStorage {
         #[serde(flatten)]
         common_config: CommonTestRepoConfig,
@@ -62,7 +54,6 @@ impl TestRepoConfig {
         match self {
             TestRepoConfig::AzureStorageBlob { common_config, .. } => common_config.id.clone(),
             TestRepoConfig::GitHub { common_config, .. } => common_config.id.clone(),
-            TestRepoConfig::HuggingFace { common_config, .. } => common_config.id.clone(),
             TestRepoConfig::LocalStorage { common_config, .. } => common_config.id.clone(),
         }
     }
@@ -73,19 +64,7 @@ impl TestRepoConfig {
                 common_config.local_tests.clone()
             }
             TestRepoConfig::GitHub { common_config, .. } => common_config.local_tests.clone(),
-            TestRepoConfig::HuggingFace { common_config, .. } => common_config.local_tests.clone(),
             TestRepoConfig::LocalStorage { common_config, .. } => common_config.local_tests.clone(),
-        }
-    }
-
-    pub fn get_force_cache_refresh(&self) -> bool {
-        match self {
-            TestRepoConfig::AzureStorageBlob { unique_config, .. } => {
-                unique_config.force_cache_refresh
-            }
-            TestRepoConfig::GitHub { unique_config, .. } => unique_config.force_cache_refresh,
-            TestRepoConfig::HuggingFace { unique_config, .. } => unique_config.force_cache_refresh,
-            TestRepoConfig::LocalStorage { .. } => false,
         }
     }
 }
@@ -97,45 +76,11 @@ pub struct CommonTestRepoConfig {
     pub local_tests: Vec<LocalTestDefinition>,
 }
 
-/// Azure Storage Blob repository configuration
-///
-/// Supports two authentication methods:
-///
-/// 1. **Access Key Authentication** (provide `access_key`):
-///    ```yaml
-///    kind: AzureStorageBlob
-///    account_name: mystorageaccount
-///    access_key: "your-access-key-here"
-///    container: test-data
-///    root_path: tests
-///    ```
-///
-/// 2. **Identity-Based Authentication** (omit `access_key`):
-///    Uses Azure DefaultAzureCredential chain:
-///    - Managed Identity (in Azure VMs, Container Apps, etc.)
-///    - Azure CLI (`az login`)
-///    - Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET)
-///    - Visual Studio Code
-///    - Azure PowerShell
-///
-///    ```yaml
-///    kind: AzureStorageBlob
-///    account_name: mystorageaccount
-///    # access_key omitted - will use identity
-///    container: test-data
-///    root_path: tests
-///    ```
-///
-///    Requirements for identity-based auth:
-///    - Ensure the identity has "Storage Blob Data Reader" role on the container
-///    - For local development: Run `az login` before running tests
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AzureStorageBlobTestRepoConfig {
     pub account_name: String,
-    /// Optional access key for storage account authentication.
-    /// If not provided, will use Azure identity (managed identity, Azure CLI, environment, etc.)
-    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "mask_secret_option")]
-    pub access_key: Option<String>,
+    #[serde(serialize_with = "mask_secret")]
+    pub access_key: String,
     pub container: String,
     #[serde(default = "is_false")]
     pub force_cache_refresh: bool,
@@ -149,16 +94,6 @@ where
     S: Serializer,
 {
     serializer.serialize_str("******")
-}
-
-fn mask_secret_option<S>(value: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match value {
-        Some(_) => serializer.serialize_str("******"),
-        None => serializer.serialize_none(),
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -185,19 +120,6 @@ fn test_repo() -> String {
 
 fn main_branch() -> String {
     "main".to_string()
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HuggingFaceTestRepoConfig {
-    pub organization: String,
-    pub dataset: String,
-    #[serde(default = "main_branch")]
-    pub revision: String,
-    #[serde(default = "is_false")]
-    pub force_cache_refresh: bool,
-    pub root_path: String,
-    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "mask_secret_option")]
-    pub token: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -254,10 +176,6 @@ pub async fn create_test_repo_client(
             common_config,
             unique_config,
         } => GithubTestRepoClient::new(common_config, unique_config).await,
-        TestRepoConfig::HuggingFace {
-            common_config,
-            unique_config,
-        } => HuggingFaceTestRepoClient::new(common_config, unique_config).await,
         TestRepoConfig::LocalStorage {
             common_config,
             unique_config,

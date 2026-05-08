@@ -264,7 +264,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
 
         let url = self.settings.full_url();
 
-        log::debug!(
+        log::info!(
             "HTTP dispatcher sending {} events to {} (source_id: {}, batch: {})",
             events.len(),
             url,
@@ -387,7 +387,6 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

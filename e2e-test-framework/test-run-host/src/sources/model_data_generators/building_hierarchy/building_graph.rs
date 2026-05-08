@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test data generator module - allow unwraps for data generation code
-#![allow(clippy::unwrap_used)]
-
 use std::{
     collections::{BTreeMap, HashSet},
     fmt,

@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test infrastructure module - allow unwraps for performance metrics code
-#![allow(clippy::unwrap_used)]
-
 //! Performance metrics output logger for measuring reaction throughput
 //!
 //! This logger tracks timing information and record counts to calculate
@@ -171,7 +168,7 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
     }
 
     async fn end_test_run(&mut self) -> anyhow::Result<OutputLoggerResult> {
-        log::info!(
+        log::error!(
             "PerformanceMetricsOutputLogger: Ending test run for {} with {} records",
             self.test_run_reaction_id,
             self.record_count
@@ -206,7 +203,7 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
             timestamp: chrono::Utc::now(),
         };
 
-        log::info!("{metrics}");
+        log::error!("{metrics}");
 
         // Write metrics to file
         let metrics_json = serde_json::to_string_pretty(&metrics)?;
@@ -240,7 +237,6 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::common::HandlerPayload;

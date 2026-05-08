@@ -352,7 +352,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
                     };
 
                     // Log the batch being sent for debugging
-                    debug!(
+                    info!(
                         "Sending batch of {} events to {}",
                         http_events.len(),
                         batch_url

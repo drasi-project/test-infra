@@ -17,7 +17,7 @@
 GREEN="\033[32m"
 RESET="\033[0m"
 
-echo -e "${GREEN}\nRunning the Stock Market E2E Test with Internal Drasi Server...${RESET}"
+echo -e "${GREEN}\nRunning the Stock Market E2E Test with Internal drasi-lib instance...${RESET}"
 # Set drasi_core modules to error level to suppress INFO logs from tracing instrumentation
 # Also suppress debug logs from channel handlers to avoid "channel closed" messages after stop trigger
 RUST_LOG="off,test_run_host=info,test_run_service=info,test_data_store=info,test_run_host::reactions::reaction_handlers::drasi_server_channel_handler=warn" \

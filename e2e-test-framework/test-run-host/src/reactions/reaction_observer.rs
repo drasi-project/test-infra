@@ -12,19 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test infrastructure module - allow unwraps for observer code
-#![allow(clippy::unwrap_used)]
-
 //! ReactionObserver implementation for handling reaction invocations
 //!
 //! This module provides an observer for reactions that handles
 //! HTTP callbacks and other reaction types using reaction-specific handlers.
 
-use std::{
-    fmt,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fmt, sync::Arc, time::SystemTime};
 
 use derive_more::Debug;
 
@@ -49,7 +42,6 @@ use crate::{
         },
         stop_triggers::{create_stop_trigger, StopTrigger},
     },
-    test_run_completion::LifecycleTx,
 };
 
 use super::TestRunReactionOverrides;
@@ -245,14 +237,12 @@ struct ReactionObserverInternalState {
     logger_results: Vec<OutputLoggerResult>,
     #[debug(skip)]
     stop_triggers: Vec<Box<dyn StopTrigger + Send + Sync>>,
-    lifecycle_tx: LifecycleTx,
-    reaction_id: TestRunReactionId,
 }
 
 impl ReactionObserverInternalState {
-    fn new(lifecycle_tx: LifecycleTx, reaction_id: TestRunReactionId) -> Self {
+    fn new() -> Self {
         let now_ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+            .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos() as u64;
 
@@ -267,8 +257,6 @@ impl ReactionObserverInternalState {
             loggers: vec![],
             logger_results: vec![],
             stop_triggers: vec![],
-            lifecycle_tx,
-            reaction_id,
         }
     }
 }
@@ -291,7 +279,6 @@ impl ReactionObserver {
         loggers: Vec<OutputLoggerConfig>,
         stop_triggers: Vec<StopTriggerDefinition>,
         test_run_overrides: Option<TestRunReactionOverrides>,
-        lifecycle_tx: LifecycleTx,
     ) -> anyhow::Result<Self> {
         log::info!(
             "ReactionObserver::new() for {} with {} loggers: {:?}",
@@ -312,10 +299,7 @@ impl ReactionObserver {
             .await?,
         );
 
-        let internal_state = Arc::new(Mutex::new(ReactionObserverInternalState::new(
-            lifecycle_tx,
-            id.clone(),
-        )));
+        let internal_state = Arc::new(Mutex::new(ReactionObserverInternalState::new()));
 
         // Create output handler
         // Note: We convert the reaction ID to a query ID for compatibility with the handler
@@ -510,16 +494,11 @@ impl ReactionObserver {
 
                 internal_state.status = ReactionObserverStatus::Running;
                 internal_state.handler_status = self.output_handler.status().await;
-                let start_time_ns = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
+                internal_state.metrics.observer_start_time_ns = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos() as u64;
-                internal_state.metrics.observer_start_time_ns = start_time_ns;
-
-                // Emit lifecycle event
-                internal_state
-                    .lifecycle_tx
-                    .reaction_started(internal_state.reaction_id.clone());
+                    .as_nanos()
+                    as u64;
             }
             ReactionObserverStatus::Error => {
                 return Err(ReactionObserverError::Error(internal_state.status).into());
@@ -587,16 +566,11 @@ impl ReactionObserver {
 
                 internal_state.status = ReactionObserverStatus::Stopped;
                 internal_state.handler_status = self.output_handler.status().await;
-                let stop_time_ns = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
+                internal_state.metrics.observer_stop_time_ns = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos() as u64;
-                internal_state.metrics.observer_stop_time_ns = stop_time_ns;
-
-                // Emit lifecycle event
-                internal_state
-                    .lifecycle_tx
-                    .reaction_stopped(internal_state.reaction_id.clone());
+                    .as_nanos()
+                    as u64;
             }
             ReactionObserverStatus::Stopped => {
                 return Err(ReactionObserverError::AlreadyStopped.into());
@@ -634,7 +608,7 @@ impl ReactionObserver {
         }
     }
 
-    /// Sets the TestRunHost for handlers that need it (e.g., DrasiServerChannelHandler)
+    /// Sets the TestRunHost for handlers that need it (e.g., DrasiLibInstanceChannelHandler)
     pub fn set_test_run_host(&self, test_run_host: std::sync::Arc<crate::TestRunHost>) {
         // Clone the handler reference to move into the async block
         let handler = self.output_handler.clone();
@@ -675,7 +649,7 @@ async fn observe_reaction_handler(
                         for (idx, trigger) in state.stop_triggers.iter().enumerate() {
                             match trigger.is_true(&handler_status, &state.metrics).await {
                                 Ok(true) => {
-                                    log::info!(
+                                    log::error!(
                                         "Stop trigger {} fired after {} invocations, stopping reaction observer",
                                         idx,
                                         state.metrics.reaction_invocation_count
@@ -722,11 +696,7 @@ async fn observe_reaction_handler(
                         log::error!("Reaction handler error: {error}");
                         let mut state = internal_state.lock().await;
                         state.status = ReactionObserverStatus::Error;
-                        let error_msg = format!("Handler error: {error}");
-                        state.error_message = Some(error_msg.clone());
-
-                        // Emit lifecycle event
-                        state.lifecycle_tx.reaction_error(state.reaction_id.clone(), error_msg);
+                        state.error_message = Some(format!("Handler error: {error}"));
                     }
                     _ => {
                         // Ignore other control signals

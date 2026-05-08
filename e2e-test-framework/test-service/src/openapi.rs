@@ -81,11 +81,11 @@ pub struct ErrorResponse {
         test_runs::stop_test_run_reaction,
         test_runs::pause_test_run_reaction,
         test_runs::reset_test_run_reaction,
-        // Test Run Drasi Server endpoints
-        test_runs::list_test_run_drasi_servers,
-        test_runs::create_test_run_drasi_server,
-        test_runs::get_test_run_drasi_server,
-        test_runs::delete_test_run_drasi_server,
+        // Test Run drasi-lib instance endpoints
+        test_runs::list_test_run_drasi_lib_instances,
+        test_runs::create_test_run_drasi_lib_instance,
+        test_runs::get_test_run_drasi_lib_instance,
+        test_runs::delete_test_run_drasi_lib_instance,
     ),
     components(
         schemas(

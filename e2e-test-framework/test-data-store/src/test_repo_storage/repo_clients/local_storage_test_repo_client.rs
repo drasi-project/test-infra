@@ -83,7 +83,7 @@ impl RemoteTestRepoClient for LocalStorageTestRepoClient {
         // Otherwise, copy the file from the source path to the repo location.
         match self.settings.source_path {
             Some(ref source_path) => {
-                let source_file = source_path.join(format!("{test_id}.test"));
+                let source_file = source_path.join(format!("{test_id}.test.json"));
 
                 if source_file.exists() {
                     fs::copy(source_file, test_def_path).await?;

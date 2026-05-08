@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test infrastructure module - allow unwraps for dispatcher code
-#![allow(clippy::unwrap_used)]
-
 use async_trait::async_trait;
 
 use drasi_comms_abstractions::comms::{Headers, Publisher};

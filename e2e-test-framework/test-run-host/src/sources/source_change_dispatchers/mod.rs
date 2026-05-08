@@ -23,8 +23,7 @@ pub mod adaptive_grpc_dispatcher;
 pub mod adaptive_http_dispatcher;
 pub mod console_dispatcher;
 pub mod dapr_dispatcher;
-pub mod drasi_server_api_dispatcher;
-pub mod drasi_server_channel_dispatcher;
+pub mod drasi_lib_instance_channel_dispatcher;
 pub mod grpc_dispatcher;
 pub mod http_dispatcher;
 pub mod jsonl_file_dispatcher;
@@ -92,39 +91,26 @@ pub async fn create_source_change_dispatcher(
             // Use adaptive dispatcher if enabled
             if def.adaptive_enabled.unwrap_or(false) {
                 Ok(Box::new(
-                    adaptive_http_dispatcher::AdaptiveHttpSourceChangeDispatcher::new(
-                        def,
-                        output_storage.clone(),
-                    )?,
-                )
-                    as Box<dyn SourceChangeDispatcher + Send + Sync>)
+                    adaptive_http_dispatcher::AdaptiveHttpSourceChangeDispatcher::new(def, output_storage.clone())?,
+                ) as Box<dyn SourceChangeDispatcher + Send + Sync>)
             } else {
-                Ok(Box::new(http_dispatcher::HttpSourceChangeDispatcher::new(
-                    def,
-                    output_storage.clone(),
-                )?)
-                    as Box<dyn SourceChangeDispatcher + Send + Sync>)
+                Ok(Box::new(
+                    http_dispatcher::HttpSourceChangeDispatcher::new(def, output_storage.clone())?,
+                ) as Box<dyn SourceChangeDispatcher + Send + Sync>)
             }
-        }
+        },
         SourceChangeDispatcherDefinition::Grpc(def) => {
             // Use adaptive dispatcher if enabled
             if def.adaptive_enabled.unwrap_or(false) {
                 Ok(Box::new(
-                    adaptive_grpc_dispatcher::AdaptiveGrpcSourceChangeDispatcher::new(
-                        def,
-                        output_storage.clone(),
-                    )
-                    .await?,
-                )
-                    as Box<dyn SourceChangeDispatcher + Send + Sync>)
+                    adaptive_grpc_dispatcher::AdaptiveGrpcSourceChangeDispatcher::new(def, output_storage.clone()).await?,
+                ) as Box<dyn SourceChangeDispatcher + Send + Sync>)
             } else {
                 Ok(Box::new(
-                    grpc_dispatcher::GrpcSourceChangeDispatcher::new(def, output_storage.clone())
-                        .await?,
-                )
-                    as Box<dyn SourceChangeDispatcher + Send + Sync>)
+                    grpc_dispatcher::GrpcSourceChangeDispatcher::new(def, output_storage.clone()).await?,
+                ) as Box<dyn SourceChangeDispatcher + Send + Sync>)
             }
-        }
+        },
         SourceChangeDispatcherDefinition::JsonlFile(def) => Ok(Box::new(
             jsonl_file_dispatcher::JsonlFileSourceChangeDispatcher::new(def, output_storage)
                 .await?,
@@ -135,15 +121,8 @@ pub async fn create_source_change_dispatcher(
                 .await?,
         )
             as Box<dyn SourceChangeDispatcher + Send + Sync>),
-        SourceChangeDispatcherDefinition::DrasiServerApi(def) => Ok(Box::new(
-            drasi_server_api_dispatcher::DrasiServerApiSourceChangeDispatcher::new(
-                def,
-                output_storage,
-            )?,
-        )
-            as Box<dyn SourceChangeDispatcher + Send + Sync>),
-        SourceChangeDispatcherDefinition::DrasiServerChannel(def) => Ok(Box::new(
-            drasi_server_channel_dispatcher::DrasiServerChannelSourceChangeDispatcher::new(
+        SourceChangeDispatcherDefinition::DrasiLibInstanceChannel(def) => Ok(Box::new(
+            drasi_lib_instance_channel_dispatcher::DrasiLibInstanceChannelSourceChangeDispatcher::new(
                 def,
                 output_storage,
             )?,

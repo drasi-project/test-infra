@@ -67,7 +67,6 @@ impl ConsoleOutputLogger {
 }
 
 #[async_trait]
-#[allow(clippy::print_stdout)]
 impl OutputLogger for ConsoleOutputLogger {
     async fn end_test_run(&mut self) -> anyhow::Result<OutputLoggerResult> {
         Ok(OutputLoggerResult {

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::unwrap_used)]
-
 use axum::http::StatusCode;
 use serde_json::Value;
 
@@ -126,8 +124,8 @@ async fn test_test_run_nested_paths_documented() {
         "/api/test_runs/{run_id}/queries/{query_id}",
         "/api/test_runs/{run_id}/reactions",
         "/api/test_runs/{run_id}/reactions/{reaction_id}",
-        "/api/test_runs/{run_id}/drasi_servers",
-        "/api/test_runs/{run_id}/drasi_servers/{server_id}",
+        "/api/test_runs/{run_id}/drasi_lib_instances",
+        "/api/test_runs/{run_id}/drasi_lib_instances/{instance_id}",
     ];
 
     for expected_path in expected_nested_paths {

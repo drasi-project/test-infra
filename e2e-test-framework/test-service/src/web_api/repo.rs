@@ -152,35 +152,32 @@ impl TestSourceResponse {
 pub fn get_test_repo_routes() -> Router {
     Router::new()
         .route(
-            "/api/test_repos",
+            "/",
             get(get_test_repo_list_handler).post(post_test_repo_handler),
         )
-        .route("/api/test_repos/:repo_id", get(get_test_repo_handler))
+        .route("/:repo_id", get(get_test_repo_handler))
         .route(
-            "/api/test_repos/:repo_id/tests",
+            "/:repo_id/tests",
             get(get_test_repo_test_list_handler).post(post_test_repo_test_handler),
         )
+        .route("/:repo_id/tests/:test_id", get(get_test_repo_test_handler))
         .route(
-            "/api/test_repos/:repo_id/tests/:test_id",
-            get(get_test_repo_test_handler),
-        )
-        .route(
-            "/api/test_repos/:repo_id/tests/:test_id/sources",
+            "/:repo_id/tests/:test_id/sources",
             get(get_test_repo_test_source_list_handler).post(post_test_repo_test_source_handler),
         )
         .route(
-            "/api/test_repos/:repo_id/tests/:test_id/sources/:source_id",
+            "/:repo_id/tests/:test_id/sources/:source_id",
             get(get_test_repo_test_source_handler),
         )
 }
 
 #[utoipa::path(
     get,
-    path = "/api/test_repos",
+    path = "/test_repos",
     tag = "repos",
     responses(
         (status = 200, description = "List of repository IDs", body = Vec<String>),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_list_handler(
@@ -194,7 +191,7 @@ pub async fn get_test_repo_list_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/test_repos/{repo_id}/tests",
+    path = "/test_repos/{repo_id}/tests",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier")
@@ -202,7 +199,7 @@ pub async fn get_test_repo_list_handler(
     responses(
         (status = 200, description = "List of test IDs in the repository", body = Vec<String>),
         (status = 404, description = "Repository not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_test_list_handler(
@@ -217,7 +214,7 @@ pub async fn get_test_repo_test_list_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/test_repos/{repo_id}/tests/{test_id}/sources",
+    path = "/test_repos/{repo_id}/tests/{test_id}/sources",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier"),
@@ -226,7 +223,7 @@ pub async fn get_test_repo_test_list_handler(
     responses(
         (status = 200, description = "List of source IDs for the test", body = Vec<String>),
         (status = 404, description = "Repository or test not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_test_source_list_handler(
@@ -247,7 +244,7 @@ pub async fn get_test_repo_test_source_list_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/test_repos/{repo_id}",
+    path = "/test_repos/{repo_id}",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier")
@@ -255,7 +252,7 @@ pub async fn get_test_repo_test_source_list_handler(
     responses(
         (status = 200, description = "Repository information", body = TestRepoResponse),
         (status = 404, description = "Repository not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_handler(
@@ -270,7 +267,7 @@ pub async fn get_test_repo_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/test_repos/{repo_id}/tests/{test_id}",
+    path = "/test_repos/{repo_id}/tests/{test_id}",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier"),
@@ -279,7 +276,7 @@ pub async fn get_test_repo_handler(
     responses(
         (status = 200, description = "Test information", body = TestResponse),
         (status = 404, description = "Repository or test not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_test_handler(
@@ -294,7 +291,7 @@ pub async fn get_test_repo_test_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/test_repos/{repo_id}/tests/{test_id}/sources/{source_id}",
+    path = "/test_repos/{repo_id}/tests/{test_id}/sources/{source_id}",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier"),
@@ -304,7 +301,7 @@ pub async fn get_test_repo_test_handler(
     responses(
         (status = 200, description = "Source information", body = TestSourceResponse),
         (status = 404, description = "Repository, test, or source not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn get_test_repo_test_source_handler(
@@ -323,13 +320,13 @@ pub async fn get_test_repo_test_source_handler(
 
 #[utoipa::path(
     post,
-    path = "/api/test_repos",
+    path = "/test_repos",
     tag = "repos",
     request_body = test_data_store::test_repo_storage::repo_clients::TestRepoConfig,
     responses(
         (status = 200, description = "Repository created successfully", body = TestRepoResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn post_test_repo_handler(
@@ -346,7 +343,7 @@ pub async fn post_test_repo_handler(
 
 #[utoipa::path(
     post,
-    path = "/api/test_repos/{repo_id}/tests",
+    path = "/test_repos/{repo_id}/tests",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier")
@@ -356,7 +353,7 @@ pub async fn post_test_repo_handler(
         (status = 200, description = "Test created successfully", body = TestResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Repository not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn post_test_repo_test_handler(
@@ -389,7 +386,7 @@ pub async fn post_test_repo_test_handler(
 
 #[utoipa::path(
     post,
-    path = "/api/test_repos/{repo_id}/tests/{test_id}/sources",
+    path = "/test_repos/{repo_id}/tests/{test_id}/sources",
     tag = "repos",
     params(
         ("repo_id" = String, Path, description = "Repository identifier"),
@@ -400,7 +397,7 @@ pub async fn post_test_repo_test_handler(
         (status = 200, description = "Source created successfully", body = TestSourceResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
         (status = 404, description = "Repository or test not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse)
+        (status = 500, description = "Internal instance error", body = ErrorResponse)
     )
 )]
 pub async fn post_test_repo_test_source_handler(

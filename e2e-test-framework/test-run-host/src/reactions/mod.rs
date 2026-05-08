@@ -151,7 +151,6 @@ impl TestRunReaction {
     pub async fn new(
         definition: TestRunReactionDefinition,
         output_storage: TestRunReactionStorage,
-        lifecycle_tx: crate::test_run_completion::LifecycleTx,
     ) -> anyhow::Result<Self> {
         // Output loggers are already in the correct format
         let output_loggers = definition.output_loggers.clone();
@@ -182,7 +181,6 @@ impl TestRunReaction {
             output_loggers,
             stop_triggers,
             definition.test_run_overrides,
-            lifecycle_tx,
         )
         .await?;
 
@@ -238,7 +236,7 @@ impl TestRunReaction {
         self.reaction_observer.stop().await
     }
 
-    /// Sets the TestRunHost for handlers that need it (e.g., DrasiServerChannelHandler)
+    /// Sets the TestRunHost for handlers that need it (e.g., DrasiLibInstanceChannelHandler)
     pub fn set_test_run_host(&self, test_run_host: std::sync::Arc<crate::TestRunHost>) {
         self.reaction_observer.set_test_run_host(test_run_host);
     }

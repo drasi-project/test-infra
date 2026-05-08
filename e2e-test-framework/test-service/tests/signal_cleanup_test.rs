@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::unwrap_used)]
-
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -34,7 +32,7 @@ async fn test_ctrl_c_cleanup_with_delete_on_stop() -> anyhow::Result<()> {
             "test_repos": []
         },
         "test_run_host": {
-            "drasi_servers": [],
+            "drasi_lib_instances": [],
             "queries": [],
             "reactions": [],
             "sources": []
@@ -111,7 +109,7 @@ async fn test_ctrl_c_no_cleanup_without_delete_on_stop() -> anyhow::Result<()> {
             "test_repos": []
         },
         "test_run_host": {
-            "drasi_servers": [],
+            "drasi_lib_instances": [],
             "queries": [],
             "reactions": [],
             "sources": []

@@ -20,7 +20,6 @@ use test_data_store::scripts::SourceChangeEvent;
 
 // Include the generated Drasi proto code
 pub mod drasi {
-    #[allow(clippy::unwrap_used)]
     pub mod v1 {
         tonic::include_proto!("drasi.v1");
     }

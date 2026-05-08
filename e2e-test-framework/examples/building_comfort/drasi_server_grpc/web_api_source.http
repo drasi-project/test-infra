@@ -1,0 +1,17 @@
+### Get all sources for the test run
+GET http://localhost:8080/api/test_runs/test_run_001/sources
+
+### Get specific source details
+GET http://localhost:8080/api/test_runs/test_run_001/sources/facilities-db
+
+### Start the source (if not auto-started)
+POST http://localhost:8080/api/test_runs/test_run_001/sources/facilities-db/start
+
+### Stop the source
+POST http://localhost:8080/api/test_runs/test_run_001/sources/facilities-db/stop
+
+### Pause the source
+POST http://localhost:8080/api/test_runs/test_run_001/sources/facilities-db/pause
+
+### Resume the source
+POST http://localhost:8080/api/test_runs/test_run_001/sources/facilities-db/resume

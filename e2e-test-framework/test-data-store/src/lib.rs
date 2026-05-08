@@ -28,7 +28,7 @@ use test_repo_storage::{
     TestRepoStorage, TestRepoStore, TestSourceScriptSet, TestSourceStorage, TestStorage,
 };
 use test_run_storage::{
-    TestRunDrasiServerId, TestRunDrasiServerStorage, TestRunId, TestRunQueryId,
+    TestRunDrasiLibInstanceId, TestRunDrasiLibInstanceStorage, TestRunId, TestRunQueryId,
     TestRunQueryStorage, TestRunReactionId, TestRunReactionStorage, TestRunSourceId,
     TestRunSourceStorage, TestRunStorage, TestRunStore,
 };
@@ -150,7 +150,7 @@ impl TestDataStore {
             #[allow(deprecated)]
             data_store_path: Some(
                 TempDir::new()
-                    .expect("Failed to create temporary directory for TestDataStore")
+                    .unwrap()
                     .into_path()
                     .to_string_lossy()
                     .to_string(),
@@ -418,16 +418,16 @@ impl TestDataStore {
             .await
     }
 
-    pub async fn get_test_run_drasi_server_storage(
+    pub async fn get_test_run_drasi_lib_instance_storage(
         &self,
-        test_run_drasi_server_id: &TestRunDrasiServerId,
-    ) -> anyhow::Result<TestRunDrasiServerStorage> {
+        test_run_drasi_lib_instance_id: &TestRunDrasiLibInstanceId,
+    ) -> anyhow::Result<TestRunDrasiLibInstanceStorage> {
         self.test_run_store
             .lock()
             .await
-            .get_test_run_storage(&test_run_drasi_server_id.test_run_id, false)
+            .get_test_run_storage(&test_run_drasi_lib_instance_id.test_run_id, false)
             .await?
-            .get_drasi_server_storage(test_run_drasi_server_id, false)
+            .get_drasi_lib_instance_storage(test_run_drasi_lib_instance_id, false)
             .await
     }
 

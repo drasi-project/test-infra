@@ -26,36 +26,6 @@ pub mod repo_clients;
 
 const TEST_SOURCES_FOLDER_NAME: &str = "sources";
 
-/// Parse test definition content from either YAML or JSON format
-///
-/// This function attempts to parse the content as YAML first (since YAML is a superset of JSON),
-/// then falls back to JSON if YAML parsing fails. If both fail, it returns a detailed error
-/// showing both parser outputs.
-fn parse_test_definition(content: &str, file_path: &str) -> anyhow::Result<TestDefinition> {
-    // Try YAML first
-    match serde_yaml::from_str::<TestDefinition>(content) {
-        Ok(test_def) => {
-            log::debug!("Successfully parsed test definition as YAML from: {file_path}");
-            Ok(test_def)
-        }
-        Err(yaml_err) => {
-            // If YAML fails, try JSON
-            match serde_json::from_str::<TestDefinition>(content) {
-                Ok(test_def) => {
-                    log::debug!("Successfully parsed test definition as JSON from: {file_path}");
-                    Ok(test_def)
-                }
-                Err(json_err) => {
-                    // Both failed, return detailed error
-                    Err(anyhow::anyhow!(
-                        "Failed to parse test definition file '{file_path}':\n  YAML: {yaml_err}\n  JSON: {json_err}"
-                    ))
-                }
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct TestRepoStore {
     pub path: PathBuf,
@@ -89,8 +59,8 @@ impl TestRepoStore {
             test_repos: HashMap::new(),
         };
 
-        if let Some(repos) = initial_repos {
-            for repo in repos {
+        if initial_repos.is_some() {
+            for repo in initial_repos.unwrap() {
                 store.add_test_repo(repo, false).await?;
             }
         }
@@ -142,15 +112,10 @@ impl TestRepoStore {
 
     pub async fn get_test_repo_storage(&self, id: &str) -> anyhow::Result<TestRepoStorage> {
         if self.path.join(id).exists() {
-            let repo_config = self
-                .test_repos
-                .get(id)
-                .ok_or_else(|| anyhow::anyhow!("Test Repo config for ID {id:?} not found"))?
-                .clone();
             Ok(TestRepoStorage {
                 id: id.to_string(),
                 path: self.path.join(id),
-                repo_config,
+                repo_config: self.test_repos.get(id).unwrap().clone(),
             })
         } else {
             anyhow::bail!("Test Repo with ID {:?} not found", &id);
@@ -193,7 +158,7 @@ impl TestRepoStorage {
             &test_def
         );
 
-        let test_def_path = self.path.join(format!("{}.test", &test_def.test_id));
+        let test_def_path = self.path.join(format!("{}.test.json", &test_def.test_id));
         let test_path = self.path.join(&test_def.test_id);
 
         if erase_data && test_path.exists() {
@@ -210,7 +175,7 @@ impl TestRepoStorage {
     pub async fn add_remote_test(&self, id: &str, replace: bool) -> anyhow::Result<TestStorage> {
         log::debug!("Adding Remote ((replace = {}) ) Test ID {:?}", replace, &id);
 
-        let test_def_path = self.path.join(format!("{id}.test"));
+        let test_def_path = self.path.join(format!("{id}.test.json"));
         let test_path = self.path.join(id);
 
         if replace {
@@ -243,16 +208,15 @@ impl TestRepoStorage {
     pub async fn get_test_definition(&self, id: &str) -> anyhow::Result<TestDefinition> {
         log::debug!("Getting Test Definition for ID {id:?}");
 
-        let test_definition_path = self.path.join(format!("{id}.test"));
-        log::debug!("Looking in {test_definition_path:?}");
+        let test_definition_path = self.path.join(format!("{id}.test.json"));
+        log::trace!("Looking in {test_definition_path:?}");
 
         if !test_definition_path.exists() {
             anyhow::bail!("Test with ID {:?} not found", &id);
         } else {
             // Read the test definition file into a string.
-            let content = fs::read_to_string(&test_definition_path).await?;
-            let path_str = test_definition_path.to_string_lossy().to_string();
-            parse_test_definition(&content, &path_str)
+            let json_content = fs::read_to_string(test_definition_path).await?;
+            Ok(serde_json::from_str(&json_content)?)
         }
     }
 
@@ -275,15 +239,14 @@ impl TestRepoStorage {
     pub async fn get_test_storage(&self, id: &str) -> anyhow::Result<TestStorage> {
         log::debug!("Getting Test Storage for ID {id:?}");
 
-        let test_definition_path = self.path.join(format!("{id}.test"));
+        let test_definition_path = self.path.join(format!("{id}.test.json"));
 
         if !test_definition_path.exists() {
             anyhow::bail!("Test with ID {:?} not found", &id);
         } else {
             // Read the test definition file into a string.
-            let content = fs::read_to_string(&test_definition_path).await?;
-            let path_str = test_definition_path.to_string_lossy().to_string();
-            let test_definition = parse_test_definition(&content, &path_str)?;
+            let json_content = fs::read_to_string(test_definition_path).await?;
+            let test_definition: models::TestDefinition = serde_json::from_str(&json_content)?;
 
             // The path to the test data is defined in test_definition.test_folder.
             // If not provided, use the test_id.
@@ -402,7 +365,7 @@ pub struct TestSourceStorage {
 
 impl TestSourceStorage {
     pub async fn get_script_files(&self) -> anyhow::Result<TestSourceScriptSet> {
-        let mut bootstrap_data_script_files: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        let mut bootstrap_data_script_files = HashMap::new();
         let mut source_change_script_files = Vec::new();
 
         if let models::TestSourceDefinition::Script(def) = &self.test_source_definition {
@@ -428,13 +391,18 @@ impl TestSourceStorage {
                 for file_path in file_path_list {
                     let data_type_name = file_path
                         .parent()
-                        .and_then(|p| p.file_name())
-                        .and_then(|n| n.to_str())
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_string();
+                    if !bootstrap_data_script_files.contains_key(&data_type_name) {
+                        bootstrap_data_script_files.insert(data_type_name.clone(), vec![]);
+                    }
                     bootstrap_data_script_files
-                        .entry(data_type_name)
-                        .or_default()
+                        .get_mut(&data_type_name)
+                        .unwrap()
                         .push(file_path);
                 }
             }

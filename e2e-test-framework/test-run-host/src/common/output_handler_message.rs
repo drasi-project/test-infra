@@ -67,8 +67,8 @@ pub enum HandlerError {
     Serde(#[from] serde_json::Error),
     #[error("Redis error: {0}")]
     RedisError(#[from] redis::RedisError),
-    #[error("HTTP server error: {0}")]
-    HttpServerError(String),
+    #[error("HTTP instance error: {0}")]
+    HttpInstanceError(String),
     #[error("Conversion error")]
     ConversionError,
 }

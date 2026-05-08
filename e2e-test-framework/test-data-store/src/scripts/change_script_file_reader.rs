@@ -107,8 +107,8 @@ impl ChangeScriptReader {
     // If there are no more records to read, None is returned.
     fn get_next_record(&mut self) -> anyhow::Result<SequencedChangeScriptRecord> {
         // Once we have reached the end of the script, always return the Finish record.
-        if let Some(footer) = &self.footer {
-            return Ok(footer.clone());
+        if self.footer.is_some() {
+            return Ok(self.footer.as_ref().unwrap().clone());
         }
 
         if self.current_reader.is_none() {
@@ -205,16 +205,15 @@ impl ChangeScriptReader {
             }
         } else {
             // Generate a synthetic Finish record to mark the end of the script.
-            let footer = SequencedChangeScriptRecord {
+            self.footer = Some(SequencedChangeScriptRecord {
                 record: ChangeScriptRecord::Finish(ChangeFinishRecord {
                     offset_ns: self.offset_ns,
                     description: "Auto generated at end of script.".to_string(),
                 }),
                 seq: self.seq,
                 offset_ns: self.offset_ns,
-            };
-            self.footer = Some(footer.clone());
-            Ok(footer)
+            });
+            Ok(self.footer.as_ref().unwrap().clone())
         }
     }
 

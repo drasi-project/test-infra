@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::unwrap_used)]
-
 use axum::http::StatusCode;
 use serde_json::json;
 
@@ -45,8 +43,8 @@ async fn test_direct_source_endpoints_return_404() {
         "/test_run_host/test_queries",
         "/test_run_host/test_reaction",
         "/test_run_host/test_reactions",
-        "/test_run_host/drasi_server",
-        "/test_run_host/drasi_servers",
+        "/test_run_host/drasi_lib_instance",
+        "/test_run_host/drasi_lib_instances",
     ];
 
     for endpoint in endpoints {
@@ -77,7 +75,7 @@ async fn test_test_run_crud_operations() {
         "sources": [],
         "queries": [],
         "reactions": [],
-        "drasi_servers": []
+        "drasi_lib_instances": []
     });
 
     let response = client
@@ -136,7 +134,7 @@ async fn test_test_run_source_operations() {
         "sources": [],
         "queries": [],
         "reactions": [],
-        "drasi_servers": []
+        "drasi_lib_instances": []
     });
 
     let response = client
@@ -202,7 +200,7 @@ async fn test_test_run_query_operations() {
         "sources": [],
         "queries": [],
         "reactions": [],
-        "drasi_servers": []
+        "drasi_lib_instances": []
     });
 
     let response = client

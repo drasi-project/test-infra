@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test infrastructure module - allow unwraps for handler code
-#![allow(clippy::unwrap_used)]
-
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
@@ -69,7 +66,7 @@ impl HttpReactionHandlerSettings {
 }
 
 #[derive(Clone)]
-struct HttpServerState {
+struct HttpInstanceState {
     tx: Sender<ReactionHandlerMessage>,
     settings: HttpReactionHandlerSettings,
 }
@@ -115,7 +112,7 @@ impl ReactionOutputHandler for HttpReactionHandler {
 
                     *status = ReactionHandlerStatus::Paused;
 
-                    tokio::spawn(http_server_thread(
+                    tokio::spawn(http_instance_thread(
                         self.settings.clone(),
                         self.status.clone(),
                         self.notifier.clone(),
@@ -226,14 +223,14 @@ impl ReactionOutputHandler for HttpReactionHandler {
     }
 }
 
-async fn http_server_thread(
+async fn http_instance_thread(
     settings: HttpReactionHandlerSettings,
     status: Arc<RwLock<ReactionHandlerStatus>>,
     notify: Arc<Notify>,
     shutdown_notify: Arc<Notify>,
     result_handler_tx_channel: Sender<ReactionHandlerMessage>,
 ) {
-    log::debug!("Starting HttpReactionHandler Server Thread");
+    log::debug!("Starting HttpReactionHandler Instance Thread");
 
     // Wait for the handler to be started
     loop {
@@ -249,11 +246,11 @@ async fn http_server_thread(
         match current_status {
             ReactionHandlerStatus::Running => break,
             ReactionHandlerStatus::Paused => {
-                log::debug!("HTTP server waiting to be started");
+                log::debug!("HTTP instance waiting to be started");
                 notify.notified().await;
             }
             ReactionHandlerStatus::Stopped => {
-                log::debug!("Handler stopped before server could start");
+                log::debug!("Handler stopped before instance could start");
                 return;
             }
             _ => {
@@ -262,7 +259,7 @@ async fn http_server_thread(
         }
     }
 
-    let state = HttpServerState {
+    let state = HttpInstanceState {
         tx: result_handler_tx_channel.clone(),
         settings: settings.clone(),
     };
@@ -276,11 +273,11 @@ async fn http_server_thread(
     let addr = match format!("{}:{}", settings.host, settings.port).parse::<SocketAddr>() {
         Ok(addr) => addr,
         Err(e) => {
-            log::error!("Failed to parse server address: {e}");
+            log::error!("Failed to parse instance address: {e}");
             *status.write().await = ReactionHandlerStatus::Error;
             let _ = result_handler_tx_channel
                 .send(ReactionHandlerMessage::Error(ReactionHandlerError::new(
-                    format!("Invalid HTTP server address: {e}"),
+                    format!("Invalid HTTP instance address: {e}"),
                     false,
                 )))
                 .await;
@@ -294,32 +291,32 @@ async fn http_server_thread(
         settings.path
     );
 
-    let server = Server::bind(&addr)
+    let instance = Server::bind(&addr)
         .serve(app.into_make_service())
         .with_graceful_shutdown(async move {
             shutdown_notify.notified().await;
-            log::debug!("HTTP server received shutdown signal");
+            log::debug!("HTTP instance received shutdown signal");
         });
 
-    if let Err(e) = server.await {
-        log::error!("HTTP server error: {e}");
+    if let Err(e) = instance.await {
+        log::error!("HTTP instance error: {e}");
         *status.write().await = ReactionHandlerStatus::Error;
         let _ = result_handler_tx_channel
             .send(ReactionHandlerMessage::Error(ReactionHandlerError::new(
-                format!("HTTP server error: {e}"),
+                format!("HTTP instance error: {e}"),
                 false,
             )))
             .await;
     }
 
-    log::debug!("HTTP server thread shutting down, sending HandlerStopping message");
+    log::debug!("HTTP instance thread shutting down, sending HandlerStopping message");
     let _ = result_handler_tx_channel
         .send(ReactionHandlerMessage::Control(ReactionControlSignal::Stop))
         .await;
 }
 
 async fn handle_reaction(
-    State(state): State<HttpServerState>,
+    State(state): State<HttpInstanceState>,
     method: Method,
     headers: HeaderMap,
     uri: axum::http::Uri,
@@ -536,7 +533,7 @@ async fn handle_reaction(
             Ok(_) => (StatusCode::OK, "OK"),
             Err(e) => {
                 log::error!("Failed to send reaction message: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Instance Error")
             }
         }
     }

@@ -65,21 +65,21 @@ impl GrpcReactionHandlerSettings {
         })
     }
 
-    pub fn server_addr(&self) -> SocketAddr {
+    pub fn instance_addr(&self) -> SocketAddr {
         format!("{}:{}", self.host, self.port)
             .parse()
-            .expect("Invalid server address")
+            .expect("Invalid instance address")
     }
 }
 
 #[derive(Clone)]
-struct GrpcServerImpl {
+struct GrpcInstanceImpl {
     tx: Sender<ReactionHandlerMessage>,
     settings: GrpcReactionHandlerSettings,
     invocation_count: Arc<RwLock<u64>>,
 }
 
-impl GrpcServerImpl {
+impl GrpcInstanceImpl {
     async fn process_query_result(&self, result: QueryResult) -> anyhow::Result<()> {
         let timestamp = chrono::Utc::now();
 
@@ -150,7 +150,7 @@ impl GrpcServerImpl {
 }
 
 #[tonic::async_trait]
-impl ReactionService for GrpcServerImpl {
+impl ReactionService for GrpcInstanceImpl {
     async fn process_results(
         &self,
         request: Request<ProcessResultsRequest>,
@@ -281,8 +281,8 @@ impl ReactionService for GrpcServerImpl {
             }
         }
 
-        // For now, return an empty stream since we don't have a real Drasi server to subscribe to
-        // In a real implementation, this would establish a subscription to the Drasi server
+        // For now, return an empty stream since we don't have a real Drasi Server to subscribe to
+        // In a real implementation, this would establish a subscription to the Drasi Server
         let (_tx, rx) = tokio::sync::mpsc::channel(100);
 
         info!(
@@ -312,9 +312,11 @@ impl ReactionService for GrpcServerImpl {
     }
 }
 
+type GrpcServerJoinHandle =
+    Arc<RwLock<Option<tokio::task::JoinHandle<Result<(), tonic::transport::Error>>>>>;
+
 pub struct GrpcReactionHandler {
-    server_handle:
-        Arc<RwLock<Option<tokio::task::JoinHandle<Result<(), tonic::transport::Error>>>>>,
+    instance_handle: GrpcServerJoinHandle,
     shutdown_notify: Arc<Notify>,
     settings: GrpcReactionHandlerSettings,
     tx: Arc<RwLock<Option<Sender<ReactionHandlerMessage>>>>,
@@ -331,7 +333,7 @@ impl GrpcReactionHandler {
         let (tx, rx) = channel(1000);
 
         Ok(Self {
-            server_handle: Arc::new(RwLock::new(None)),
+            instance_handle: Arc::new(RwLock::new(None)),
             shutdown_notify: Arc::new(Notify::new()),
             settings,
             tx: Arc::new(RwLock::new(Some(tx))),
@@ -351,8 +353,8 @@ impl ReactionOutputHandler for GrpcReactionHandler {
     }
 
     async fn start(&self) -> anyhow::Result<()> {
-        let mut server_handle = self.server_handle.write().await;
-        if server_handle.is_some() {
+        let mut instance_handle = self.instance_handle.write().await;
+        if instance_handle.is_some() {
             return Ok(()); // Already running
         }
 
@@ -362,73 +364,76 @@ impl ReactionOutputHandler for GrpcReactionHandler {
             .ok_or_else(|| anyhow::anyhow!("Transmitter not available"))?
             .clone();
 
-        let server_impl = GrpcServerImpl {
+        let instance_impl = GrpcInstanceImpl {
             tx,
             settings: self.settings.clone(),
             invocation_count: Arc::new(RwLock::new(0)),
         };
 
-        let addr = self.settings.server_addr();
+        let addr = self.settings.instance_addr();
         let shutdown_notify_clone = self.shutdown_notify.clone();
 
-        info!("Starting Drasi ReactionService server on {}", addr);
+        info!("Starting Drasi ReactionService instance on {}", addr);
         info!(
-            "Server configured for query_ids: {:?}",
+            "Instance configured for query_ids: {:?}",
             self.settings.query_ids
         );
 
         let handle = tokio::spawn(async move {
             Server::builder()
-                .add_service(ReactionServiceServer::new(server_impl))
+                .add_service(ReactionServiceServer::new(instance_impl))
                 .serve_with_shutdown(addr, async {
                     shutdown_notify_clone.notified().await;
                 })
                 .await
         });
 
-        *server_handle = Some(handle);
+        *instance_handle = Some(handle);
         *self.status.write().await = ReactionHandlerStatus::Running;
 
-        // Give the server time to start listening
+        // Give the instance time to start listening
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         info!(
-            "Server is now listening and ready to accept connections on {}",
-            self.settings.server_addr()
+            "Instance is now listening and ready to accept connections on {}",
+            self.settings.instance_addr()
         );
 
         Ok(())
     }
 
     async fn pause(&self) -> anyhow::Result<()> {
-        // gRPC server doesn't support pause - just update status
+        // gRPC instance doesn't support pause - just update status
         *self.status.write().await = ReactionHandlerStatus::Paused;
         Ok(())
     }
 
     async fn stop(&self) -> anyhow::Result<()> {
         info!(
-            "Shutting down Drasi ReactionService server on {}",
-            self.settings.server_addr()
+            "Shutting down Drasi ReactionService instance on {}",
+            self.settings.instance_addr()
         );
 
         // Signal shutdown
         self.shutdown_notify.notify_one();
 
-        // Wait for server to stop
-        let mut server_handle = self.server_handle.write().await;
-        if let Some(handle) = server_handle.take() {
+        // Wait for instance to stop
+        let mut instance_handle = self.instance_handle.write().await;
+        if let Some(handle) = instance_handle.take() {
             match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
                 Ok(Ok(Ok(_))) => {
-                    debug!("Drasi ReactionService server shut down successfully");
+                    debug!("Drasi ReactionService instance shut down successfully");
                 }
                 Ok(Ok(Err(e))) => {
-                    error!("Drasi ReactionService server error during shutdown: {}", e);
+                    error!(
+                        "Drasi ReactionService instance error during shutdown: {}",
+                        e
+                    );
                 }
                 Ok(Err(e)) => {
                     error!("Task join error during shutdown: {}", e);
                 }
                 Err(_) => {
-                    error!("Timeout waiting for Drasi ReactionService server to shut down");
+                    error!("Timeout waiting for Drasi ReactionService instance to shut down");
                 }
             }
         }
@@ -443,7 +448,7 @@ impl ReactionOutputHandler for GrpcReactionHandler {
 
     async fn metrics(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
-            "endpoint": format!("grpc://{}", self.settings.server_addr()),
+            "endpoint": format!("grpc://{}", self.settings.instance_addr()),
             "query_ids": self.settings.query_ids,
         }))
     }

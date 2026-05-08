@@ -17,10 +17,5 @@
 GREEN="\033[32m"
 RESET="\033[0m"
 
-echo -e "${GREEN}\nRunning the E2E Test Service with Embedded Drasi Server (DEBUG)...${RESET}"
-
-# Debug build (faster compile times)
-# Set debug/trace levels but suppress drasi_core INFO logs from tracing instrumentation
-RUST_LOG="off,test_run_host=debug, test_run_service=debug, test_data_store=debug" \
-	cargo run --manifest-path ./test-service/Cargo.toml -- --config examples/building_comfort/drasi_embedded/config.json \
-	| egrep '^(TRACE|DEBUG|INFO|WARN|ERROR)'
+echo -e "${GREEN}\nRunning the E2E Test Service as a local process...${RESET}"
+RUST_LOG=debug cargo run --release --manifest-path "$(dirname "$0")/../../../test-service/Cargo.toml" -- --config "$(dirname "$0")/config.json"

@@ -1,0 +1,5 @@
+### Get all queries for the test run
+GET http://localhost:8080/api/test_runs/test_run_001/queries
+
+### Note: This example doesn't define queries as they would be handled by the Drasi Server
+### The reactions receive the query results from the Drasi Server

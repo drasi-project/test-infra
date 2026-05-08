@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test infrastructure module - allow unwraps for handler code
-#![allow(clippy::unwrap_used)]
-
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -258,10 +255,7 @@ async fn reader_thread(
     notify: Arc<Notify>,
     result_stream_handler_tx_channel: Sender<QueryHandlerMessage>,
 ) {
-    log::debug!(
-        "Starting RedisResultStreamHandler Reader Thread with {:?}",
-        &settings
-    );
+    log::debug!("Starting RedisResultStreamHandler Reader Thread");
 
     let client_result =
         redis::Client::open(format!("redis://{}:{}", &settings.host, &settings.port));
@@ -458,7 +452,6 @@ async fn read_stream(
                                 }
                                 Err(e) => {
                                     log::error!("Error: {e:?}");
-                                    log::error!("Record: {s:?}");
                                     records.push(RedisStreamReadResult {
                                         id,
                                         seq: seq.fetch_add(1, Ordering::SeqCst),

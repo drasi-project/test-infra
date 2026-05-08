@@ -27,7 +27,7 @@ const SOURCE_CHANGE_LOG_FOLDER_NAME: &str = "source_change_log";
 const REACTIONS_FOLDER_NAME: &str = "reactions";
 const REACTION_OUTPUT_LOG_FOLDER_NAME: &str = "output_log";
 
-const DRASI_SERVERS_FOLDER_NAME: &str = "drasi_servers";
+const DRASI_LIB_INSTANCES_FOLDER_NAME: &str = "drasi_lib_instances";
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
 pub struct TestRunId {
@@ -219,46 +219,50 @@ impl TryFrom<&str> for TestRunReactionId {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
-pub struct TestRunDrasiServerId {
+pub struct TestRunDrasiLibInstanceId {
     pub test_run_id: TestRunId,
-    pub test_drasi_server_id: String,
+    pub test_drasi_lib_instance_id: String,
 }
 
-impl TestRunDrasiServerId {
-    pub fn new(test_run_id: &TestRunId, test_drasi_server_id: &str) -> Self {
+impl TestRunDrasiLibInstanceId {
+    pub fn new(test_run_id: &TestRunId, test_drasi_lib_instance_id: &str) -> Self {
         Self {
             test_run_id: test_run_id.clone(),
-            test_drasi_server_id: test_drasi_server_id.to_string(),
+            test_drasi_lib_instance_id: test_drasi_lib_instance_id.to_string(),
         }
     }
 }
 
-impl fmt::Display for TestRunDrasiServerId {
+impl fmt::Display for TestRunDrasiLibInstanceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.test_run_id, self.test_drasi_server_id)
+        write!(
+            f,
+            "{}.{}",
+            self.test_run_id, self.test_drasi_lib_instance_id
+        )
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ParseTestRunDrasiServerIdError {
-    #[error("Invalid format for TestRunDrasiServerId - {0}")]
+pub enum ParseTestRunDrasiLibInstanceIdError {
+    #[error("Invalid format for TestRunDrasiLibInstanceId - {0}")]
     InvalidFormat(String),
-    #[error("Invalid values for TestRunDrasiServerId - {0}")]
+    #[error("Invalid values for TestRunDrasiLibInstanceId - {0}")]
     InvalidValues(String),
 }
 
-impl TryFrom<&str> for TestRunDrasiServerId {
-    type Error = ParseTestRunDrasiServerIdError;
+impl TryFrom<&str> for TestRunDrasiLibInstanceId {
+    type Error = ParseTestRunDrasiLibInstanceIdError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let parts: Vec<&str> = value.split('.').collect();
         if parts.len() == 4 {
             Ok(Self {
                 test_run_id: TestRunId::new(parts[0], parts[1], parts[2]),
-                test_drasi_server_id: parts[3].to_string(),
+                test_drasi_lib_instance_id: parts[3].to_string(),
             })
         } else {
-            Err(ParseTestRunDrasiServerIdError::InvalidFormat(
+            Err(ParseTestRunDrasiLibInstanceIdError::InvalidFormat(
                 value.to_string(),
             ))
         }
@@ -329,7 +333,7 @@ impl TestRunStore {
         let queries_path = test_run_path.join(QUERIES_FOLDER_NAME);
         let sources_path = test_run_path.join(SOURCES_FOLDER_NAME);
         let reactions_path = test_run_path.join(REACTIONS_FOLDER_NAME);
-        let drasi_servers_path = test_run_path.join(DRASI_SERVERS_FOLDER_NAME);
+        let drasi_lib_instances_path = test_run_path.join(DRASI_LIB_INSTANCES_FOLDER_NAME);
 
         if replace && test_run_path.exists() {
             fs::remove_dir_all(&test_run_path).await?;
@@ -345,7 +349,7 @@ impl TestRunStore {
             queries_path,
             sources_path,
             reactions_path,
-            drasi_servers_path,
+            drasi_lib_instances_path,
         })
     }
 }
@@ -356,7 +360,7 @@ pub struct TestRunStorage {
     pub queries_path: PathBuf,
     pub sources_path: PathBuf,
     pub reactions_path: PathBuf,
-    pub drasi_servers_path: PathBuf,
+    pub drasi_lib_instances_path: PathBuf,
 }
 
 impl TestRunStorage {
@@ -487,50 +491,53 @@ impl TestRunStorage {
         Ok(test_run_reactions)
     }
 
-    pub async fn get_drasi_server_storage(
+    pub async fn get_drasi_lib_instance_storage(
         &self,
-        drasi_server_id: &TestRunDrasiServerId,
+        drasi_lib_instance_id: &TestRunDrasiLibInstanceId,
         replace: bool,
-    ) -> anyhow::Result<TestRunDrasiServerStorage> {
+    ) -> anyhow::Result<TestRunDrasiLibInstanceStorage> {
         log::debug!(
-            "Getting (replace = {replace}) TestRunDrasiServerStorage for ID: {drasi_server_id:?}"
+            "Getting (replace = {replace}) TestRunDrasiLibInstanceStorage for ID: {drasi_lib_instance_id:?}"
         );
 
-        let drasi_server_path = self
-            .drasi_servers_path
-            .join(&drasi_server_id.test_drasi_server_id);
+        let drasi_lib_instance_path = self
+            .drasi_lib_instances_path
+            .join(&drasi_lib_instance_id.test_drasi_lib_instance_id);
 
-        if replace && drasi_server_path.exists() {
-            fs::remove_dir_all(&drasi_server_path).await?;
+        if replace && drasi_lib_instance_path.exists() {
+            fs::remove_dir_all(&drasi_lib_instance_path).await?;
         }
 
-        if !drasi_server_path.exists() {
-            fs::create_dir_all(&drasi_server_path).await?;
+        if !drasi_lib_instance_path.exists() {
+            fs::create_dir_all(&drasi_lib_instance_path).await?;
         }
 
-        Ok(TestRunDrasiServerStorage {
-            id: drasi_server_id.clone(),
-            path: drasi_server_path,
+        Ok(TestRunDrasiLibInstanceStorage {
+            id: drasi_lib_instance_id.clone(),
+            path: drasi_lib_instance_path,
         })
     }
 
-    pub async fn get_drasi_server_ids(&self) -> anyhow::Result<Vec<TestRunDrasiServerId>> {
-        let mut test_run_drasi_servers = Vec::new();
+    pub async fn get_drasi_lib_instance_ids(
+        &self,
+    ) -> anyhow::Result<Vec<TestRunDrasiLibInstanceId>> {
+        let mut test_run_drasi_lib_instances = Vec::new();
 
-        if self.drasi_servers_path.exists() {
-            let mut entries = fs::read_dir(&self.drasi_servers_path).await?;
+        if self.drasi_lib_instances_path.exists() {
+            let mut entries = fs::read_dir(&self.drasi_lib_instances_path).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let metadata = entry.metadata().await?;
                 if metadata.is_dir() {
                     if let Some(folder_name) = entry.file_name().to_str() {
-                        let drasi_server_id = TestRunDrasiServerId::new(&self.id, folder_name);
-                        test_run_drasi_servers.push(drasi_server_id);
+                        let drasi_lib_instance_id =
+                            TestRunDrasiLibInstanceId::new(&self.id, folder_name);
+                        test_run_drasi_lib_instances.push(drasi_lib_instance_id);
                     }
                 }
             }
         }
 
-        Ok(test_run_drasi_servers)
+        Ok(test_run_drasi_lib_instances)
     }
 }
 
@@ -580,20 +587,20 @@ impl TestRunReactionStorage {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TestRunDrasiServerStorage {
-    pub id: TestRunDrasiServerId,
+pub struct TestRunDrasiLibInstanceStorage {
+    pub id: TestRunDrasiLibInstanceId,
     pub path: PathBuf,
 }
 
-impl TestRunDrasiServerStorage {
+impl TestRunDrasiLibInstanceStorage {
     pub async fn write_test_run_summary(&self, summary: &Value) -> anyhow::Result<()> {
         let summary_path = self.path.join("test_run_summary.json");
         fs::write(summary_path, serde_json::to_string_pretty(summary)?).await?;
         Ok(())
     }
 
-    pub async fn write_server_config(&self, config: &Value) -> anyhow::Result<()> {
-        let config_path = self.path.join("server_config.json");
+    pub async fn write_instance_config(&self, config: &Value) -> anyhow::Result<()> {
+        let config_path = self.path.join("instance_config.json");
         fs::write(config_path, serde_json::to_string_pretty(config)?).await?;
         Ok(())
     }

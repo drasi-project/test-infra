@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test infrastructure module - allow unwraps for observer code
-#![allow(clippy::unwrap_used)]
-
 //! QueryResultObserver implementation using query-specific output handlers
 //!
 //! This module provides a QueryResultObserver that uses query-specific
@@ -23,7 +20,7 @@
 use std::{
     cmp::max,
     fmt::{self, Debug, Formatter},
-    time::{SystemTime, UNIX_EPOCH},
+    time::SystemTime,
 };
 
 use futures::future::join_all;
@@ -32,8 +29,8 @@ use tokio::sync::mpsc::Receiver;
 
 use crate::queries::{
     query_output_handler::{
-        create_query_handler, QueryControlSignal, QueryHandlerMessage, QueryHandlerRecord,
-        QueryHandlerStatus, QueryOutputHandler,
+        QueryControlSignal, QueryHandlerMessage, QueryHandlerRecord, QueryHandlerStatus,
+        QueryOutputHandler,
     },
     result_stream_record::{ControlEvent, ControlSignal, QueryResultRecord},
     stop_triggers::{create_stop_trigger, StopTrigger},
@@ -46,9 +43,7 @@ use super::result_stream_loggers::{
 use serde::Serialize;
 use std::sync::Arc;
 use test_data_store::{
-    test_repo_storage::models::{
-        ResultStreamHandlerDefinition, StopTriggerDefinition, TestQueryDefinition,
-    },
+    test_repo_storage::models::{StopTriggerDefinition, TestQueryDefinition},
     test_run_storage::{TestRunQueryId, TestRunQueryStorage},
 };
 use tokio::{
@@ -57,7 +52,6 @@ use tokio::{
 };
 
 use super::{result_stream_loggers::ResultStreamLoggerConfig, TestRunQueryOverrides};
-use crate::test_run_completion::LifecycleTx;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum QueryResultObserverStatus {
@@ -105,8 +99,7 @@ pub struct QueryResultObserverSettings {
     pub id: TestRunQueryId,
     pub loggers: Vec<ResultStreamLoggerConfig>,
     pub output_storage: TestRunQueryStorage,
-    pub result_stream_handler: ResultStreamHandlerDefinition,
-    pub stop_trigger: StopTriggerDefinition,
+    pub stop_trigger: Option<StopTriggerDefinition>,
 }
 
 impl QueryResultObserverSettings {
@@ -117,15 +110,15 @@ impl QueryResultObserverSettings {
         loggers: Vec<ResultStreamLoggerConfig>,
         test_run_overrides: Option<TestRunQueryOverrides>,
     ) -> anyhow::Result<Self> {
-        let overrides = test_run_overrides.as_ref();
+        // Start with stop trigger from test definition
+        let mut stop_trigger = definition.stop_trigger.clone();
 
-        let stop_trigger = overrides
-            .and_then(|o| o.stop_trigger.clone())
-            .unwrap_or_else(|| definition.stop_trigger.clone());
-
-        let result_stream_handler = overrides
-            .and_then(|o| o.result_stream_handler.clone())
-            .unwrap_or_else(|| definition.result_stream_handler.clone());
+        // Allow overrides to replace it
+        if let Some(overrides) = test_run_overrides {
+            if let Some(override_stop_trigger) = &overrides.stop_trigger {
+                stop_trigger = Some(override_stop_trigger.clone());
+            }
+        }
 
         let settings = Self {
             stop_trigger,
@@ -133,7 +126,6 @@ impl QueryResultObserverSettings {
             id: test_run_query_id,
             loggers,
             output_storage,
-            result_stream_handler,
         };
 
         Ok(settings)
@@ -405,7 +397,6 @@ pub struct QueryResultObserver {
     settings: QueryResultObserverSettings,
     observer_tx_channel: Sender<QueryResultObserverMessage>,
     _observer_thread_handle: Arc<Mutex<JoinHandle<anyhow::Result<()>>>>,
-    _lifecycle_tx: LifecycleTx,
 }
 
 impl QueryResultObserver {
@@ -415,7 +406,6 @@ impl QueryResultObserver {
         output_storage: TestRunQueryStorage,
         loggers: Vec<ResultStreamLoggerConfig>,
         test_run_overrides: Option<TestRunQueryOverrides>,
-        lifecycle_tx: LifecycleTx,
     ) -> anyhow::Result<Self> {
         let settings = QueryResultObserverSettings::new(
             test_run_query_id,
@@ -428,18 +418,13 @@ impl QueryResultObserver {
         log::debug!("Creating QueryResultObserver from {:?}", &settings);
 
         let (observer_tx_channel, observer_rx_channel) = tokio::sync::mpsc::channel(100);
-        let lifecycle_tx_clone = lifecycle_tx.clone();
-        let observer_thread_handle = tokio::spawn(observer_thread(
-            observer_rx_channel,
-            settings.clone(),
-            lifecycle_tx_clone,
-        ));
+        let observer_thread_handle =
+            tokio::spawn(observer_thread(observer_rx_channel, settings.clone()));
 
         Ok(Self {
             settings,
             observer_tx_channel,
             _observer_thread_handle: Arc::new(Mutex::new(observer_thread_handle)),
-            _lifecycle_tx: lifecycle_tx,
         })
     }
 
@@ -502,8 +487,8 @@ impl QueryResultObserver {
 
 /// Internal state for QueryResultObserver
 struct QueryResultObserverInternalState {
-    output_handler: Box<dyn QueryOutputHandler + Send + Sync>,
-    output_handler_rx_channel: Receiver<QueryHandlerMessage>,
+    output_handler: Option<Box<dyn QueryOutputHandler + Send + Sync>>,
+    output_handler_rx_channel: Option<Receiver<QueryHandlerMessage>>,
     handler_status: QueryHandlerStatus,
     loggers: Vec<Box<dyn ResultStreamLogger + Send + Sync>>,
     logger_results: Vec<ResultStreamLoggerResult>,
@@ -512,14 +497,10 @@ struct QueryResultObserverInternalState {
     status: QueryResultObserverStatus,
     metrics: QueryResultObserverMetrics,
     stop_trigger: Box<dyn StopTrigger + Send + Sync>,
-    lifecycle_tx: LifecycleTx,
 }
 
 impl QueryResultObserverInternalState {
-    pub async fn initialize(
-        settings: QueryResultObserverSettings,
-        lifecycle_tx: LifecycleTx,
-    ) -> anyhow::Result<Self> {
+    pub async fn initialize(settings: QueryResultObserverSettings) -> anyhow::Result<Self> {
         log::debug!("Initializing QueryResultObserver using {settings:?}");
 
         let metrics = QueryResultObserverMetrics {
@@ -530,10 +511,9 @@ impl QueryResultObserverInternalState {
             ..Default::default()
         };
 
-        let output_handler =
-            create_query_handler(settings.id.clone(), settings.result_stream_handler.clone())
-                .await?;
-        let output_handler_rx_channel = output_handler.init().await?;
+        // Create result stream handler
+        // Note: output_handler is now a runtime configuration, not part of test definition
+        let (output_handler, output_handler_rx_channel) = (None, None);
 
         // Create result stream loggers
         let loggers = create_result_stream_loggers(
@@ -543,21 +523,19 @@ impl QueryResultObserverInternalState {
         )
         .await?;
 
-        let stop_trigger = create_stop_trigger(&settings.stop_trigger).await?;
-
-        // let stop_trigger = match &settings.stop_trigger {
-        //     Some(trigger_def) => create_stop_trigger(trigger_def).await?,
-        //     None => {
-        //         // Create a default stop trigger that never triggers
-        //         use test_data_store::test_repo_storage::models::RecordCountStopTriggerDefinition;
-        //         create_stop_trigger(&StopTriggerDefinition::RecordCount(
-        //             RecordCountStopTriggerDefinition {
-        //                 record_count: u64::MAX,
-        //             },
-        //         ))
-        //         .await?
-        //     }
-        // };
+        let stop_trigger = match &settings.stop_trigger {
+            Some(trigger_def) => create_stop_trigger(trigger_def).await?,
+            None => {
+                // Create a default stop trigger that never triggers
+                use test_data_store::test_repo_storage::models::RecordCountStopTriggerDefinition;
+                create_stop_trigger(&StopTriggerDefinition::RecordCount(
+                    RecordCountStopTriggerDefinition {
+                        record_count: u64::MAX,
+                    },
+                ))
+                .await?
+            }
+        };
 
         Ok(Self {
             output_handler,
@@ -570,7 +548,6 @@ impl QueryResultObserverInternalState {
             status: QueryResultObserverStatus::Paused,
             metrics,
             stop_trigger,
-            lifecycle_tx,
         })
     }
 
@@ -715,7 +692,7 @@ impl QueryResultObserverInternalState {
             }
         }
 
-        log::trace!(
+        log::info!(
             "Processed HandlerRecord: sequence: {}, time_ns: {}, handler_status: {:?}",
             record.payload.sequence.unwrap_or(0),
             record_time_ns,
@@ -929,18 +906,18 @@ impl QueryResultObserverInternalState {
                 );
 
                 self.status = QueryResultObserverStatus::Running;
-                let start_time_ns = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as u64;
-                self.metrics.try_set_observer_start_time(start_time_ns);
+                self.metrics.try_set_observer_start_time(
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos() as u64,
+                );
                 self.metrics.observer_stop_time_ns = 0;
 
-                // Emit lifecycle event
-                self.lifecycle_tx.query_started(self.settings.id.clone());
-
                 // Start the unified handler
-                let _ = &self.output_handler.start().await?;
+                if let Some(handler) = &self.output_handler {
+                    handler.start().await?;
+                }
                 Ok(())
             }
             QueryResultObserverCommand::Stop => {
@@ -970,8 +947,9 @@ impl QueryResultObserverInternalState {
                     .as_nanos() as u64;
 
                 // Pause the unified handler
-                let _ = &self.output_handler.pause().await?;
-
+                if let Some(handler) = &self.output_handler {
+                    handler.pause().await?;
+                }
                 Ok(())
             }
             QueryResultObserverCommand::Reset => {
@@ -1009,22 +987,20 @@ impl QueryResultObserverInternalState {
         );
 
         self.status = QueryResultObserverStatus::Stopped;
-        let stop_time_ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+        self.metrics.observer_stop_time_ns = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos() as u64;
-        self.metrics.observer_stop_time_ns = stop_time_ns;
-
-        // Emit lifecycle event
-        self.lifecycle_tx.query_stopped(self.settings.id.clone());
 
         // Stop the unified handler
-        match &self.output_handler.stop().await {
-            Ok(_) => {
-                self.handler_status = QueryHandlerStatus::Stopped;
-            }
-            Err(e) => {
-                self.transition_to_error_state("Error stopping output handler", Some(e));
+        if let Some(handler) = &self.output_handler {
+            match handler.stop().await {
+                Ok(_) => {
+                    self.handler_status = QueryHandlerStatus::Stopped;
+                }
+                Err(e) => {
+                    self.transition_to_error_state("Error stopping output handler", Some(&e));
+                }
             }
         }
 
@@ -1053,16 +1029,10 @@ impl QueryResultObserverInternalState {
                 "QueryResultObserver transitioned to an Error state. Received error: {msg}"
             );
             self.status = QueryResultObserverStatus::Error;
-            let error_time_ns = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+            self.metrics.observer_stop_time_ns = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos() as u64;
-            self.metrics.observer_stop_time_ns = error_time_ns;
-
-            // Emit lifecycle event
-            self.lifecycle_tx
-                .query_error(self.settings.id.clone(), msg.clone());
-
             self.error_message = Some(msg);
         }
     }
@@ -1090,14 +1060,13 @@ impl QueryResultObserverInternalState {
 async fn observer_thread(
     mut command_rx_channel: Receiver<QueryResultObserverMessage>,
     settings: QueryResultObserverSettings,
-    lifecycle_tx: LifecycleTx,
 ) -> anyhow::Result<()> {
     log::info!(
         "QueryResultObserver thread started for TestRunQuery {} ...",
         settings.id
     );
 
-    let mut state = QueryResultObserverInternalState::initialize(settings, lifecycle_tx).await?;
+    let mut state = QueryResultObserverInternalState::initialize(settings).await?;
 
     // Loop to process commands sent to the QueryResultObserver or read from the output handler.
     loop {
@@ -1122,13 +1091,12 @@ async fn observer_thread(
 
             // Process messages from the Output Handler.
             output_handler_message = async {
-                // if let Some(ref mut rx) = state.output_handler_rx_channel {
-                    // rx.recv().await
-                    state.output_handler_rx_channel.recv().await
-                // } else {
+                if let Some(ref mut rx) = state.output_handler_rx_channel {
+                    rx.recv().await
+                } else {
                     // If no output handler, wait forever
-                    // std::future::pending().await
-                // }
+                    std::future::pending().await
+                }
             }, if state.status == QueryResultObserverStatus::Running => {
                 match output_handler_message {
                     Some(msg) => {

@@ -117,8 +117,7 @@ pub struct BootstrapHeaderRecord {
 impl Default for BootstrapHeaderRecord {
     fn default() -> Self {
         BootstrapHeaderRecord {
-            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00")
-                .expect("Failed to parse epoch timestamp"),
+            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
             description: "Error: Header record not found.".to_string(),
         }
     }
@@ -134,8 +133,7 @@ pub struct ChangeHeaderRecord {
 impl Default for ChangeHeaderRecord {
     fn default() -> Self {
         ChangeHeaderRecord {
-            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00")
-                .expect("Failed to parse epoch timestamp"),
+            start_time: DateTime::parse_from_rfc3339("1970-01-01T00:00:00.000-00:00").unwrap(),
             description: "Error: Header record not found.".to_string(),
         }
     }

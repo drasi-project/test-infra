@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Test infrastructure module - allow unwraps for otel metric logger code
-#![allow(clippy::unwrap_used)]
-
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -270,7 +267,6 @@ impl ProfilerMetrics {
     }
 }
 
-#[allow(dead_code)] // Defined for potential future use
 #[derive(Debug, Serialize)]
 struct ProfilerSummary {
     pub bootstrap_rec_count: usize,

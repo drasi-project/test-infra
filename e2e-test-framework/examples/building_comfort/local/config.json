@@ -25,8 +25,8 @@
                             "process_old_entries": true
                           },
                           "stop_trigger": {
-                            "kind": "RecordCount",
-                            "record_count": 50
+                            "kind": "RecordSequenceNumber",
+                            "record_sequence_number": 13000
                           }
                         }                      
                       ],
@@ -39,7 +39,7 @@
                           "model_data_generator": {
                             "kind": "BuildingHierarchy",
                             "change_interval": [100, 10, 0, 5000],
-                            "change_count": 10,
+                            "change_count": 1000000,
                             "seed": 123456789,
                             "spacing_mode": "none",
                             "time_mode": "2025-01-03T10:03:15.4Z",
@@ -116,14 +116,14 @@
               "queries": [
                 {
                   "test_query_id": "room-comfort-level",
-                  "start_immediately": false,
+                  "start_immediately": true,
                   "loggers": [
                     {
                       "kind": "Profiler",
                       "max_lines_per_file": 15000,
-                      "write_bootstrap_log": true,
+                      "write_bootstrap_log": false,
                       "write_change_image": true,
-                      "write_change_log": true,
+                      "write_change_log": false,
                       "write_change_rates": true,
                       "write_distributions": true
                     },
@@ -134,14 +134,13 @@
                   ],
                   "test_run_overrides" : {
                     "stop_trigger": {
-                      "kind": "RecordCount",
-                      "record_count": 25
+                      "kind": "RecordSequenceNumber",
+                      "record_sequence_number": 18
                     }
                   }
                 }             
               ],
-              "sources": [],
-              "sources_dont_run": [
+              "sources": [
                   {
                       "test_source_id": "facilities-db",
                       "start_mode": "auto",

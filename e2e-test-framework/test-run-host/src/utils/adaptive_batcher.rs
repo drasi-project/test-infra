@@ -275,8 +275,6 @@ impl<T> AdaptiveBatcher<T> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use tokio::time::sleep;
@@ -314,11 +312,13 @@ mod tests {
     #[tokio::test]
     async fn test_adaptive_batcher_burst() {
         let (tx, rx) = mpsc::channel(1000);
-        let mut config = AdaptiveBatchConfig::default();
         // Ensure we have a reasonable batch size for testing
-        config.max_batch_size = 50;
-        config.min_batch_size = 5;
-        config.max_wait_time = Duration::from_millis(10);
+        let config = AdaptiveBatchConfig {
+            max_batch_size: 50,
+            min_batch_size: 5,
+            max_wait_time: Duration::from_millis(10),
+            ..Default::default()
+        };
         let mut batcher = AdaptiveBatcher::new(rx, config);
 
         // Send many messages quickly to simulate burst

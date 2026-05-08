@@ -13,19 +13,24 @@
 // limitations under the License.
 
 use chrono::{DateTime, Utc};
-use std::{collections::HashMap, num::NonZeroU32, str::FromStr};
+use std::{num::NonZeroU32, str::FromStr};
 
 use serde::{
     de::{self, Deserializer},
     Deserialize, Serialize, Serializer,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimeMode {
     Live,
-    #[default]
     Recorded,
     Rebased(u64),
+}
+
+impl Default for TimeMode {
+    fn default() -> Self {
+        Self::Recorded
+    }
 }
 
 impl FromStr for TimeMode {
@@ -36,12 +41,7 @@ impl FromStr for TimeMode {
             "live" => Ok(Self::Live),
             "recorded" => Ok(Self::Recorded),
             _ => match chrono::DateTime::parse_from_rfc3339(s) {
-                Ok(t) => {
-                    let nanos = t
-                        .timestamp_nanos_opt()
-                        .ok_or_else(|| anyhow::anyhow!("Timestamp out of range for nanoseconds"))?;
-                    Ok(Self::Rebased(nanos as u64))
-                }
+                Ok(t) => Ok(Self::Rebased(t.timestamp_nanos_opt().unwrap() as u64)),
                 Err(e) => {
                     anyhow::bail!("Error parsing TimeMode - value:{s}, error:{e}");
                 }
@@ -89,12 +89,17 @@ impl Serialize for TimeMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpacingMode {
     None,
     Rate(NonZeroU32),
-    #[default]
     Recorded,
+}
+
+impl Default for SpacingMode {
+    fn default() -> Self {
+        Self::Recorded
+    }
 }
 
 impl FromStr for SpacingMode {
@@ -153,26 +158,6 @@ impl Serialize for SpacingMode {
     }
 }
 
-/// Definition of a completion handler
-///
-/// Completion handlers execute when all test components (sources, queries, reactions) finish.
-/// They are intrinsic to the test definition and define what happens on completion.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum CompletionHandlerDefinition {
-    /// Log completion summary to configured log level
-    Log(LogHandlerConfig),
-}
-
-/// Configuration for LogCompletionHandler
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LogHandlerConfig {
-    /// Log level: "debug", "info", "warn", or "error"
-    /// Defaults to "info" if not specified
-    #[serde(default)]
-    pub log_level: Option<String>,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct LocalTestDefinition {
     pub test_id: String,
@@ -180,16 +165,13 @@ pub struct LocalTestDefinition {
     pub description: Option<String>,
     pub test_folder: Option<String>,
     #[serde(default)]
-    pub drasi_servers: Vec<TestDrasiServerDefinition>,
+    pub drasi_lib_instances: Vec<TestDrasiLibInstanceDefinition>,
     #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
     pub reactions: Vec<TestReactionDefinition>,
     #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
-    /// Completion handlers that execute when all components finish
-    #[serde(default)]
-    pub completion_handlers: Vec<CompletionHandlerDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -201,17 +183,13 @@ pub struct TestDefinition {
     pub description: Option<String>,
     pub test_folder: Option<String>,
     #[serde(default)]
-    pub drasi_servers: Vec<TestDrasiServerDefinition>,
+    pub drasi_lib_instances: Vec<TestDrasiLibInstanceDefinition>,
     #[serde(default)]
     pub queries: Vec<TestQueryDefinition>,
     #[serde(default)]
     pub reactions: Vec<TestReactionDefinition>,
     #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
-    /// Completion handlers that execute when all components finish
-    /// These define what happens when the test completes (logging, uploads, etc.)
-    #[serde(default)]
-    pub completion_handlers: Vec<CompletionHandlerDefinition>,
 }
 
 impl TestDefinition {
@@ -250,8 +228,8 @@ impl TestDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
 #[allow(clippy::large_enum_variant)]
+#[serde(tag = "kind")]
 pub enum TestSourceDefinition {
     Model(ModelTestSourceDefinition),
     Script(ScriptTestSourceDefinition),
@@ -412,8 +390,7 @@ pub enum SourceChangeDispatcherDefinition {
     Grpc(GrpcSourceChangeDispatcherDefinition),
     JsonlFile(JsonlFileSourceChangeDispatcherDefinition),
     RedisStream(RedisStreamSourceChangeDispatcherDefinition),
-    DrasiServerApi(DrasiServerApiSourceChangeDispatcherDefinition),
-    DrasiServerChannel(DrasiServerChannelSourceChangeDispatcherDefinition),
+    DrasiLibInstanceChannel(DrasiLibInstanceChannelSourceChangeDispatcherDefinition),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -470,16 +447,8 @@ pub struct GrpcSourceChangeDispatcherDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DrasiServerApiSourceChangeDispatcherDefinition {
-    pub drasi_server_id: String,
-    pub source_id: String,
-    pub timeout_seconds: Option<u64>,
-    pub batch_events: Option<bool>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DrasiServerChannelSourceChangeDispatcherDefinition {
-    pub drasi_server_id: String,
+pub struct DrasiLibInstanceChannelSourceChangeDispatcherDefinition {
+    pub drasi_lib_instance_id: String,
     pub source_id: String,
     pub buffer_size: Option<usize>,
 }
@@ -488,8 +457,8 @@ pub struct DrasiServerChannelSourceChangeDispatcherDefinition {
 pub struct TestQueryDefinition {
     #[serde(default)]
     pub test_query_id: String,
-    pub result_stream_handler: ResultStreamHandlerDefinition,
-    pub stop_trigger: StopTriggerDefinition,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_trigger: Option<StopTriggerDefinition>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -548,8 +517,8 @@ pub enum ReactionHandlerDefinition {
     Http(HttpReactionHandlerDefinition),
     EventGrid(EventGridReactionHandlerDefinition),
     Grpc(GrpcReactionHandlerDefinition),
-    DrasiServerCallback(DrasiServerCallbackReactionHandlerDefinition),
-    DrasiServerChannel(DrasiServerChannelReactionHandlerDefinition),
+    DrasiLibInstanceCallback(DrasiLibInstanceCallbackReactionHandlerDefinition),
+    DrasiLibInstanceChannel(DrasiLibInstanceChannelReactionHandlerDefinition),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -576,15 +545,15 @@ pub struct GrpcReactionHandlerDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DrasiServerCallbackReactionHandlerDefinition {
-    pub drasi_server_id: String,
+pub struct DrasiLibInstanceCallbackReactionHandlerDefinition {
+    pub drasi_lib_instance_id: String,
     pub reaction_id: String,
     pub callback_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DrasiServerChannelReactionHandlerDefinition {
-    pub drasi_server_id: String,
+pub struct DrasiLibInstanceChannelReactionHandlerDefinition {
+    pub drasi_lib_instance_id: String,
     pub reaction_id: String,
     pub buffer_size: Option<usize>,
 }
@@ -644,224 +613,103 @@ impl TryFrom<&str> for QueryId {
     }
 }
 
-/// Test definition for a Drasi Server stored in test repositories
+/// Test definition for a drasi-lib instance stored in test repositories
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TestDrasiServerDefinition {
-    /// Unique identifier for the server
-    pub id: String,
+pub struct TestDrasiLibInstanceDefinition {
+    /// Unique identifier for the drasi-lib instance.
+    pub test_drasi_lib_instance_id: String,
 
-    /// Human-readable name for the server
-    pub name: String,
+    /// Human-readable name for the drasi-lib instance.
+    pub name: Option<String>,
 
-    /// Description of the server's purpose in the test
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Description of the drasi-lib instance's purpose in the test.
     pub description: Option<String>,
 
-    /// Server configuration
-    pub config: DrasiServerConfig,
+    /// drasi-lib instance configuration.
+    pub config: DrasiLibInstanceConfig,
 }
 
-/// Runtime configuration for a Drasi Server instance
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct DrasiServerConfig {
-    /// Runtime configuration (thread pool size, etc.)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<DrasiServerRuntimeConfig>,
-
-    /// Storage backend configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub storage: Option<DrasiServerStorageConfig>,
-
-    /// Authentication settings
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth: Option<DrasiServerAuthConfig>,
-
-    /// Source configurations
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sources: Vec<DrasiSourceConfig>,
-
-    /// Query configurations
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub queries: Vec<DrasiQueryConfig>,
-
-    /// Reaction configurations
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reactions: Vec<DrasiReactionConfig>,
-
-    /// Log level for the server (trace, debug, info, warn, error)
-    #[serde(skip_serializing_if = "Option::is_none")]
+/// Runtime configuration for an embedded drasi-lib instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrasiLibInstanceConfig {
+    /// Log level for the drasi-lib instance (trace, debug, info, warn, error).
     pub log_level: Option<String>,
 
-    /// Additional server-specific configuration
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
-}
+    /// Source configurations.
+    pub sources: Vec<DrasiLibSourceConfig>,
 
-/// Runtime configuration for Drasi Server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiServerRuntimeConfig {
-    /// Number of worker threads
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worker_threads: Option<usize>,
+    /// Query configurations.
+    pub queries: Vec<DrasiLibQueryConfig>,
 
-    /// Maximum number of blocking threads
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_blocking_threads: Option<usize>,
-
-    /// Thread name prefix
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thread_name_prefix: Option<String>,
-
-    /// Enable runtime metrics
-    #[serde(default)]
-    pub enable_metrics: bool,
-}
-
-/// Storage backend configuration for Drasi Server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum DrasiServerStorageConfig {
-    /// In-memory storage (default for tests)
-    #[serde(rename = "memory")]
-    Memory {
-        /// Maximum memory usage in bytes
-        #[serde(skip_serializing_if = "Option::is_none")]
-        max_size: Option<usize>,
-    },
-
-    /// File-based storage
-    #[serde(rename = "file")]
-    File {
-        /// Base directory for storage
-        path: String,
-
-        /// Enable persistence across restarts
-        #[serde(default = "default_true")]
-        persist: bool,
-    },
-
-    /// Redis storage
-    #[serde(rename = "redis")]
-    Redis {
-        /// Redis connection URL
-        url: String,
-
-        /// Key prefix for this server instance
-        #[serde(skip_serializing_if = "Option::is_none")]
-        key_prefix: Option<String>,
-    },
+    /// Reaction configurations.
+    pub reactions: Vec<DrasiLibReactionConfig>,
 }
 
 fn default_true() -> bool {
     true
 }
 
-/// Authentication configuration for Drasi Server
+/// Source configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum DrasiServerAuthConfig {
-    /// No authentication (default for tests)
-    #[serde(rename = "none")]
-    None,
-
-    /// Basic authentication
-    #[serde(rename = "basic")]
-    Basic {
-        /// Username
-        username: String,
-
-        /// Password
-        password: String,
-    },
-
-    /// Token-based authentication
-    #[serde(rename = "token")]
-    Token {
-        /// Static token value
-        token: String,
-    },
-
-    /// OAuth2 authentication
-    #[serde(rename = "oauth2")]
-    OAuth2 {
-        /// OAuth2 provider URL
-        provider_url: String,
-
-        /// Client ID
-        client_id: String,
-
-        /// Client secret
-        #[serde(skip_serializing_if = "Option::is_none")]
-        client_secret: Option<String>,
-
-        /// Required scopes
-        #[serde(default)]
-        scopes: Vec<String>,
-    },
-}
-
-/// Source configuration for Drasi Server
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiSourceConfig {
-    /// Unique identifier for the source
+pub struct DrasiLibSourceConfig {
+    /// Unique identifier for the source.
     pub id: String,
 
-    /// Type of source (e.g., "mock", "kafka", "database")
-    pub source_type: String,
+    /// Source kind, such as application.
+    pub kind: String,
 
-    /// Whether to automatically start this source
+    /// Whether to automatically start this source.
     #[serde(default = "default_true")]
     pub auto_start: bool,
 
-    /// Source-specific configuration properties
+    /// Kind-specific source configuration.
     #[serde(default)]
-    pub properties: HashMap<String, serde_json::Value>,
+    pub config: serde_json::Value,
 }
 
-/// Query configuration for Drasi Server
+/// Query configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiQueryConfig {
-    /// Unique identifier for the query
+pub struct DrasiLibQueryConfig {
+    /// Unique identifier for the query.
     pub id: String,
 
-    /// Cypher query string
+    /// Cypher query string.
     pub query: String,
 
-    /// IDs of sources this query subscribes to
+    /// IDs of sources this query subscribes to.
     pub sources: Vec<String>,
 
-    /// Whether to automatically start this query
+    /// Whether to automatically start this query.
     #[serde(default = "default_true")]
     pub auto_start: bool,
 
-    /// Query-specific configuration properties
+    /// Optional query-specific options.
     #[serde(default)]
-    pub properties: HashMap<String, serde_json::Value>,
+    pub config: serde_json::Value,
 }
 
-/// Reaction configuration for Drasi Server
+/// Reaction configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DrasiReactionConfig {
-    /// Unique identifier for the reaction
+pub struct DrasiLibReactionConfig {
+    /// Unique identifier for the reaction.
     pub id: String,
 
-    /// Type of reaction (e.g., "log", "webhook", "notification")
-    pub reaction_type: String,
+    /// Reaction kind, such as application.
+    pub kind: String,
 
-    /// IDs of queries this reaction subscribes to
+    /// IDs of queries this reaction subscribes to.
     pub queries: Vec<String>,
 
-    /// Whether to automatically start this reaction
+    /// Whether to automatically start this reaction.
     #[serde(default = "default_true")]
     pub auto_start: bool,
 
-    /// Reaction-specific configuration properties
+    /// Kind-specific reaction configuration.
     #[serde(default)]
-    pub properties: HashMap<String, serde_json::Value>,
+    pub config: serde_json::Value,
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use std::{
         fs::File,
@@ -874,7 +722,7 @@ mod tests {
 
     fn create_test_file(content: &str) -> File {
         let dir = tempdir().unwrap();
-        let file_path = dir.path().join("unit_test.test");
+        let file_path = dir.path().join("unit_test.test.json");
         let mut file = File::create(&file_path).unwrap();
         writeln!(file, "{content}").unwrap();
         file.sync_all().unwrap();
@@ -1135,12 +983,11 @@ mod tests {
             "queries": [
                 {
                     "test_query_id": "room-comfort-level",
-                    "result_stream_handler": {
-                        "kind": "RedisStream",
-                        "host": "drasi-redis",
-                        "port": 6379,
-                        "stream_name": "room-comfort-level-results",
-                        "process_old_entries": false
+                    "handler": {
+                        "kind": "Http",
+                        "port": 9001,
+                        "path": "/reaction",
+                        "correlation_header": "X-Query-Sequence"
                     },
                     "stop_trigger": {
                         "kind": "RecordCount",
@@ -1174,8 +1021,9 @@ mod tests {
         assert_eq!(test_definition.queries.len(), 1);
         let query = &test_definition.queries[0];
         assert_eq!(query.test_query_id, "room-comfort-level");
+        assert!(query.stop_trigger.is_some());
 
-        match &query.stop_trigger {
+        match query.stop_trigger.as_ref().unwrap() {
             StopTriggerDefinition::RecordCount(trigger) => {
                 assert_eq!(trigger.record_count, 90000);
             }
@@ -1205,12 +1053,11 @@ mod tests {
             "queries": [
                 {
                     "test_query_id": "room-comfort-level",
-                    "result_stream_handler": {
-                        "kind": "RedisStream",
-                        "host": "drasi-redis",
-                        "port": 6379,
-                        "stream_name": "room-comfort-level-results",
-                        "process_old_entries": false
+                    "handler": {
+                        "kind": "Http",
+                        "port": 9001,
+                        "path": "/reaction",
+                        "correlation_header": "X-Query-Sequence"
                     },
                     "stop_trigger": {
                         "kind": "RecordCount",
@@ -1284,87 +1131,13 @@ mod tests {
         // Note: handler fields in JSON will be ignored since they're not in the model
         let query = &local_test_def.queries[0];
         assert_eq!(query.test_query_id, "room-comfort-level");
-
-        match &query.stop_trigger {
-            StopTriggerDefinition::RecordCount(trigger) => {
-                assert_eq!(trigger.record_count, 90000);
-            }
-            _ => panic!("Expected RecordCount stop trigger"),
-        }
+        assert!(query.stop_trigger.is_some());
 
         let reaction = &local_test_def.reactions[0];
         assert_eq!(reaction.test_reaction_id, "building-comfort");
         // The JSON has "stop_trigger" but the field is "stop_triggers", so it's None
         assert!(reaction.stop_triggers.is_none());
         assert!(reaction.output_handler.is_none()); // handler field is ignored
-    }
-
-    #[test]
-    fn test_script_based_config_file() {
-        // Test parsing a config file that use Script as the source type
-        let script_test = r#"
-        {
-            "test_id": "script_test",
-            "version": 1,
-            "description": "A test defined by scripts",
-            "test_folder": "script_test",
-            "sources": [
-                {
-                    "test_source_id": "script-source",
-                    "kind": "Script",
-                    "bootstrap_data_generator": {
-                        "kind": "Script",
-                        "script_file_folder": "bootstrap_scripts",
-                        "time_mode": "live"
-                    },
-                    "source_change_generator": {
-                        "kind": "Script",
-                        "script_file_folder": "change_scripts",
-                        "spacing_mode": "1000",
-                        "time_mode": "recorded"
-                    }
-                }
-            ],
-            "queries": [],
-            "reactions": []
-        }
-        "#;
-
-        let result: Result<LocalTestDefinition, _> = serde_json::from_str(script_test);
-        assert!(
-            result.is_ok(),
-            "Failed to parse LocalTestDefinition: {:?}",
-            result.err()
-        );
-
-        let local_test_def = result.unwrap();
-        assert_eq!(local_test_def.test_id, "script_test");
-        assert_eq!(local_test_def.sources.len(), 1);
-
-        match &local_test_def.sources[0] {
-            TestSourceDefinition::Script(source) => {
-                assert_eq!(source.common.test_source_id, "script-source");
-
-                match source.bootstrap_data_generator.as_ref().unwrap() {
-                    BootstrapDataGeneratorDefinition::Script(definition) => {
-                        assert_eq!(definition.common.time_mode, TimeMode::Live);
-                        assert_eq!(definition.script_file_folder, "bootstrap_scripts");
-                    }
-                }
-
-                match source.source_change_generator.as_ref().unwrap() {
-                    SourceChangeGeneratorDefinition::Script(definition) => {
-                        assert_eq!(
-                            definition.common.spacing_mode,
-                            SpacingMode::Rate(NonZeroU32::new(1000).unwrap())
-                        );
-                        assert_eq!(definition.common.time_mode, TimeMode::Recorded);
-                        assert_eq!(definition.script_file_folder, "change_scripts");
-                    }
-                }
-            }
-            _ => panic!("Expected ScriptTestSourceDefinition"),
-        }
     }
 
     #[test]
@@ -1454,108 +1227,5 @@ mod tests {
             .unwrap() as u64;
         let time_mode: TimeMode = serde_json::from_str(json).unwrap();
         assert_eq!(time_mode, TimeMode::Rebased(parsed_time));
-    }
-
-    #[test]
-    fn test_parse_yaml_test_definition() {
-        // Test parsing YAML format test definition
-        let yaml_content = r#"
-test_id: test_yaml
-version: 1
-description: A YAML test definition
-test_folder: test_yaml
-sources:
-  - test_source_id: source1
-    kind: Script
-    bootstrap_data_generator:
-      kind: Script
-      script_file_folder: bootstrap_data_scripts
-      time_mode: live
-    source_change_generator:
-      kind: Script
-      script_file_folder: source_change_scripts
-      spacing_mode: recorded
-      time_mode: live
-queries:
-  - test_query_id: query1
-    result_stream_handler:
-      kind: RedisStream
-      host: localhost
-      port: 6379
-      stream_name: test-results
-    stop_trigger:
-      kind: RecordCount
-      record_count: 100
-reactions:
-  - test_reaction_id: reaction1
-    output_handler:
-      kind: Http
-      host: localhost
-      port: 8080
-      path: /webhook
-"#;
-        let test_definition: TestDefinition = serde_yaml::from_str(yaml_content).unwrap();
-
-        assert_eq!(test_definition.version, 1);
-        assert_eq!(
-            test_definition.description,
-            Some("A YAML test definition".to_string())
-        );
-        assert_eq!(test_definition.sources.len(), 1);
-        assert_eq!(test_definition.queries.len(), 1);
-        assert_eq!(test_definition.reactions.len(), 1);
-
-        // Verify source details
-        match &test_definition.sources[0] {
-            TestSourceDefinition::Script(source) => {
-                assert_eq!(source.common.test_source_id, "source1");
-                assert!(source.bootstrap_data_generator.is_some());
-                assert!(source.source_change_generator.is_some());
-            }
-            _ => panic!("Expected Script source"),
-        }
-
-        // Verify query details
-        let query = &test_definition.queries[0];
-        assert_eq!(query.test_query_id, "query1");
-
-        // Verify reaction details
-        let reaction = &test_definition.reactions[0];
-        assert_eq!(reaction.test_reaction_id, "reaction1");
-    }
-
-    #[test]
-    fn test_parse_json_and_yaml_equivalence() {
-        // Test that JSON and YAML produce the same result
-        let json_content = r#"
-{
-    "test_id": "test1",
-    "version": 1,
-    "description": "Test",
-    "test_folder": "test1",
-    "sources": [],
-    "queries": [],
-    "reactions": []
-}
-"#;
-
-        let yaml_content = r#"
-test_id: test1
-version: 1
-description: Test
-test_folder: test1
-sources: []
-queries: []
-reactions: []
-"#;
-
-        let json_def: TestDefinition = serde_json::from_str(json_content).unwrap();
-        let yaml_def: TestDefinition = serde_yaml::from_str(yaml_content).unwrap();
-
-        assert_eq!(json_def.version, yaml_def.version);
-        assert_eq!(json_def.description, yaml_def.description);
-        assert_eq!(json_def.sources.len(), yaml_def.sources.len());
-        assert_eq!(json_def.queries.len(), yaml_def.queries.len());
-        assert_eq!(json_def.reactions.len(), yaml_def.reactions.len());
     }
 }

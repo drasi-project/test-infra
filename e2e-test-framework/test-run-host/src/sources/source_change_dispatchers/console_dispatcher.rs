@@ -58,7 +58,6 @@ impl ConsoleSourceChangeDispatcher {
 }
 
 #[async_trait]
-#[allow(clippy::print_stdout)]
 impl SourceChangeDispatcher for ConsoleSourceChangeDispatcher {
     async fn close(&mut self) -> anyhow::Result<()> {
         Ok(())

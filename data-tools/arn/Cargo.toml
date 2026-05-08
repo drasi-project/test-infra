@@ -1,0 +1,20 @@
+[package]
+name = "arn"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+test-data-store = { path = "../../e2e-test-framework/test-data-store" }
+
+anyhow = "1.0.86"
+chrono = { version = "0.4.38", features = ["serde"] }
+clap = { version = "4.5.18", features = ["derive", "env"] }
+env_logger = "0.7.1"
+log = "0.4"
+rand = "0.8.5"
+serde = { version = "1.0.163", features = ["derive"] }
+serde_json = "1.0.96"
+strum = "0.26.3"
+strum_macros = "0.26.4"
+tokio = { version = "1.37.0", features = ["full"] }
+uuid = { version = "1.10.0", features = ["v4", "serde"] }

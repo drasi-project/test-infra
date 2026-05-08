@@ -25,8 +25,11 @@ pub struct Params {
     #[arg(env = "SOURCE_ID")]
     pub proxy_source_id: String,
 
-    #[arg(short = 's', long = "test_run_source_id", env = "TEST_RUN_SOURCE_ID")]
-    pub test_run_source_id: String,
+    #[arg(short = 'r', long = "test_run_id", env = "TEST_RUN_ID")]
+    pub test_run_id: String,
+
+    #[arg(short = 's', long = "test_source_id", env = "TEST_SOURCE_ID")]
+    pub test_source_id: String,
 
     #[arg(
         short = 'h',

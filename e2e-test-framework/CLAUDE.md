@@ -159,6 +159,15 @@ The framework deploys as a Drasi SourceProvider:
 - Stop triggers define test completion criteria and are intrinsic to the test itself
 - Runtime overrides for stop triggers are available via `TestRunQueryOverrides` and `TestRunReactionOverrides`
 
+## drasi-lib instance Full Configuration (2025-07-28)
+
+**New Feature**: drasi-lib instances can now be fully configured with Sources, Queries, and Reactions:
+- Add `sources`, `queries`, and `reactions` arrays to `DrasiLibInstanceConfig`
+- TestSources can send data to configured sources via `DrasiLibInstanceChannel` dispatcher
+- TestReactions can receive data from configured reactions via `DrasiLibInstanceChannel` handler
+- The framework validates that TestSource/TestReaction IDs match configured component names
+- See `examples/building_comfort/drasi_lib_instance_internal` for a complete example
+
 ## Embedded drasi-lib Instance Hosting (2026-05-06)
 
 **Breaking change**: embedded hosting is now called a drasi-lib instance, not a Drasi Server. External Drasi Server gRPC/HTTP scenarios remain separate and keep their Drasi Server terminology.

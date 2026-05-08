@@ -151,6 +151,7 @@ impl TestRunQuery {
     pub async fn new(
         definition: TestRunQueryDefinition,
         output_storage: TestRunQueryStorage,
+        lifecycle_tx: crate::test_run_completion::LifecycleTx,
     ) -> anyhow::Result<Self> {
         let query_result_observer = QueryResultObserver::new(
             definition.id.clone(),
@@ -158,6 +159,7 @@ impl TestRunQuery {
             output_storage,
             definition.loggers,
             definition.test_run_overrides,
+            lifecycle_tx,
         )
         .await?;
 

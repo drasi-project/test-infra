@@ -237,10 +237,16 @@ struct ReactionObserverInternalState {
     logger_results: Vec<OutputLoggerResult>,
     #[debug(skip)]
     stop_triggers: Vec<Box<dyn StopTrigger + Send + Sync>>,
+    #[debug(skip)]
+    lifecycle_tx: crate::test_run_completion::LifecycleTx,
+    reaction_id: TestRunReactionId,
 }
 
 impl ReactionObserverInternalState {
-    fn new() -> Self {
+    fn new(
+        lifecycle_tx: crate::test_run_completion::LifecycleTx,
+        reaction_id: TestRunReactionId,
+    ) -> Self {
         let now_ns = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -257,6 +263,8 @@ impl ReactionObserverInternalState {
             loggers: vec![],
             logger_results: vec![],
             stop_triggers: vec![],
+            lifecycle_tx,
+            reaction_id,
         }
     }
 }
@@ -279,6 +287,7 @@ impl ReactionObserver {
         loggers: Vec<OutputLoggerConfig>,
         stop_triggers: Vec<StopTriggerDefinition>,
         test_run_overrides: Option<TestRunReactionOverrides>,
+        lifecycle_tx: crate::test_run_completion::LifecycleTx,
     ) -> anyhow::Result<Self> {
         log::info!(
             "ReactionObserver::new() for {} with {} loggers: {:?}",
@@ -299,7 +308,10 @@ impl ReactionObserver {
             .await?,
         );
 
-        let internal_state = Arc::new(Mutex::new(ReactionObserverInternalState::new()));
+        let internal_state = Arc::new(Mutex::new(ReactionObserverInternalState::new(
+            lifecycle_tx,
+            id.clone(),
+        )));
 
         // Create output handler
         // Note: We convert the reaction ID to a query ID for compatibility with the handler
@@ -493,6 +505,9 @@ impl ReactionObserver {
                 *self.observer_task_handle.lock().await = Some(observer_task);
 
                 internal_state.status = ReactionObserverStatus::Running;
+                internal_state
+                    .lifecycle_tx
+                    .reaction_started(internal_state.reaction_id.clone());
                 internal_state.handler_status = self.output_handler.status().await;
                 internal_state.metrics.observer_start_time_ns = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
@@ -565,6 +580,9 @@ impl ReactionObserver {
                 internal_state.loggers.clear();
 
                 internal_state.status = ReactionObserverStatus::Stopped;
+                internal_state
+                    .lifecycle_tx
+                    .reaction_stopped(internal_state.reaction_id.clone());
                 internal_state.handler_status = self.output_handler.status().await;
                 internal_state.metrics.observer_stop_time_ns = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
@@ -655,6 +673,9 @@ async fn observe_reaction_handler(
                                         state.metrics.reaction_invocation_count
                                     );
                                     state.status = ReactionObserverStatus::Stopped;
+                                    state
+                                        .lifecycle_tx
+                                        .reaction_stopped(state.reaction_id.clone());
 
                                 // Close loggers and collect results before stopping
                                 log::info!("Closing {} loggers after stop trigger fired", state.loggers.len());
@@ -696,7 +717,11 @@ async fn observe_reaction_handler(
                         log::error!("Reaction handler error: {error}");
                         let mut state = internal_state.lock().await;
                         state.status = ReactionObserverStatus::Error;
-                        state.error_message = Some(format!("Handler error: {error}"));
+                        let error_msg = format!("Handler error: {error}");
+                        state
+                            .lifecycle_tx
+                            .reaction_error(state.reaction_id.clone(), error_msg.clone());
+                        state.error_message = Some(error_msg);
                     }
                     _ => {
                         // Ignore other control signals

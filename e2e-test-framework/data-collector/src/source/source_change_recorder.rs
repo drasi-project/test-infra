@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for data collection code
+#![allow(clippy::unwrap_used)]
+
 use std::{sync::Arc, time::SystemTime};
 
 use serde::Serialize;

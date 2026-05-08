@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Test infrastructure module - allow unwraps for test beacon reader
+#![allow(clippy::unwrap_used)]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -210,7 +213,7 @@ async fn reader_thread(
                             .await;
 
                         let sce = SourceChangeEvent {
-                            op: "u".to_string(), 
+                            op: "u".to_string(),
                             payload: SourceChangeEventPayload {
                                 source: SourceChangeEventSourceInfo {
                                     db: "facilities".to_string(),
@@ -218,7 +221,7 @@ async fn reader_thread(
                                     table: "node".to_string(),
                                     ts_ns: 1724694923060000000
                                 },
-                                before: serde_json::from_str(r#"{ "id": "room_01_01_02", "labels": ["Room"], "properties": { "name": "Room 01_01_02",  "temp": 72, "humidity": 42, "co2": 500}"#).unwrap(), 
+                                before: serde_json::from_str(r#"{ "id": "room_01_01_02", "labels": ["Room"], "properties": { "name": "Room 01_01_02",  "temp": 72, "humidity": 42, "co2": 500}"#).unwrap(),
                                 after: serde_json::from_str(r#"{ "id": "room_01_01_02", "labels": ["Room"], "properties": { "name": "Room 01_01_02", "temp": 71, "humidity": 40, "co2": 495}}"#).unwrap()
                             },
                             reactivator_end_ns: 1724694923070000000,

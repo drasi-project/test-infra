@@ -1,0 +1,46 @@
+# Copyright 2025 The Drasi Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+FROM mcr.microsoft.com/azurelinux/base/rust:1.88 AS builder
+RUN tdnf update -y && tdnf install -y protobuf-devel cmake openssl-devel clang-devel jq jq-devel oniguruma-devel
+
+WORKDIR /usr/src
+# Copy the workspace root manifest so member crates can inherit
+# `lints.workspace = true`. Strip out members not copied into this build
+# context (proxy and reactivator have their own images).
+COPY ./Cargo.toml ./Cargo.toml
+RUN sed -i '/  "proxy",/d; /  "reactivator",/d' Cargo.toml
+COPY ./infrastructure ./infrastructure
+COPY ./test-data-store ./test-data-store
+COPY ./data-collector ./data-collector
+COPY ./test-run-host ./test-run-host
+COPY ./test-service ./test-service
+
+WORKDIR /usr/src/test-service
+ENV JQ_LIB_DIR=/usr/lib64
+
+# Generate Cargo.lock and pin home dependency to version compatible with Rust 1.86
+RUN cargo generate-lockfile
+RUN cargo update home --precise 0.5.9
+RUN cargo install --locked --path .
+
+FROM mcr.microsoft.com/azurelinux/distroless/debug:3.0
+COPY --from=builder /usr/lib64/libstdc++.so.6 /usr/lib64/
+COPY --from=builder /usr/lib64/libjq.so* /usr/lib64/
+COPY --from=builder /usr/lib64/libonig.so* /usr/lib64/
+ENV RUST_BACKTRACE=1
+ENV JQ_LIB_DIR=/usr/lib64
+COPY --from=builder /usr/local/cargo/bin/test-service /usr/local/bin/test-service
+USER root
+CMD ["test-service"]

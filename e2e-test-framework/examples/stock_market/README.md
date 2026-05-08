@@ -11,7 +11,7 @@ The stock market example provides multiple configuration options to demonstrate 
 
 ### 2. Internal Drasi Server (`/drasi_server_internal/`)
 - **Architecture**: Embedded Drasi Server within test service
-- **Communication**: In-memory channels (DrasiServerChannel)
+- **Communication**: In-memory channels (DrasiLibInstanceChannel)
 - **Advantages**: 
   - No external dependencies
   - Fast, direct communication

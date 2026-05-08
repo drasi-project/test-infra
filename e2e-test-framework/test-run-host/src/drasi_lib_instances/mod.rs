@@ -180,6 +180,8 @@ pub struct TestRunDrasiLibInstance {
     pub state: Arc<RwLock<TestRunDrasiLibInstanceState>>,
     pub storage: TestRunDrasiLibInstanceStorage,
     pub id: TestRunDrasiLibInstanceId,
+    #[debug(skip)]
+    lifecycle_tx: crate::test_run_completion::LifecycleTx,
 }
 
 impl TestRunDrasiLibInstance {
@@ -187,6 +189,7 @@ impl TestRunDrasiLibInstance {
     pub async fn new(
         definition: TestRunDrasiLibInstanceDefinition,
         storage: TestRunDrasiLibInstanceStorage,
+        lifecycle_tx: crate::test_run_completion::LifecycleTx,
     ) -> anyhow::Result<Self> {
         let instance = Self {
             id: definition.id.clone(),
@@ -196,6 +199,7 @@ impl TestRunDrasiLibInstance {
             reaction_handles: Arc::new(RwLock::new(HashMap::new())),
             state: Arc::new(RwLock::new(TestRunDrasiLibInstanceState::Uninitialized)),
             storage,
+            lifecycle_tx,
         };
         if instance.definition.start_immediately {
             instance.start().await?;
@@ -297,6 +301,8 @@ impl TestRunDrasiLibInstance {
         *self.source_handles.write().await = source_handles;
         *self.reaction_handles.write().await = reaction_handles;
         *self.state.write().await = TestRunDrasiLibInstanceState::Running;
+        self.lifecycle_tx
+            .drasi_lib_instance_started(self.id.clone());
         Ok(())
     }
 
@@ -308,6 +314,8 @@ impl TestRunDrasiLibInstance {
         self.source_handles.write().await.clear();
         self.reaction_handles.write().await.clear();
         *self.state.write().await = TestRunDrasiLibInstanceState::Stopped;
+        self.lifecycle_tx
+            .drasi_lib_instance_stopped(self.id.clone());
         Ok(())
     }
 

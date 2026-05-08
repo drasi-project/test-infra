@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use anyhow::{Context, Result};
 use clap::Parser;
 use data_collector::{config::DataCollectorConfig, DataCollector};
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,33 @@ pub struct TestServiceConfig {
     pub data_collector: DataCollectorConfig,
 }
 
+/// Loads configuration from a file, supporting both YAML and JSON formats.
+///
+/// This function uses a content-based parsing approach:
+/// 1. Attempts to parse as YAML first (since YAML is a superset of JSON)
+/// 2. Falls back to JSON parsing if YAML fails
+/// 3. Returns detailed error messages from both parsers if both fail
+fn load_config_from_file(path: &str) -> Result<TestServiceConfig> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config file: {path}"))?;
+
+    match serde_yaml::from_str::<TestServiceConfig>(&content) {
+        Ok(config) => {
+            log::debug!("Successfully parsed config as YAML from: {path}");
+            Ok(config)
+        }
+        Err(yaml_err) => match serde_json::from_str::<TestServiceConfig>(&content) {
+            Ok(config) => {
+                log::debug!("Successfully parsed config as JSON from: {path}");
+                Ok(config)
+            }
+            Err(json_err) => Err(anyhow::anyhow!(
+                "Failed to parse config file '{path}':\n  YAML: {yaml_err}\n  JSON: {json_err}"
+            )),
+        },
+    }
+}
+
 // The main function that starts the starts the Test Service.
 #[tokio::main]
 async fn main() {
@@ -81,19 +109,9 @@ async fn main() {
         Some(config_file_path) => {
             log::info!("Loading Test Service config from {config_file_path:#?}");
 
-            // Validate that the file exists and if not return an error.
-            if !std::path::Path::new(config_file_path).exists() {
-                panic!("Config file not found: {config_file_path}");
-            }
-
-            // Read the file content into a string.
-            let config_file_json =
-                std::fs::read_to_string(config_file_path).unwrap_or_else(|err| {
-                    panic!("Error reading config file: {err}");
-                });
-
-            serde_json::from_str::<TestServiceConfig>(&config_file_json).unwrap_or_else(|err| {
-                panic!("Error parsing TestServiceConfig: {err}");
+            // Load config using the dual-format (YAML/JSON) parser
+            load_config_from_file(config_file_path).unwrap_or_else(|err| {
+                panic!("Error loading config file: {err}");
             })
         }
         None => {

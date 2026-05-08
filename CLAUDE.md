@@ -8,9 +8,19 @@ Drasi Test Infrastructure - A comprehensive testing framework for Drasi's reacti
 - **E2E Test Framework**: Rust-based testing infrastructure that simulates data sources, dispatches change events, and monitors query results
 - **Data Tools**: CLI utilities for working with GDELT and Wikidata external data sources
 
-## Recent Changes (2025-08-08)
+## Recent Changes
 
-### gRPC Integration with Drasi v1 Protocol
+### YAML Configuration Support (2025-11-10)
+**New Feature**: The E2E Test Framework now supports both YAML and JSON configuration formats:
+- Configuration files can be written in either YAML or JSON format
+- Format detection is automatic based on file content (not file extension)
+- YAML-first parsing strategy with JSON fallback for maximum compatibility
+- Comprehensive error messages showing both parser outputs when config is invalid
+- All existing JSON configs continue to work without modification
+- Example YAML configs available in `examples/*/config.yaml`
+- See Configuration section below for details and examples
+
+### gRPC Integration with Drasi v1 Protocol (2025-08-08)
 **Breaking Change**: The gRPC implementation has been completely replaced to use Drasi's official v1 protocol:
 - Custom proto files removed in favor of Drasi's official `drasi/v1/*.proto` definitions
 - `GrpcSourceChangeDispatcher` now acts as a client for `drasi.v1.SourceService`
@@ -126,8 +136,21 @@ The framework is organized as a Rust workspace with interconnected services:
 
 ## Configuration
 
-Test configurations use JSON format. Key sections:
+Test configurations support both **YAML and JSON formats**. The test-service automatically detects and parses the format based on file content, not file extension. This means you can use either format interchangeably:
 
+- **YAML**: Recommended for human editing (supports comments, better readability)
+- **JSON**: Works seamlessly, backward compatible with all existing configs
+
+### Format Detection
+The system uses a content-based parsing approach:
+1. Attempts to parse as YAML first (since YAML is a superset of JSON)
+2. Falls back to JSON if YAML parsing fails
+3. Returns detailed error messages from both parsers if both fail
+
+### Configuration Structure
+Key sections (shown in both formats):
+
+**JSON Format:**
 ```json
 {
   "repo": {
@@ -150,6 +173,33 @@ Test configurations use JSON format. Key sections:
   }
 }
 ```
+
+**YAML Format:**
+```yaml
+# YAML supports comments for better documentation
+repo:
+  url: path/to/test/data
+  auth:  # optional credentials
+
+sources:
+  - id: source1
+    name: Test Source
+    config: {}  # source-specific config
+
+queries:
+  - id: query1
+    name: Test Query
+    profiling: true
+
+run:
+  timing_mode: recorded  # or rebased, live
+  dispatcher: console    # or dapr, redis, file
+```
+
+### Examples
+- JSON examples: `examples/*/config.json`
+- YAML examples: `examples/*/config.yaml`
+- Run scripts for both: `run_*.sh` and `run_*_yaml.sh`
 
 ## API Integration
 

@@ -44,14 +44,14 @@ While the test is running, you can interact with various endpoints:
 
 ### drasi-lib instance Management (Internal Only)
 ```bash
-# Get server status
-curl http://localhost:8080/api/drasi-servers/internal-stock-market-server
+# Get instance status
+curl http://localhost:8080/api/drasi_lib_instances/internal-stock-market-server
 
 # Start all components
-curl -X POST http://localhost:8080/api/drasi-servers/internal-stock-market-server/start
+curl -X POST http://localhost:8080/api/drasi_lib_instances/internal-stock-market-server/start
 
 # Stop all components
-curl -X POST http://localhost:8080/api/drasi-servers/internal-stock-market-server/stop
+curl -X POST http://localhost:8080/api/drasi_lib_instances/internal-stock-market-server/stop
 ```
 
 ### Source Control
@@ -77,7 +77,7 @@ curl http://localhost:8080/api/queries/price-movements
 ## Interactive Testing
 
 Use the provided `.http` files with a REST client or VS Code REST Client extension:
-- `web_api_drasi_server.http` - drasi-lib instance management
+- `web_api_drasi_lib_instance.http` - drasi-lib instance management
 - `web_api_source.http` - Source control
 - `web_api_query.http` - Query testing
 - `web_api_reaction.http` - Reaction monitoring

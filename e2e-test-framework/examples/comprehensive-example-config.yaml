@@ -68,13 +68,13 @@ data_store:
           test_folder: comprehensive_test
 
           # ====================================================================
-          # DRASI SERVER DEFINITIONS
+          # DRASI-LIB INSTANCE DEFINITIONS
           # ====================================================================
-          # Define embedded Drasi Server instances for testing
-          drasi_servers:
+          # Define embedded drasi-lib instances for testing
+          drasi_lib_instances:
             - id: embedded-drasi
-              name: Embedded Drasi Server
-              description: In-process Drasi Server for testing reactive queries
+              name: Embedded drasi-lib instance
+              description: In-process drasi-lib instance for testing reactive queries
 
               config:
                 # Runtime configuration
@@ -178,9 +178,9 @@ data_store:
                 - kind: Console
                   date_time_format: "%Y-%m-%d %H:%M:%S%.3f"
 
-                # Send to Drasi Server via channel
-                - kind: DrasiServerChannel
-                  drasi_server_id: embedded-drasi
+                # Send to drasi-lib instance via channel
+                - kind: DrasiLibInstanceChannel
+                  drasi_lib_instance_id: embedded-drasi
                   source_id: test-db
                   buffer_size: 2048
 
@@ -398,8 +398,8 @@ data_store:
 
               # Output handler (where reaction results go)
               output_handler:
-                kind: DrasiServerChannel
-                drasi_server_id: embedded-drasi
+                kind: DrasiLibInstanceChannel
+                drasi_lib_instance_id: embedded-drasi
                 reaction_id: alert-handler
                 buffer_size: 1024
 
@@ -465,11 +465,11 @@ test_run_host:
       test_run_id: run_001
 
       # ========================================================================
-      # DRASI SERVER RUNTIME CONFIG
+      # DRASI-LIB INSTANCE RUNTIME CONFIG
       # ========================================================================
-      # Runtime configuration for Drasi servers in this test run
-      drasi_servers:
-        - test_drasi_server_id: embedded-drasi
+      # Runtime configuration for drasi-lib instances in this test run
+      drasi_lib_instances:
+        - test_drasi_lib_instance_id: embedded-drasi
           start_immediately: true
 
           # Runtime overrides for this test run

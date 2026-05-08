@@ -159,36 +159,51 @@ The framework deploys as a Drasi SourceProvider:
 - Stop triggers define test completion criteria and are intrinsic to the test itself
 - Runtime overrides for stop triggers are available via `TestRunQueryOverrides` and `TestRunReactionOverrides`
 
-## Drasi Server Full Configuration (2025-07-28)
+## drasi-lib instance Full Configuration (2025-07-28)
 
-**New Feature**: Drasi Servers can now be fully configured with Sources, Queries, and Reactions:
-- Add `sources`, `queries`, and `reactions` arrays to `DrasiServerConfig`
-- TestSources can send data to configured sources via `DrasiServerChannel` dispatcher
-- TestReactions can receive data from configured reactions via `DrasiServerChannel` handler
+**New Feature**: drasi-lib instances can now be fully configured with Sources, Queries, and Reactions:
+- Add `sources`, `queries`, and `reactions` arrays to `DrasiLibInstanceConfig`
+- TestSources can send data to configured sources via `DrasiLibInstanceChannel` dispatcher
+- TestReactions can receive data from configured reactions via `DrasiLibInstanceChannel` handler
 - The framework validates that TestSource/TestReaction IDs match configured component names
-- See `examples/building_comfort/drasi_server_internal` for a complete example
+- See `examples/building_comfort/drasi_lib_instance_internal` for a complete example
 
-## DrasiServerCore Integration (2025-07-29, Updated 2025-08-01)
+## Embedded drasi-lib Instance Hosting (2026-05-06)
 
-**Architecture Note**: The test infrastructure uses `DrasiServerCore` instead of `DrasiServer`:
-- DrasiServerCore is an **embedded library**, not a standalone server - it provides programmatic access to Drasi functionality
-- The Test Service provides its own REST API that wraps DrasiServerCore's programmatic API for external access
-- The `api_endpoint` field will always return `None` as DrasiServerCore doesn't expose any Web API or bind to network ports
-- The `binding` configuration has been removed (as of 2025-08-01) since DrasiServerCore doesn't use network bindings
-- All component management (sources, queries, reactions) is done through DrasiServerCore's managers via direct method calls
+**Breaking change**: embedded hosting is now called a drasi-lib instance, not a Drasi Server. External Drasi Server gRPC/HTTP scenarios remain separate and keep their Drasi Server terminology.
 
-**Lifecycle Changes (2025-08-01)**:
-- The `start_legacy()` method has been removed from DrasiServerCore
-- DrasiServerCore now requires a two-step initialization:
-  1. `initialize()` - Creates all configured components and sets up routers
-  2. `start()` - Starts all components marked with `auto_start: true`
-- Components are started in sequence: Sources → Queries → Reactions
-- Application handles are available after components are started
-- Shutdown is handled by dropping the DrasiServerCore reference - no explicit shutdown needed
+- Test repo schema: `drasi_servers` → `drasi_lib_instances`; `test_drasi_server_id` → `test_drasi_lib_instance_id`.
+- Runtime config: `TestRunConfig.drasi_servers` → `drasi_lib_instances`.
+- Storage folder: `drasi_servers` → `drasi_lib_instances`.
+- REST routes: `/api/test_runs/.../drasi_servers[/{id}]` → `/api/test_runs/.../drasi_lib_instances[/{id}]`.
+- Dispatcher/handler kinds: `DrasiServerChannel` → `DrasiLibInstanceChannel`, `DrasiServerCallback` → `DrasiLibInstanceCallback`.
+- Removed `DrasiServerApi` source dispatcher; embedded drasi-lib instances do not expose an HTTP endpoint.
 
-**Important**: Don't confuse DrasiServerCore with a full DrasiServer:
-- DrasiServerCore = Library for embedding Drasi functionality into applications
-- DrasiServer = Standalone server application with HTTP endpoints (not used in test infrastructure)
+Instance config uses published crates: `drasi-lib`, `drasi-core`, `drasi-bootstrap-noop`, `drasi-bootstrap-application`, `drasi-source-application`, and `drasi-reaction-application`. The workspace `Cargo.toml` includes a commented `[patch.crates-io]` block for local Drasi core development, following the drasi-server pattern.
+
+Schema shape:
+
+```json
+{
+  "drasi_lib_instances": [{
+    "test_drasi_lib_instance_id": "internal-drasi-lib",
+    "name": "Internal drasi-lib instance",
+    "description": "Embedded drasi-lib instance for testing",
+    "config": {
+      "log_level": "info",
+      "sources": [{ "id": "source1", "kind": "application", "auto_start": true, "config": {} }],
+      "queries": [{ "id": "query1", "query": "MATCH (n) RETURN n", "sources": ["source1"], "auto_start": true, "config": {} }],
+      "reactions": [{ "id": "reaction1", "kind": "application", "queries": ["query1"], "auto_start": true, "config": {} }]
+    }
+  }]
+}
+```
+
+Lifecycle: `DrasiLib::builder().with_id(...).with_source(...).with_query(...).with_reaction(...).build().await?`, then `core.start().await?`; shutdown uses `core.shutdown().await?`. Only `kind == "application"` sources and reactions are supported initially.
+
+## External Drasi Server Testing
+
+External Drasi Server scenarios use gRPC/HTTP dispatchers and handlers (`GrpcSourceChangeDispatcher`, `GrpcReactionHandler`, HTTP dispatchers/handlers) and the `drasi.v1.SourceService` / `drasi.v1.ReactionService` protocol. Do not rename these external Drasi Server concepts when changing embedded drasi-lib instance hosting.
 
 ## Logging Configuration (2025-07-31)
 

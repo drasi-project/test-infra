@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use test_data_store::test_run_storage::{
-    TestRunDrasiServerId, TestRunQueryId, TestRunReactionId, TestRunSourceId,
+    TestRunDrasiLibInstanceId, TestRunQueryId, TestRunReactionId, TestRunSourceId,
 };
 
 /// Lifecycle events emitted by test components.
@@ -23,17 +23,17 @@ use test_data_store::test_run_storage::{
 /// channel transmission.
 #[derive(Debug, Clone)]
 pub enum ComponentLifecycleEvent {
-    // DrasiServer events
-    DrasiServerStarted {
-        id: TestRunDrasiServerId,
+    // DrasiLibInstance events
+    DrasiLibInstanceStarted {
+        id: TestRunDrasiLibInstanceId,
         timestamp_ns: u64,
     },
-    DrasiServerStopped {
-        id: TestRunDrasiServerId,
+    DrasiLibInstanceStopped {
+        id: TestRunDrasiLibInstanceId,
         timestamp_ns: u64,
     },
-    DrasiServerError {
-        id: TestRunDrasiServerId,
+    DrasiLibInstanceError {
+        id: TestRunDrasiLibInstanceId,
         timestamp_ns: u64,
         error: String,
     },

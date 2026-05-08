@@ -22,7 +22,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::events::ComponentLifecycleEvent;
 use test_data_store::test_run_storage::{
-    TestRunDrasiServerId, TestRunQueryId, TestRunReactionId, TestRunSourceId,
+    TestRunDrasiLibInstanceId, TestRunQueryId, TestRunReactionId, TestRunSourceId,
 };
 
 /// Wrapper around the lifecycle event channel sender that provides a clean API
@@ -56,30 +56,30 @@ impl LifecycleTx {
             .as_nanos() as u64
     }
 
-    /// Emit a DrasiServer started event
-    pub fn drasi_server_started(&self, id: TestRunDrasiServerId) {
+    /// Emit a DrasiLibInstance started event
+    pub fn drasi_lib_instance_started(&self, id: TestRunDrasiLibInstanceId) {
         if let Some(tx) = &self.tx {
-            let _ = tx.send(ComponentLifecycleEvent::DrasiServerStarted {
+            let _ = tx.send(ComponentLifecycleEvent::DrasiLibInstanceStarted {
                 id,
                 timestamp_ns: Self::now_ns(),
             });
         }
     }
 
-    /// Emit a DrasiServer stopped event
-    pub fn drasi_server_stopped(&self, id: TestRunDrasiServerId) {
+    /// Emit a DrasiLibInstance stopped event
+    pub fn drasi_lib_instance_stopped(&self, id: TestRunDrasiLibInstanceId) {
         if let Some(tx) = &self.tx {
-            let _ = tx.send(ComponentLifecycleEvent::DrasiServerStopped {
+            let _ = tx.send(ComponentLifecycleEvent::DrasiLibInstanceStopped {
                 id,
                 timestamp_ns: Self::now_ns(),
             });
         }
     }
 
-    /// Emit a DrasiServer error event
-    pub fn drasi_server_error(&self, id: TestRunDrasiServerId, error: String) {
+    /// Emit a DrasiLibInstance error event
+    pub fn drasi_lib_instance_error(&self, id: TestRunDrasiLibInstanceId, error: String) {
         if let Some(tx) = &self.tx {
-            let _ = tx.send(ComponentLifecycleEvent::DrasiServerError {
+            let _ = tx.send(ComponentLifecycleEvent::DrasiLibInstanceError {
                 id,
                 timestamp_ns: Self::now_ns(),
                 error,

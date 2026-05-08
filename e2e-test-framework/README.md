@@ -8,7 +8,7 @@ A comprehensive testing framework for validating Drasi, a Change Processing Plat
 - [Architecture](#architecture)
 - [Getting Started](#getting-started)
 - [Deployment Modes](#deployment-modes)
-  - [Standalone Process (Testing Drasi Server)](#standalone-process-testing-drasi-server)
+  - [Standalone Process (Testing drasi-lib instance)](#standalone-process-testing-drasi-lib-instance)
   - [Kubernetes Deployment (Testing Drasi Platform)](#kubernetes-deployment-testing-drasi-platform)
   - [Library Integration (Custom Testing)](#library-integration-custom-testing)
 - [Configuration](#configuration)
@@ -31,7 +31,7 @@ A comprehensive testing framework for validating Drasi, a Change Processing Plat
 - [Reactions](#reactions)
   - [Reaction Output Handlers](#reaction-output-handlers)
   - [Output Loggers](#output-loggers)
-- [Drasi Servers](#drasi-servers)
+- [drasi-lib instances](#drasi-lib-instances)
 - [REST API](#rest-api)
 - [Examples](#examples)
 - [Development](#development)
@@ -48,7 +48,7 @@ The Drasi E2E Test Framework provides:
 - **Performance Testing**: Measure throughput, latency, and resource utilization
 
 The framework supports multiple deployment scenarios:
-1. **Standalone Process**: Test Drasi Server directly via HTTP/gRPC APIs
+1. **Standalone Process**: Test drasi-lib instance directly via HTTP/gRPC APIs
 2. **Kubernetes Deployment**: Test the full Drasi Platform in a cluster
 3. **Library Integration**: Embed the test engine in custom test applications
 
@@ -81,9 +81,9 @@ e2e-test-framework/
 
 ## Deployment Modes
 
-### Standalone Process (Testing Drasi Server)
+### Standalone Process (Testing drasi-lib instance)
 
-Use the Test Service as a standalone process to test Drasi Server directly:
+Use the Test Service as a standalone process to test drasi-lib instance directly:
 
 ```bash
 # Run with a configuration file
@@ -98,7 +98,7 @@ cargo run --release -p test-service -- --config config.yaml
 
 The Test Service will:
 1. Load test definitions from configured repositories
-2. Initialize sources that dispatch changes via HTTP/gRPC to Drasi Server
+2. Initialize sources that dispatch changes via HTTP/gRPC to drasi-lib instance
 3. Monitor query results via Redis streams or reaction endpoints
 4. Collect profiling metrics and logs
 
@@ -205,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
         sources: vec![/* source configs */],
         queries: vec![/* query configs */],
         reactions: vec![/* reaction configs */],
-        drasi_servers: vec![/* server configs */],
+        drasi_lib_instances: vec![/* server configs */],
     };
 
     let test_run_id = test_run_host.add_test_run(test_run_config).await?;
@@ -232,7 +232,7 @@ pub struct TestRunHost { /* ... */ }
 
 // Configuration types
 pub struct TestRunHostConfig { pub test_runs: Vec<TestRunConfig> }
-pub struct TestRunConfig { /* test_id, sources, queries, reactions, drasi_servers */ }
+pub struct TestRunConfig { /* test_id, sources, queries, reactions, drasi_lib_instances */ }
 pub struct TestRunSourceConfig { /* source configuration */ }
 pub struct TestRunQueryConfig { /* query configuration */ }
 pub struct TestRunReactionConfig { /* reaction configuration */ }
@@ -759,27 +759,27 @@ source_change_dispatchers:
     pubsub_topic: source-changes     # Required
 ```
 
-#### DrasiServerApi Dispatcher
+#### DrasiLibInstanceApi Dispatcher
 
 Sends changes to an embedded Drasi server via API:
 
 ```yaml
 source_change_dispatchers:
-  - kind: DrasiServerApi
-    drasi_server_id: embedded-server
+  - kind: DrasiLibInstanceApi
+    drasi_lib_instance_id: embedded-server
     source_id: facilities-source
     timeout_seconds: 30              # Optional
     batch_events: false              # Optional
 ```
 
-#### DrasiServerChannel Dispatcher
+#### DrasiLibInstanceChannel Dispatcher
 
 Sends changes to an embedded Drasi server via internal channel:
 
 ```yaml
 source_change_dispatchers:
-  - kind: DrasiServerChannel
-    drasi_server_id: embedded-server
+  - kind: DrasiLibInstanceChannel
+    drasi_lib_instance_id: embedded-server
     source_id: facilities-source
     buffer_size: 2048                # Optional
 ```
@@ -962,26 +962,26 @@ reactions:
       access_key: ${EVENT_GRID_KEY}
 ```
 
-#### DrasiServerCallback Handler
+#### DrasiLibInstanceCallback Handler
 
 ```yaml
 reactions:
   - test_reaction_id: comfort-alerts
     output_handler:
-      kind: DrasiServerCallback
-      drasi_server_id: embedded-server
+      kind: DrasiLibInstanceCallback
+      drasi_lib_instance_id: embedded-server
       reaction_id: drasi-reaction-id
       callback_type: default         # Optional
 ```
 
-#### DrasiServerChannel Handler
+#### DrasiLibInstanceChannel Handler
 
 ```yaml
 reactions:
   - test_reaction_id: comfort-alerts
     output_handler:
-      kind: DrasiServerChannel
-      drasi_server_id: embedded-server
+      kind: DrasiLibInstanceChannel
+      drasi_lib_instance_id: embedded-server
       reaction_id: drasi-reaction-id
       buffer_size: 1024              # Optional
 ```
@@ -1038,14 +1038,14 @@ reactions:
 
 ---
 
-## Drasi Servers
+## drasi-lib instances
 
 Embed Drasi server functionality for in-process testing:
 
 ```yaml
 local_tests:
   - test_id: embedded-test
-    drasi_servers:
+    drasi_lib_instances:
       - id: embedded-server
         name: Test Server
         description: In-process Drasi server for testing
@@ -1110,8 +1110,8 @@ test_run_host:
       test_repo_id: local_repo
       test_run_id: run-001
 
-      drasi_servers:
-        - test_drasi_server_id: embedded-server
+      drasi_lib_instances:
+        - test_drasi_lib_instance_id: embedded-server
           start_immediately: true
 
           test_run_overrides:

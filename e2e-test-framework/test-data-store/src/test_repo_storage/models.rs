@@ -172,6 +172,9 @@ pub struct LocalTestDefinition {
     pub reactions: Vec<TestReactionDefinition>,
     #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
+    /// Completion handlers that execute when all components finish
+    #[serde(default)]
+    pub completion_handlers: Vec<CompletionHandlerDefinition>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -190,6 +193,30 @@ pub struct TestDefinition {
     pub reactions: Vec<TestReactionDefinition>,
     #[serde(default)]
     pub sources: Vec<TestSourceDefinition>,
+    /// Completion handlers that execute when all components finish
+    /// These define what happens when the test completes (logging, uploads, etc.)
+    #[serde(default)]
+    pub completion_handlers: Vec<CompletionHandlerDefinition>,
+}
+
+/// Definition of a completion handler
+///
+/// Completion handlers execute when all test components (sources, queries, reactions) finish.
+/// They are intrinsic to the test definition and define what happens on completion.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum CompletionHandlerDefinition {
+    /// Log completion summary to configured log level
+    Log(LogHandlerConfig),
+}
+
+/// Configuration for LogCompletionHandler
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LogHandlerConfig {
+    /// Log level: "debug", "info", "warn", or "error"
+    /// Defaults to "info" if not specified
+    #[serde(default)]
+    pub log_level: Option<String>,
 }
 
 impl TestDefinition {

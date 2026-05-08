@@ -44,7 +44,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
-          submodules: true
+          submodules: false
       - name: Install specific Rust version
         uses: actions-rs/toolchain@v1
         with:
@@ -54,13 +54,27 @@ jobs:
       - name: Install Clippy
         run: rustup component add clippy rustfmt
 
+      # test-run-host enables drasi-core's "middleware-jq" feature, which pulls
+      # in jq-sys; jq-sys's build.rs links against the system libjq + libonig.
+      # Mirror drasi-project/drasi-server/Dockerfile's build deps.
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler jq libjq-dev
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libjq-dev \
+            libonig-dev \
+            libprotobuf-dev \
+            protobuf-compiler \
+            cmake \
+            clang \
+            libclang-dev \
+            jq
 
       - name: Set JQ_LIB_DIR
-        run: echo "JQ_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> $GITHUB_ENV
+        run: echo "JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1))" >> $GITHUB_ENV
 
       # Cache Cargo dependencies
       - name: Cache Cargo registry

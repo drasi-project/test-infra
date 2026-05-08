@@ -15,12 +15,12 @@
 use std::collections::HashMap;
 
 use test_data_store::test_run_storage::{
-    TestRunDrasiServerId, TestRunQueryId, TestRunReactionId, TestRunSourceId,
+    TestRunDrasiLibInstanceId, TestRunQueryId, TestRunReactionId, TestRunSourceId,
 };
 
 use super::events::ComponentLifecycleEvent;
 use super::types::{
-    ComponentCompletionSummary, DrasiServerState, QueryState, ReactionState, SourceState,
+    ComponentCompletionSummary, DrasiLibInstanceState, QueryState, ReactionState, SourceState,
 };
 
 /// Tracks the state of all components in a TestRun.
@@ -30,11 +30,11 @@ use super::types::{
 /// components have reached terminal states.
 #[derive(Debug)]
 pub struct ComponentStateTracker {
-    drasi_servers: HashMap<TestRunDrasiServerId, DrasiServerState>,
+    drasi_lib_instances: HashMap<TestRunDrasiLibInstanceId, DrasiLibInstanceState>,
     sources: HashMap<TestRunSourceId, SourceState>,
     queries: HashMap<TestRunQueryId, QueryState>,
     reactions: HashMap<TestRunReactionId, ReactionState>,
-    total_drasi_servers: usize,
+    total_drasi_lib_instances: usize,
     total_sources: usize,
     total_queries: usize,
     total_reactions: usize,
@@ -44,17 +44,17 @@ pub struct ComponentStateTracker {
 impl ComponentStateTracker {
     /// Create a new tracker with expected component counts.
     pub fn new(
-        drasi_server_count: usize,
+        drasi_lib_instance_count: usize,
         source_count: usize,
         query_count: usize,
         reaction_count: usize,
     ) -> Self {
         Self {
-            drasi_servers: HashMap::new(),
+            drasi_lib_instances: HashMap::new(),
             sources: HashMap::new(),
             queries: HashMap::new(),
             reactions: HashMap::new(),
-            total_drasi_servers: drasi_server_count,
+            total_drasi_lib_instances: drasi_lib_instance_count,
             total_sources: source_count,
             total_queries: query_count,
             total_reactions: reaction_count,
@@ -65,22 +65,22 @@ impl ComponentStateTracker {
     /// Update tracker state based on a lifecycle event.
     pub fn update(&mut self, event: &ComponentLifecycleEvent) {
         match event {
-            ComponentLifecycleEvent::DrasiServerStarted { id, .. } => {
-                self.drasi_servers
-                    .insert(id.clone(), DrasiServerState::Running);
+            ComponentLifecycleEvent::DrasiLibInstanceStarted { id, .. } => {
+                self.drasi_lib_instances
+                    .insert(id.clone(), DrasiLibInstanceState::Running);
             }
-            ComponentLifecycleEvent::DrasiServerStopped { id, timestamp_ns } => {
-                self.drasi_servers
-                    .insert(id.clone(), DrasiServerState::Stopped);
+            ComponentLifecycleEvent::DrasiLibInstanceStopped { id, timestamp_ns } => {
+                self.drasi_lib_instances
+                    .insert(id.clone(), DrasiLibInstanceState::Stopped);
                 self.finish_times.insert(id.to_string(), *timestamp_ns);
             }
-            ComponentLifecycleEvent::DrasiServerError {
+            ComponentLifecycleEvent::DrasiLibInstanceError {
                 id,
                 timestamp_ns,
                 error,
             } => {
-                self.drasi_servers
-                    .insert(id.clone(), DrasiServerState::Error(error.clone()));
+                self.drasi_lib_instances
+                    .insert(id.clone(), DrasiLibInstanceState::Error(error.clone()));
                 self.finish_times.insert(id.to_string(), *timestamp_ns);
             }
 
@@ -150,14 +150,14 @@ impl ComponentStateTracker {
     /// Check if all components have finished.
     ///
     /// Returns true when:
-    /// - All DrasiServers are in terminal state (Stopped | Error)
+    /// - All DrasiLibInstances are in terminal state (Stopped | Error)
     /// - All sources are in terminal state (Finished | Stopped | Error)
     /// - All queries are in terminal state (Stopped | Error)
     /// - All reactions are in terminal state (Stopped | Error)
     /// - All expected components have been registered
     pub fn all_components_finished(&self) -> bool {
         // Check we've seen all components
-        let all_registered = self.drasi_servers.len() == self.total_drasi_servers
+        let all_registered = self.drasi_lib_instances.len() == self.total_drasi_lib_instances
             && self.sources.len() == self.total_sources
             && self.queries.len() == self.total_queries
             && self.reactions.len() == self.total_reactions;
@@ -166,11 +166,13 @@ impl ComponentStateTracker {
             return false;
         }
 
-        // All DrasiServers must be in terminal state
-        let drasi_servers_done = self
-            .drasi_servers
-            .values()
-            .all(|ds| matches!(ds, DrasiServerState::Stopped | DrasiServerState::Error(_)));
+        // All DrasiLibInstances must be in terminal state
+        let drasi_lib_instances_done = self.drasi_lib_instances.values().all(|ds| {
+            matches!(
+                ds,
+                DrasiLibInstanceState::Stopped | DrasiLibInstanceState::Error(_)
+            )
+        });
 
         // All sources must be in terminal state
         let sources_done = self.sources.values().all(|s| {
@@ -192,14 +194,14 @@ impl ComponentStateTracker {
             .values()
             .all(|r| matches!(r, ReactionState::Stopped | ReactionState::Error(_)));
 
-        drasi_servers_done && sources_done && queries_done && reactions_done
+        drasi_lib_instances_done && sources_done && queries_done && reactions_done
     }
 
     /// Get a summary of component completion states.
     pub fn get_completion_summary(&self) -> ComponentCompletionSummary {
         let mut summary = ComponentCompletionSummary {
-            drasi_servers_stopped: 0,
-            drasi_servers_error: 0,
+            drasi_lib_instances_stopped: 0,
+            drasi_lib_instances_error: 0,
             sources_finished: 0,
             sources_stopped: 0,
             sources_error: 0,
@@ -210,10 +212,10 @@ impl ComponentStateTracker {
             component_finish_times: self.finish_times.clone(),
         };
 
-        for state in self.drasi_servers.values() {
+        for state in self.drasi_lib_instances.values() {
             match state {
-                DrasiServerState::Stopped => summary.drasi_servers_stopped += 1,
-                DrasiServerState::Error(_) => summary.drasi_servers_error += 1,
+                DrasiLibInstanceState::Stopped => summary.drasi_lib_instances_stopped += 1,
+                DrasiLibInstanceState::Error(_) => summary.drasi_lib_instances_error += 1,
                 _ => {}
             }
         }
@@ -246,9 +248,12 @@ impl ComponentStateTracker {
         summary
     }
 
-    /// Get the current state of a DrasiServer.
-    pub fn get_drasi_server_state(&self, id: &TestRunDrasiServerId) -> Option<&DrasiServerState> {
-        self.drasi_servers.get(id)
+    /// Get the current state of a DrasiLibInstance.
+    pub fn get_drasi_lib_instance_state(
+        &self,
+        id: &TestRunDrasiLibInstanceId,
+    ) -> Option<&DrasiLibInstanceState> {
+        self.drasi_lib_instances.get(id)
     }
 
     /// Get the current state of a source.

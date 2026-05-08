@@ -52,13 +52,13 @@ impl LogCompletionHandler {
 
     fn log_summary(&self, test_run_id: &str, summary: &ComponentCompletionSummary) {
         let message = format!(
-            "TestRun '{}' completed: DrasiServers(stopped={}, error={}), \
+            "TestRun '{}' completed: DrasiLibInstances(stopped={}, error={}), \
              Sources(finished={}, stopped={}, error={}), \
              Queries(stopped={}, error={}), Reactions(stopped={}, error={}), \
              Has Errors: {}",
             test_run_id,
-            summary.drasi_servers_stopped,
-            summary.drasi_servers_error,
+            summary.drasi_lib_instances_stopped,
+            summary.drasi_lib_instances_error,
             summary.sources_finished,
             summary.sources_stopped,
             summary.sources_error,

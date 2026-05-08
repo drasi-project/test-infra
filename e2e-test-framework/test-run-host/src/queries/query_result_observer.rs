@@ -397,6 +397,7 @@ pub struct QueryResultObserver {
     settings: QueryResultObserverSettings,
     observer_tx_channel: Sender<QueryResultObserverMessage>,
     _observer_thread_handle: Arc<Mutex<JoinHandle<anyhow::Result<()>>>>,
+    _lifecycle_tx: crate::test_run_completion::LifecycleTx,
 }
 
 impl QueryResultObserver {
@@ -406,6 +407,7 @@ impl QueryResultObserver {
         output_storage: TestRunQueryStorage,
         loggers: Vec<ResultStreamLoggerConfig>,
         test_run_overrides: Option<TestRunQueryOverrides>,
+        lifecycle_tx: crate::test_run_completion::LifecycleTx,
     ) -> anyhow::Result<Self> {
         let settings = QueryResultObserverSettings::new(
             test_run_query_id,
@@ -418,13 +420,18 @@ impl QueryResultObserver {
         log::debug!("Creating QueryResultObserver from {:?}", &settings);
 
         let (observer_tx_channel, observer_rx_channel) = tokio::sync::mpsc::channel(100);
-        let observer_thread_handle =
-            tokio::spawn(observer_thread(observer_rx_channel, settings.clone()));
+        let lifecycle_tx_clone = lifecycle_tx.clone();
+        let observer_thread_handle = tokio::spawn(observer_thread(
+            observer_rx_channel,
+            settings.clone(),
+            lifecycle_tx_clone,
+        ));
 
         Ok(Self {
             settings,
             observer_tx_channel,
             _observer_thread_handle: Arc::new(Mutex::new(observer_thread_handle)),
+            _lifecycle_tx: lifecycle_tx,
         })
     }
 
@@ -497,10 +504,14 @@ struct QueryResultObserverInternalState {
     status: QueryResultObserverStatus,
     metrics: QueryResultObserverMetrics,
     stop_trigger: Box<dyn StopTrigger + Send + Sync>,
+    lifecycle_tx: crate::test_run_completion::LifecycleTx,
 }
 
 impl QueryResultObserverInternalState {
-    pub async fn initialize(settings: QueryResultObserverSettings) -> anyhow::Result<Self> {
+    pub async fn initialize(
+        settings: QueryResultObserverSettings,
+        lifecycle_tx: crate::test_run_completion::LifecycleTx,
+    ) -> anyhow::Result<Self> {
         log::debug!("Initializing QueryResultObserver using {settings:?}");
 
         let metrics = QueryResultObserverMetrics {
@@ -548,6 +559,7 @@ impl QueryResultObserverInternalState {
             status: QueryResultObserverStatus::Paused,
             metrics,
             stop_trigger,
+            lifecycle_tx,
         })
     }
 
@@ -906,6 +918,7 @@ impl QueryResultObserverInternalState {
                 );
 
                 self.status = QueryResultObserverStatus::Running;
+                self.lifecycle_tx.query_started(self.settings.id.clone());
                 self.metrics.try_set_observer_start_time(
                     SystemTime::now()
                         .duration_since(SystemTime::UNIX_EPOCH)
@@ -987,6 +1000,7 @@ impl QueryResultObserverInternalState {
         );
 
         self.status = QueryResultObserverStatus::Stopped;
+        self.lifecycle_tx.query_stopped(self.settings.id.clone());
         self.metrics.observer_stop_time_ns = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -1029,6 +1043,8 @@ impl QueryResultObserverInternalState {
                 "QueryResultObserver transitioned to an Error state. Received error: {msg}"
             );
             self.status = QueryResultObserverStatus::Error;
+            self.lifecycle_tx
+                .query_error(self.settings.id.clone(), msg.clone());
             self.metrics.observer_stop_time_ns = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
@@ -1060,13 +1076,14 @@ impl QueryResultObserverInternalState {
 async fn observer_thread(
     mut command_rx_channel: Receiver<QueryResultObserverMessage>,
     settings: QueryResultObserverSettings,
+    lifecycle_tx: crate::test_run_completion::LifecycleTx,
 ) -> anyhow::Result<()> {
     log::info!(
         "QueryResultObserver thread started for TestRunQuery {} ...",
         settings.id
     );
 
-    let mut state = QueryResultObserverInternalState::initialize(settings).await?;
+    let mut state = QueryResultObserverInternalState::initialize(settings, lifecycle_tx).await?;
 
     // Loop to process commands sent to the QueryResultObserver or read from the output handler.
     loop {

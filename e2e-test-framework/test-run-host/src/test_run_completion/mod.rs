@@ -53,5 +53,5 @@ pub use events::ComponentLifecycleEvent;
 pub use lifecycle_tx::LifecycleTx;
 pub use tracker::ComponentStateTracker;
 pub use types::{
-    ComponentCompletionSummary, DrasiServerState, QueryState, ReactionState, SourceState,
+    ComponentCompletionSummary, DrasiLibInstanceState, QueryState, ReactionState, SourceState,
 };

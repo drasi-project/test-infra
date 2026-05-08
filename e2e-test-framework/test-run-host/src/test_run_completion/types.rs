@@ -14,9 +14,9 @@
 
 use std::collections::HashMap;
 
-/// State of a DrasiServer component.
+/// State of a DrasiLibInstance component.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DrasiServerState {
+pub enum DrasiLibInstanceState {
     Running,
     Stopped,
     Error(String),
@@ -54,8 +54,8 @@ pub enum ReactionState {
 /// which components finished, stopped, or encountered errors.
 #[derive(Debug, Clone)]
 pub struct ComponentCompletionSummary {
-    pub drasi_servers_stopped: usize,
-    pub drasi_servers_error: usize,
+    pub drasi_lib_instances_stopped: usize,
+    pub drasi_lib_instances_error: usize,
     pub sources_finished: usize,
     pub sources_stopped: usize,
     pub sources_error: usize,
@@ -68,8 +68,8 @@ pub struct ComponentCompletionSummary {
 }
 
 impl ComponentCompletionSummary {
-    pub fn total_drasi_servers(&self) -> usize {
-        self.drasi_servers_stopped + self.drasi_servers_error
+    pub fn total_drasi_lib_instances(&self) -> usize {
+        self.drasi_lib_instances_stopped + self.drasi_lib_instances_error
     }
 
     pub fn total_sources(&self) -> usize {
@@ -85,7 +85,7 @@ impl ComponentCompletionSummary {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.drasi_servers_error > 0
+        self.drasi_lib_instances_error > 0
             || self.sources_error > 0
             || self.queries_error > 0
             || self.reactions_error > 0

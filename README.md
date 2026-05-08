@@ -24,7 +24,7 @@ The `e2e-test-framework/` directory contains a comprehensive Rust-based testing 
 - Collects profiling metrics and performance data
 
 **Deployment options:**
-- **Standalone process** - Test Drasi Server directly
+- **Standalone process** - Test drasi-lib instance directly
 - **Kubernetes** - Test Drasi Platform in a cluster
 - **Library** - Embed in custom test applications
 

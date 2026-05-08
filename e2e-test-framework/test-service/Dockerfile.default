@@ -33,20 +33,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src
+# Copy the workspace root manifest so that member crates can resolve
+# `lints.workspace = true`. Strip out members that aren't copied into the
+# build context (proxy and reactivator have their own images).
+COPY ./Cargo.toml ./Cargo.toml
+RUN sed -i '/  "proxy",/d; /  "reactivator",/d' Cargo.toml
 COPY ./infrastructure ./infrastructure
 COPY ./test-data-store ./test-data-store
 COPY ./data-collector ./data-collector
 COPY ./test-run-host ./test-run-host
+COPY ./test-service ./test-service
 
-RUN cargo new test-service
 WORKDIR /usr/src/test-service
-
-COPY ./test-service/Cargo.toml .
 # Set JQ_LIB_DIR dynamically for multiarch support — Debian's libjq-dev does
 # not ship a pkg-config file, so jq-sys can't autodetect the install path.
-RUN JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1)) \
-    cargo fetch
-COPY ./test-service .
 RUN JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1)) \
     cargo install --force --path .
 

@@ -16,6 +16,11 @@ FROM mcr.microsoft.com/azurelinux/base/rust:1.88 AS builder
 RUN tdnf update -y && tdnf install -y protobuf-devel cmake openssl-devel clang-devel jq jq-devel oniguruma-devel
 
 WORKDIR /usr/src
+# Copy the workspace root manifest so member crates can inherit
+# `lints.workspace = true`. Strip out members not copied into this build
+# context (proxy and reactivator have their own images).
+COPY ./Cargo.toml ./Cargo.toml
+RUN sed -i '/  "proxy",/d; /  "reactivator",/d' Cargo.toml
 COPY ./infrastructure ./infrastructure
 COPY ./test-data-store ./test-data-store
 COPY ./data-collector ./data-collector

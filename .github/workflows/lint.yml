@@ -57,7 +57,7 @@ jobs:
       # test-run-host enables drasi-core's "middleware-jq" feature, which pulls
       # in jq-sys; jq-sys's build.rs links against the system libjq + libonig.
       # Mirror drasi-project/drasi-server/Dockerfile's build deps.
-      - name: Install system dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -90,4 +90,8 @@ jobs:
       - name: Lint check
         run: |
             cd e2e-test-framework
+            # Debian's libjq-dev ships no pkg-config file, so jq-sys can't
+            # autodetect the install path. Same trick as the test-service
+            # Dockerfile and drasi-server's build.
+            export JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1))
             make lint-check

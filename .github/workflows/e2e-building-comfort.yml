@@ -34,9 +34,10 @@ jobs:
     env:
       WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_server_http
       DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
-      # Expected per-reaction SHA-256 baselines live alongside the test in
-      # $WORKDIR/expected_reaction_sha256.json (version-controlled, reviewable
-      # in PRs). No repo variables required.
+      # Determinism baselines live inline in $WORKDIR/config.json under the
+      # Sha256Determinism completion handler's `expected` map. The framework
+      # flips the test-run status to Error on mismatch; the runner script
+      # surfaces that via the test-service REST API.
 
     steps:
       - name: Checkout

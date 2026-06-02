@@ -17,8 +17,11 @@
                       "completion_handlers": [
                           {
                               "kind": "Sha256Determinism",
-                              "expected": {},
-                              "missing_baseline": "Warn"
+                              "expected": {
+                                  "building-comfort": "71ac6eba21fec837d2145dca6603812c0795b1fc713139b9c99136db0c806b51",
+                                  "building-comfort-floor-agg": "0162693d42554af54254dd1b74070efa9a1f21cfdf8340fc40f8d4a80cea2c25"
+                              },
+                              "missing_baseline": "Fail"
                           },
                           { "kind": "Log", "log_level": "info" }
                       ],

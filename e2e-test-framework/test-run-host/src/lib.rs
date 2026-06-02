@@ -38,8 +38,8 @@ use reactions::{
 };
 use sources::{
     bootstrap_data_generators::BootstrapData, create_test_run_source,
-    source_change_generators::SourceChangeGeneratorCommandResponse, SourceStartMode, TestRunSource,
-    TestRunSourceConfig, TestRunSourceState,
+    source_change_generators::{SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStatus},
+    SourceStartMode, TestRunSource, TestRunSourceConfig, TestRunSourceState,
 };
 use test_data_store::{
     test_repo_storage::models::SpacingMode,
@@ -48,7 +48,9 @@ use test_data_store::{
     },
     TestDataStore,
 };
-use test_run_completion::{create_completion_handler, ComponentStateTracker, LifecycleTx};
+use test_run_completion::{
+    create_completion_handler, ComponentLifecycleEvent, ComponentStateTracker, LifecycleTx,
+};
 
 pub mod common;
 pub mod drasi_lib_instances;
@@ -243,8 +245,103 @@ impl TestRunHost {
                         reaction_count,
                     );
 
-                    while let Some(event) = rx.recv().await {
-                        tracker.update(&event);
+                    // Sources don't emit lifecycle events themselves, so the
+                    // monitoring task polls each source's change-generator
+                    // status from the registry and feeds synthetic events into
+                    // the tracker. `last_source_status` dedupes so we only
+                    // push on transitions.
+                    let mut poll_interval =
+                        tokio::time::interval(std::time::Duration::from_millis(500));
+                    poll_interval
+                        .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    let mut last_source_status: HashMap<
+                        TestRunSourceId,
+                        SourceChangeGeneratorStatus,
+                    > = HashMap::new();
+
+                    let now_ns = || {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0)
+                    };
+
+                    loop {
+                        tokio::select! {
+                            biased;
+                            maybe_event = rx.recv() => {
+                                match maybe_event {
+                                    Some(event) => tracker.update(&event),
+                                    None => break,
+                                }
+                            }
+                            _ = poll_interval.tick() => {
+                                let runs = test_runs_for_task.read().await;
+                                if let Some(run) = runs.get(&test_run_id_clone) {
+                                    for (source_id_str, source) in run.sources.iter() {
+                                        let source_id = TestRunSourceId::new(
+                                            &test_run_id_clone,
+                                            source_id_str,
+                                        );
+                                        let status = match source
+                                            .get_source_change_generator_state()
+                                            .await
+                                        {
+                                            Ok(state) => state.status,
+                                            Err(e) => {
+                                                log::debug!(
+                                                    "Failed to poll source {source_id} \
+                                                     generator state: {e}"
+                                                );
+                                                continue;
+                                            }
+                                        };
+                                        if last_source_status.get(&source_id) == Some(&status) {
+                                            continue;
+                                        }
+                                        let event = match status {
+                                            SourceChangeGeneratorStatus::Running
+                                            | SourceChangeGeneratorStatus::Skipping
+                                            | SourceChangeGeneratorStatus::Stepping => {
+                                                ComponentLifecycleEvent::SourceStarted {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                }
+                                            }
+                                            SourceChangeGeneratorStatus::Paused => {
+                                                ComponentLifecycleEvent::SourcePaused {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                }
+                                            }
+                                            SourceChangeGeneratorStatus::Stopped => {
+                                                ComponentLifecycleEvent::SourceStopped {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                }
+                                            }
+                                            SourceChangeGeneratorStatus::Finished => {
+                                                ComponentLifecycleEvent::SourceFinished {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                }
+                                            }
+                                            SourceChangeGeneratorStatus::Error => {
+                                                ComponentLifecycleEvent::SourceError {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                    error: "source change generator entered \
+                                                            Error state"
+                                                        .to_string(),
+                                                }
+                                            }
+                                        };
+                                        tracker.update(&event);
+                                        last_source_status.insert(source_id, status);
+                                    }
+                                }
+                            }
+                        }
 
                         if tracker.all_components_finished() {
                             let mut summary = tracker.get_completion_summary();

@@ -223,13 +223,41 @@ start_test_service() {
     fi
 }
 
-poll_until_stopped() {
-    # poll_until_stopped <test_reaction_id>
-    # Writes final state to $ARTIFACTS_DIR/final_reaction_state__<id>.json on Stopped/Error.
+fetch_final_reaction_state() {
+    # fetch_final_reaction_state <test_reaction_id>
+    # Snapshots the reaction's current state to $ARTIFACTS_DIR/final_reaction_state__<id>.json.
+    # Returns 0 if the reaction is Stopped, 1 on Error/anything else (the completion
+    # tracker only fires when every reaction is Stopped/Error, so Running here means
+    # the run aborted before the tracker could fire).
     local reaction_id="$1"
     local state_file="$ARTIFACTS_DIR/final_reaction_state__${reaction_id}.json"
     local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/reactions/${reaction_id}"
-    log "Polling [$reaction_id] $url (timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s)"
+    local body status
+    body="$(curl -sS "$url" 2>/dev/null || true)"
+    if [[ -z "$body" ]]; then
+        log "WARNING: [$reaction_id] empty response from $url"
+        return 1
+    fi
+    echo "$body" > "$state_file"
+    status="$(echo "$body" | jq -r '.reaction_observer.status // "Unknown"')"
+    case "$status" in
+        Stopped) log "[$reaction_id] final state: Stopped"; return 0 ;;
+        Error)   log "ERROR: [$reaction_id] final state: Error"; return 1 ;;
+        *)       log "ERROR: [$reaction_id] final state: $status (expected Stopped)"; return 1 ;;
+    esac
+}
+
+wait_for_completion_signal() {
+    # Waits for the test-run's completion tracker to fire, signaled by the
+    # test-service log line emitted from test_run_completion::completion_handlers
+    # ("TestRun '<id>' completed:") which appears once every component reaches a
+    # terminal state. Uses TEST_RUN_ID as the discriminator so multiple runs sharing
+    # the same log don't false-positive.
+    local log_file="$LOG_DIR/test-service.log"
+    local marker="TestRun '${TEST_RUN_ID}' completed:"
+    log "Waiting for completion-tracker signal in $log_file"
+    log "  marker: $marker  (timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s)"
+
     local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
     local start_ts=$(( $(date +%s) ))
     local last_log_ts=0
@@ -244,55 +272,45 @@ poll_until_stopped() {
             return 1
         fi
 
-        local http_code body status count now elapsed
-        http_code="$(curl -sS -o /tmp/poll_body.$$ -w '%{http_code}' "$url" 2>/dev/null || echo '000')"
-        body="$(cat /tmp/poll_body.$$ 2>/dev/null || true)"
-        rm -f /tmp/poll_body.$$
-
-        status="Unknown"
-        count="?"
-        if [[ "$http_code" == "200" && -n "$body" ]]; then
-            status="$(echo "$body" | jq -r '.reaction_observer.status // "Unknown"')"
-            count="$(echo "$body" | jq -r '.reaction_observer.result_summary.record_count // .reaction_observer.result_summary.reaction_invocation_count // "?"')"
+        if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
+            log "Completion signal observed for $TEST_RUN_ID"
+            grep -F "$marker" "$log_file" | tail -n1 | sed 's/^/[completion] /'
+            return 0
         fi
 
+        local now elapsed
         now=$(date +%s)
         elapsed=$(( now - start_ts ))
         if (( now - last_log_ts >= 30 )); then
-            log "poll [$reaction_id] t=${elapsed}s http=${http_code} status=${status} records=${count}"
+            log "waiting for completion t=${elapsed}s (no marker yet)"
             last_log_ts=$now
-        fi
-
-        if [[ "$status" == "Stopped" ]]; then
-            echo "$body" > "$state_file"
-            log "[$reaction_id] reached Stopped state"
-            return 0
-        fi
-        if [[ "$status" == "Error" ]]; then
-            echo "$body" > "$state_file"
-            log "ERROR: [$reaction_id] entered Error state"
-            return 1
         fi
 
         sleep "$POLL_INTERVAL_SECS"
     done
 
-    log "ERROR: [$reaction_id] did not complete within ${TIMEOUT_SECS}s"
+    log "ERROR: completion signal not observed within ${TIMEOUT_SECS}s"
     log "--- test-service.log (last 100 lines) ---"
-    tail -n 100 "$LOG_DIR/test-service.log" || true
+    tail -n 100 "$log_file" || true
     log "--- end test-service.log ---"
     log "--- drasi-server.log (last 100 lines) ---"
     tail -n 100 "$LOG_DIR/drasi-server.log" || true
     log "--- end drasi-server.log ---"
-    curl -sS "$url" > "$state_file" 2>/dev/null || true
+    # Best-effort snapshot of each reaction for debugging.
+    local id
+    for id in $TEST_REACTION_IDS; do
+        fetch_final_reaction_state "$id" || true
+    done
     return 1
 }
 
 poll_all_reactions() {
-    local rc=0
-    local id
+    if ! wait_for_completion_signal; then
+        return 1
+    fi
+    local rc=0 id
     for id in $TEST_REACTION_IDS; do
-        if ! poll_until_stopped "$id"; then
+        if ! fetch_final_reaction_state "$id"; then
             rc=1
         fi
     done

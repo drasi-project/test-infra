@@ -14,6 +14,9 @@
                       "version": 1,
                       "description": "",
                       "test_folder": "building_comfort",
+                      "completion_handlers": [
+                          { "kind": "Log", "log_level": "info" }
+                      ],
                       "queries": [],
                       "sources": [
                         {

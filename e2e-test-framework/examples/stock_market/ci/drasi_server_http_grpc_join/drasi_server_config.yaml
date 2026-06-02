@@ -88,8 +88,7 @@ queries:
       RETURN w.symbol   AS Symbol,
              s.name     AS Name,
              s.price    AS Price,
-             s.volume   AS Volume,
-             w.added_by AS AddedBy
+             s.volume   AS Volume
 
 reactions:
   # HTTP webhook reaction posts query results to the test framework's

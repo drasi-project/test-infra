@@ -97,6 +97,7 @@ impl OutputLogger for JsonlFileOutputLogger {
             has_output: true,
             logger_name: "JsonlFile".to_string(),
             output_folder_path: Some(self.settings.folder_path.clone()),
+            summary: None,
         })
     }
 

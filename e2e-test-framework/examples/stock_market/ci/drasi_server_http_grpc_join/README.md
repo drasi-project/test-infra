@@ -54,12 +54,13 @@ test-service --gRPC source--+
 - `dev_repo/stock_market/sources/watchlist-db/source_change_scripts/source_change_scripts_00000.jsonl`
   &mdash; The watchlist replay script (seed + timed edits).
 - `run_test_ci.sh` &mdash; CI runner: downloads drasi-server, patches
-  configs (admin port, absolute paths), launches both processes, polls
-  until Stopped, computes a deterministic SHA-256 fingerprint of the
-  reaction output and compares against the baseline.
-- `expected_reaction_sha256.json` &mdash; Baseline SHA-256 per reaction id.
-  Initially empty; the CI script emits the actual fingerprint to
-  `ci_artifacts/reaction_output_sha256__<id>.txt` so you can paste it in.
+  configs (admin port, absolute paths), launches both processes, and
+  waits for the test-run completion signal. SHA-256 determinism
+  verification is intentionally not performed: the query joins two async
+  sources (HTTP + gRPC) flowing concurrently, so emission order &mdash;
+  and the multiset of rows captured before the `RecordCount` stop
+  trigger fires &mdash; varies run-to-run even with seeded inputs. The
+  count-based stop trigger is the assertion.
 
 ## Why the watchlist seed is in `source_change_scripts`, not `bootstrap_scripts`
 

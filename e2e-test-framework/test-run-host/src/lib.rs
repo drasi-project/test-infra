@@ -211,9 +211,13 @@ impl TestRunHost {
                 .completion_handlers
                 .iter()
                 .filter_map(|handler_def| {
-                    create_completion_handler(handler_def)
-                        .inspect_err(|e| log::error!("Failed to create completion handler: {e}"))
-                        .ok()
+                    create_completion_handler(
+                        handler_def,
+                        self.data_store.clone(),
+                        test_run_id.clone(),
+                    )
+                    .inspect_err(|e| log::error!("Failed to create completion handler: {e}"))
+                    .ok()
                 })
                 .collect();
 
@@ -229,6 +233,7 @@ impl TestRunHost {
                 let source_count = config.sources.len();
                 let query_count = config.queries.len();
                 let reaction_count = config.reactions.len();
+                let test_runs_for_task = self.test_runs.clone();
 
                 let task = tokio::spawn(async move {
                     let mut tracker = ComponentStateTracker::new(
@@ -242,16 +247,58 @@ impl TestRunHost {
                         tracker.update(&event);
 
                         if tracker.all_components_finished() {
-                            let summary = tracker.get_completion_summary();
+                            let mut summary = tracker.get_completion_summary();
                             log::info!("All components finished for TestRun {test_run_id_clone}");
 
-                            // Execute all handlers
+                            // Snapshot each reaction's logger results so handlers
+                            // (e.g. Sha256Determinism) can read them without
+                            // needing a back-reference to the host.
+                            {
+                                let runs = test_runs_for_task.read().await;
+                                if let Some(run) = runs.get(&test_run_id_clone) {
+                                    for (_, reaction) in run.reactions.iter() {
+                                        match reaction.get_reaction_observer_state().await {
+                                            Ok(state) => {
+                                                summary.reaction_logger_outputs.insert(
+                                                    reaction.id.clone(),
+                                                    state.logger_results.clone(),
+                                                );
+                                            }
+                                            Err(e) => {
+                                                log::warn!(
+                                                    "Failed to snapshot logger results for \
+                                                     reaction {}: {e}",
+                                                    reaction.id
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    log::warn!(
+                                        "TestRun {test_run_id_clone} not yet in registry at \
+                                         completion; reaction logger outputs unavailable"
+                                    );
+                                }
+                            }
+
+                            // Execute all handlers, aggregate any errors so we
+                            // can flip TestRunStatus once at the end.
+                            let mut handler_errors: Vec<String> = Vec::new();
                             for handler in &handlers {
                                 if let Err(e) = handler
                                     .handle_completion(&test_run_id_clone.to_string(), &summary)
                                     .await
                                 {
                                     log::error!("Completion handler failed: {e}");
+                                    handler_errors.push(e.to_string());
+                                }
+                            }
+
+                            if !handler_errors.is_empty() {
+                                let msg = handler_errors.join("; ");
+                                let mut runs = test_runs_for_task.write().await;
+                                if let Some(run) = runs.get_mut(&test_run_id_clone) {
+                                    run.status = TestRunStatus::Error(msg);
                                 }
                             }
                             break;

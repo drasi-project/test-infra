@@ -31,15 +31,10 @@
 #   TEST_RUN_ID           Full run id used by the API: test_repo_id.test_id.test_run_id
 #                         Default: drasi_server_dev_repo.building_comfort.test_run_001
 #   TEST_REACTION_IDS     Space-separated list of test_reaction_id values to
-#                         poll until Stopped and to hash for determinism.
+#                         snapshot at completion.
 #                         Default: "building-comfort building-comfort-floor-agg"
-#   EXPECTED_SHA_FILE     Sidecar JSON mapping test_reaction_id -> expected
-#                         SHA-256 of the canonical reaction JsonlFile output.
-#                         Default: $SCRIPT_DIR/expected_reaction_sha256.json
-#                         Missing key or empty value = no baseline yet (the
-#                         script emits the actual SHA to artifacts and passes).
-#                         A non-empty value that doesn't match fails CI.
-#   TIMEOUT_SECS          Max seconds to wait for Stopped state. Default: 1800
+#   TIMEOUT_SECS          Max seconds to wait for the completion signal.
+#                         Default: 1800
 #   POLL_INTERVAL_SECS    Seconds between status polls. Default: 10
 #   ARTIFACTS_DIR         Where to copy outputs. Default: ./ci_artifacts
 #   WORK_DIR              Scratch dir. Default: ./.ci_work
@@ -62,7 +57,6 @@ TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
-EXPECTED_SHA_FILE="${EXPECTED_SHA_FILE:-$SCRIPT_DIR/expected_reaction_sha256.json}"
 
 LOG_DIR="$WORK_DIR/logs"
 DOWNLOAD_DIR="$WORK_DIR/drasi-server-download"
@@ -296,19 +290,6 @@ wait_for_completion_signal() {
     return 1
 }
 
-poll_all_reactions() {
-    if ! wait_for_completion_signal; then
-        return 1
-    fi
-    local rc=0 id
-    for id in $TEST_REACTION_IDS; do
-        if ! fetch_final_reaction_state "$id"; then
-            rc=1
-        fi
-    done
-    return $rc
-}
-
 print_summary() {
     local id state_file
     for id in $TEST_REACTION_IDS; do
@@ -349,80 +330,53 @@ print_summary() {
     echo "::endgroup::"
 }
 
-# Resolve the expected SHA for a reaction id from the sidecar JSON file.
-# Missing file, missing key, or empty value all mean "no baseline" -> the
-# caller emits the actual SHA and treats the check as passing.
-expected_sha_for_reaction() {
-    local id="$1"
-    [[ -s "$EXPECTED_SHA_FILE" ]] || return 0
-    jq -r --arg id "$id" '.[$id] // ""' "$EXPECTED_SHA_FILE" 2>/dev/null
-}
+# Verifies the test-run's final status via the test-service REST API. The
+# framework's Sha256Determinism completion handler flips the run status to
+# Error if any reaction's DeterminismHash logger SHA doesn't match the
+# baseline declared in the test definition; otherwise the run stays at
+# Running once all components have finished. We give the handler chain a
+# short grace period after the completion marker to settle.
+verify_test_run_status() {
+    local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}"
+    local status_file="$ARTIFACTS_DIR/final_test_run_status.json"
+    local deadline=$(( $(date +%s) + 30 ))
+    local body status
 
-verify_deterministic_result() {
-    # verify_deterministic_result <test_reaction_id>
-    local reaction_id="$1"
-    local state_file="$ARTIFACTS_DIR/final_reaction_state__${reaction_id}.json"
-    local jsonl_dir first_jsonl reaction_sha expected_sha
-
-    if [[ ! -s "$state_file" ]]; then
-        log "WARNING: [$reaction_id] No final reaction state; skipping deterministic output hash"
-        return 0
-    fi
-
-    jsonl_dir="$(jq -r '.reaction_observer.logger_results[]? | select(.logger_name == "JsonlFile" and .has_output == true) | .output_folder_path' "$state_file" | head -n1)"
-    if [[ -z "$jsonl_dir" || ! -d "$jsonl_dir" ]]; then
-        log "WARNING: [$reaction_id] JsonlFile output folder not found from reaction state; skipping hash check"
-        return 0
-    fi
-
-    first_jsonl="$(find "$jsonl_dir" -name '*.jsonl' -type f -print -quit)"
-    if [[ -z "$first_jsonl" ]]; then
-        log "WARNING: [$reaction_id] No reaction JSONL files found in $jsonl_dir; skipping hash check"
-        return 0
-    fi
-
-    # Hash only canonical reaction payload content (not timestamps/trace metadata)
-    # so equal seeded runs are compared on actual result data. We also sort the
-    # extracted payload lines so the hash is order-independent — tests with
-    # multiple async sources (e.g. HTTP + gRPC) can interleave reaction rows
-    # in different orders run-to-run even with deterministic inputs.
-    reaction_sha="$(find "$jsonl_dir" -name '*.jsonl' -type f -print0 \
-        | sort -z \
-        | xargs -0 cat \
-        | jq -cS 'if .payload.type == "ReactionInvocation" then .payload.request_body elif .payload.type == "ReactionOutput" then .payload.reaction_output else .payload end' \
-        | LC_ALL=C sort \
-        | sha256sum \
-        | awk '{print $1}')"
-    if [[ -z "$reaction_sha" ]]; then
-        log "WARNING: [$reaction_id] Failed to compute reaction output hash"
-        return 0
-    fi
-
-    printf '%s\n' "$reaction_sha" > "$ARTIFACTS_DIR/reaction_output_sha256__${reaction_id}.txt"
-    printf '%s\n' "$jsonl_dir"    > "$ARTIFACTS_DIR/reaction_output_jsonl_dir__${reaction_id}.txt"
-    log "[$reaction_id] Reaction output SHA-256: $reaction_sha"
-
-    expected_sha="$(expected_sha_for_reaction "$reaction_id")"
-    if [[ -n "$expected_sha" ]]; then
-        if [[ "$reaction_sha" != "$expected_sha" ]]; then
-            log "ERROR: [$reaction_id] Determinism check failed. expected=$expected_sha actual=$reaction_sha"
-            return 1
+    while (( $(date +%s) < deadline )); do
+        body="$(curl -sS "$url" 2>/dev/null || true)"
+        if [[ -n "$body" ]]; then
+            echo "$body" > "$status_file"
+            status="$(echo "$body" | jq -r '.status // "Unknown"')"
+            case "$status" in
+                Error:*)
+                    log "ERROR: test-run status: $status"
+                    return 1
+                    ;;
+                Stopped|Running)
+                    log "test-run status: $status"
+                    return 0
+                    ;;
+            esac
         fi
-        log "[$reaction_id] Determinism check passed"
-    else
-        log "[$reaction_id] No expected SHA provided; fingerprint emitted for baseline setup"
-    fi
-}
-
-verify_all_reactions() {
-    local rc=0
-    local id
-    for id in $TEST_REACTION_IDS; do
-        if ! verify_deterministic_result "$id"; then
-            rc=1
-        fi
+        sleep 1
     done
-    return $rc
+
+    log "WARNING: could not confirm final test-run status from $url"
+    [[ -s "$status_file" ]] && cat "$status_file"
+    return 0
+}
+
+# Best-effort copy of the determinism verdict file (written by the
+# Sha256Determinism completion handler under the test-run storage path).
+copy_determinism_verdict() {
+    local verdict
+    verdict="$(find "$DATA_CACHE" -name 'determinism_verdict.json' -type f -print -quit 2>/dev/null || true)"
+    if [[ -n "$verdict" && -f "$verdict" ]]; then
+        cp "$verdict" "$ARTIFACTS_DIR/determinism_verdict.json"
+        echo "::group::Determinism verdict"
+        jq '.' "$ARTIFACTS_DIR/determinism_verdict.json" 2>/dev/null || cat "$ARTIFACTS_DIR/determinism_verdict.json"
+        echo "::endgroup::"
+    fi
 }
 
 download_drasi_server
@@ -431,11 +385,18 @@ start_drasi_server
 start_test_service
 
 poll_rc=0
-poll_all_reactions || poll_rc=$?
+if wait_for_completion_signal; then
+    for id in $TEST_REACTION_IDS; do
+        fetch_final_reaction_state "$id" || poll_rc=1
+    done
+else
+    poll_rc=1
+fi
 print_summary
 
 determinism_rc=0
-verify_all_reactions || determinism_rc=$?
+verify_test_run_status || determinism_rc=$?
+copy_determinism_verdict
 
 if (( poll_rc != 0 )); then
     exit "$poll_rc"

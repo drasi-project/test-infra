@@ -34,12 +34,10 @@
 #   TEST_RUN_ID           Full run id used by the API: test_repo_id.test_id.test_run_id
 #                         Default: drasi_server_dev_repo.stock_market.test_run_001
 #   TEST_REACTION_IDS     Space-separated list of test_reaction_id values to
-#                         poll until Stopped and to hash for determinism.
+#                         snapshot at completion.
 #                         Default: "stock-market-join"
-#   EXPECTED_SHA_FILE     Sidecar JSON mapping test_reaction_id -> expected
-#                         SHA-256 of the canonical reaction JsonlFile output.
-#                         Default: $SCRIPT_DIR/expected_reaction_sha256.json
-#   TIMEOUT_SECS          Max seconds to wait for Stopped state. Default: 1800
+#   TIMEOUT_SECS          Max seconds to wait for the completion signal.
+#                         Default: 1800
 #   POLL_INTERVAL_SECS    Seconds between status polls. Default: 10
 #   ARTIFACTS_DIR         Where to copy outputs. Default: ./ci_artifacts
 #   WORK_DIR              Scratch dir. Default: ./.ci_work
@@ -63,7 +61,6 @@ TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
-EXPECTED_SHA_FILE="${EXPECTED_SHA_FILE:-$SCRIPT_DIR/expected_reaction_sha256.json}"
 
 LOG_DIR="$WORK_DIR/logs"
 DOWNLOAD_DIR="$WORK_DIR/drasi-server-download"
@@ -304,19 +301,6 @@ wait_for_completion_signal() {
     return 1
 }
 
-poll_all_reactions() {
-    if ! wait_for_completion_signal; then
-        return 1
-    fi
-    local rc=0 id
-    for id in $TEST_REACTION_IDS; do
-        if ! fetch_final_reaction_state "$id"; then
-            rc=1
-        fi
-    done
-    return $rc
-}
-
 print_summary() {
     local id state_file
     for id in $TEST_REACTION_IDS; do
@@ -357,98 +341,26 @@ print_summary() {
     echo "::endgroup::"
 }
 
-# Resolve the expected SHA for a reaction id from the sidecar JSON file.
-# Missing file, missing key, or empty value all mean "no baseline" -> the
-# caller emits the actual SHA and treats the check as passing.
-expected_sha_for_reaction() {
-    local id="$1"
-    [[ -s "$EXPECTED_SHA_FILE" ]] || return 0
-    jq -r --arg id "$id" '.[$id] // ""' "$EXPECTED_SHA_FILE" 2>/dev/null
-}
-
-verify_deterministic_result() {
-    # verify_deterministic_result <test_reaction_id>
-    local reaction_id="$1"
-    local state_file="$ARTIFACTS_DIR/final_reaction_state__${reaction_id}.json"
-    local jsonl_dir first_jsonl reaction_sha expected_sha
-
-    if [[ ! -s "$state_file" ]]; then
-        log "WARNING: [$reaction_id] No final reaction state; skipping deterministic output hash"
-        return 0
-    fi
-
-    jsonl_dir="$(jq -r '.reaction_observer.logger_results[]? | select(.logger_name == "JsonlFile" and .has_output == true) | .output_folder_path' "$state_file" | head -n1)"
-    if [[ -z "$jsonl_dir" || ! -d "$jsonl_dir" ]]; then
-        log "WARNING: [$reaction_id] JsonlFile output folder not found from reaction state; skipping hash check"
-        return 0
-    fi
-
-    first_jsonl="$(find "$jsonl_dir" -name '*.jsonl' -type f -print -quit)"
-    if [[ -z "$first_jsonl" ]]; then
-        log "WARNING: [$reaction_id] No reaction JSONL files found in $jsonl_dir; skipping hash check"
-        return 0
-    fi
-
-    # Hash only canonical reaction payload content (not timestamps/trace metadata)
-    # so equal seeded runs are compared on actual result data. We also sort the
-    # extracted payload lines so the hash is order-independent — tests with
-    # multiple async sources (e.g. HTTP + gRPC) can interleave reaction rows
-    # in different orders run-to-run even with deterministic inputs.
-    reaction_sha="$(find "$jsonl_dir" -name '*.jsonl' -type f -print0 \
-        | sort -z \
-        | xargs -0 cat \
-        | jq -cS 'if .payload.type == "ReactionInvocation" then .payload.request_body elif .payload.type == "ReactionOutput" then .payload.reaction_output else .payload end' \
-        | LC_ALL=C sort \
-        | sha256sum \
-        | awk '{print $1}')"
-    if [[ -z "$reaction_sha" ]]; then
-        log "WARNING: [$reaction_id] Failed to compute reaction output hash"
-        return 0
-    fi
-
-    printf '%s\n' "$reaction_sha" > "$ARTIFACTS_DIR/reaction_output_sha256__${reaction_id}.txt"
-    printf '%s\n' "$jsonl_dir"    > "$ARTIFACTS_DIR/reaction_output_jsonl_dir__${reaction_id}.txt"
-    log "[$reaction_id] Reaction output SHA-256: $reaction_sha"
-
-    # SHA-256 determinism check is disabled for this test. The query joins
-    # two async sources (HTTP + gRPC) flowing concurrently, so the multiset
-    # of emitted reaction rows itself varies run-to-run (different
-    # interleavings produce different before/after pairs, and the
-    # RecordCount stop trigger truncates the tail at slightly different
-    # points). The count-based stop trigger is the meaningful assertion;
-    # the SHA is only emitted to artifacts for inspection.
-    log "[$reaction_id] SHA determinism check skipped (multi-source async join is not byte-deterministic)"
-}
-
-verify_all_reactions() {
-    local rc=0
-    local id
-    for id in $TEST_REACTION_IDS; do
-        if ! verify_deterministic_result "$id"; then
-            rc=1
-        fi
-    done
-    return $rc
-}
-
 download_drasi_server
 patch_configs
 start_drasi_server
 start_test_service
 
 poll_rc=0
-poll_all_reactions || poll_rc=$?
+if wait_for_completion_signal; then
+    for id in $TEST_REACTION_IDS; do
+        fetch_final_reaction_state "$id" || poll_rc=1
+    done
+else
+    poll_rc=1
+fi
 print_summary
 
-determinism_rc=0
-verify_all_reactions || determinism_rc=$?
+# SHA-256 determinism verification is intentionally not performed for this
+# test: the Cypher query joins two async sources (HTTP + gRPC) flowing
+# concurrently, so the multiset of emitted reaction rows itself varies
+# run-to-run (different interleavings produce different before/after pairs,
+# and the RecordCount stop trigger truncates the tail at slightly different
+# points). The count-based stop trigger is the meaningful assertion.
 
-if (( poll_rc != 0 )); then
-    exit "$poll_rc"
-fi
-
-if (( determinism_rc != 0 )); then
-    exit "$determinism_rc"
-fi
-
-exit 0
+exit "$poll_rc"

@@ -15,6 +15,11 @@
                       "description": "",
                       "test_folder": "building_comfort",
                       "completion_handlers": [
+                          {
+                              "kind": "Sha256Determinism",
+                              "expected": {},
+                              "missing_baseline": "Warn"
+                          },
                           { "kind": "Log", "log_level": "info" }
                       ],
                       "queries": [],
@@ -134,7 +139,10 @@
                           },
                           {
                               "kind": "PerformanceMetrics"
-                          }                      
+                          },
+                          {
+                              "kind": "DeterminismHash"
+                          }
                       ]
                   },
                   {
@@ -147,7 +155,10 @@
                           },
                           {
                               "kind": "PerformanceMetrics"
-                          }                      
+                          },
+                          {
+                              "kind": "DeterminismHash"
+                          }
                       ]
                   }
               ],

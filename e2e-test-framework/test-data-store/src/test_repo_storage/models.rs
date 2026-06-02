@@ -208,6 +208,10 @@ pub struct TestDefinition {
 pub enum CompletionHandlerDefinition {
     /// Log completion summary to configured log level
     Log(LogHandlerConfig),
+    /// Compare each reaction's `DeterminismHash` output-logger SHA-256 to an
+    /// expected baseline. Used to verify that a seeded test run produces the
+    /// same reaction output (and ordering) across runs.
+    Sha256Determinism(Sha256DeterminismHandlerConfig),
 }
 
 /// Configuration for LogCompletionHandler
@@ -217,6 +221,29 @@ pub struct LogHandlerConfig {
     /// Defaults to "info" if not specified
     #[serde(default)]
     pub log_level: Option<String>,
+}
+
+/// Configuration for Sha256DeterminismCompletionHandler
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Sha256DeterminismHandlerConfig {
+    /// Map of `test_reaction_id` -> expected SHA-256 (hex). Reactions absent
+    /// from this map are treated according to `missing_baseline`.
+    #[serde(default)]
+    pub expected: std::collections::BTreeMap<String, String>,
+    /// Behaviour when a reaction has no expected baseline declared.
+    #[serde(default)]
+    pub missing_baseline: MissingBaselinePolicy,
+}
+
+/// What to do when a reaction has no entry in `expected`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum MissingBaselinePolicy {
+    /// Log the actual SHA-256 and treat the reaction as passing. Useful for
+    /// capturing a fresh baseline on the first run of a new test.
+    #[default]
+    Warn,
+    /// Treat a missing baseline as a verification failure.
+    Fail,
 }
 
 impl TestDefinition {

@@ -15,11 +15,6 @@
             "description": "Building comfort monitoring test with an embedded drasi-lib instance",
             "test_folder": "building_comfort",
             "completion_handlers": [
-              {
-                "kind": "Sha256Determinism",
-                "expected": {},
-                "missing_baseline": "Warn"
-              },
               { "kind": "Log", "log_level": "info" }
             ],
             "queries": [],
@@ -37,15 +32,15 @@
                 ],
                 "model_data_generator": {
                   "kind": "BuildingHierarchy",
-                  "change_interval": [5000000000, 1000000000, 1000000000, 5000000000],
-                  "change_count": 5000,
+                  "change_interval": [2000000000, 500000000, 500000000, 4000000000],
+                  "change_count": 100000,
                   "send_initial_inserts": true,
                   "seed": 123456789,
                   "spacing_mode": "none",
                   "time_mode": "2025-01-03T10:03:15.4Z",
                   "building_count": [1, 0],
-                  "floor_count": [1, 0],
-                  "room_count": [1, 0],
+                  "floor_count": [3, 0],
+                  "room_count": [4, 0],
                   "room_sensors": [
                     {
                       "kind": "NormalFloat",
@@ -88,7 +83,7 @@
                 "stop_triggers": [
                   {
                     "kind": "RecordCount",
-                    "record_count": 4999
+                    "record_count": 95000
                   }
                 ]
               }

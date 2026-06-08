@@ -15,6 +15,14 @@
             "description": "Building comfort monitoring test with an embedded drasi-lib instance",
             "test_folder": "building_comfort",
             "completion_handlers": [
+              {
+                "kind": "Sha256Determinism",
+                "expected": {
+                  "building-comfort": "ec6f6788d383aad04ebe4b6c5a78218820f190a4403441d8b00fe6be99bbdfb7",
+                  "building-comfort-floor-agg": "f60dc85b7924bd59857c478b433e87db210c7581d66a504a97681c3df08d3c56"
+                },
+                "missing_baseline": "Fail"
+              },
               { "kind": "Log", "log_level": "info" }
             ],
             "queries": [],
@@ -86,6 +94,21 @@
                     "record_count": 95000
                   }
                 ]
+              },
+              {
+                "test_reaction_id": "building-comfort-floor-agg",
+                "output_handler": {
+                  "kind": "DrasiLibInstanceChannel",
+                  "reaction_id": "building-comfort-floor-agg-alerts",
+                  "buffer_size": 1024,
+                  "drasi_lib_instance_id": "internal-drasi-lib"
+                },
+                "stop_triggers": [
+                  {
+                    "kind": "RecordCount",
+                    "record_count": 45000
+                  }
+                ]
               }
             ],
             "drasi_lib_instances": [
@@ -110,6 +133,13 @@
                       "sources": ["facilities-db"],
                       "auto_start": true,
                       "config": {}
+                    },
+                    {
+                      "id": "floor-agg",
+                      "query": "MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room) WITH f, avg(r.temperature) AS AvgTemperature, max(r.co2) AS MaxCo2, min(r.humidity) AS MinHumidity, count(r) AS RoomCount RETURN elementId(f) AS FloorId, AvgTemperature, MaxCo2, MinHumidity, RoomCount",
+                      "sources": ["facilities-db"],
+                      "auto_start": true,
+                      "config": {}
                     }
                   ],
                   "reactions": [
@@ -117,6 +147,13 @@
                       "id": "building-comfort-alerts",
                       "kind": "application",
                       "queries": ["all-rooms"],
+                      "auto_start": true,
+                      "config": {}
+                    },
+                    {
+                      "id": "building-comfort-floor-agg-alerts",
+                      "kind": "application",
+                      "queries": ["floor-agg"],
                       "auto_start": true,
                       "config": {}
                     }
@@ -139,6 +176,18 @@
         "reactions": [
           {
             "test_reaction_id": "building-comfort",
+            "start_immediately": true,
+            "output_loggers": [
+              {
+                "kind": "JsonlFile",
+                "max_lines_per_file": 15000
+              },
+              { "kind": "PerformanceMetrics" },
+              { "kind": "DeterminismHash" }
+            ]
+          },
+          {
+            "test_reaction_id": "building-comfort-floor-agg",
             "start_immediately": true,
             "output_loggers": [
               {

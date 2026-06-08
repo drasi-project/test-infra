@@ -52,7 +52,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
 TEST_SERVICE_PORT="${TEST_SERVICE_PORT:-63123}"
 TEST_RUN_ID="${TEST_RUN_ID:-drasi_lib_dev_repo.building_comfort.test_run_001}"
-TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort}"
+TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort building-comfort-floor-agg}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"

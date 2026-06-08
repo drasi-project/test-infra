@@ -7,7 +7,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Scheduled / CI runner for the building_comfort / drasi_server_http E2E test.
+# Scheduled / CI runner for the building_comfort / drasi_server_grpc E2E test.
 #
 # Responsibilities:
 #   1. Download the latest (or pinned) drasi-server release binary, unless
@@ -26,7 +26,7 @@
 #   DRASI_SERVER_VERSION  Release tag to download. Default: latest
 #   DRASI_SERVER_BIN      Pre-downloaded binary; skips the download step.
 #   DRASI_ADMIN_PORT      Admin port to patch into drasi_server_config.yaml. Default: 8090
-#   DRASI_SOURCE_PORT     HTTP source port. Default: 9000
+#   DRASI_SOURCE_PORT     gRPC source port. Default: 50051
 #   TEST_SERVICE_PORT     test-service REST API port. Default: 63123
 #   TEST_RUN_ID           Full run id used by the API: test_repo_id.test_id.test_run_id
 #                         Default: drasi_server_dev_repo.building_comfort.test_run_001
@@ -49,7 +49,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
 DRASI_ADMIN_PORT="${DRASI_ADMIN_PORT:-8090}"
-DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-9000}"
+DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-50051}"
 TEST_SERVICE_PORT="${TEST_SERVICE_PORT:-63123}"
 TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.building_comfort.test_run_001}"
 TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort building-comfort-floor-agg}"

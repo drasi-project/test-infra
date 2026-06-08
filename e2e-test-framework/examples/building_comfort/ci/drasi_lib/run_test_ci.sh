@@ -157,6 +157,7 @@ fetch_final_reaction_state() {
 wait_for_completion_signal() {
     local log_file="$LOG_DIR/test-service.log"
     local marker="TestRun '${TEST_RUN_ID}' completed:"
+    local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}"
     log "Waiting for completion-tracker signal in $log_file"
     log "  marker: $marker  (timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s)"
 
@@ -180,7 +181,17 @@ wait_for_completion_signal() {
         now=$(date +%s)
         elapsed=$(( now - start_ts ))
         if (( now - last_log_ts >= 30 )); then
-            log "waiting for completion t=${elapsed}s (no marker yet)"
+            # Heartbeat: live reaction-invocation counts so a stuck run is
+            # debuggable from the workflow log alone (no artifact required).
+            local id summary
+            summary=""
+            for id in $TEST_REACTION_IDS; do
+                local count
+                count="$(curl -sS "${url}/reactions/${id}" 2>/dev/null \
+                    | jq -r '.reaction_observer.result_summary.reaction_invocation_count // "?"' 2>/dev/null || echo '?')"
+                summary+="${id}=${count} "
+            done
+            log "waiting for completion t=${elapsed}s ${summary}(no marker yet)"
             last_log_ts=$now
         fi
 

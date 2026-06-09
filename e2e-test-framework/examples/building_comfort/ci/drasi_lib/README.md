@@ -30,13 +30,17 @@ test-service ── in-process channel ──> drasi-lib ── in-process chann
 
 ## CI vs local
 
-- **No determinism check**: unlike the drasi-server variants, this
-  variant does not verify a SHA-256 baseline. The embedded drasi-lib
-  pipeline emits records via tokio's multi-threaded scheduler, so the
-  interleaving (and any order-sensitive hash) varies with CPU class and
-  core count. The run reports performance metrics only; byte-level
-  determinism is covered by the `drasi_server_http` and
-  `drasi_server_grpc` variants.
+- **Per-query determinism check**: `config.json` declares a
+  `Sha256Determinism` completion handler. Each reaction's `DeterminismHash`
+  output logger skips drasi-lib's empty-results heartbeats and hashes only
+  the data records its query emitted — so the per-reaction SHA is stable
+  for each query in isolation, even though the cross-reaction interleaving
+  varies with the host's tokio scheduler. On first run, leave `expected: {}`
+  and `missing_baseline: Warn` so the framework just logs the actual SHA.
+  Once you have a trusted baseline (typically matching SHAs from two
+  consecutive local runs and a CI run), copy the SHA from each reaction's
+  `DeterminismHash` logger summary into the `expected` map and flip
+  `missing_baseline` to `Fail`.
 - **No `delete_on_stop`**: the runner script patches `delete_on_start`
   and `delete_on_stop` to `false` so artifacts survive between phases.
 - **No drasi-server binary**: drasi-lib runs in-process, so there's
@@ -75,3 +79,11 @@ The drasi-lib host runs in-process, so it has no port of its own.
   drasi-lib host only supports `kind: "application"` sources/reactions.
   Don't change those in `config.json`; if you need HTTP/gRPC transport,
   use the `ci/drasi_server_http` or `ci/drasi_server_grpc` example.
+- **`Determinism mismatch`** &mdash; expected on the first run with empty
+  baselines (`missing_baseline: Warn` makes that a non-fatal warning).
+  Copy the actual SHA value from each reaction's `DeterminismHash` logger
+  summary (or `determinism_verdict.json`) into `expected` in
+  `config.json`, then flip `missing_baseline` to `Fail`. If the mismatch
+  appears across hosts with `missing_baseline: Fail`, the per-reaction
+  heartbeat-skip filter may need tuning — see the comment in
+  `test-run-host/src/reactions/output_loggers/determinism_hash_logger.rs`.

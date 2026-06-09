@@ -85,7 +85,14 @@ impl OutputLogger for DeterminismHashOutputLogger {
     }
 
     async fn log_handler_record(&mut self, record: &HandlerRecord) -> anyhow::Result<()> {
-        let canonical = canonical_payload_bytes(record)?;
+        // Skip empty-results heartbeats: drasi-lib re-evaluations that coalesce
+        // to zero rows still produce a HandlerRecord (`{query_id, results: []}`),
+        // and how many of those land between two real records is decided by
+        // tokio's scheduler. Hashing them makes the SHA host-dependent. Real
+        // records use the singular `result` key, so the filter is precise.
+        let Some(canonical) = canonical_payload_bytes(record)? else {
+            return Ok(());
+        };
         self.hasher.update(&canonical);
         self.hasher.update(b"\n");
         self.record_count += 1;
@@ -94,7 +101,7 @@ impl OutputLogger for DeterminismHashOutputLogger {
 }
 
 /// Project a `HandlerRecord` to the canonical payload bytes that participate
-/// in the determinism hash.
+/// in the determinism hash, or `Ok(None)` to skip the record entirely.
 ///
 /// Matches the historical bash pipeline:
 ///   - `ReactionInvocation` -> `request_body`
@@ -104,14 +111,35 @@ impl OutputLogger for DeterminismHashOutputLogger {
 /// The chosen value is re-serialised to compact JSON with recursively sorted
 /// keys (equivalent of `jq -cS`) so logically identical objects always hash
 /// to the same bytes regardless of in-memory field order.
-pub(crate) fn canonical_payload_bytes(record: &HandlerRecord) -> anyhow::Result<Vec<u8>> {
+///
+/// Records whose projected payload is an object containing `results: []`
+/// (the drasi-lib in-process "empty re-evaluation" heartbeat shape) are
+/// excluded from the hash — see the comment in `log_handler_record`.
+pub(crate) fn canonical_payload_bytes(record: &HandlerRecord) -> anyhow::Result<Option<Vec<u8>>> {
     let projected: Value = match &record.payload {
         HandlerPayload::ReactionInvocation { request_body, .. } => request_body.clone(),
         HandlerPayload::ReactionOutput { reaction_output } => reaction_output.clone(),
         _ => serde_json::to_value(&record.payload)?,
     };
+    if is_empty_results_heartbeat(&projected) {
+        return Ok(None);
+    }
     let canonical = sort_json_keys(projected);
-    Ok(serde_json::to_vec(&canonical)?)
+    Ok(Some(serde_json::to_vec(&canonical)?))
+}
+
+/// True for the in-process drasi-lib heartbeat shape
+/// `{ "query_id": ..., "results": [] }` (and any superset with `results: []`).
+/// HTTP/gRPC reaction payloads use different field names
+/// (`addedResults`, `updatedResults`, ...) so they are never matched.
+fn is_empty_results_heartbeat(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => match map.get("results") {
+            Some(Value::Array(items)) => items.is_empty(),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn sort_json_keys(value: Value) -> Value {
@@ -161,7 +189,7 @@ mod tests {
                 headers: Default::default(),
             },
         );
-        let bytes = canonical_payload_bytes(&rec).unwrap();
+        let bytes = canonical_payload_bytes(&rec).unwrap().unwrap();
         // Keys recursively sorted -> a before b.
         assert_eq!(std::str::from_utf8(&bytes).unwrap(), r#"{"a":1,"b":2}"#);
     }
@@ -174,11 +202,83 @@ mod tests {
                 reaction_output: json!({ "z": [3, 2, 1], "a": { "y": 1, "x": 2 } }),
             },
         );
-        let bytes = canonical_payload_bytes(&rec).unwrap();
+        let bytes = canonical_payload_bytes(&rec).unwrap().unwrap();
         // Array order is preserved; nested object keys are sorted.
         assert_eq!(
             std::str::from_utf8(&bytes).unwrap(),
             r#"{"a":{"x":2,"y":1},"z":[3,2,1]}"#
+        );
+    }
+
+    #[test]
+    fn canonical_payload_skips_empty_results_heartbeat() {
+        let rec = make_record(
+            3,
+            HandlerPayload::ReactionOutput {
+                reaction_output: json!({ "query_id": "q1", "results": [] }),
+            },
+        );
+        assert!(canonical_payload_bytes(&rec).unwrap().is_none());
+    }
+
+    #[test]
+    fn canonical_payload_keeps_non_empty_results() {
+        let rec = make_record(
+            4,
+            HandlerPayload::ReactionOutput {
+                reaction_output: json!({ "query_id": "q1", "results": [{"a": 1}] }),
+            },
+        );
+        assert!(canonical_payload_bytes(&rec).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn streaming_hash_ignores_interleaved_heartbeats() {
+        let test_run_id = TestRunId::new("repo", "test", "run");
+        let reaction_id = TestRunReactionId::new(&test_run_id, "r");
+
+        let data1 = make_record(
+            0,
+            HandlerPayload::ReactionOutput {
+                reaction_output: json!({ "query_id": "q1", "result": { "v": 1 } }),
+            },
+        );
+        let data2 = make_record(
+            1,
+            HandlerPayload::ReactionOutput {
+                reaction_output: json!({ "query_id": "q1", "result": { "v": 2 } }),
+            },
+        );
+        let beat = make_record(
+            2,
+            HandlerPayload::ReactionOutput {
+                reaction_output: json!({ "query_id": "q1", "results": [] }),
+            },
+        );
+
+        // Stream A: just the two data records.
+        let mut a =
+            DeterminismHashOutputLogger::new(reaction_id.clone(), &Default::default()).unwrap();
+        a.log_handler_record(&data1).await.unwrap();
+        a.log_handler_record(&data2).await.unwrap();
+        let a_sum = a.end_test_run().await.unwrap();
+
+        // Stream B: same two data records with five heartbeats sprinkled in.
+        let mut b =
+            DeterminismHashOutputLogger::new(reaction_id, &Default::default()).unwrap();
+        b.log_handler_record(&beat).await.unwrap();
+        b.log_handler_record(&data1).await.unwrap();
+        b.log_handler_record(&beat).await.unwrap();
+        b.log_handler_record(&beat).await.unwrap();
+        b.log_handler_record(&data2).await.unwrap();
+        b.log_handler_record(&beat).await.unwrap();
+        b.log_handler_record(&beat).await.unwrap();
+        let b_sum = b.end_test_run().await.unwrap();
+
+        assert_eq!(a_sum.summary, b_sum.summary);
+        assert_eq!(
+            a_sum.summary.as_ref().unwrap()["record_count"].as_u64(),
+            Some(2)
         );
     }
 

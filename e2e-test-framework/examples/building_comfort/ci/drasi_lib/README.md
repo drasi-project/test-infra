@@ -30,17 +30,21 @@ test-service ── in-process channel ──> drasi-lib ── in-process chann
 
 ## CI vs local
 
-- **Per-query determinism check**: `config.json` declares a
-  `Sha256Determinism` completion handler. Each reaction's `DeterminismHash`
-  output logger skips drasi-lib's empty-results heartbeats and hashes only
-  the data records its query emitted — so the per-reaction SHA is stable
-  for each query in isolation, even though the cross-reaction interleaving
-  varies with the host's tokio scheduler. On first run, leave `expected: {}`
-  and `missing_baseline: Warn` so the framework just logs the actual SHA.
-  Once you have a trusted baseline (typically matching SHAs from two
-  consecutive local runs and a CI run), copy the SHA from each reaction's
-  `DeterminismHash` logger summary into the `expected` map and flip
-  `missing_baseline` to `Fail`.
+- **Per-query determinism check (CI-only baseline)**: `config.json`
+  declares a `Sha256Determinism` completion handler. The baselines in
+  `expected` are captured from the GitHub Actions runner
+  (`ubuntu-latest`, x86_64). The drasi-lib variant compiles drasi-lib
+  into the test-service binary, so the emitted byte stream depends on
+  the build environment (OS, arch, toolchain) on top of the pinned
+  `Cargo.lock`. **Running this variant locally on a different OS/arch
+  (e.g. macOS arm64) will produce different SHAs and fail the check;
+  that is expected.** The HTTP and gRPC variants run a pre-built
+  drasi-server binary downloaded from a release, so they don't have
+  this constraint and can be verified locally.
+  - To re-baseline after an intentional dep bump or engine change:
+    push the branch, read the actual SHAs from the failing CI run's
+    `determinism_verdict.json` artifact, and paste them into
+    `expected`.
 - **No `delete_on_stop`**: the runner script patches `delete_on_start`
   and `delete_on_stop` to `false` so artifacts survive between phases.
 - **No drasi-server binary**: drasi-lib runs in-process, so there's
@@ -79,11 +83,15 @@ The drasi-lib host runs in-process, so it has no port of its own.
   drasi-lib host only supports `kind: "application"` sources/reactions.
   Don't change those in `config.json`; if you need HTTP/gRPC transport,
   use the `ci/drasi_server_http` or `ci/drasi_server_grpc` example.
-- **`Determinism mismatch`** &mdash; expected on the first run with empty
-  baselines (`missing_baseline: Warn` makes that a non-fatal warning).
-  Copy the actual SHA value from each reaction's `DeterminismHash` logger
-  summary (or `determinism_verdict.json`) into `expected` in
-  `config.json`, then flip `missing_baseline` to `Fail`. If the mismatch
-  appears across hosts with `missing_baseline: Fail`, the per-reaction
-  heartbeat-skip filter may need tuning — see the comment in
-  `test-run-host/src/reactions/output_loggers/determinism_hash_logger.rs`.
+- **`Determinism mismatch` on local runs** &mdash; expected. The
+  baselines in `expected` are captured on the GitHub Actions runner
+  (Linux x86_64); local runs on macOS arm64 (or any other host) will
+  produce different SHAs because the embedded drasi-lib is compiled
+  from source as part of the test-service binary. To verify the
+  variant locally without failing the check, temporarily set
+  `expected: {}` and `missing_baseline: "Warn"` in `config.json`
+  (don't commit that change).
+- **`Determinism mismatch` in CI** &mdash; means either the pinned
+  `Cargo.lock` changed, drasi-lib changed behavior, or the workload
+  shifted. Re-baseline by copying the actual SHAs from the failing
+  run's `determinism_verdict.json` artifact into `expected`.

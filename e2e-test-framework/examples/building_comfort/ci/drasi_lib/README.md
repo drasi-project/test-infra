@@ -30,12 +30,13 @@ test-service ── in-process channel ──> drasi-lib ── in-process chann
 
 ## CI vs local
 
-- **Determinism check is on**: `config.json` declares a
-  `Sha256Determinism` completion handler. On first run, leave
-  `expected: {}` and `missing_baseline: Warn` so the framework just logs
-  the actual SHA. Once you have a trusted baseline, copy the SHA from
-  the run's `DeterminismHash` logger summary into the `expected` map and
-  flip `missing_baseline` to `Fail`.
+- **No determinism check**: unlike the drasi-server variants, this
+  variant does not verify a SHA-256 baseline. The embedded drasi-lib
+  pipeline emits records via tokio's multi-threaded scheduler, so the
+  interleaving (and any order-sensitive hash) varies with CPU class and
+  core count. The run reports performance metrics only; byte-level
+  determinism is covered by the `drasi_server_http` and
+  `drasi_server_grpc` variants.
 - **No `delete_on_stop`**: the runner script patches `delete_on_start`
   and `delete_on_stop` to `false` so artifacts survive between phases.
 - **No drasi-server binary**: drasi-lib runs in-process, so there's
@@ -74,8 +75,3 @@ The drasi-lib host runs in-process, so it has no port of its own.
   drasi-lib host only supports `kind: "application"` sources/reactions.
   Don't change those in `config.json`; if you need HTTP/gRPC transport,
   use the `ci/drasi_server_http` or `ci/drasi_server_grpc` example.
-- **`Determinism mismatch`** &mdash; expected on the first run with empty
-  baselines (`missing_baseline: Warn` makes that a non-fatal warning).
-  Copy the actual SHA value from the run's `DeterminismHash` logger
-  summary (or `determinism_verdict.json`) into `expected` in
-  `config.json`, then flip `missing_baseline` to `Fail`.

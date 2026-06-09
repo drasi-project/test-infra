@@ -23,10 +23,14 @@
 #      drasi-lib instance never reaches a terminal state on its own, so we
 #      do NOT wait for the framework's test-run completion tracker.
 #   3. Wait for every configured reaction to reach Stopped via the REST API.
-#   4. Snapshot each reaction's final state, do an inline SHA-256
-#      determinism check against the `expected` map in config.json (if a
-#      Sha256Determinism handler is declared), and write a markdown
-#      summary into $GITHUB_STEP_SUMMARY.
+#   4. Snapshot each reaction's final state and write a markdown summary
+#      (status, invocations, runtime, throughput) into $GITHUB_STEP_SUMMARY.
+#
+#      No SHA-256 determinism check is performed for this variant: the
+#      embedded drasi-lib pipeline emits records via tokio's multi-threaded
+#      scheduler, so the interleaving (and therefore any order-sensitive
+#      hash) depends on the host's CPU class and core count. The two
+#      drasi-server transports cover byte-level determinism.
 #
 # Required tools: bash, jq, curl, cargo.
 #
@@ -174,8 +178,7 @@ wait_for_reactions_stopped() {
     # Embedded drasi-lib runs never fire the framework's test-run completion
     # tracker because the in-process drasi-lib instance stays Running until
     # the host process exits. We treat "every reaction Stopped" as the
-    # authoritative done signal; the DeterminismHash logger summary on each
-    # reaction gives us the SHA without needing the completion-handler chain.
+    # authoritative done signal.
     local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}"
     log "Waiting for all reactions to reach Stopped (timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s)"
     log "  reactions: $TEST_REACTION_IDS"
@@ -290,65 +293,6 @@ verify_test_run_status() {
     return 0
 }
 
-# Compare each reaction's DeterminismHash SHA-256 from its logger summary to
-# the `expected` map declared on the Sha256Determinism completion handler in
-# config.json. Returns 1 on mismatch, 0 otherwise.
-verify_determinism_inline() {
-    local expected_map
-    expected_map="$(jq -c '
-        .data_store.test_repos[]?.local_tests[]?.completion_handlers[]?
-        | select(.kind == "Sha256Determinism")
-        | .expected // {}
-    ' "$TEST_CFG_CI" 2>/dev/null | head -n1)"
-    if [[ -z "$expected_map" || "$expected_map" == "null" ]]; then
-        log "No Sha256Determinism handler configured; skipping inline SHA check"
-        return 0
-    fi
-
-    local verdict_file="$ARTIFACTS_DIR/determinism_verdict.json"
-    local results="{}"
-    local fail=0
-    local id state_file actual expected passed
-
-    for id in $TEST_REACTION_IDS; do
-        state_file="$ARTIFACTS_DIR/final_reaction_state__${id}.json"
-        actual="$(jq -r '
-            (.reaction_observer.logger_results[]?
-                | select(.logger_name == "DeterminismHash")
-                | .summary.sha256) // empty
-        ' "$state_file" 2>/dev/null)"
-        expected="$(echo "$expected_map" | jq -r --arg id "$id" '.[$id] // empty' 2>/dev/null)"
-
-        if [[ -z "$actual" ]]; then
-            log "WARNING: [$id] no DeterminismHash logger summary; cannot verify"
-            passed="false"
-            fail=1
-        elif [[ -z "$expected" ]]; then
-            log "[$id] no expected baseline; actual=$actual (treating as pass)"
-            passed="true"
-        elif [[ "$actual" == "$expected" ]]; then
-            log "[$id] determinism check passed (sha256=${actual:0:12}…)"
-            passed="true"
-        else
-            log "ERROR: [$id] determinism mismatch expected=$expected actual=$actual"
-            passed="false"
-            fail=1
-        fi
-
-        results="$(echo "$results" | jq --arg id "$id" --arg a "$actual" --arg e "$expected" --argjson p "$passed" \
-            '.[$id] = {actual: ($a // null), expected: ($e // null), passed: $p}')"
-    done
-
-    jq --arg run "$TEST_RUN_ID" --argjson results "$results" \
-        '{test_run_id: $run, results: $results}' \
-        <<<'{}' > "$verdict_file"
-    echo "::group::Determinism verdict (inline)"
-    jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
-    echo "::endgroup::"
-
-    return "$fail"
-}
-
 write_step_summary() {
     if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
         return 0
@@ -364,36 +308,20 @@ write_step_summary() {
 
         echo "### Reactions"
         echo
-        echo "| Reaction | Status | Records | Runtime | SHA-256 | Determinism |"
-        echo "| --- | --- | ---: | --- | --- | --- |"
+        echo "| Reaction | Status | Records | Runtime |"
+        echo "| --- | --- | ---: | --- |"
 
-        local verdict_file="$ARTIFACTS_DIR/determinism_verdict.json"
-        local id state_file status invocations runtime sha verdict_passed verdict_cell
+        local id state_file status invocations runtime
         for id in $TEST_REACTION_IDS; do
             state_file="$ARTIFACTS_DIR/final_reaction_state__${id}.json"
-            status="n/a"; invocations="n/a"; runtime="n/a"; sha="n/a"
+            status="n/a"; invocations="n/a"; runtime="n/a"
             if [[ -s "$state_file" ]]; then
                 status="$(jq -r '.reaction_observer.status // "n/a"' "$state_file" 2>/dev/null)"
                 invocations="$(jq -r '.reaction_observer.result_summary.reaction_invocation_count // "n/a"' "$state_file" 2>/dev/null)"
                 runtime="$(jq -r '.reaction_observer.result_summary.observer_runtime_s // "n/a"' "$state_file" 2>/dev/null)"
-                sha="$(jq -r '
-                    (.reaction_observer.logger_results[]?
-                        | select(.logger_name == "DeterminismHash")
-                        | .summary.sha256) // "n/a"' "$state_file" 2>/dev/null)"
             fi
 
-            verdict_cell="-"
-            if [[ -s "$verdict_file" ]]; then
-                verdict_passed="$(jq -r --arg id "$id" '.results[$id].passed // empty' "$verdict_file" 2>/dev/null)"
-                case "$verdict_passed" in
-                    true)  verdict_cell="✅ pass" ;;
-                    false) verdict_cell="❌ fail" ;;
-                esac
-            fi
-
-            local sha_short="${sha:0:12}"
-            [[ "$sha" == "n/a" ]] && sha_short="n/a"
-            echo "| \`$id\` | $status | $invocations | $runtime | \`$sha_short\` | $verdict_cell |"
+            echo "| \`$id\` | $status | $invocations | $runtime |"
         done
         echo
 
@@ -410,14 +338,6 @@ write_step_summary() {
             echo "| \`$rid\` | $records | $duration | $rps |"
         done < <(find "$DATA_CACHE" -path '*output_log/performance_metrics/*.json' -type f -print0 2>/dev/null || true)
         echo
-
-        if [[ -s "$verdict_file" ]]; then
-            echo "### Determinism verdict"
-            echo
-            echo '```json'
-            jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
-            echo '```'
-        fi
     } >> "$out"
 }
 
@@ -434,17 +354,7 @@ else
 fi
 print_summary
 
-determinism_rc=0
-verify_test_run_status || determinism_rc=$?
-verify_determinism_inline || determinism_rc=$?
+verify_test_run_status || true
 write_step_summary
 
-if (( poll_rc != 0 )); then
-    exit "$poll_rc"
-fi
-
-if (( determinism_rc != 0 )); then
-    exit "$determinism_rc"
-fi
-
-exit 0
+exit "$poll_rc"

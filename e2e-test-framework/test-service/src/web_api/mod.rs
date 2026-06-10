@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{error::Error as _, net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::Extension,
@@ -233,7 +233,26 @@ pub(crate) async fn start_web_api(
     log::info!("API Documentation available at http://{addr}/docs");
     log::info!("OpenAPI JSON specification available at http://{addr}/api-docs/openapi.json");
 
-    let instance = axum::Server::bind(&addr).serve(app.into_make_service());
+    let instance = match axum::Server::try_bind(&addr) {
+        Ok(builder) => builder.serve(app.into_make_service()),
+        Err(err) => {
+            if let Some(io_err) = err
+                .source()
+                .and_then(|src| src.downcast_ref::<std::io::Error>())
+            {
+                if io_err.kind() == std::io::ErrorKind::AddrInUse {
+                    log::error!(
+                        "Port {port} is already in use. Another test-service instance is likely \
+                         running; stop it (e.g. `pkill -f target/release/test-service`) or pass \
+                         `--port <other>` to use a different port."
+                    );
+                    std::process::exit(1);
+                }
+            }
+            log::error!("Failed to bind test-service Web API to {addr}: {err}");
+            std::process::exit(1);
+        }
+    };
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = instance.with_graceful_shutdown(shutdown_signal(test_data_store));

@@ -266,7 +266,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
 
         let url = self.settings.full_url();
 
-        log::info!(
+        log::debug!(
             "HTTP dispatcher sending {} events to {} (source_id: {}, batch: {})",
             events.len(),
             url,
@@ -331,7 +331,7 @@ impl SourceChangeDispatcher for HttpSourceChangeDispatcher {
                 anyhow::bail!("HTTP request failed with status: {status}");
             }
 
-            log::info!(
+            log::debug!(
                 "Successfully dispatched batch of {} events to {} - Status: {}",
                 events.len(),
                 batch_url,

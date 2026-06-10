@@ -27,7 +27,7 @@ echo -e "  - Throughput window: 5 seconds"
 echo -e "  - Target events: 100,000"
 echo ""
 
-# Run with enhanced logging to see adaptive behavior
-RUST_LOG='info,test_run_host::utils::adaptive_batcher=error,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
-    cargo run --release --manifest-path "$(dirname "$0")/../../../test-service/Cargo.toml" -- \
-    --config "$(dirname "$0")/config.json"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/../_local_runner.sh"
+export RUST_LOG="${RUST_LOG:-info,test_run_host::utils::adaptive_batcher=error,drasi_core::query::continuous_query=error,drasi_core::path_solver=error}"
+run_local_test "$SCRIPT_DIR/config.json"

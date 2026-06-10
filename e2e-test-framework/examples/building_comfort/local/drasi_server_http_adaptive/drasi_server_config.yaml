@@ -54,6 +54,26 @@ queries:
              r.humidity AS Humidity,
              r.co2 AS Co2
 
+  # Floor-level aggregate: exercises a one-hop traversal across
+  # Floor -[:FLOOR_ROOM]-> Room plus avg / min / max / count aggregations.
+  - id: building-comfort-floor-agg
+    autoStart: true
+    queryLanguage: Cypher
+    sources:
+      - sourceId: events-http
+    query: |
+      MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room)
+      WITH f,
+           avg(r.temperature) AS AvgTemperature,
+           max(r.co2)         AS MaxCo2,
+           min(r.humidity)    AS MinHumidity,
+           count(r)           AS RoomCount
+      RETURN elementId(f)     AS FloorId,
+             AvgTemperature,
+             MaxCo2,
+             MinHumidity,
+             RoomCount
+
 reactions:
   # HTTP webhook reaction posts query results to the test framework's
   # HttpReactionHandler at http://localhost:3000/events.
@@ -71,10 +91,34 @@ reactions:
       building-comfort:
         added:
           method: POST
-          path: "/events"
+          url: "/events"
         updated:
           method: POST
-          path: "/events"
+          url: "/events"
         deleted:
           method: POST
-          path: "/events"
+          url: "/events"
+
+  # Floor-aggregate HTTP webhook reaction posts results to the test
+  # framework's HttpReactionHandler at http://localhost:3001/events.
+  - kind: http
+    id: http-webhook-floor-agg
+    autoStart: true
+    queries:
+      - building-comfort-floor-agg
+    baseUrl: "http://localhost:3001"
+    timeoutMs: 60000
+    headers:
+      Content-Type: "application/json"
+      X-Query-Sequence: "building-comfort-floor-agg"
+    routes:
+      building-comfort-floor-agg:
+        added:
+          method: POST
+          url: "/events"
+        updated:
+          method: POST
+          url: "/events"
+        deleted:
+          method: POST
+          url: "/events"

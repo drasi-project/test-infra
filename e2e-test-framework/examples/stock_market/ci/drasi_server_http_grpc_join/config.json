@@ -15,13 +15,6 @@
                       "description": "Stocks (Model/HTTP) joined with a slow-changing watchlist (Script/gRPC). Cypher query MATCH (s:Stock),(w:WatchlistItem) WHERE s.symbol = w.symbol returns only watchlisted stock prices.",
                       "test_folder": "stock_market",
                       "completion_handlers": [
-                          {
-                              "kind": "Sha256Determinism",
-                              "expected": {
-                                  "watchlist-prices": "a59bad263ae73a5517e5cf31c62a0d521f4d6e27477669ac3ee4ed4757bcb045"
-                              },
-                              "missing_baseline": "Fail"
-                          },
                           { "kind": "Log", "log_level": "info" }
                       ],
                       "queries": [],
@@ -145,9 +138,6 @@
                           },
                           {
                               "kind": "PerformanceMetrics"
-                          },
-                          {
-                              "kind": "DeterminismHash"
                           }
                       ]
                   }

@@ -55,16 +55,16 @@ test-service --gRPC source--+
   &mdash; The watchlist replay script (seed + timed edits).
 - `run_test_ci.sh` &mdash; CI runner: downloads drasi-server, patches
   configs (admin port, absolute paths), launches both processes, waits
-  for the test-run completion signal, computes per-reaction SHA-256 via
-  the `DeterminismHash` output logger, and writes a markdown summary
-  to `$GITHUB_STEP_SUMMARY`. Same shape as the
-  `building_comfort/ci/drasi_server_*` runners. The `Sha256Determinism`
-  completion handler ships with an empty `expected` map and
-  `missing_baseline: "Warn"`, so the first run just records the SHA
-  without failing; whether this join workload is stable enough to
-  lock a baseline is an open question (the multiset of emitted rows
-  varies run-to-run with the HTTP+gRPC interleaving and where the
-  `RecordCount` stop trigger truncates the tail).
+  for the test-run completion signal, and writes a markdown summary
+  (reaction status + throughput) to `$GITHUB_STEP_SUMMARY`. Same shape
+  as the `building_comfort/ci/drasi_server_*` runners. **No SHA-256
+  determinism check is performed for this variant**: the cross-source
+  join over an HTTP + gRPC pair produces a different multiset of
+  emitted rows on each run (the relative ordering of stock ticks vs
+  watchlist edits varies, and the `RecordCount` stop trigger truncates
+  the tail at different points), so no SHA baseline is stable. The
+  count-based stop trigger is the meaningful assertion; performance
+  metrics are reported in the workflow summary for visibility.
 
 ## Why the watchlist seed is in `source_change_scripts`, not `bootstrap_scripts`
 
@@ -104,11 +104,10 @@ The CI script will:
 3. Start `drasi-server` (waiting for both port `9000` and port `50051`)
    and `test-service`.
 4. Poll the `watchlist-prices` reaction until it reaches `Stopped`.
-5. Capture the per-reaction SHA-256 from the `DeterminismHash` logger
-   summary and write a markdown report to `$GITHUB_STEP_SUMMARY` (or
-   skip the report when run locally).
+5. Write a markdown report (reaction status + throughput) to
+   `$GITHUB_STEP_SUMMARY` (or skip the report when run locally).
 
-Artifacts (logs, captured JSONL, reaction state, SHA fingerprint) land in
+Artifacts (logs, captured JSONL, reaction state) land in
 `./ci_artifacts/`.
 
 ## Default ports
@@ -137,5 +136,4 @@ and add / change / delete records. Each record is one line:
   when the source starts.
 
 If you adjust the script, you'll likely need to retune `record_count` in
-`config.json` for the `watchlist-prices` reaction and refresh the
-baseline SHA.
+`config.json` for the `watchlist-prices` reaction.

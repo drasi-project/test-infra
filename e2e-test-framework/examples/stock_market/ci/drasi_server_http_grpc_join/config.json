@@ -17,8 +17,10 @@
                       "completion_handlers": [
                           {
                               "kind": "Sha256Determinism",
-                              "expected": {},
-                              "missing_baseline": "Warn"
+                              "expected": {
+                                  "watchlist-prices": "a59bad263ae73a5517e5cf31c62a0d521f4d6e27477669ac3ee4ed4757bcb045"
+                              },
+                              "missing_baseline": "Fail"
                           },
                           { "kind": "Log", "log_level": "info" }
                       ],

@@ -42,7 +42,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Script lives at examples/building_comfort/ci/drasi_server_http/ — five levels
+# Script lives at examples/building_comfort/ci/drasi_server_grpc/ — five levels
 # below the repo root.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 

@@ -41,7 +41,7 @@
 #                         Default: drasi_lib_dev_repo.building_comfort.test_run_001
 #   TEST_REACTION_IDS     Space-separated list of test_reaction_id values to
 #                         snapshot at completion.
-#                         Default: "building-comfort"
+#                         Default: "building-comfort building-comfort-floor-agg"
 #   TIMEOUT_SECS          Max seconds to wait for all reactions to Stop.
 #                         Default: 1800
 #   POLL_INTERVAL_SECS    Seconds between status polls. Default: 10

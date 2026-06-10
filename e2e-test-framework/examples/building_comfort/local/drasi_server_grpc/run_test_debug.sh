@@ -18,6 +18,7 @@ GREEN="\033[32m"
 RESET="\033[0m"
 
 echo -e "${GREEN}\nRunning the E2E Test Service with gRPC in debug mode...${RESET}"
-# Set drasi_core modules to error level to suppress INFO logs from tracing instrumentation
-# But enable debug for gRPC components
-RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error,test_run_host::sources::source_change_dispatchers::grpc_dispatcher=debug,test_run_host::reactions::reaction_handlers::grpc_reaction_handler=debug' cargo run --manifest-path "$(dirname "$0")/../../../test-service/Cargo.toml" -- --config "$(dirname "$0")/config.json"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/../_local_runner.sh"
+export RUST_LOG="${RUST_LOG:-info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error,test_run_host::sources::source_change_dispatchers::grpc_dispatcher=debug,test_run_host::reactions::reaction_handlers::grpc_reaction_handler=debug}"
+run_local_test "$SCRIPT_DIR/config.json"

@@ -18,4 +18,7 @@ GREEN="\033[32m"
 RESET="\033[0m"
 
 echo -e "${GREEN}\nRunning the E2E Test Service as a local process...${RESET}"
-RUST_LOG=debug cargo run --release --manifest-path "$(dirname "$0")/../../../test-service/Cargo.toml" -- --config "$(dirname "$0")/config.json"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/../_local_runner.sh"
+export RUST_LOG="${RUST_LOG:-debug}"
+run_local_test "$SCRIPT_DIR/config.json"

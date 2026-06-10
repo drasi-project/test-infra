@@ -39,6 +39,7 @@
                             "seed": 123456789,
                             "spacing_mode": "none",
                             "time_mode": "2025-01-03T10:03:15.4Z",
+                            "send_initial_inserts": true,
                             "building_count": [1, 0],
                             "floor_count": [3, 0],
                             "room_count": [4, 0],                   
@@ -87,7 +88,7 @@
                           "stop_triggers": [
                             {
                               "kind": "RecordCount",
-                              "record_count": 100000
+                              "record_count": 99981
                             }
                           ]
                         },
@@ -102,7 +103,7 @@
                           "stop_triggers": [
                             {
                               "kind": "RecordCount",
-                              "record_count": 100000
+                              "record_count": 49860
                             }
                           ]
                         }

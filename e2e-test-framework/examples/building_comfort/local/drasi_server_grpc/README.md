@@ -81,6 +81,25 @@ From this folder:
 
 For verbose tracing use `./run_test_debug.sh`.
 
+### Optional: per-reaction SHA-256 determinism check
+
+Set `SHA_CHECK=1` to attach a `DeterminismHash` output logger to each
+reaction and a `Sha256Determinism` completion handler (with an empty
+baseline and `missing_baseline: "Warn"`) to the test definition. The
+run then prints the per-reaction SHA-256 in the framework log without
+failing the test:
+
+```bash
+SHA_CHECK=1 ./run_test.sh
+```
+
+Requires `jq` on `PATH`. Two successive runs on the same machine should
+produce identical SHAs; the CI variant
+[`ci/drasi_server_grpc`](../../ci/drasi_server_grpc) maintains a locked
+baseline. To enforce a baseline locally, paste the SHAs into a
+`Sha256Determinism` block in `config.json` directly (see the CI variant's
+`config.json` for the exact shape).
+
 ## Inspect / control while running
 
 The test service exposes a REST API on `http://localhost:8080`. The

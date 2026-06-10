@@ -18,8 +18,10 @@ GREEN="\033[32m"
 RESET="\033[0m"
 
 echo -e "${GREEN}\nRunning the E2E Test Service with gRPC as a local process...${RESET}"
-# Set drasi_core modules to error level to suppress INFO logs from tracing instrumentation
-RUST_LOG='info, drasi_core::query::continuous_query=error,drasi_core::path_solver=error' cargo run --release --manifest-path "$(dirname "$0")/../../../test-service/Cargo.toml" -- --config "$(dirname "$0")/config.json"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/../_local_runner.sh"
+export RUST_LOG="${RUST_LOG:-info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error}"
+run_local_test "$SCRIPT_DIR/config.json"
 
 # RUST_LOG_STYLE=never \
 # RUST_LOG="off,drasi_server=info, test_run_host=info, test_data_store=info" \

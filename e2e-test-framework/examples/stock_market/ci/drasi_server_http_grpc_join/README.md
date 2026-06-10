@@ -54,13 +54,17 @@ test-service --gRPC source--+
 - `dev_repo/stock_market/sources/watchlist-db/source_change_scripts/source_change_scripts_00000.jsonl`
   &mdash; The watchlist replay script (seed + timed edits).
 - `run_test_ci.sh` &mdash; CI runner: downloads drasi-server, patches
-  configs (admin port, absolute paths), launches both processes, and
-  waits for the test-run completion signal. SHA-256 determinism
-  verification is intentionally not performed: the query joins two async
-  sources (HTTP + gRPC) flowing concurrently, so emission order &mdash;
-  and the multiset of rows captured before the `RecordCount` stop
-  trigger fires &mdash; varies run-to-run even with seeded inputs. The
-  count-based stop trigger is the assertion.
+  configs (admin port, absolute paths), launches both processes, waits
+  for the test-run completion signal, computes per-reaction SHA-256 via
+  the `DeterminismHash` output logger, and writes a markdown summary
+  to `$GITHUB_STEP_SUMMARY`. Same shape as the
+  `building_comfort/ci/drasi_server_*` runners. The `Sha256Determinism`
+  completion handler ships with an empty `expected` map and
+  `missing_baseline: "Warn"`, so the first run just records the SHA
+  without failing; whether this join workload is stable enough to
+  lock a baseline is an open question (the multiset of emitted rows
+  varies run-to-run with the HTTP+gRPC interleaving and where the
+  `RecordCount` stop trigger truncates the tail).
 
 ## Why the watchlist seed is in `source_change_scripts`, not `bootstrap_scripts`
 
@@ -100,7 +104,9 @@ The CI script will:
 3. Start `drasi-server` (waiting for both port `9000` and port `50051`)
    and `test-service`.
 4. Poll the `watchlist-prices` reaction until it reaches `Stopped`.
-5. Hash the canonical reaction output and (if a baseline is set) compare.
+5. Capture the per-reaction SHA-256 from the `DeterminismHash` logger
+   summary and write a markdown report to `$GITHUB_STEP_SUMMARY` (or
+   skip the report when run locally).
 
 Artifacts (logs, captured JSONL, reaction state, SHA fingerprint) land in
 `./ci_artifacts/`.

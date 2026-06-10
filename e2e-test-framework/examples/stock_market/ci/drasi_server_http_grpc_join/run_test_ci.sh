@@ -341,6 +341,133 @@ print_summary() {
     echo "::endgroup::"
 }
 
+# Verifies the test-run's final status via the test-service REST API. The
+# framework's Sha256Determinism completion handler flips the run status to
+# Error if any reaction's DeterminismHash logger SHA doesn't match the
+# baseline declared in the test definition; otherwise the run stays at
+# Running once all components have finished. We give the handler chain a
+# short grace period after the completion marker to settle.
+verify_test_run_status() {
+    local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}"
+    local status_file="$ARTIFACTS_DIR/final_test_run_status.json"
+    local deadline=$(( $(date +%s) + 30 ))
+    local body status
+
+    while (( $(date +%s) < deadline )); do
+        body="$(curl -sS "$url" 2>/dev/null || true)"
+        if [[ -n "$body" ]]; then
+            echo "$body" > "$status_file"
+            status="$(echo "$body" | jq -r '.status // "Unknown"')"
+            case "$status" in
+                Error:*)
+                    log "ERROR: test-run status: $status"
+                    return 1
+                    ;;
+                Stopped|Running)
+                    log "test-run status: $status"
+                    return 0
+                    ;;
+            esac
+        fi
+        sleep 1
+    done
+
+    log "WARNING: could not confirm final test-run status from $url"
+    [[ -s "$status_file" ]] && cat "$status_file"
+    return 0
+}
+
+# Best-effort copy of the determinism verdict file (written by the
+# Sha256Determinism completion handler under the test-run storage path).
+copy_determinism_verdict() {
+    local verdict
+    verdict="$(find "$DATA_CACHE" -name 'determinism_verdict.json' -type f -print -quit 2>/dev/null || true)"
+    if [[ -n "$verdict" && -f "$verdict" ]]; then
+        cp "$verdict" "$ARTIFACTS_DIR/determinism_verdict.json"
+        echo "::group::Determinism verdict"
+        jq '.' "$ARTIFACTS_DIR/determinism_verdict.json" 2>/dev/null || cat "$ARTIFACTS_DIR/determinism_verdict.json"
+        echo "::endgroup::"
+    fi
+}
+
+# Render a markdown summary into $GITHUB_STEP_SUMMARY so it shows up on the
+# workflow run page. Local runs (no GITHUB_STEP_SUMMARY env var) skip this.
+write_step_summary() {
+    if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        return 0
+    fi
+
+    local out="$GITHUB_STEP_SUMMARY"
+    local drasi_version="${DRASI_SERVER_VERSION:-latest}"
+    local server_version
+    server_version="$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n1 || echo unknown)"
+
+    {
+        echo "## E2E test summary — \`$TEST_RUN_ID\`"
+        echo
+        echo "- drasi-server tag: \`$drasi_version\`"
+        echo "- drasi-server binary: \`$server_version\`"
+        echo
+
+        echo "### Reactions"
+        echo
+        echo "| Reaction | Status | Records | Runtime | SHA-256 | Determinism |"
+        echo "| --- | --- | ---: | --- | --- | --- |"
+
+        local verdict_file="$ARTIFACTS_DIR/determinism_verdict.json"
+        local id state_file status invocations runtime sha verdict_passed verdict_cell
+        for id in $TEST_REACTION_IDS; do
+            state_file="$ARTIFACTS_DIR/final_reaction_state__${id}.json"
+            status="n/a"; invocations="n/a"; runtime="n/a"; sha="n/a"
+            if [[ -s "$state_file" ]]; then
+                status="$(jq -r '.reaction_observer.status // "n/a"' "$state_file" 2>/dev/null)"
+                invocations="$(jq -r '.reaction_observer.result_summary.reaction_invocation_count // "n/a"' "$state_file" 2>/dev/null)"
+                runtime="$(jq -r '.reaction_observer.result_summary.observer_runtime_s // "n/a"' "$state_file" 2>/dev/null)"
+                sha="$(jq -r '
+                    (.reaction_observer.logger_results[]?
+                        | select(.logger_name == "DeterminismHash")
+                        | .summary.sha256) // "n/a"' "$state_file" 2>/dev/null)"
+            fi
+
+            verdict_cell="-"
+            if [[ -s "$verdict_file" ]]; then
+                verdict_passed="$(jq -r --arg id "$id" '.results[$id].passed // empty' "$verdict_file" 2>/dev/null)"
+                case "$verdict_passed" in
+                    true)  verdict_cell="✅ pass" ;;
+                    false) verdict_cell="❌ fail" ;;
+                esac
+            fi
+
+            local sha_short="${sha:0:12}"
+            [[ "$sha" == "n/a" ]] && sha_short="n/a"
+            echo "| \`$id\` | $status | $invocations | $runtime | \`$sha_short\` | $verdict_cell |"
+        done
+        echo
+
+        echo "### Throughput"
+        echo
+        echo "| Reaction | Records | Duration (s) | Records/sec |"
+        echo "| --- | ---: | ---: | ---: |"
+        local metrics_file rid records duration rps
+        while IFS= read -r -d '' metrics_file; do
+            rid="$(jq -r '.test_run_reaction_id // "unknown"' "$metrics_file" 2>/dev/null | awk -F'.' '{print $NF}')"
+            records="$(jq -r '.record_count // "n/a"' "$metrics_file" 2>/dev/null)"
+            duration="$(jq -r '(.duration_ns // 0) / 1e9 | . * 1000 | round / 1000' "$metrics_file" 2>/dev/null)"
+            rps="$(jq -r '.records_per_second // "n/a" | if type == "number" then . * 100 | round / 100 else . end' "$metrics_file" 2>/dev/null)"
+            echo "| \`$rid\` | $records | $duration | $rps |"
+        done < <(find "$DATA_CACHE" -path '*output_log/performance_metrics/*.json' -type f -print0 2>/dev/null || true)
+        echo
+
+        if [[ -s "$verdict_file" ]]; then
+            echo "### Determinism verdict"
+            echo
+            echo '```json'
+            jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
+            echo '```'
+        fi
+    } >> "$out"
+}
+
 download_drasi_server
 patch_configs
 start_drasi_server
@@ -356,11 +483,17 @@ else
 fi
 print_summary
 
-# SHA-256 determinism verification is intentionally not performed for this
-# test: the Cypher query joins two async sources (HTTP + gRPC) flowing
-# concurrently, so the multiset of emitted reaction rows itself varies
-# run-to-run (different interleavings produce different before/after pairs,
-# and the RecordCount stop trigger truncates the tail at slightly different
-# points). The count-based stop trigger is the meaningful assertion.
+determinism_rc=0
+verify_test_run_status || determinism_rc=$?
+copy_determinism_verdict
+write_step_summary
 
-exit "$poll_rc"
+if (( poll_rc != 0 )); then
+    exit "$poll_rc"
+fi
+
+if (( determinism_rc != 0 )); then
+    exit "$determinism_rc"
+fi
+
+exit 0

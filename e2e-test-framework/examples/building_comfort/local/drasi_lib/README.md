@@ -54,6 +54,23 @@ All commands assume you are in this folder.
 
 Use `./run_test_debug.sh` for verbose tracing.
 
+#### Optional: per-reaction SHA-256 determinism check
+
+Set `SHA_CHECK=1` to attach a `DeterminismHash` output logger to each
+reaction and a `Sha256Determinism` completion handler (with an empty
+baseline and `missing_baseline: "Warn"`) to the test definition. The
+run then prints the per-reaction SHA-256 in the framework log without
+failing the test:
+
+```bash
+SHA_CHECK=1 ./run_test.sh
+```
+
+Requires `jq` on `PATH`. SHA stability across hosts is not guaranteed
+for the embedded drasi-lib variant (see the
+[`ci/drasi_lib`](../../ci/drasi_lib) README for details); two
+consecutive runs on the same machine should match.
+
 ### Option B: cargo run directly
 
 The script is just a wrapper around `cargo run` against the workspace's

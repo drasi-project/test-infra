@@ -20,8 +20,8 @@ instead of going over HTTP or gRPC.
    (`all-rooms`: `MATCH (r:Room) RETURN ...`) and pushes results back to
    the test service over the same in-process channel
    (`output_handler.kind = "DrasiLibInstanceChannel"`).
-4. The test service stops the reaction once **99,000** events have been
-   observed (`stop_triggers.RecordCount`).
+4. The test service stops each reaction once its `RecordCount` stop-trigger fires
+   (see `config.json`).
 
 ```
 test-service ── in-process channel ──> drasi-lib ── in-process channel ──> test-service

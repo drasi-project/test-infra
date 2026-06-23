@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM mcr.microsoft.com/azurelinux/base/rust:1.86 AS builder
+FROM mcr.microsoft.com/azurelinux/base/rust:1.90 AS builder
 RUN tdnf update -y && tdnf install -y protobuf-devel cmake openssl-devel clang-devel
+
+# azure-linux does not provide a 1.95 base image yet, so install the
+# required toolchain on top of the 1.90 base.
+RUN rustup toolchain install 1.95.0 && rustup default 1.95.0
 
 WORKDIR /usr/src
 COPY ./proxy ./proxy

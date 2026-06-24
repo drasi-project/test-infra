@@ -20,7 +20,7 @@ on:
 
 jobs:
   lint:
-    uses: drasi-project/.github/.github/workflows/rust-lint.yaml@rust195
+    uses: drasi-project/.github/.github/workflows/rust-lint.yaml@main
     with:
       working-directory: 'e2e-test-framework'
       install-jq: true

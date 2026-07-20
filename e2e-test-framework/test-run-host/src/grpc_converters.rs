@@ -26,8 +26,8 @@ pub mod drasi {
 }
 
 use drasi::v1::{
-    ChangeType, Element, ElementMetadata, ElementReference, Node, QueryResult, Relation,
-    SourceChange,
+    ChangeType, Element, ElementMetadata, ElementReference, Node, QueryResult, QueryResultItemType,
+    Relation, SourceChange,
 };
 
 /// Convert a test framework SourceChangeEvent to Drasi SourceChange
@@ -281,26 +281,24 @@ pub fn convert_from_drasi_query_result(result: QueryResult) -> Result<Vec<JsonVa
     for item in result.results {
         let mut json_obj = Map::new();
 
-        // Set the change type
-        json_obj.insert("type".to_string(), JsonValue::String(item.r#type.clone()));
+        // Map the operation enum to a string ("ADD" / "UPDATE" / "DELETE").
+        let type_str = match QueryResultItemType::from_i32(item.item_type) {
+            Some(QueryResultItemType::Add) => "ADD",
+            Some(QueryResultItemType::Update) => "UPDATE",
+            Some(QueryResultItemType::Delete) => "DELETE",
+            _ => "UNSPECIFIED",
+        };
+        json_obj.insert("type".to_string(), JsonValue::String(type_str.to_string()));
 
-        // Add data fields
-        if let Some(data) = item.data {
-            if let Some(obj) = proto_struct_to_json(&data)?.as_object() {
-                for (k, v) in obj {
-                    json_obj.insert(k.clone(), v.clone());
-                }
-            }
+        // Raw row state carried on either side of the change:
+        //   ADD    -> only `after`
+        //   DELETE -> only `before`
+        //   UPDATE -> both
+        if let Some(before) = item.before {
+            json_obj.insert("before".to_string(), proto_struct_to_json(&before)?);
         }
-
-        // For UPDATE, add before and after
-        if item.r#type == "UPDATE" {
-            if let Some(before) = item.before {
-                json_obj.insert("before".to_string(), proto_struct_to_json(&before)?);
-            }
-            if let Some(after) = item.after {
-                json_obj.insert("after".to_string(), proto_struct_to_json(&after)?);
-            }
+        if let Some(after) = item.after {
+            json_obj.insert("after".to_string(), proto_struct_to_json(&after)?);
         }
 
         output.push(JsonValue::Object(json_obj));

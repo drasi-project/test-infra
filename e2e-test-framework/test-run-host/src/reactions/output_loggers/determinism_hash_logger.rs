@@ -110,7 +110,9 @@ impl OutputLogger for DeterminismHashOutputLogger {
 ///
 /// The chosen value is re-serialised to compact JSON with recursively sorted
 /// keys (equivalent of `jq -cS`) so logically identical objects always hash
-/// to the same bytes regardless of in-memory field order.
+/// to the same bytes regardless of in-memory field order. Volatile keys
+/// (see [`VOLATILE_KEYS`]) are stripped first so wall-clock timestamps and
+/// per-emission sequence ids do not make the hash run-dependent.
 ///
 /// Records whose projected payload is an object containing `results: []`
 /// (the drasi-lib in-process "empty re-evaluation" heartbeat shape) are
@@ -124,8 +126,34 @@ pub(crate) fn canonical_payload_bytes(record: &HandlerRecord) -> anyhow::Result<
     if is_empty_results_heartbeat(&projected) {
         return Ok(None);
     }
-    let canonical = sort_json_keys(projected);
+    let canonical = sort_json_keys(strip_volatile_keys(projected));
     Ok(Some(serde_json::to_vec(&canonical)?))
+}
+
+/// Keys whose values are not stable across runs and therefore must not
+/// participate in the determinism hash:
+///   - `timestamp`  — the wall-clock time of the originating query emission.
+///   - `sequenceId` — the monotonic per-emission sequence id.
+///
+/// Reaction payloads that forward the raw Drasi notification verbatim carry
+/// these fields — notably the HTTP `DefaultChangeNotification` envelope. The
+/// gRPC converter already projects items down to `{type, before, after}` and
+/// never emits them, so stripping here keeps the two transports comparable
+/// and makes the HTTP hash stable run-to-run.
+const VOLATILE_KEYS: &[&str] = &["timestamp", "sequenceId"];
+
+/// Recursively remove [`VOLATILE_KEYS`] from every object in `value`.
+fn strip_volatile_keys(value: Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .filter(|(k, _)| !VOLATILE_KEYS.contains(&k.as_str()))
+                .map(|(k, v)| (k, strip_volatile_keys(v)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(strip_volatile_keys).collect()),
+        other => other,
+    }
 }
 
 /// True for the in-process drasi-lib heartbeat shape
@@ -230,6 +258,55 @@ mod tests {
             },
         );
         assert!(canonical_payload_bytes(&rec).unwrap().is_some());
+    }
+
+    #[test]
+    fn canonical_payload_strips_volatile_keys() {
+        // Mirrors the HTTP `DefaultChangeNotification` envelope the handler
+        // forwards verbatim: only `operation`/`before`/`after` are stable,
+        // while `timestamp` and `sequenceId` vary run-to-run.
+        let with_volatile = make_record(
+            5,
+            HandlerPayload::ReactionInvocation {
+                reaction_type: "http".into(),
+                query_id: "q1".into(),
+                request_method: "POST".into(),
+                request_path: "/reaction".into(),
+                request_body: json!({
+                    "operation": "ADD",
+                    "queryId": "q1",
+                    "sequenceId": 42,
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "after": { "id": 1 }
+                }),
+                headers: Default::default(),
+            },
+        );
+        let without_volatile = make_record(
+            6,
+            HandlerPayload::ReactionInvocation {
+                reaction_type: "http".into(),
+                query_id: "q1".into(),
+                request_method: "POST".into(),
+                request_path: "/reaction".into(),
+                request_body: json!({
+                    "operation": "ADD",
+                    "queryId": "q1",
+                    "sequenceId": 99,
+                    "timestamp": "2027-06-06T12:34:56+00:00",
+                    "after": { "id": 1 }
+                }),
+                headers: Default::default(),
+            },
+        );
+        let a = canonical_payload_bytes(&with_volatile).unwrap().unwrap();
+        let b = canonical_payload_bytes(&without_volatile).unwrap().unwrap();
+        // Differing timestamp / sequenceId must not change the hashed bytes.
+        assert_eq!(a, b);
+        assert_eq!(
+            std::str::from_utf8(&a).unwrap(),
+            r#"{"after":{"id":1},"operation":"ADD","queryId":"q1"}"#
+        );
     }
 
     #[tokio::test]

@@ -84,20 +84,27 @@ reactions:
       - building-comfort
     baseUrl: "http://localhost:9001"
     timeoutMs: 60000
-    headers:
-      Content-Type: "application/json"
-      X-Query-Sequence: "building-comfort"
-    routes:
-      building-comfort:
-        added:
-          method: POST
-          url: "/reaction"
-        updated:
-          method: POST
-          url: "/reaction"
-        deleted:
-          method: POST
-          url: "/reaction"
+    outputTemplates:
+      routes:
+        building-comfort:
+          added:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"
+          updated:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"
+          deleted:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"
 
   # HTTP webhook reaction posts floor-aggregate query results to the test
   # framework's HttpReactionHandler at http://localhost:9002/reaction.
@@ -108,17 +115,24 @@ reactions:
       - building-comfort-floor-agg
     baseUrl: "http://localhost:9002"
     timeoutMs: 60000
-    headers:
-      Content-Type: "application/json"
-      X-Query-Sequence: "building-comfort-floor-agg"
-    routes:
-      building-comfort-floor-agg:
-        added:
-          method: POST
-          url: "/reaction"
-        updated:
-          method: POST
-          url: "/reaction"
-        deleted:
-          method: POST
-          url: "/reaction"
+    outputTemplates:
+      routes:
+        building-comfort-floor-agg:
+          added:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort-floor-agg"
+          updated:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort-floor-agg"
+          deleted:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort-floor-agg"

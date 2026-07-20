@@ -84,20 +84,27 @@ reactions:
       - building-comfort
     baseUrl: "http://localhost:3000"
     timeoutMs: 60000
-    headers:
-      Content-Type: "application/json"
-      X-Query-Sequence: "building-comfort"
-    routes:
-      building-comfort:
-        added:
-          method: POST
-          url: "/events"
-        updated:
-          method: POST
-          url: "/events"
-        deleted:
-          method: POST
-          url: "/events"
+    outputTemplates:
+      routes:
+        building-comfort:
+          added:
+            method: POST
+            url: "/events"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"
+          updated:
+            method: POST
+            url: "/events"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"
+          deleted:
+            method: POST
+            url: "/events"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"
 
   # Floor-aggregate HTTP webhook reaction posts results to the test
   # framework's HttpReactionHandler at http://localhost:3001/events.
@@ -108,17 +115,24 @@ reactions:
       - building-comfort-floor-agg
     baseUrl: "http://localhost:3001"
     timeoutMs: 60000
-    headers:
-      Content-Type: "application/json"
-      X-Query-Sequence: "building-comfort-floor-agg"
-    routes:
-      building-comfort-floor-agg:
-        added:
-          method: POST
-          url: "/events"
-        updated:
-          method: POST
-          url: "/events"
-        deleted:
-          method: POST
-          url: "/events"
+    outputTemplates:
+      routes:
+        building-comfort-floor-agg:
+          added:
+            method: POST
+            url: "/events"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort-floor-agg"
+          updated:
+            method: POST
+            url: "/events"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort-floor-agg"
+          deleted:
+            method: POST
+            url: "/events"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort-floor-agg"

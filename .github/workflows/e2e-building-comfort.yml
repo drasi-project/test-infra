@@ -15,9 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       drasi_server_repo:
-        description: "drasi-server repo (owner/name) to build from. Default: drasi-project/drasi-server."
+        description: "drasi-server repo (owner/name) to build from. Empty defaults to drasi-project/drasi-server."
         required: false
-        default: "drasi-project/drasi-server"
+        default: ""
       drasi_server_ref:
         description: "drasi-server branch/tag/SHA to BUILD from source (http/grpc jobs). Empty = download the latest release binary."
         required: false

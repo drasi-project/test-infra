@@ -82,24 +82,13 @@ export WORK_DIR="$PWD/.local_run/work"
 | Test service gRPC reaction handler (per-room)      | 50052           |
 | Test service gRPC reaction handler (floor-agg)     | 50053           |
 
-## Running in CI against a drasi-server branch or fork
+## Running in CI
 
-The scheduled workflow ([`.github/workflows/e2e-building-comfort.yml`](../../../../../.github/workflows/e2e-building-comfort.yml))
-downloads the latest drasi-server release by default. To instead **build
-drasi-server from source** for this job, run it via *Actions → E2E -
-building_comfort → Run workflow* and set:
-
-- `drasi_server_ref` &mdash; a branch, tag, or commit SHA to build. Leaving
-  it empty keeps the default release-download behavior.
-- `drasi_server_repo` &mdash; the repo to build from (`owner/name`). Point it
-  at a fork to test a fork branch. Defaults to `drasi-project/drasi-server`.
-
-The runner (`run_test_ci.sh`) clones that repo/ref and runs
-`cargo build --release`, then uses the freshly built binary. The workflow
-step summary labels the run with the resolved source
-(`source <repo>@<ref> (<sha>)` or `release <tag> (<repo>)`) so results are
-traceable. The same behavior is available locally by exporting
-`DRASI_SERVER_REF` (and optionally `DRASI_REPO`) before running the script.
+This variant runs as the `building_comfort / drasi_server_grpc` job of the
+`E2E - building_comfort` workflow, which downloads the latest drasi-server
+release by default or builds from a branch/fork on demand. See
+[`../README.md`](../README.md) for how to trigger it and pass a
+`drasi_server_ref` / `drasi_server_repo`.
 
 ## Troubleshooting
 

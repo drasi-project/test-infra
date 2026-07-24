@@ -14,16 +14,12 @@ name: E2E - building_comfort
 on:
   workflow_dispatch:
     inputs:
-      drasi_server_version:
-        description: "drasi-server release tag (e.g. v0.1.5). Empty = latest. Ignored when drasi_server_ref is set."
-        required: false
-        default: ""
       drasi_server_repo:
-        description: "drasi-server repo (owner/name) to build from. Use a fork here. Only applies when drasi_server_ref is set."
+        description: "drasi-server repo (owner/name) to build from. Default: drasi-project/drasi-server."
         required: false
         default: "drasi-project/drasi-server"
       drasi_server_ref:
-        description: "drasi-server branch/tag/SHA to BUILD from source (http/grpc jobs). Empty = download the release binary."
+        description: "drasi-server branch/tag/SHA to BUILD from source (http/grpc jobs). Empty = download the latest release binary."
         required: false
         default: ""
       timeout_minutes:
@@ -44,10 +40,9 @@ jobs:
     timeout-minutes: 60
     env:
       WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_server_http
-      DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
       # When drasi_server_ref is set, the runner builds drasi-server from that
       # branch/tag/SHA of DRASI_REPO (a fork if drasi_server_repo points at one)
-      # instead of downloading a release.
+      # instead of downloading the latest release.
       DRASI_REPO: ${{ inputs.drasi_server_repo }}
       DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
       # Determinism baselines live inline in $WORKDIR/config.json under the
@@ -113,10 +108,9 @@ jobs:
     timeout-minutes: 60
     env:
       WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_server_grpc
-      DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
       # When drasi_server_ref is set, the runner builds drasi-server from that
       # branch/tag/SHA of DRASI_REPO (a fork if drasi_server_repo points at one)
-      # instead of downloading a release.
+      # instead of downloading the latest release.
       DRASI_REPO: ${{ inputs.drasi_server_repo }}
       DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
       # Determinism baselines live inline in $WORKDIR/config.json under the

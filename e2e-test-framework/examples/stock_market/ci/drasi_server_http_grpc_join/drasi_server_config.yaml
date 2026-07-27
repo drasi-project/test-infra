@@ -100,17 +100,24 @@ reactions:
       - watchlist-prices
     baseUrl: "http://localhost:9002"
     timeoutMs: 60000
-    headers:
-      Content-Type: "application/json"
-      X-Query-Sequence: "watchlist-prices"
-    routes:
-      watchlist-prices:
-        added:
-          method: POST
-          url: "/reaction"
-        updated:
-          method: POST
-          url: "/reaction"
-        deleted:
-          method: POST
-          url: "/reaction"
+    outputTemplates:
+      routes:
+        watchlist-prices:
+          added:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "watchlist-prices"
+          updated:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "watchlist-prices"
+          deleted:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "watchlist-prices"

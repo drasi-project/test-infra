@@ -12,12 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM mcr.microsoft.com/azurelinux/base/rust:1.90 AS builder
-RUN tdnf update -y && tdnf install -y protobuf-devel cmake openssl-devel clang-devel
+FROM rust:1.95.0 AS builder
 
-# azure-linux does not provide a 1.95 base image yet, so install the
-# required toolchain on top of the 1.90 base.
-RUN rustup toolchain install 1.95.0 && rustup default 1.95.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    cmake \
+    clang \
+    libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src
 COPY ./proxy ./proxy
@@ -32,9 +38,11 @@ WORKDIR /usr/src/proxy
 RUN cargo generate-lockfile
 RUN cargo install --locked --path .
 
-FROM mcr.microsoft.com/azurelinux/distroless/base:3.0
-COPY --from=builder /usr/lib64/libstdc++.so.6 /usr/lib64/
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 ENV RUST_BACKTRACE=1
 COPY --from=builder /usr/local/cargo/bin/proxy /usr/local/bin/proxy
-USER root
 CMD ["proxy"]

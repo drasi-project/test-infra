@@ -34,9 +34,8 @@ COPY ./test-service ./test-service
 WORKDIR /usr/src/test-service
 ENV JQ_LIB_DIR=/usr/lib64
 
-# Generate Cargo.lock and pin home dependency to version compatible with Rust 1.86
+# Generate Cargo.lock for the workspace build
 RUN cargo generate-lockfile
-RUN cargo update home --precise 0.5.9
 RUN cargo install --locked --path .
 
 FROM mcr.microsoft.com/azurelinux/distroless/base:3.0

@@ -72,7 +72,7 @@ e2e-test-framework/
 
 ## Prerequisites
 
-- Rust toolchain (1.75+)
+- Rust toolchain (1.95+)
 - Docker (for container builds)
 - Redis (for query result streaming)
 - Kind/K3D (for Kubernetes testing)

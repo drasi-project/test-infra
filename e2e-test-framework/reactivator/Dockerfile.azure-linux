@@ -28,10 +28,8 @@ RUN sed -i '/^\[lints\]$/,/^workspace = true$/d' /usr/src/reactivator/Cargo.toml
 
 WORKDIR /usr/src/reactivator
 
-# Generate Cargo.lock and pin dependencies if needed for Rust 1.86 compatibility
+# Generate Cargo.lock for the standalone crate build
 RUN cargo generate-lockfile
-# Only update home if it exists as a dependency
-RUN cargo update home --precise 0.5.9 || true
 RUN cargo install --locked --path .
 
 FROM mcr.microsoft.com/azurelinux/distroless/base:3.0

@@ -52,6 +52,11 @@
 #                         dispatcher batch_size/batch_timeout_ms and HTTP
 #                         adaptive source adaptiveMax*); standard variants are
 #                         left untouched.
+#   QUERY_TUNING          query capacity preset: low|medium|high (medium).
+#                         Sets priorityQueueCapacity / dispatchBufferCapacity /
+#                         bootstrapBufferSize on every server query component.
+#                         Perf/backpressure only; results (determinism SHAs)
+#                         must not change. 'medium' == server defaults.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -76,6 +81,7 @@ TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort building-comfort-floor-
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 BATCHING_SPEED="${BATCHING_SPEED:-medium}"
+QUERY_TUNING="${QUERY_TUNING:-medium}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -194,6 +200,25 @@ resolve_batching_preset() {
             ;;
     esac
     log "Batching speed '$BATCHING_SPEED' -> batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS"
+}
+
+# Map the QUERY_TUNING preset to server query capacity knobs applied to every
+# query component (priorityQueueCapacity / dispatchBufferCapacity /
+# bootstrapBufferSize). These are perf/backpressure only, so all presets must
+# yield identical determinism SHAs. 'medium' matches the drasi-server defaults
+# (priorityQueueCapacity 10000, dispatchBufferCapacity 1000, bootstrapBufferSize
+# 10000), so it is effectively a no-op made explicit.
+resolve_query_tuning() {
+    case "$QUERY_TUNING" in
+        low)    PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
+        medium) PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
+        high)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000; BOOTSTRAP_BUFFER_SIZE=100000 ;;
+        *)
+            log "ERROR: invalid QUERY_TUNING='$QUERY_TUNING' (expected low|medium|high)"
+            return 1
+            ;;
+    esac
+    log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE"
 }
 
 patch_configs() {
@@ -333,13 +358,23 @@ apply_server_components() {
     fi
     drasi_apply "/sources" "$src_body"
 
-    log "Applying queries from $SERVER_QUERIES_FILE"
+    log "Applying queries from $SERVER_QUERIES_FILE (query tuning '$QUERY_TUNING')"
     local q
     while IFS= read -r q; do
         [[ -z "$q" ]] && continue
         local qid; qid="$(printf '%s' "$q" | jq -r '.id')"
-        log "  -> query $qid"
-        drasi_apply "/queries" "$q"
+        # Apply the query-tuning preset (camelCase; the server DTO uses
+        # rename_all=camelCase + deny_unknown_fields, so exact casing matters).
+        local q_body
+        q_body="$(printf '%s' "$q" | jq \
+            --argjson pq "$PRIORITY_QUEUE_CAP" \
+            --argjson db "$DISPATCH_BUFFER_CAP" \
+            --argjson bb "$BOOTSTRAP_BUFFER_SIZE" '
+            .priorityQueueCapacity = $pq
+            | .dispatchBufferCapacity = $db
+            | .bootstrapBufferSize = $bb')"
+        log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
+        drasi_apply "/queries" "$q_body"
     done < <(jq -c '.[]' "$qry_file")
 
     log "Applying reactions from $SERVER_REACTIONS_FILE"
@@ -508,6 +543,7 @@ write_step_summary() {
         echo "- reactions component: \`$SERVER_REACTIONS_FILE\`"
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
         echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
+        echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         echo
 
         echo "### Reactions"
@@ -571,6 +607,7 @@ write_step_summary() {
 
 download_drasi_server
 resolve_batching_preset
+resolve_query_tuning
 patch_configs
 start_drasi_server
 apply_server_components

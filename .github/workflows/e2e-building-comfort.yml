@@ -56,6 +56,14 @@ on:
           - medium
           - high
         default: medium
+      query_tuning:
+        description: "Query capacity preset (priority/dispatch buffers, bootstrap buffer). Perf-only."
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+        default: medium
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false
@@ -227,6 +235,10 @@ jobs:
           # runs -> run_dynamic.sh defaults to medium. Only adaptive variants
           # consume it; standard variants ignore it.
           BATCHING_SPEED: ${{ inputs.batching_speed }}
+          # Query capacity preset (low|medium|high). Empty on scheduled runs ->
+          # run_dynamic.sh defaults to medium. Applied to all dynamic variants'
+          # query components; perf-only, results must not change.
+          QUERY_TUNING: ${{ inputs.query_tuning }}
         run: bash "${RUN_SCRIPT}"
 
       - name: Upload artifacts

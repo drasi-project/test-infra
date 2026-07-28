@@ -1,0 +1,4 @@
+# Local run scratch / artifacts produced by run_dynamic.sh
+.local_run/
+.ci_work/
+ci_artifacts/

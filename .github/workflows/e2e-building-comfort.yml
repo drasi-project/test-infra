@@ -1,19 +1,34 @@
 # Scheduled E2E tests for the building_comfort scenario, run against an
-# external drasi-server over multiple transports (HTTP, gRPC) and also
-# against an embedded drasi-lib instance (in-process inside the
-# test-service crate).
+# external drasi-server over multiple transports (HTTP, gRPC — each in a
+# plain and an adaptive-batching flavor) and also against an embedded
+# drasi-lib instance (in-process inside the test-service crate).
 #
 # Each test pattern lives in its own example folder and exposes a
 # `run_test_ci.sh` that orchestrates the run and writes artifacts to
-# $ARTIFACTS_DIR. This workflow just sets env vars and invokes that
-# script. To add another pattern, copy one of the jobs and point WORKDIR
-# at the new example folder.
+# $ARTIFACTS_DIR. This workflow selects one or more of those folders via a
+# matrix, sets env vars, and invokes the script. To add another pattern,
+# create a new example folder with a `run_test_ci.sh` and add its name to
+# the `variants` input description below.
+#
+# Variant selection:
+#   - Scheduled runs and the default manual dispatch exercise only the
+#     non-adaptive variants (drasi_lib, drasi_server_http,
+#     drasi_server_grpc).
+#   - Manual runs can pick any subset (including the *_adaptive variants)
+#     by passing a comma-separated `variants` list.
 
 name: E2E - building_comfort
 
 on:
   workflow_dispatch:
     inputs:
+      variants:
+        description: >-
+          Comma-separated variants to run. Options: drasi_lib,
+          drasi_server_http, drasi_server_grpc, drasi_server_http_adaptive,
+          drasi_server_grpc_adaptive. Empty = non-adaptive defaults.
+        required: false
+        default: "drasi_lib,drasi_server_http,drasi_server_grpc"
       drasi_server_version:
         description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
         required: false
@@ -30,17 +45,49 @@ permissions:
   contents: read
 
 jobs:
-  building-comfort-drasi-server-http:
-    name: building_comfort / drasi_server_http
+  # Resolve the requested variants into a JSON array consumed by the run
+  # job's matrix. Scheduled runs (no inputs) fall back to the non-adaptive
+  # defaults.
+  select-variants:
+    name: select variants
+    runs-on: ubuntu-latest
+    outputs:
+      variants: ${{ steps.compute.outputs.variants }}
+    steps:
+      - name: Compute variant matrix
+        id: compute
+        env:
+          # Passed via env (not inline ${{ }}) to avoid shell injection.
+          RAW_VARIANTS: ${{ inputs.variants }}
+        run: |
+          raw="$RAW_VARIANTS"
+          [[ -z "$raw" ]] && raw="drasi_lib,drasi_server_http,drasi_server_grpc"
+          # Split on commas, trim whitespace, drop empties -> compact JSON array.
+          json="$(printf '%s' "$raw" \
+            | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0))')"
+          echo "Selected variants: $json"
+          echo "variants=$json" >> "$GITHUB_OUTPUT"
+
+  building-comfort:
+    name: building_comfort / ${{ matrix.variant }}
+    needs: select-variants
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.select-variants.outputs.variants) }}
     env:
-      WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_server_http
+      WORKDIR: e2e-test-framework/examples/building_comfort/ci/${{ matrix.variant }}
+      # drasi_lib runs in-process and ignores this; the drasi_server_*
+      # variants download the matching release binary.
       DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
       # Determinism baselines live inline in $WORKDIR/config.json under the
       # Sha256Determinism completion handler's `expected` map. The framework
       # flips the test-run status to Error on mismatch; the runner script
-      # surfaces that via the test-service REST API.
+      # surfaces that via the test-service REST API. The *_adaptive variants
+      # reuse the same baselines as their plain counterparts because adaptive
+      # batching is a transport optimization and must not change results.
 
     steps:
       - name: Checkout
@@ -90,133 +137,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: building_comfort-drasi_server_http
-          path: ${{ runner.temp }}/artifacts
-          if-no-files-found: warn
-
-  building-comfort-drasi-server-grpc:
-    name: building_comfort / drasi_server_grpc
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_server_grpc
-      DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
-      # Determinism baselines live inline in $WORKDIR/config.json under the
-      # Sha256Determinism completion handler's `expected` map. First run
-      # uses missing_baseline=Warn so the framework just logs the actual
-      # SHAs; lock them in by copying into `expected` and flipping the
-      # policy to Fail.
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: e2e-test-framework
-
-      - name: Install runtime deps (jq, curl)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl
-
-      # test-run-host enables drasi-core's `middleware-jq` feature, which
-      # pulls in jq-sys; jq-sys links against the system libjq + libonig.
-      # Mirror lint.yml / drasi-server's Dockerfile.
-      - name: Install build deps for libjq
-        run: |
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev libjq-dev libonig-dev \
-            libprotobuf-dev protobuf-compiler cmake clang libclang-dev
-
-      - name: Set JQ_LIB_DIR
-        run: echo "JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1))" >> "$GITHUB_ENV"
-
-      - name: Compute timeout (seconds)
-        run: |
-          mins="${{ inputs.timeout_minutes }}"
-          [[ -z "$mins" ]] && mins=30
-          echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
-
-      - name: Build test-service
-        working-directory: e2e-test-framework
-        run: cargo build --release --manifest-path test-service/Cargo.toml
-
-      - name: Run scheduled test
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
-          WORK_DIR: ${{ runner.temp }}/ci_work
-        run: bash "${WORKDIR}/run_test_ci.sh"
-
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v5
-        with:
-          name: building_comfort-drasi_server_grpc
-          path: ${{ runner.temp }}/artifacts
-          if-no-files-found: warn
-
-  building-comfort-drasi-lib:
-    name: building_comfort / drasi_lib
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_lib
-      # No external drasi-server: drasi-lib runs in-process inside the
-      # test-service crate, so we skip the download/version inputs.
-      # Determinism baselines live inline in $WORKDIR/config.json under the
-      # Sha256Determinism completion handler's `expected` map. First run
-      # uses missing_baseline=Warn so the framework just logs the actual
-      # SHAs; lock them in by copying into `expected` and flipping the
-      # policy to Fail.
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: e2e-test-framework
-
-      - name: Install runtime deps (jq, curl)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl
-
-      - name: Install build deps for libjq
-        run: |
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev libjq-dev libonig-dev \
-            libprotobuf-dev protobuf-compiler cmake clang libclang-dev
-
-      - name: Set JQ_LIB_DIR
-        run: echo "JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1))" >> "$GITHUB_ENV"
-
-      - name: Compute timeout (seconds)
-        run: |
-          mins="${{ inputs.timeout_minutes }}"
-          [[ -z "$mins" ]] && mins=30
-          echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
-
-      - name: Build test-service
-        working-directory: e2e-test-framework
-        run: cargo build --release --manifest-path test-service/Cargo.toml
-
-      - name: Run scheduled test
-        env:
-          ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
-          WORK_DIR: ${{ runner.temp }}/ci_work
-        run: bash "${WORKDIR}/run_test_ci.sh"
-
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v5
-        with:
-          name: building_comfort-drasi_lib
+          name: building_comfort-${{ matrix.variant }}
           path: ${{ runner.temp }}/artifacts
           if-no-files-found: warn

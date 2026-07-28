@@ -1,23 +1,22 @@
 # Scheduled / manual E2E tests for the building_comfort scenario.
 #
-# Two families of variant run through one matrix:
+# Coverage is DYNAMIC-first: variants boot a BARE Drasi Server and apply the
+# scenario at runtime via the admin REST API from reusable component JSON
+# under examples/building_comfort/dynamic/ (driven by run_dynamic.sh). A
+# variant is a small component/config selection, not a whole folder.
 #
-#   * STATIC ci variants (drasi_lib, drasi_server_http, drasi_server_grpc and
-#     their *_adaptive flavors) — each lives in its own
-#     examples/building_comfort/ci/<variant>/ folder and exposes a
-#     `run_test_ci.sh` that boots Drasi Server from a fully-populated YAML.
+#   * dynamic_* variants -> dynamic/run_dynamic.sh (REST-applied components)
+#   * drasi_lib          -> embedded in-process engine (no external server;
+#                           runs via ci/drasi_lib/run_test_ci.sh)
 #
-#   * DYNAMIC variants (dynamic_*) — boot a BARE Drasi Server and apply the
-#     scenario at runtime via the admin REST API from reusable component JSON
-#     under examples/building_comfort/dynamic/. Selected by env vars passed to
-#     examples/building_comfort/dynamic/run_dynamic.sh. For HTTP, "standard" vs
-#     "adaptive" is a single swapped source component (adaptiveEnabled).
+# HTTP adaptive note: adaptive lives on the Drasi Server *source*
+# (adaptiveEnabled) with a standard dispatcher, which is loss-free. The old
+# framework-dispatcher /events/batch approach collapsed per-room results
+# (per-room never reached its count) and was retired.
 #
 # Variant selection:
-#   - Scheduled runs cover two sets (see the two crons below): a standard
-#     http+grpc run (07:00 UTC) and an all-adaptive run (07:30 UTC).
-#   - Manual runs tick a checkbox per variant (including *_adaptive and
-#     dynamic_*); the matrix is built from the checked ones.
+#   - Scheduled: 07:00 UTC standard set, 07:30 UTC adaptive set (see crons).
+#   - Manual: tick a checkbox per variant; the matrix is built from checked.
 
 name: E2E - building_comfort
 
@@ -26,35 +25,23 @@ on:
     inputs:
       # One checkbox per variant (GitHub renders boolean inputs as checkboxes).
       drasi_lib:
-        description: "Static: drasi_lib"
+        description: "drasi_lib (embedded, in-process)"
         type: boolean
         default: true
-      drasi_server_http:
-        description: "Static: drasi_server_http (standard)"
-        type: boolean
-        default: true
-      drasi_server_grpc:
-        description: "Static: drasi_server_grpc (standard)"
-        type: boolean
-        default: true
-      drasi_server_http_adaptive:
-        description: "Static: drasi_server_http_adaptive"
-        type: boolean
-        default: false
-      drasi_server_grpc_adaptive:
-        description: "Static: drasi_server_grpc_adaptive"
-        type: boolean
-        default: false
       dynamic_http_standard:
-        description: "Dynamic: dynamic_http_standard"
+        description: "dynamic_http_standard (HTTP, REST-applied)"
         type: boolean
-        default: false
+        default: true
       dynamic_http_adaptive:
-        description: "Dynamic: dynamic_http_adaptive"
+        description: "dynamic_http_adaptive (HTTP, server adaptiveEnabled)"
         type: boolean
         default: false
       dynamic_grpc_standard:
-        description: "Dynamic: dynamic_grpc_standard"
+        description: "dynamic_grpc_standard (gRPC, REST-applied)"
+        type: boolean
+        default: true
+      dynamic_grpc_adaptive:
+        description: "dynamic_grpc_adaptive (gRPC adaptive dispatcher)"
         type: boolean
         default: false
       drasi_server_version:
@@ -66,9 +53,9 @@ on:
         required: false
         default: "30"
   schedule:
-    # 07:00 UTC — standard run: drasi_lib + standard http + grpc.
+    # 07:00 UTC — standard set (drasi_lib + dynamic http+grpc).
     - cron: "0 7 * * *"
-    # 07:30 UTC — all-adaptive run: http + grpc adaptive variants.
+    # 07:30 UTC — adaptive set (dynamic http+grpc adaptive).
     - cron: "30 7 * * *"
 
 permissions:
@@ -90,32 +77,26 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
           # Boolean inputs arrive as "true"/"false" (empty on scheduled runs).
           V_DRASI_LIB: ${{ inputs.drasi_lib }}
-          V_HTTP: ${{ inputs.drasi_server_http }}
-          V_GRPC: ${{ inputs.drasi_server_grpc }}
-          V_HTTP_ADAPTIVE: ${{ inputs.drasi_server_http_adaptive }}
-          V_GRPC_ADAPTIVE: ${{ inputs.drasi_server_grpc_adaptive }}
           V_DYN_HTTP_STD: ${{ inputs.dynamic_http_standard }}
           V_DYN_HTTP_ADAPTIVE: ${{ inputs.dynamic_http_adaptive }}
           V_DYN_GRPC_STD: ${{ inputs.dynamic_grpc_standard }}
+          V_DYN_GRPC_ADAPTIVE: ${{ inputs.dynamic_grpc_adaptive }}
         run: |
           variants=()
-          if [[ -z "$V_DRASI_LIB$V_HTTP$V_GRPC$V_HTTP_ADAPTIVE$V_GRPC_ADAPTIVE$V_DYN_HTTP_STD$V_DYN_HTTP_ADAPTIVE$V_DYN_GRPC_STD" ]]; then
+          if [[ -z "$V_DRASI_LIB$V_DYN_HTTP_STD$V_DYN_HTTP_ADAPTIVE$V_DYN_GRPC_STD$V_DYN_GRPC_ADAPTIVE" ]]; then
             # No checkboxes present -> scheduled run; pick a set per cron.
             case "$SCHEDULE" in
               "30 7 * * *")
-                variants=(drasi_server_http_adaptive drasi_server_grpc_adaptive) ;;
+                variants=(dynamic_http_adaptive dynamic_grpc_adaptive) ;;
               *)
-                variants=(drasi_lib drasi_server_http drasi_server_grpc) ;;
+                variants=(drasi_lib dynamic_http_standard dynamic_grpc_standard) ;;
             esac
           else
-            [[ "$V_DRASI_LIB"        == "true" ]] && variants+=(drasi_lib)
-            [[ "$V_HTTP"            == "true" ]] && variants+=(drasi_server_http)
-            [[ "$V_GRPC"            == "true" ]] && variants+=(drasi_server_grpc)
-            [[ "$V_HTTP_ADAPTIVE"   == "true" ]] && variants+=(drasi_server_http_adaptive)
-            [[ "$V_GRPC_ADAPTIVE"   == "true" ]] && variants+=(drasi_server_grpc_adaptive)
-            [[ "$V_DYN_HTTP_STD"    == "true" ]] && variants+=(dynamic_http_standard)
-            [[ "$V_DYN_HTTP_ADAPTIVE" == "true" ]] && variants+=(dynamic_http_adaptive)
-            [[ "$V_DYN_GRPC_STD"    == "true" ]] && variants+=(dynamic_grpc_standard)
+            [[ "$V_DRASI_LIB"          == "true" ]] && variants+=(drasi_lib)
+            [[ "$V_DYN_HTTP_STD"       == "true" ]] && variants+=(dynamic_http_standard)
+            [[ "$V_DYN_HTTP_ADAPTIVE"  == "true" ]] && variants+=(dynamic_http_adaptive)
+            [[ "$V_DYN_GRPC_STD"       == "true" ]] && variants+=(dynamic_grpc_standard)
+            [[ "$V_DYN_GRPC_ADAPTIVE"  == "true" ]] && variants+=(dynamic_grpc_adaptive)
           fi
 
           if (( ${#variants[@]} == 0 )); then
@@ -209,6 +190,12 @@ jobs:
                   echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
                   echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
                   # TEST_CFG_SRC left unset -> driver default (config.json)
+                  ;;
+                dynamic_grpc_adaptive)
+                  echo "SERVER_SOURCE_FILE=source_grpc.json"       >> "$GITHUB_ENV"
+                  echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
+                  echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
+                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.grpc_adaptive.json" >> "$GITHUB_ENV"
                   ;;
                 *)
                   echo "Unknown dynamic variant: $VARIANT" >&2; exit 1 ;;

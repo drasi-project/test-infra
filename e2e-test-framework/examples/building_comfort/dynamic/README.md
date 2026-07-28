@@ -45,13 +45,21 @@ Selectable via `run_dynamic.sh` env vars (or the CI workflow's `variant` input):
 | Variant | Source component | Reactions | Ingress port | Test-service config |
 | --- | --- | --- | --- | --- |
 | `grpc_standard` | `source_grpc.json` | `reactions_grpc.json` | 50051 | `config.json` |
+| `grpc_adaptive` | `source_grpc.json` | `reactions_grpc.json` | 50051 | `config.grpc_adaptive.json` (adaptive dispatcher) |
 | `http_standard` | `source_http.json` (`adaptiveEnabled:false`) | `reactions_http.json` | 9000 | `config.http.json` |
 | `http_adaptive` | `source_http_adaptive.json` (`adaptiveEnabled:true`) | `reactions_http.json` | 9000 | `config.http.json` |
 
 Note `http_standard` and `http_adaptive` differ by **one swapped source
-component only** — the adaptive batching lives entirely inside the Drasi Server
-HTTP source, so queries, reactions and the test-service config are identical and
-the determinism baselines must match.
+component only** — adaptive batching lives inside the Drasi Server HTTP source,
+so queries, reactions and the test-service config are identical and the
+determinism baselines match (verified in CI: both hashes equal the standard
+baseline).
+
+For **gRPC**, the source has no `adaptiveEnabled` field, so `grpc_adaptive` puts
+adaptive on the framework *dispatcher* instead (`config.grpc_adaptive.json`);
+gRPC streaming delivers each event as a discrete message, so that is also
+loss-free. (HTTP's `/events/batch` dispatcher path is **not** loss-free — it
+collapses per-room updates — which is why HTTP adaptive is done server-side.)
 
 
 ## Apply order

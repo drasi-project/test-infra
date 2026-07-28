@@ -96,10 +96,18 @@ DRASI_SOURCE_PORT=9000 TEST_CFG_SRC="$PWD/config.http.json" ./run_dynamic.sh
 
 ## Run it in CI
 
-Workflow: `.github/workflows/e2e-building-comfort-dynamic.yml`
-(`workflow_dispatch`). Pick the **variant** input (`http_standard`,
-`http_adaptive`, `grpc_standard`) and run. The job maps the variant onto the
-`run_dynamic.sh` env knobs, builds `test-service`, and uploads artifacts.
+The dynamic variants are part of the shared workflow
+`.github/workflows/e2e-building-comfort.yml` (`workflow_dispatch`). Add any of
+these to the comma-separated **variants** input:
+
+- `dynamic_http_standard`
+- `dynamic_http_adaptive`
+- `dynamic_grpc_standard`
+
+The workflow's *Resolve variant* step maps `dynamic_*` onto the
+`run_dynamic.sh` env knobs; static `ci/*` variants continue to use their own
+`run_test_ci.sh`.
+
 
 ## Adding a new variant
 

@@ -1,21 +1,23 @@
-# Scheduled E2E tests for the building_comfort scenario, run against an
-# external drasi-server over multiple transports (HTTP, gRPC — each in a
-# plain and an adaptive-batching flavor) and also against an embedded
-# drasi-lib instance (in-process inside the test-service crate).
+# Scheduled / manual E2E tests for the building_comfort scenario.
 #
-# Each test pattern lives in its own example folder and exposes a
-# `run_test_ci.sh` that orchestrates the run and writes artifacts to
-# $ARTIFACTS_DIR. This workflow selects one or more of those folders via a
-# matrix, sets env vars, and invokes the script. To add another pattern,
-# create a new example folder with a `run_test_ci.sh` and add its name to
-# the `variants` input description below.
+# Two families of variant run through one matrix:
+#
+#   * STATIC ci variants (drasi_lib, drasi_server_http, drasi_server_grpc and
+#     their *_adaptive flavors) — each lives in its own
+#     examples/building_comfort/ci/<variant>/ folder and exposes a
+#     `run_test_ci.sh` that boots Drasi Server from a fully-populated YAML.
+#
+#   * DYNAMIC variants (dynamic_*) — boot a BARE Drasi Server and apply the
+#     scenario at runtime via the admin REST API from reusable component JSON
+#     under examples/building_comfort/dynamic/. Selected by env vars passed to
+#     examples/building_comfort/dynamic/run_dynamic.sh. For HTTP, "standard" vs
+#     "adaptive" is a single swapped source component (adaptiveEnabled).
 #
 # Variant selection:
-#   - Scheduled runs and the default manual dispatch exercise only the
-#     non-adaptive variants (drasi_lib, drasi_server_http,
-#     drasi_server_grpc).
-#   - Manual runs can pick any subset (including the *_adaptive variants)
-#     by passing a comma-separated `variants` list.
+#   - Scheduled runs cover two sets (see the two crons below): a standard
+#     http+grpc run (07:00 UTC) and an all-adaptive run (07:30 UTC).
+#   - Manual runs can pick any subset (including *_adaptive and dynamic_*)
+#     via the comma-separated `variants` input.
 
 name: E2E - building_comfort
 
@@ -24,9 +26,11 @@ on:
     inputs:
       variants:
         description: >-
-          Comma-separated variants to run. Options: drasi_lib,
-          drasi_server_http, drasi_server_grpc, drasi_server_http_adaptive,
-          drasi_server_grpc_adaptive. Empty = non-adaptive defaults.
+          Comma-separated variants. Static: drasi_lib, drasi_server_http,
+          drasi_server_grpc, drasi_server_http_adaptive,
+          drasi_server_grpc_adaptive. Dynamic: dynamic_http_standard,
+          dynamic_http_adaptive, dynamic_grpc_standard. Empty = non-adaptive
+          defaults.
         required: false
         default: "drasi_lib,drasi_server_http,drasi_server_grpc"
       drasi_server_version:
@@ -38,16 +42,18 @@ on:
         required: false
         default: "30"
   schedule:
-    # 07:00 UTC daily.
+    # 07:00 UTC — standard run: drasi_lib + standard http + grpc.
     - cron: "0 7 * * *"
+    # 07:30 UTC — all-adaptive run: http + grpc adaptive variants.
+    - cron: "30 7 * * *"
 
 permissions:
   contents: read
 
 jobs:
   # Resolve the requested variants into a JSON array consumed by the run
-  # job's matrix. Scheduled runs (no inputs) fall back to the non-adaptive
-  # defaults.
+  # job's matrix. workflow_dispatch uses the `variants` input; scheduled runs
+  # (empty input) pick a set based on which cron fired.
   select-variants:
     name: select variants
     runs-on: ubuntu-latest
@@ -59,9 +65,20 @@ jobs:
         env:
           # Passed via env (not inline ${{ }}) to avoid shell injection.
           RAW_VARIANTS: ${{ inputs.variants }}
+          SCHEDULE: ${{ github.event.schedule }}
         run: |
           raw="$RAW_VARIANTS"
-          [[ -z "$raw" ]] && raw="drasi_lib,drasi_server_http,drasi_server_grpc"
+          if [[ -z "$raw" ]]; then
+            # No explicit input (scheduled run) -> pick a set per cron.
+            case "$SCHEDULE" in
+              "30 7 * * *")
+                # All-adaptive scheduled run.
+                raw="drasi_server_http_adaptive,drasi_server_grpc_adaptive" ;;
+              *)
+                # Standard scheduled run (07:00 cron / fallback).
+                raw="drasi_lib,drasi_server_http,drasi_server_grpc" ;;
+            esac
+          fi
           # Split on commas, trim whitespace, drop empties -> compact JSON array.
           json="$(printf '%s' "$raw" \
             | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0))')"
@@ -78,16 +95,16 @@ jobs:
       matrix:
         variant: ${{ fromJSON(needs.select-variants.outputs.variants) }}
     env:
-      WORKDIR: e2e-test-framework/examples/building_comfort/ci/${{ matrix.variant }}
-      # drasi_lib runs in-process and ignores this; the drasi_server_*
-      # variants download the matching release binary.
+      VARIANT: ${{ matrix.variant }}
+      # drasi_lib runs in-process and ignores this; every other variant
+      # downloads the matching drasi-server release binary.
       DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
-      # Determinism baselines live inline in $WORKDIR/config.json under the
-      # Sha256Determinism completion handler's `expected` map. The framework
-      # flips the test-run status to Error on mismatch; the runner script
-      # surfaces that via the test-service REST API. The *_adaptive variants
+      # Determinism baselines live inline in each variant's config.json under
+      # the Sha256Determinism completion handler's `expected` map. The
+      # framework flips the test-run status to Error on mismatch; the runner
+      # scripts surface that via the test-service REST API. Adaptive variants
       # reuse the same baselines as their plain counterparts because adaptive
-      # batching is a transport optimization and must not change results.
+      # batching must not change results.
 
     steps:
       - name: Checkout
@@ -122,16 +139,54 @@ jobs:
           [[ -z "$mins" ]] && mins=30
           echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
 
+      # Resolve the variant to a runner script (+ dynamic env knobs). Static
+      # variants map to ci/<variant>/run_test_ci.sh; dynamic_* variants map to
+      # the shared dynamic/run_dynamic.sh with component/config selections.
+      - name: Resolve variant
+        run: |
+          case "$VARIANT" in
+            dynamic_*)
+              DD="e2e-test-framework/examples/building_comfort/dynamic"
+              echo "RUN_SCRIPT=$DD/run_dynamic.sh"     >> "$GITHUB_ENV"
+              echo "SERVER_QUERIES_FILE=queries.json"  >> "$GITHUB_ENV"
+              case "$VARIANT" in
+                dynamic_http_standard)
+                  echo "SERVER_SOURCE_FILE=source_http.json"       >> "$GITHUB_ENV"
+                  echo "SERVER_REACTIONS_FILE=reactions_http.json" >> "$GITHUB_ENV"
+                  echo "DRASI_SOURCE_PORT=9000"                    >> "$GITHUB_ENV"
+                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
+                  ;;
+                dynamic_http_adaptive)
+                  echo "SERVER_SOURCE_FILE=source_http_adaptive.json" >> "$GITHUB_ENV"
+                  echo "SERVER_REACTIONS_FILE=reactions_http.json"    >> "$GITHUB_ENV"
+                  echo "DRASI_SOURCE_PORT=9000"                       >> "$GITHUB_ENV"
+                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
+                  ;;
+                dynamic_grpc_standard)
+                  echo "SERVER_SOURCE_FILE=source_grpc.json"       >> "$GITHUB_ENV"
+                  echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
+                  echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
+                  # TEST_CFG_SRC left unset -> driver default (config.json)
+                  ;;
+                *)
+                  echo "Unknown dynamic variant: $VARIANT" >&2; exit 1 ;;
+              esac
+              ;;
+            *)
+              echo "RUN_SCRIPT=e2e-test-framework/examples/building_comfort/ci/$VARIANT/run_test_ci.sh" >> "$GITHUB_ENV"
+              ;;
+          esac
+
       - name: Build test-service
         working-directory: e2e-test-framework
         run: cargo build --release --manifest-path test-service/Cargo.toml
 
-      - name: Run scheduled test
+      - name: Run test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
           WORK_DIR: ${{ runner.temp }}/ci_work
-        run: bash "${WORKDIR}/run_test_ci.sh"
+        run: bash "${RUN_SCRIPT}"
 
       - name: Upload artifacts
         if: always()

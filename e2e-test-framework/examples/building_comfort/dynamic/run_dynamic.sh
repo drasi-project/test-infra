@@ -285,6 +285,36 @@ patch_configs() {
     fi
 }
 
+# Pre-create the RocksDB index base directory. The server's built-in RocksDB
+# index opens each query's DB at ./data/<safe_id>/index/<query_id> but only
+# create_if_missing's the leaf; nothing creates the parent ./data/<safe_id>/index
+# dir (the WAL provider creates the sibling ./data/<safe_id>/wal, so the
+# <safe_id> parent exists but not `index`). Without this, the first persistent
+# query's POST /queries fails with HTTP 500. No-op unless STORAGE_BACKEND=rocksdb.
+#
+# safe_id = "id-" + lowercase hex of each instance-id byte (server's
+# instance_storage_key). We compute it from the instance id in the CI yaml and
+# also scan any data dirs the server already created, for robustness.
+prepare_rocksdb_index_dirs() {
+    [[ "$SERVER_PERSIST_INDEX" == "true" ]] || return 0
+    local iid hex safe
+    iid="$(grep -E '^id:' "$DRASI_CFG_CI" | head -1 | sed -E 's/^id:[[:space:]]*//; s/^["'\'']//; s/["'\'']$//; s/[[:space:]]+$//')"
+    if [[ -n "$iid" ]]; then
+        hex="$(printf '%s' "$iid" | od -An -v -tx1 | tr -d ' \n')"
+        safe="id-$hex"
+        mkdir -p "$WORK_DIR/data/$safe/index"
+        log "Pre-created RocksDB index dir: $WORK_DIR/data/$safe/index (instance '$iid')"
+    fi
+    # Belt-and-suspenders: create an `index` sibling for every data dir the
+    # server has already materialized (e.g. the WAL dir's <safe_id> parent).
+    shopt -s nullglob
+    local d
+    for d in "$WORK_DIR"/data/*/; do
+        mkdir -p "${d}index"
+    done
+    shopt -u nullglob
+}
+
 start_drasi_server() {
     log "Starting bare drasi-server (components applied via REST)"
     # Run from WORK_DIR so the built-in RocksDB index/WAL (written to ./data
@@ -303,6 +333,7 @@ start_drasi_server() {
         tail -n 200 "$LOG_DIR/drasi-server.log" || true
         return 1
     fi
+    prepare_rocksdb_index_dirs
 }
 
 # drasi_apply <resource-path> <json-body>
@@ -319,12 +350,14 @@ drasi_apply() {
     json_body="${resp%$'\n'*}"
     if [[ "$http_code" != "2"* ]]; then
         log "ERROR: POST ${path} returned HTTP ${http_code}: ${json_body}"
+        tail -n 40 "$LOG_DIR/drasi-server.log" 2>/dev/null | sed 's/^/[drasi-server] /' || true
         return 1
     fi
     # Drasi Server sometimes returns HTTP 200 with {"success": false, ...}.
     ok="$(printf '%s' "$json_body" | jq -r 'if type=="object" then (.success // "true") else "true" end' 2>/dev/null || echo true)"
     if [[ "$ok" == "false" ]]; then
         log "ERROR: POST ${path} reported failure: ${json_body}"
+        tail -n 40 "$LOG_DIR/drasi-server.log" 2>/dev/null | sed 's/^/[drasi-server] /' || true
         return 1
     fi
     return 0

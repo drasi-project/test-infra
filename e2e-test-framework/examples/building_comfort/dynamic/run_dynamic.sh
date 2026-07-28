@@ -438,6 +438,89 @@ copy_determinism_verdict() {
     fi
 }
 
+# Render a markdown summary into $GITHUB_STEP_SUMMARY so it shows up on the
+# workflow run page. Local runs (no GITHUB_STEP_SUMMARY env var) skip this.
+write_step_summary() {
+    if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        return 0
+    fi
+
+    local out="$GITHUB_STEP_SUMMARY"
+    local drasi_version="${DRASI_SERVER_VERSION:-latest}"
+    local server_version
+    server_version="$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n1 || echo unknown)"
+
+    {
+        echo "## E2E test summary — \`${VARIANT:-dynamic}\`"
+        echo
+        echo "- test run: \`$TEST_RUN_ID\`"
+        echo "- transport: dynamic (bare drasi-server, components applied via REST)"
+        echo "- drasi-server tag: \`$drasi_version\`"
+        echo "- drasi-server binary: \`$server_version\`"
+        echo "- source component: \`$SERVER_SOURCE_FILE\` (ingress port $DRASI_SOURCE_PORT)"
+        echo "- reactions component: \`$SERVER_REACTIONS_FILE\`"
+        echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
+        echo
+
+        echo "### Reactions"
+        echo
+        echo "| Reaction | Status | Records | Runtime | SHA-256 | Determinism |"
+        echo "| --- | --- | ---: | --- | --- | --- |"
+
+        local verdict_file="$ARTIFACTS_DIR/determinism_verdict.json"
+        local id state_file status invocations runtime sha verdict_passed verdict_cell
+        for id in $TEST_REACTION_IDS; do
+            state_file="$ARTIFACTS_DIR/final_reaction_state__${id}.json"
+            status="n/a"; invocations="n/a"; runtime="n/a"; sha="n/a"
+            if [[ -s "$state_file" ]]; then
+                status="$(jq -r '.reaction_observer.status // "n/a"' "$state_file" 2>/dev/null)"
+                invocations="$(jq -r '.reaction_observer.result_summary.reaction_invocation_count // "n/a"' "$state_file" 2>/dev/null)"
+                runtime="$(jq -r '.reaction_observer.result_summary.observer_runtime_s // "n/a"' "$state_file" 2>/dev/null)"
+                sha="$(jq -r '
+                    (.reaction_observer.logger_results[]?
+                        | select(.logger_name == "DeterminismHash")
+                        | .summary.sha256) // "n/a"' "$state_file" 2>/dev/null)"
+            fi
+
+            verdict_cell="-"
+            if [[ -s "$verdict_file" ]]; then
+                verdict_passed="$(jq -r --arg id "$id" '.results[$id].passed // empty' "$verdict_file" 2>/dev/null)"
+                case "$verdict_passed" in
+                    true)  verdict_cell="✅ pass" ;;
+                    false) verdict_cell="❌ fail" ;;
+                esac
+            fi
+
+            local sha_short="${sha:0:12}"
+            [[ "$sha" == "n/a" ]] && sha_short="n/a"
+            echo "| \`$id\` | $status | $invocations | $runtime | \`$sha_short\` | $verdict_cell |"
+        done
+        echo
+
+        echo "### Throughput"
+        echo
+        echo "| Reaction | Records | Duration (s) | Records/sec |"
+        echo "| --- | ---: | ---: | ---: |"
+        local metrics_file rid records duration rps
+        while IFS= read -r -d '' metrics_file; do
+            rid="$(jq -r '.test_run_reaction_id // "unknown"' "$metrics_file" 2>/dev/null | awk -F'.' '{print $NF}')"
+            records="$(jq -r '.record_count // "n/a"' "$metrics_file" 2>/dev/null)"
+            duration="$(jq -r '(.duration_ns // 0) / 1e9 | . * 1000 | round / 1000' "$metrics_file" 2>/dev/null)"
+            rps="$(jq -r '.records_per_second // "n/a" | if type == "number" then . * 100 | round / 100 else . end' "$metrics_file" 2>/dev/null)"
+            echo "| \`$rid\` | $records | $duration | $rps |"
+        done < <(find "$DATA_CACHE" -path '*output_log/performance_metrics/*.json' -type f -print0 2>/dev/null || true)
+        echo
+
+        if [[ -s "$verdict_file" ]]; then
+            echo "### Determinism verdict"
+            echo
+            echo '```json'
+            jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
+            echo '```'
+        fi
+    } >> "$out"
+}
+
 download_drasi_server
 patch_configs
 start_drasi_server
@@ -457,6 +540,7 @@ print_summary
 determinism_rc=0
 verify_test_run_status || determinism_rc=$?
 copy_determinism_verdict
+write_step_summary
 
 if (( poll_rc != 0 )); then
     exit "$poll_rc"

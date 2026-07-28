@@ -64,6 +64,13 @@ on:
           - medium
           - high
         default: medium
+      storage_backend:
+        description: "Query index backend for dynamic variants (memory or built-in RocksDB). Results must not change."
+        type: choice
+        options:
+          - memory
+          - rocksdb
+        default: memory
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false
@@ -239,6 +246,10 @@ jobs:
           # run_dynamic.sh defaults to medium. Applied to all dynamic variants'
           # query components; perf-only, results must not change.
           QUERY_TUNING: ${{ inputs.query_tuning }}
+          # Query index backend (memory|rocksdb). Empty on scheduled runs ->
+          # run_dynamic.sh defaults to memory. rocksdb uses the server's
+          # built-in persistent index; results must not change.
+          STORAGE_BACKEND: ${{ inputs.storage_backend }}
         run: bash "${RUN_SCRIPT}"
 
       - name: Upload artifacts

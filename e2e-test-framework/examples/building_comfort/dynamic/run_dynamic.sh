@@ -57,6 +57,11 @@
 #                         bootstrapBufferSize on every server query component.
 #                         Perf/backpressure only; results (determinism SHAs)
 #                         must not change. 'medium' == server defaults.
+#   STORAGE_BACKEND       query index backend: memory|rocksdb (memory).
+#                         rocksdb enables the server's BUILT-IN persistent
+#                         RocksDB index (instance-level persistIndex: true) for
+#                         all queries. Results (determinism SHAs) must not
+#                         change; it just persists the same index to ./data.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -82,6 +87,7 @@ TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 BATCHING_SPEED="${BATCHING_SPEED:-medium}"
 QUERY_TUNING="${QUERY_TUNING:-medium}"
+STORAGE_BACKEND="${STORAGE_BACKEND:-memory}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -221,10 +227,34 @@ resolve_query_tuning() {
     log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE"
 }
 
+# Validate STORAGE_BACKEND and derive SERVER_PERSIST_INDEX. 'rocksdb' flips the
+# instance to the server's built-in persistent RocksDB index (loss-free); the
+# index + WAL land under ./data relative to the server cwd (WORK_DIR here).
+resolve_storage_backend() {
+    case "$STORAGE_BACKEND" in
+        memory)  SERVER_PERSIST_INDEX=false ;;
+        rocksdb) SERVER_PERSIST_INDEX=true  ;;
+        *)
+            log "ERROR: invalid STORAGE_BACKEND='$STORAGE_BACKEND' (expected memory|rocksdb)"
+            return 1
+            ;;
+    esac
+    log "Storage backend '$STORAGE_BACKEND' -> persistIndex=$SERVER_PERSIST_INDEX"
+}
+
 patch_configs() {
     log "Patching empty server config admin port -> $DRASI_ADMIN_PORT"
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
     grep -E '^(host|port):' "$DRASI_CFG_CI"
+
+    # Storage backend: rocksdb -> instance-level persistIndex: true (built-in
+    # persistent index). The base yaml has no persistIndex key (defaults to
+    # in-memory), so we append the top-level key only when requested. The
+    # server rejects snake_case, so the key must be camelCase 'persistIndex'.
+    if [[ "$SERVER_PERSIST_INDEX" == "true" ]]; then
+        printf 'persistIndex: true\n' >> "$DRASI_CFG_CI"
+        log "Enabled persistent RocksDB index (persistIndex: true); data dir: $WORK_DIR/data"
+    fi
 
     log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \
@@ -257,8 +287,12 @@ patch_configs() {
 
 start_drasi_server() {
     log "Starting bare drasi-server (components applied via REST)"
+    # Run from WORK_DIR so the built-in RocksDB index/WAL (written to ./data
+    # relative to cwd) lands in scratch, not the source tree. Plugins resolve
+    # relative to the binary dir, not cwd, so this is safe for plugin loading.
+    rm -rf "$WORK_DIR/data"
     (
-        cd "$SCRIPT_DIR"
+        cd "$WORK_DIR"
         "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
             > "$LOG_DIR/drasi-server.log" 2>&1
     ) &
@@ -544,6 +578,7 @@ write_step_summary() {
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
         echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
         echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
+        echo "- storage backend: \`$STORAGE_BACKEND\` (persistIndex=$SERVER_PERSIST_INDEX)"
         echo
 
         echo "### Reactions"
@@ -608,6 +643,7 @@ write_step_summary() {
 download_drasi_server
 resolve_batching_preset
 resolve_query_tuning
+resolve_storage_backend
 patch_configs
 start_drasi_server
 apply_server_components

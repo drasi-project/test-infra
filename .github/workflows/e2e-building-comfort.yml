@@ -48,6 +48,14 @@ on:
         description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
         required: false
         default: ""
+      batching_speed:
+        description: "Adaptive batching speed preset (affects adaptive variants only)."
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+        default: medium
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false
@@ -215,6 +223,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
           WORK_DIR: ${{ runner.temp }}/ci_work
+          # Adaptive batching preset (low|medium|high). Empty on scheduled
+          # runs -> run_dynamic.sh defaults to medium. Only adaptive variants
+          # consume it; standard variants ignore it.
+          BATCHING_SPEED: ${{ inputs.batching_speed }}
         run: bash "${RUN_SCRIPT}"
 
       - name: Upload artifacts

@@ -47,6 +47,11 @@
 #   TEST_REACTION_IDS     reactions to snapshot ("building-comfort building-comfort-floor-agg")
 #   TIMEOUT_SECS          completion timeout (1800)
 #   POLL_INTERVAL_SECS    status poll interval (10)
+#   BATCHING_SPEED        adaptive batching preset: low|medium|high (medium).
+#                         Only affects adaptive components (gRPC adaptive
+#                         dispatcher batch_size/batch_timeout_ms and HTTP
+#                         adaptive source adaptiveMax*); standard variants are
+#                         left untouched.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -70,6 +75,7 @@ TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.building_comfort.test_run_001}
 TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort building-comfort-floor-agg}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
+BATCHING_SPEED="${BATCHING_SPEED:-medium}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -173,6 +179,23 @@ download_drasi_server() {
     cd - >/dev/null
 }
 
+# Map the BATCHING_SPEED preset to concrete batch-size / wait knobs shared by
+# the gRPC adaptive dispatcher (batch_size / batch_timeout_ms) and the HTTP
+# adaptive source (adaptiveMaxBatchSize / adaptiveMaxWaitMs). 'medium' matches
+# the values checked into the component/config files.
+resolve_batching_preset() {
+    case "$BATCHING_SPEED" in
+        low)    BATCH_SIZE=100;  BATCH_WAIT_MS=10  ;;
+        medium) BATCH_SIZE=1000; BATCH_WAIT_MS=50  ;;
+        high)   BATCH_SIZE=5000; BATCH_WAIT_MS=200 ;;
+        *)
+            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected low|medium|high)"
+            return 1
+            ;;
+    esac
+    log "Batching speed '$BATCHING_SPEED' -> batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS"
+}
+
 patch_configs() {
     log "Patching empty server config admin port -> $DRASI_ADMIN_PORT"
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
@@ -190,6 +213,20 @@ patch_configs() {
     if [[ "$seed_count" -eq 0 ]]; then
         log "ERROR: No model_data_generator.seed configured in $TEST_CFG_CI"
         return 1
+    fi
+
+    # Apply the batching-speed preset to any *adaptive* gRPC dispatcher. Only
+    # dispatchers with adaptive_enabled==true are touched, so standard gRPC
+    # variants keep their config verbatim.
+    local patched
+    patched="$(jq --argjson bs "$BATCH_SIZE" --argjson wt "$BATCH_WAIT_MS" '
+        (.data_store.test_repos[]?.local_tests[]?.sources[]?.source_change_dispatchers[]?
+          | select(.adaptive_enabled == true))
+          |= (.batch_size = $bs | .batch_timeout_ms = $wt)
+    ' "$TEST_CFG_CI")"
+    printf '%s\n' "$patched" > "$TEST_CFG_CI"
+    if jq -e '[.data_store.test_repos[]?.local_tests[]?.sources[]?.source_change_dispatchers[]? | select(.adaptive_enabled == true)] | length > 0' "$TEST_CFG_CI" >/dev/null 2>&1; then
+        log "Applied batching preset '$BATCHING_SPEED' to adaptive gRPC dispatcher (batch_size=$BATCH_SIZE, batch_timeout_ms=$BATCH_WAIT_MS)"
     fi
 }
 
@@ -284,7 +321,17 @@ apply_server_components() {
     # Order matters: source before queries that subscribe to it, queries
     # before reactions that consume them.
     log "Applying source from $SERVER_SOURCE_FILE"
-    drasi_apply "/sources" "$(cat "$src_file")"
+    # Apply the batching-speed preset to an *adaptive* HTTP source only
+    # (adaptiveEnabled==true). Non-adaptive sources pass through unchanged.
+    local src_body
+    src_body="$(jq --argjson bs "$BATCH_SIZE" --argjson wt "$BATCH_WAIT_MS" '
+        if .adaptiveEnabled == true then
+            .adaptiveMaxBatchSize = $bs | .adaptiveMaxWaitMs = $wt
+        else . end' "$src_file")"
+    if printf '%s' "$src_body" | jq -e '.adaptiveEnabled == true' >/dev/null 2>&1; then
+        log "Applied batching preset '$BATCHING_SPEED' to adaptive HTTP source (adaptiveMaxBatchSize=$BATCH_SIZE, adaptiveMaxWaitMs=$BATCH_WAIT_MS)"
+    fi
+    drasi_apply "/sources" "$src_body"
 
     log "Applying queries from $SERVER_QUERIES_FILE"
     local q
@@ -460,6 +507,7 @@ write_step_summary() {
         echo "- source component: \`$SERVER_SOURCE_FILE\` (ingress port $DRASI_SOURCE_PORT)"
         echo "- reactions component: \`$SERVER_REACTIONS_FILE\`"
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
+        echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
         echo
 
         echo "### Reactions"
@@ -522,6 +570,7 @@ write_step_summary() {
 }
 
 download_drasi_server
+resolve_batching_preset
 patch_configs
 start_drasi_server
 apply_server_components

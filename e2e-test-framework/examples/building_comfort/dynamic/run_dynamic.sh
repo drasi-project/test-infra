@@ -57,16 +57,20 @@
 #                         bootstrapBufferSize on every server query component.
 #                         Perf/backpressure only; results (determinism SHAs)
 #                         must not change. 'medium' == server defaults.
-#   STORAGE_BACKEND       query index backend: memory|rocksdb (memory).
-#                         rocksdb enables the server's BUILT-IN persistent
-#                         RocksDB index (instance-level persistIndex: true) for
-#                         all queries. Results (determinism SHAs) must not
-#                         change; it just persists the same index to ./data.
-#                         Persistent queries require replay-capable sources, so
-#                         rocksdb also turns on source WAL durability (see
-#                         WAL_MAX_EVENTS).
-#   WAL_MAX_EVENTS        WAL retention cap when rocksdb forces durability on
-#                         (500000). Must exceed the scenario's total events so
+#   SERVER_PROFILE        server instance-config profile: standard|persist_index|
+#                         state_store (standard). Selects the committed base yaml
+#                         under base/ (drasi_server.<profile>.yaml). These carry
+#                         instance-level settings that are NOT REST-creatable:
+#                           standard      -> in-memory index, no state store
+#                           persist_index -> built-in RocksDB index (persistIndex:
+#                                            true); driver also enables source WAL
+#                                            durability since persistent queries
+#                                            require replay-capable sources.
+#                           state_store   -> redb plugin state store.
+#                         Sources/queries/reactions are always applied dynamically
+#                         via REST. Results (determinism SHAs) must not change.
+#   WAL_MAX_EVENTS        WAL retention cap when persist_index forces durability
+#                         on (500000). Must exceed the scenario's total events so
 #                         the default RejectIncoming policy never drops any.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
@@ -93,8 +97,8 @@ TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 BATCHING_SPEED="${BATCHING_SPEED:-medium}"
 QUERY_TUNING="${QUERY_TUNING:-medium}"
-STORAGE_BACKEND="${STORAGE_BACKEND:-memory}"
-# WAL retention cap used when STORAGE_BACKEND=rocksdb forces source durability
+SERVER_PROFILE="${SERVER_PROFILE:-standard}"
+# WAL retention cap used when the persist_index profile forces source durability
 # on. Must exceed the total events this scenario emits so the default
 # RejectIncoming capacity policy never drops events.
 WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
@@ -237,34 +241,39 @@ resolve_query_tuning() {
     log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE"
 }
 
-# Validate STORAGE_BACKEND and derive SERVER_PERSIST_INDEX. 'rocksdb' flips the
-# instance to the server's built-in persistent RocksDB index (loss-free); the
-# index + WAL land under ./data relative to the server cwd (WORK_DIR here).
-resolve_storage_backend() {
-    case "$STORAGE_BACKEND" in
-        memory)  SERVER_PERSIST_INDEX=false ;;
-        rocksdb) SERVER_PERSIST_INDEX=true  ;;
+# Select the committed base server yaml for SERVER_PROFILE and derive whether it
+# enables persistent indexing. The yaml is the source of truth for instance-level
+# config (persistIndex, stateStore); the driver only needs to know if persistIndex
+# is on so it can also enable source WAL durability (persistent queries reject
+# non-replay sources) and pre-create the RocksDB index dir.
+resolve_server_profile() {
+    local base
+    case "$SERVER_PROFILE" in
+        standard)      base="drasi_server.empty.yaml" ;;
+        persist_index) base="drasi_server.persist_index.yaml" ;;
+        state_store)   base="drasi_server.state_store.yaml" ;;
         *)
-            log "ERROR: invalid STORAGE_BACKEND='$STORAGE_BACKEND' (expected memory|rocksdb)"
+            log "ERROR: invalid SERVER_PROFILE='$SERVER_PROFILE' (expected standard|persist_index|state_store)"
             return 1
             ;;
     esac
-    log "Storage backend '$STORAGE_BACKEND' -> persistIndex=$SERVER_PERSIST_INDEX"
+    DRASI_CFG_SRC="$SCRIPT_DIR/base/$base"
+    if [[ ! -f "$DRASI_CFG_SRC" ]]; then
+        log "ERROR: base server config not found: $DRASI_CFG_SRC"
+        return 1
+    fi
+    if grep -qE '^persistIndex:[[:space:]]*true([[:space:]]|$)' "$DRASI_CFG_SRC"; then
+        SERVER_PERSIST_INDEX=true
+    else
+        SERVER_PERSIST_INDEX=false
+    fi
+    log "Server profile '$SERVER_PROFILE' -> base=$base, persistIndex=$SERVER_PERSIST_INDEX"
 }
 
 patch_configs() {
     log "Patching empty server config admin port -> $DRASI_ADMIN_PORT"
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
     grep -E '^(host|port):' "$DRASI_CFG_CI"
-
-    # Storage backend: rocksdb -> instance-level persistIndex: true (built-in
-    # persistent index). The base yaml has no persistIndex key (defaults to
-    # in-memory), so we append the top-level key only when requested. The
-    # server rejects snake_case, so the key must be camelCase 'persistIndex'.
-    if [[ "$SERVER_PERSIST_INDEX" == "true" ]]; then
-        printf 'persistIndex: true\n' >> "$DRASI_CFG_CI"
-        log "Enabled persistent RocksDB index (persistIndex: true); data dir: $WORK_DIR/data"
-    fi
 
     log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \
@@ -300,7 +309,8 @@ patch_configs() {
 # create_if_missing's the leaf; nothing creates the parent ./data/<safe_id>/index
 # dir (the WAL provider creates the sibling ./data/<safe_id>/wal, so the
 # <safe_id> parent exists but not `index`). Without this, the first persistent
-# query's POST /queries fails with HTTP 500. No-op unless STORAGE_BACKEND=rocksdb.
+# query's POST /queries fails with HTTP 500. No-op unless the persist_index
+# profile is active (SERVER_PERSIST_INDEX=true).
 #
 # safe_id = "id-" + lowercase hex of each instance-id byte (server's
 # instance_storage_key). We compute it from the instance id in the CI yaml and
@@ -331,6 +341,10 @@ start_drasi_server() {
     # relative to cwd) lands in scratch, not the source tree. Plugins resolve
     # relative to the binary dir, not cwd, so this is safe for plugin loading.
     rm -rf "$WORK_DIR/data"
+    # ./data must exist before the server starts: the redb state store writes
+    # ./data/state.redb and the RocksDB index writes ./data/<id>/index, and
+    # neither create_dir_all's the base dir.
+    mkdir -p "$WORK_DIR/data"
     (
         cd "$WORK_DIR"
         "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
@@ -437,13 +451,13 @@ apply_server_components() {
     # A persistent (RocksDB) query rejects "volatile" sources — those whose
     # supports_replay() is false. The http/gRPC sources become replay-capable
     # only when WAL durability is enabled (drasi-core PR #465 / issue #368:
-    # "Transient Source WAL Integration"). So when STORAGE_BACKEND=rocksdb we
-    # must turn durability on, else POST /queries fails with a compatibility
-    # error. DurabilityConfig fields are snake_case (no rename_all); the source
-    # DTO passes unknown fields straight to the plugin. max_events must exceed
-    # the total events this scenario emits (~100k) so the default
-    # RejectIncoming capacity policy never drops events (which would break
-    # determinism / the stop trigger). WAL is write-ahead, so results are
+    # "Transient Source WAL Integration"). So when the persist_index profile is
+    # active we must turn durability on, else POST /queries fails with a
+    # compatibility error. DurabilityConfig fields are snake_case (no
+    # rename_all); the source DTO passes unknown fields straight to the plugin.
+    # max_events must exceed the total events this scenario emits (~100k) so the
+    # default RejectIncoming capacity policy never drops events (which would
+    # break determinism / the stop trigger). WAL is write-ahead, so results are
     # unchanged — determinism SHAs must still match the memory baselines.
     if [[ "$SERVER_PERSIST_INDEX" == "true" ]]; then
         src_body="$(printf '%s' "$src_body" | jq --argjson me "$WAL_MAX_EVENTS" \
@@ -638,7 +652,7 @@ write_step_summary() {
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
         echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
         echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
-        echo "- storage backend: \`$STORAGE_BACKEND\` (persistIndex=$SERVER_PERSIST_INDEX$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo ", source WAL durability on, max_events=$WAL_MAX_EVENTS"))"
+        echo "- server profile: \`$SERVER_PROFILE\` (persistIndex=$SERVER_PERSIST_INDEX$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo ", source WAL durability on, max_events=$WAL_MAX_EVENTS"))"
         echo
 
         echo "### Reactions"
@@ -703,7 +717,7 @@ write_step_summary() {
 download_drasi_server
 resolve_batching_preset
 resolve_query_tuning
-resolve_storage_backend
+resolve_server_profile
 patch_configs
 start_drasi_server
 apply_server_components

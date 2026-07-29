@@ -1,4 +1,4 @@
-# Building Comfort — Dynamic component-config driver (prototype)
+# Building Comfort — Dynamic component-config driver
 
 This is a **dynamic** alternative to the static `ci/drasi_server_*` folders.
 Instead of a fully-populated `drasi_server_config.yaml` per variant, it boots a
@@ -25,17 +25,21 @@ different `*_FILE` selection), applied via REST.
 
 ```
 dynamic/
-  base/drasi_server.empty.yaml     # instance + plugins only, no components
+  base/
+    drasi_server.empty.yaml         # standard profile: in-memory index, no state store
+    drasi_server.persist_index.yaml # persist_index profile: built-in RocksDB (persistIndex: true)
+    drasi_server.state_store.yaml   # state_store profile: redb plugin state store
   components/server/
-    source_grpc.json               # gRPC source        (POST /api/v1/sources)
-    source_http.json               # HTTP source, adaptiveEnabled: false
-    source_http_adaptive.json      # HTTP source, adaptiveEnabled: true (+ tuned)
-    queries.json                   # array; constant across variants
-    reactions_grpc.json            # array; gRPC reactions
-    reactions_http.json            # array; HTTP webhook reactions
-  config.json                      # test-service config (gRPC dispatcher/handlers)
-  config.http.json                 # test-service config (HTTP dispatcher/handlers)
-  run_dynamic.sh                   # the driver
+    source_grpc.json                # gRPC source        (POST /api/v1/sources)
+    source_http.json                # HTTP source, adaptiveEnabled: false
+    source_http_adaptive.json       # HTTP source, adaptiveEnabled: true (+ tuned)
+    queries.json                    # array; constant across variants
+    reactions_grpc.json             # array; gRPC reactions (batchSize/flush tunable)
+    reactions_http.json             # array; HTTP webhook reactions
+  config.json                       # test-service config (gRPC dispatcher/handlers)
+  config.http.json                  # test-service config (HTTP dispatcher/handlers)
+  config.grpc_adaptive.json         # test-service config (gRPC adaptive dispatcher)
+  run_dynamic.sh                    # the driver
 ```
 
 ## Variants
@@ -60,6 +64,47 @@ adaptive on the framework *dispatcher* instead (`config.grpc_adaptive.json`);
 gRPC streaming delivers each event as a discrete message, so that is also
 loss-free. (HTTP's `/events/batch` dispatcher path is **not** loss-free — it
 collapses per-room updates — which is why HTTP adaptive is done server-side.)
+
+## Configuration knobs (issue #71 coverage)
+
+Beyond the transport variant, the driver applies several **orthogonal** config
+axes, each exposed as a `run_dynamic.sh` env var **and** a workflow
+`workflow_dispatch` input. All are **loss-free**: determinism SHAs must stay
+equal to the baselines regardless of the setting — they change
+performance/persistence, not results. A mismatch or hang is therefore a real
+signal, not a config nuisance.
+
+| Axis | Env var | Workflow input | Values (default) | Configures | Applies to |
+| --- | --- | --- | --- | --- | --- |
+| Source adaptive batching | `BATCHING_SPEED` | `batching_speed` | low / medium / high (**medium**) | adaptive source `adaptiveMax*` / gRPC adaptive dispatcher `batch_size`+`batch_timeout_ms` | adaptive variants only |
+| Query capacity | `QUERY_TUNING` | `query_tuning` | low / medium / high (**medium**) | `priorityQueueCapacity`, `dispatchBufferCapacity`, `bootstrapBufferSize` on every query | all dynamic |
+| Server profile | `SERVER_PROFILE` | `server_profile` | standard / persist_index / state_store (**standard**) | selects the `base/` yaml (RocksDB index or redb state store) | all dynamic |
+| Reaction batching | `REACTION_BATCHING` | `reaction_batching` | low / medium / high (**low**) | gRPC reaction `batchSize` + `batchFlushTimeoutMs` | gRPC reactions only |
+
+`medium` (batching/query) and `low` (reaction) equal the committed defaults, so
+those settings are explicit no-ops; only the other values change behavior.
+
+### Preset values
+
+| Preset | `batching_speed` (batch_size / wait_ms) | `query_tuning` (priorityQueue / dispatchBuffer / bootstrapBuffer) | `reaction_batching` (batchSize / flush_ms) |
+| --- | --- | --- | --- |
+| low | 100 / 10 | 1000 / 100 / 1000 | 1 / 100 (no batching) |
+| medium | 1000 / 50 | 10000 / 1000 / 10000 | 100 / 100 |
+| high | 5000 / 200 | 100000 / 10000 / 100000 | 1000 / 50 |
+
+### Server profiles
+
+| Profile | Base yaml | Effect |
+| --- | --- | --- |
+| `standard` | `drasi_server.empty.yaml` | In-memory index, no state store (baseline). |
+| `persist_index` | `drasi_server.persist_index.yaml` | Instance-level `persistIndex: true` → built-in RocksDB index. A persistent query rejects non-replay sources, so the driver also enables **source WAL durability** (`durability.enabled`, `WAL_MAX_EVENTS` default 500000). Loss-free but slower (see limitations). |
+| `state_store` | `drasi_server.state_store.yaml` | Instance-level `stateStore: { kind: redb, path: ./data/state.redb }` for plugin state persistence. |
+
+RocksDB index/WAL and the redb state store are written under `./data` relative
+to the server's working directory; the driver runs the server from `WORK_DIR`
+and pre-creates `./data` (and the RocksDB index dir) so nothing lands in the
+source tree.
+
 
 
 ## Apply order
@@ -102,19 +147,42 @@ SERVER_SOURCE_FILE=source_http_adaptive.json SERVER_REACTIONS_FILE=reactions_htt
 DRASI_SOURCE_PORT=9000 TEST_CFG_SRC="$PWD/config.http.json" ./run_dynamic.sh
 ```
 
+### Applying config axes locally
+
+The config presets are independent env vars, combinable with any variant:
+
+```bash
+# gRPC standard with high query buffers, RocksDB index, and batched reactions
+QUERY_TUNING=high SERVER_PROFILE=persist_index REACTION_BATCHING=high \
+SERVER_SOURCE_FILE=source_grpc.json SERVER_REACTIONS_FILE=reactions_grpc.json \
+DRASI_SOURCE_PORT=50051 ./run_dynamic.sh
+```
+
 ## Run it in CI
 
-The dynamic variants are part of the shared workflow
-`.github/workflows/e2e-building-comfort.yml` (`workflow_dispatch`). Add any of
-these to the comma-separated **variants** input:
+The dynamic variants live in the shared workflow
+`.github/workflows/e2e-building-comfort.yml` (`workflow_dispatch` + scheduled).
+
+**Variant selection** is one checkbox per variant (GitHub renders boolean inputs
+as checkboxes); tick any of:
 
 - `dynamic_http_standard`
 - `dynamic_http_adaptive`
 - `dynamic_grpc_standard`
+- `dynamic_grpc_adaptive`
+
+(plus `drasi_lib`, which uses the embedded engine via `ci/drasi_lib/run_test_ci.sh`.)
+
+**Config axes** are separate dropdown inputs applied to whichever dynamic
+variants run: `batching_speed`, `query_tuning`, `server_profile`,
+`reaction_batching` (see the matrix above). On **scheduled** runs the inputs are
+absent, so the driver falls back to each axis's default.
 
 The workflow's *Resolve variant* step maps `dynamic_*` onto the
-`run_dynamic.sh` env knobs; static `ci/*` variants continue to use their own
-`run_test_ci.sh`.
+`run_dynamic.sh` `*_FILE` / port / `TEST_CFG_SRC` env knobs; static `ci/*`
+variants continue to use their own `run_test_ci.sh`. The config-axis env vars
+(`BATCHING_SPEED`, `QUERY_TUNING`, `SERVER_PROFILE`, `REACTION_BATCHING`) are
+passed straight through on the *Run test* step.
 
 
 ## Adding a new variant
@@ -126,6 +194,27 @@ The workflow's *Resolve variant* step maps `dynamic_*` onto the
    an option to the workflow's `variant` input.
 
 Queries stay constant (`queries.json`) across transports.
+
+## Known limitations & invariants
+
+- **Loss-free invariant.** Every config axis (`batching_speed`, `query_tuning`,
+  `reaction_batching`) and every `server_profile` must yield determinism SHAs
+  equal to the standard/memory baselines — they change performance or
+  persistence, not results. A SHA mismatch or a hang (stop trigger never firing)
+  is a real bug signal.
+- **`persist_index` is much slower.** The RocksDB index plus the *mandatory*
+  source WAL durability (a persistent query rejects non-replay sources) is ~10x
+  slower here, dominated by the WAL doing one fsync'd redb transaction per event.
+  This is a performance limitation, not a correctness issue — see
+  [issue-drafts/wal-per-event-fsync-throughput.md](../../../../issue-drafts/wal-per-event-fsync-throughput.md).
+- **HTTP reaction batching is not wired.** Only gRPC reaction batching is
+  supported: the test framework's HTTP reaction handler can't parse the Drasi
+  Server's `{ "batch": [...] }` envelope, so a batched HTTP reaction would drop
+  results and hang — see
+  [issue-drafts/http-reaction-batch-envelope-mismatch.md](../../../../issue-drafts/http-reaction-batch-envelope-mismatch.md).
+- **drasi-lib config is out of scope** for this phase (Drasi Server only). The
+  embedded drasi-lib instance runs with near-default config; its runtime /
+  metrics / auth knobs are not currently configurable through the framework.
 
 
 ## Plugin availability (important)

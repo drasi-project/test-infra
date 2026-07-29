@@ -72,6 +72,14 @@
 #   WAL_MAX_EVENTS        WAL retention cap when persist_index forces durability
 #                         on (500000). Must exceed the scenario's total events so
 #                         the default RejectIncoming policy never drops any.
+#   REACTION_BATCHING     gRPC reaction batching preset: low|medium|high (low).
+#                         Sets batchSize / batchFlushTimeoutMs on gRPC reaction
+#                         components. Loss-free: the test handler counts each
+#                         result item separately (unpacks batches), so the record
+#                         count and determinism SHAs are unchanged. 'low' == the
+#                         committed default (batchSize 1 = no batching). Only
+#                         reactions that already carry batchSize (gRPC) are
+#                         touched; HTTP reactions are left as-is.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -102,6 +110,7 @@ SERVER_PROFILE="${SERVER_PROFILE:-standard}"
 # on. Must exceed the total events this scenario emits so the default
 # RejectIncoming capacity policy never drops events.
 WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
+REACTION_BATCHING="${REACTION_BATCHING:-low}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -239,6 +248,23 @@ resolve_query_tuning() {
             ;;
     esac
     log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE"
+}
+
+# Map the REACTION_BATCHING preset to gRPC reaction batchSize / batchFlushTimeoutMs.
+# Loss-free (the test handler unpacks batches and counts each item), so all
+# presets must yield identical determinism SHAs. 'low' matches the committed
+# component default (batchSize 1 = no batching), so it is a no-op made explicit.
+resolve_reaction_batching() {
+    case "$REACTION_BATCHING" in
+        low)    REACTION_BATCH_SIZE=1;    REACTION_FLUSH_MS=100 ;;
+        medium) REACTION_BATCH_SIZE=100;  REACTION_FLUSH_MS=100 ;;
+        high)   REACTION_BATCH_SIZE=1000; REACTION_FLUSH_MS=50  ;;
+        *)
+            log "ERROR: invalid REACTION_BATCHING='$REACTION_BATCHING' (expected low|medium|high)"
+            return 1
+            ;;
+    esac
+    log "Reaction batching '$REACTION_BATCHING' -> batchSize=$REACTION_BATCH_SIZE, batchFlushTimeoutMs=$REACTION_FLUSH_MS"
 }
 
 # Select the committed base server yaml for SERVER_PROFILE and derive whether it
@@ -485,13 +511,23 @@ apply_server_components() {
         drasi_apply "/queries" "$q_body"
     done < <(jq -c '.[]' "$qry_file")
 
-    log "Applying reactions from $SERVER_REACTIONS_FILE"
+    log "Applying reactions from $SERVER_REACTIONS_FILE (reaction batching '$REACTION_BATCHING')"
     local r
     while IFS= read -r r; do
         [[ -z "$r" ]] && continue
         local rid; rid="$(printf '%s' "$r" | jq -r '.id')"
-        log "  -> reaction $rid"
-        drasi_apply "/reactions" "$r"
+        # Apply the reaction-batching preset only to reactions that already
+        # carry a batchSize field (gRPC). HTTP reactions have deny_unknown_fields
+        # and no batchSize, so they are passed through untouched.
+        local r_body
+        r_body="$(printf '%s' "$r" | jq --argjson bs "$REACTION_BATCH_SIZE" --argjson ft "$REACTION_FLUSH_MS" \
+            'if has("batchSize") then .batchSize = $bs | .batchFlushTimeoutMs = $ft else . end')"
+        if printf '%s' "$r_body" | jq -e 'has("batchSize")' >/dev/null 2>&1; then
+            log "  -> reaction $rid (batchSize=$REACTION_BATCH_SIZE, batchFlushTimeoutMs=$REACTION_FLUSH_MS)"
+        else
+            log "  -> reaction $rid"
+        fi
+        drasi_apply "/reactions" "$r_body"
     done < <(jq -c '.[]' "$rxn_file")
 
     log "Component snapshot:"
@@ -652,6 +688,7 @@ write_step_summary() {
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
         echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
         echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
+        echo "- reaction batching: \`$REACTION_BATCHING\` (batchSize=$REACTION_BATCH_SIZE, batchFlushTimeoutMs=$REACTION_FLUSH_MS)"
         echo "- server profile: \`$SERVER_PROFILE\` (persistIndex=$SERVER_PERSIST_INDEX$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo ", source WAL durability on, max_events=$WAL_MAX_EVENTS"))"
         echo
 
@@ -717,6 +754,7 @@ write_step_summary() {
 download_drasi_server
 resolve_batching_preset
 resolve_query_tuning
+resolve_reaction_batching
 resolve_server_profile
 patch_configs
 start_drasi_server

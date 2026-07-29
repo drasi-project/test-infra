@@ -72,6 +72,14 @@ on:
           - persist_index
           - state_store
         default: standard
+      reaction_batching:
+        description: "gRPC reaction batching preset (batchSize/flush). Loss-free; results must not change."
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+        default: low
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false
@@ -251,6 +259,10 @@ jobs:
           # Empty on scheduled runs -> run_dynamic.sh defaults to standard.
           # Selects the committed base yaml; results must not change.
           SERVER_PROFILE: ${{ inputs.server_profile }}
+          # gRPC reaction batching preset (low|medium|high). Empty on scheduled
+          # runs -> run_dynamic.sh defaults to low (= no batching). Loss-free:
+          # the test handler counts each result item, so results must not change.
+          REACTION_BATCHING: ${{ inputs.reaction_batching }}
         run: bash "${RUN_SCRIPT}"
 
       - name: Upload artifacts

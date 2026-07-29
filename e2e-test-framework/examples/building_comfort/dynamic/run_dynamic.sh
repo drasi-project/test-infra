@@ -62,6 +62,12 @@
 #                         RocksDB index (instance-level persistIndex: true) for
 #                         all queries. Results (determinism SHAs) must not
 #                         change; it just persists the same index to ./data.
+#                         Persistent queries require replay-capable sources, so
+#                         rocksdb also turns on source WAL durability (see
+#                         WAL_MAX_EVENTS).
+#   WAL_MAX_EVENTS        WAL retention cap when rocksdb forces durability on
+#                         (500000). Must exceed the scenario's total events so
+#                         the default RejectIncoming policy never drops any.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -88,6 +94,10 @@ POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 BATCHING_SPEED="${BATCHING_SPEED:-medium}"
 QUERY_TUNING="${QUERY_TUNING:-medium}"
 STORAGE_BACKEND="${STORAGE_BACKEND:-memory}"
+# WAL retention cap used when STORAGE_BACKEND=rocksdb forces source durability
+# on. Must exceed the total events this scenario emits so the default
+# RejectIncoming capacity policy never drops events.
+WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -423,6 +433,23 @@ apply_server_components() {
     if printf '%s' "$src_body" | jq -e '.adaptiveEnabled == true' >/dev/null 2>&1; then
         log "Applied batching preset '$BATCHING_SPEED' to adaptive HTTP source (adaptiveMaxBatchSize=$BATCH_SIZE, adaptiveMaxWaitMs=$BATCH_WAIT_MS)"
     fi
+
+    # A persistent (RocksDB) query rejects "volatile" sources — those whose
+    # supports_replay() is false. The http/gRPC sources become replay-capable
+    # only when WAL durability is enabled (drasi-core PR #465 / issue #368:
+    # "Transient Source WAL Integration"). So when STORAGE_BACKEND=rocksdb we
+    # must turn durability on, else POST /queries fails with a compatibility
+    # error. DurabilityConfig fields are snake_case (no rename_all); the source
+    # DTO passes unknown fields straight to the plugin. max_events must exceed
+    # the total events this scenario emits (~100k) so the default
+    # RejectIncoming capacity policy never drops events (which would break
+    # determinism / the stop trigger). WAL is write-ahead, so results are
+    # unchanged — determinism SHAs must still match the memory baselines.
+    if [[ "$SERVER_PERSIST_INDEX" == "true" ]]; then
+        src_body="$(printf '%s' "$src_body" | jq --argjson me "$WAL_MAX_EVENTS" \
+            '.durability = {enabled: true, max_events: $me}')"
+        log "Enabled source WAL durability for persistent index (max_events=$WAL_MAX_EVENTS)"
+    fi
     drasi_apply "/sources" "$src_body"
 
     log "Applying queries from $SERVER_QUERIES_FILE (query tuning '$QUERY_TUNING')"
@@ -611,7 +638,7 @@ write_step_summary() {
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
         echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
         echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
-        echo "- storage backend: \`$STORAGE_BACKEND\` (persistIndex=$SERVER_PERSIST_INDEX)"
+        echo "- storage backend: \`$STORAGE_BACKEND\` (persistIndex=$SERVER_PERSIST_INDEX$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo ", source WAL durability on, max_events=$WAL_MAX_EVENTS"))"
         echo
 
         echo "### Reactions"

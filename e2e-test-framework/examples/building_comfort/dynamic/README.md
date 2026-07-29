@@ -78,11 +78,14 @@ signal, not a config nuisance.
 | --- | --- | --- | --- | --- | --- |
 | Source adaptive batching | `BATCHING_SPEED` | `batching_speed` | low / medium / high (**medium**) | adaptive source `adaptiveMax*` / gRPC adaptive dispatcher `batch_size`+`batch_timeout_ms` | adaptive variants only |
 | Query capacity | `QUERY_TUNING` | `query_tuning` | low / medium / high (**medium**) | `priorityQueueCapacity`, `dispatchBufferCapacity`, `bootstrapBufferSize` on every query | all dynamic |
-| Server profile | `SERVER_PROFILE` | `server_profile` | standard / persist_index / state_store (**standard**) | selects the `base/` yaml (RocksDB index or redb state store) | all dynamic |
+| Persistent index | `PERSIST_INDEX` | `persist_index` | true / false (**false**) | instance-level `persistIndex: true` (built-in RocksDB) + source WAL durability | all dynamic |
+| State store | `STATE_STORE` | `state_store` | true / false (**false**) | instance-level redb `stateStore` | all dynamic |
 | Reaction batching | `REACTION_BATCHING` | `reaction_batching` | low / medium / high (**low**) | gRPC reaction `batchSize` + `batchFlushTimeoutMs` | gRPC reactions only |
 
-`medium` (batching/query) and `low` (reaction) equal the committed defaults, so
-those settings are explicit no-ops; only the other values change behavior.
+`medium` (batching/query), `low` (reaction) and `false` (index/state store)
+equal the committed defaults, so those settings are explicit no-ops; only the
+other values change behavior. `persist_index` and `state_store` are
+**independent** — any of the four on/off combinations is valid.
 
 ### Preset values
 
@@ -92,13 +95,17 @@ those settings are explicit no-ops; only the other values change behavior.
 | medium | 1000 / 50 | 10000 / 1000 / 10000 | 100 / 100 |
 | high | 5000 / 200 | 100000 / 10000 / 100000 | 1000 / 50 |
 
-### Server profiles
+### Server instance profiles (`persist_index` × `state_store`)
 
-| Profile | Base yaml | Effect |
-| --- | --- | --- |
-| `standard` | `drasi_server.empty.yaml` | In-memory index, no state store (baseline). |
-| `persist_index` | `drasi_server.persist_index.yaml` | Instance-level `persistIndex: true` → built-in RocksDB index. A persistent query rejects non-replay sources, so the driver also enables **source WAL durability** (`durability.enabled`, `WAL_MAX_EVENTS` default 500000). Loss-free but slower (see limitations). |
-| `state_store` | `drasi_server.state_store.yaml` | Instance-level `stateStore: { kind: redb, path: ./data/state.redb }` for plugin state persistence. |
+These two toggles are independent; each on/off combination selects a committed
+base yaml under `base/`:
+
+| `persist_index` | `state_store` | Base yaml | Effect |
+| --- | --- | --- | --- |
+| false | false | `drasi_server.empty.yaml` | In-memory index, no state store (baseline). |
+| true | false | `drasi_server.persist_index.yaml` | `persistIndex: true` → built-in RocksDB index. A persistent query rejects non-replay sources, so the driver also enables **source WAL durability** (`durability.enabled`, `WAL_MAX_EVENTS` default 500000). Loss-free but slower (see limitations). |
+| false | true | `drasi_server.state_store.yaml` | `stateStore: { kind: redb, path: ./data/state.redb }` for plugin state persistence. |
+| true | true | `drasi_server.persist_index_state_store.yaml` | Both of the above. |
 
 RocksDB index/WAL and the redb state store are written under `./data` relative
 to the server's working directory; the driver runs the server from `WORK_DIR`
@@ -153,7 +160,7 @@ The config presets are independent env vars, combinable with any variant:
 
 ```bash
 # gRPC standard with high query buffers, RocksDB index, and batched reactions
-QUERY_TUNING=high SERVER_PROFILE=persist_index REACTION_BATCHING=high \
+QUERY_TUNING=high PERSIST_INDEX=true REACTION_BATCHING=high \
 SERVER_SOURCE_FILE=source_grpc.json SERVER_REACTIONS_FILE=reactions_grpc.json \
 DRASI_SOURCE_PORT=50051 ./run_dynamic.sh
 ```
@@ -166,23 +173,23 @@ The dynamic variants live in the shared workflow
 **Variant selection** is one checkbox per variant (GitHub renders boolean inputs
 as checkboxes); tick any of:
 
-- `dynamic_http_standard`
-- `dynamic_http_adaptive`
-- `dynamic_grpc_standard`
-- `dynamic_grpc_adaptive`
+- `http_standard`
+- `http_adaptive`
+- `grpc_standard`
+- `grpc_adaptive`
 
 (plus `drasi_lib`, which uses the embedded engine via `ci/drasi_lib/run_test_ci.sh`.)
 
-**Config axes** are separate dropdown inputs applied to whichever dynamic
-variants run: `batching_speed`, `query_tuning`, `server_profile`,
-`reaction_batching` (see the matrix above). On **scheduled** runs the inputs are
-absent, so the driver falls back to each axis's default.
+**Config axes** are separate dropdown/checkbox inputs applied to whichever
+dynamic variants run: `batching_speed`, `query_tuning`, `persist_index`,
+`state_store`, `reaction_batching` (see the matrix above). On **scheduled** runs
+the inputs are absent, so the driver falls back to each axis's default.
 
-The workflow's *Resolve variant* step maps `dynamic_*` onto the
-`run_dynamic.sh` `*_FILE` / port / `TEST_CFG_SRC` env knobs; static `ci/*`
-variants continue to use their own `run_test_ci.sh`. The config-axis env vars
-(`BATCHING_SPEED`, `QUERY_TUNING`, `SERVER_PROFILE`, `REACTION_BATCHING`) are
-passed straight through on the *Run test* step.
+The workflow's *Resolve variant* step maps every non-`drasi_lib` variant onto the
+`run_dynamic.sh` `*_FILE` / port / `TEST_CFG_SRC` env knobs; `drasi_lib` uses its
+own `ci/drasi_lib/run_test_ci.sh`. The config-axis env vars (`BATCHING_SPEED`,
+`QUERY_TUNING`, `PERSIST_INDEX`, `STATE_STORE`, `REACTION_BATCHING`) are passed
+straight through on the *Run test* step.
 
 
 ## Adding a new variant
@@ -198,7 +205,8 @@ Queries stay constant (`queries.json`) across transports.
 ## Known limitations & invariants
 
 - **Loss-free invariant.** Every config axis (`batching_speed`, `query_tuning`,
-  `reaction_batching`) and every `server_profile` must yield determinism SHAs
+  `reaction_batching`) and both instance toggles (`persist_index`,
+  `state_store`) must yield determinism SHAs
   equal to the standard/memory baselines — they change performance or
   persistence, not results. A SHA mismatch or a hang (stop trigger never firing)
   is a real bug signal.

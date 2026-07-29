@@ -5,9 +5,9 @@
 # under examples/building_comfort/dynamic/ (driven by run_dynamic.sh). A
 # variant is a small component/config selection, not a whole folder.
 #
-#   * dynamic_* variants -> dynamic/run_dynamic.sh (REST-applied components)
-#   * drasi_lib          -> embedded in-process engine (no external server;
-#                           runs via ci/drasi_lib/run_test_ci.sh)
+#   * http_* / grpc_* variants -> dynamic/run_dynamic.sh (REST-applied components)
+#   * drasi_lib                 -> embedded in-process engine (no external server;
+#                                  runs via ci/drasi_lib/run_test_ci.sh)
 #
 # HTTP adaptive note: adaptive lives on the Drasi Server *source*
 # (adaptiveEnabled) with a standard dispatcher, which is loss-free. The old
@@ -28,20 +28,20 @@ on:
         description: "drasi_lib (embedded, in-process)"
         type: boolean
         default: true
-      dynamic_http_standard:
-        description: "dynamic_http_standard (HTTP, REST-applied)"
+      http_standard:
+        description: "http_standard (HTTP, REST-applied)"
         type: boolean
         default: true
-      dynamic_http_adaptive:
-        description: "dynamic_http_adaptive (HTTP, server adaptiveEnabled)"
+      http_adaptive:
+        description: "http_adaptive (HTTP, server adaptiveEnabled)"
         type: boolean
         default: false
-      dynamic_grpc_standard:
-        description: "dynamic_grpc_standard (gRPC, REST-applied)"
+      grpc_standard:
+        description: "grpc_standard (gRPC, REST-applied)"
         type: boolean
         default: true
-      dynamic_grpc_adaptive:
-        description: "dynamic_grpc_adaptive (gRPC adaptive dispatcher)"
+      grpc_adaptive:
+        description: "grpc_adaptive (gRPC adaptive dispatcher)"
         type: boolean
         default: false
       drasi_server_version:
@@ -57,23 +57,23 @@ on:
           - high
         default: medium
       query_tuning:
-        description: "Query capacity preset (priority/dispatch buffers, bootstrap buffer). Perf-only."
+        description: "Query capacity preset (priority/dispatch buffers, bootstrap buffer)."
         type: choice
         options:
           - low
           - medium
           - high
         default: medium
-      server_profile:
-        description: "Server instance-config profile (base yaml): standard, persist_index (RocksDB), or state_store (redb). Results must not change."
-        type: choice
-        options:
-          - standard
-          - persist_index
-          - state_store
-        default: standard
+      persist_index:
+        description: "Use the built-in RocksDB persistent index (persistIndex). Independent of state_store."
+        type: boolean
+        default: false
+      state_store:
+        description: "Use the redb plugin state store (stateStore). Independent of persist_index."
+        type: boolean
+        default: false
       reaction_batching:
-        description: "gRPC reaction batching preset (batchSize/flush). Loss-free; results must not change."
+        description: "gRPC reaction batching preset (batchSize/flush)."
         type: choice
         options:
           - low
@@ -109,26 +109,26 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
           # Boolean inputs arrive as "true"/"false" (empty on scheduled runs).
           V_DRASI_LIB: ${{ inputs.drasi_lib }}
-          V_DYN_HTTP_STD: ${{ inputs.dynamic_http_standard }}
-          V_DYN_HTTP_ADAPTIVE: ${{ inputs.dynamic_http_adaptive }}
-          V_DYN_GRPC_STD: ${{ inputs.dynamic_grpc_standard }}
-          V_DYN_GRPC_ADAPTIVE: ${{ inputs.dynamic_grpc_adaptive }}
+          V_HTTP_STD: ${{ inputs.http_standard }}
+          V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
+          V_GRPC_STD: ${{ inputs.grpc_standard }}
+          V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
         run: |
           variants=()
-          if [[ -z "$V_DRASI_LIB$V_DYN_HTTP_STD$V_DYN_HTTP_ADAPTIVE$V_DYN_GRPC_STD$V_DYN_GRPC_ADAPTIVE" ]]; then
+          if [[ -z "$V_DRASI_LIB$V_HTTP_STD$V_HTTP_ADAPTIVE$V_GRPC_STD$V_GRPC_ADAPTIVE" ]]; then
             # No checkboxes present -> scheduled run; pick a set per cron.
             case "$SCHEDULE" in
               "30 7 * * *")
-                variants=(dynamic_http_adaptive dynamic_grpc_adaptive) ;;
+                variants=(http_adaptive grpc_adaptive) ;;
               *)
-                variants=(drasi_lib dynamic_http_standard dynamic_grpc_standard) ;;
+                variants=(drasi_lib http_standard grpc_standard) ;;
             esac
           else
-            [[ "$V_DRASI_LIB"          == "true" ]] && variants+=(drasi_lib)
-            [[ "$V_DYN_HTTP_STD"       == "true" ]] && variants+=(dynamic_http_standard)
-            [[ "$V_DYN_HTTP_ADAPTIVE"  == "true" ]] && variants+=(dynamic_http_adaptive)
-            [[ "$V_DYN_GRPC_STD"       == "true" ]] && variants+=(dynamic_grpc_standard)
-            [[ "$V_DYN_GRPC_ADAPTIVE"  == "true" ]] && variants+=(dynamic_grpc_adaptive)
+            [[ "$V_DRASI_LIB"     == "true" ]] && variants+=(drasi_lib)
+            [[ "$V_HTTP_STD"      == "true" ]] && variants+=(http_standard)
+            [[ "$V_HTTP_ADAPTIVE" == "true" ]] && variants+=(http_adaptive)
+            [[ "$V_GRPC_STD"      == "true" ]] && variants+=(grpc_standard)
+            [[ "$V_GRPC_ADAPTIVE" == "true" ]] && variants+=(grpc_adaptive)
           fi
 
           if (( ${#variants[@]} == 0 )); then
@@ -194,47 +194,48 @@ jobs:
           [[ -z "$mins" ]] && mins=30
           echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
 
-      # Resolve the variant to a runner script (+ dynamic env knobs). Static
-      # variants map to ci/<variant>/run_test_ci.sh; dynamic_* variants map to
-      # the shared dynamic/run_dynamic.sh with component/config selections.
+      # Resolve the variant to a runner script (+ dynamic env knobs). drasi_lib
+      # maps to ci/drasi_lib/run_test_ci.sh (embedded engine); every other
+      # variant is dynamic and maps to the shared dynamic/run_dynamic.sh with
+      # component/config selections.
       - name: Resolve variant
         run: |
           case "$VARIANT" in
-            dynamic_*)
+            drasi_lib)
+              echo "RUN_SCRIPT=e2e-test-framework/examples/building_comfort/ci/$VARIANT/run_test_ci.sh" >> "$GITHUB_ENV"
+              ;;
+            *)
               DD="e2e-test-framework/examples/building_comfort/dynamic"
               echo "RUN_SCRIPT=$DD/run_dynamic.sh"     >> "$GITHUB_ENV"
               echo "SERVER_QUERIES_FILE=queries.json"  >> "$GITHUB_ENV"
               case "$VARIANT" in
-                dynamic_http_standard)
+                http_standard)
                   echo "SERVER_SOURCE_FILE=source_http.json"       >> "$GITHUB_ENV"
                   echo "SERVER_REACTIONS_FILE=reactions_http.json" >> "$GITHUB_ENV"
                   echo "DRASI_SOURCE_PORT=9000"                    >> "$GITHUB_ENV"
                   echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
                   ;;
-                dynamic_http_adaptive)
+                http_adaptive)
                   echo "SERVER_SOURCE_FILE=source_http_adaptive.json" >> "$GITHUB_ENV"
                   echo "SERVER_REACTIONS_FILE=reactions_http.json"    >> "$GITHUB_ENV"
                   echo "DRASI_SOURCE_PORT=9000"                       >> "$GITHUB_ENV"
                   echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
                   ;;
-                dynamic_grpc_standard)
+                grpc_standard)
                   echo "SERVER_SOURCE_FILE=source_grpc.json"       >> "$GITHUB_ENV"
                   echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
                   echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
                   # TEST_CFG_SRC left unset -> driver default (config.json)
                   ;;
-                dynamic_grpc_adaptive)
+                grpc_adaptive)
                   echo "SERVER_SOURCE_FILE=source_grpc.json"       >> "$GITHUB_ENV"
                   echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
                   echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
                   echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.grpc_adaptive.json" >> "$GITHUB_ENV"
                   ;;
                 *)
-                  echo "Unknown dynamic variant: $VARIANT" >&2; exit 1 ;;
+                  echo "Unknown variant: $VARIANT" >&2; exit 1 ;;
               esac
-              ;;
-            *)
-              echo "RUN_SCRIPT=e2e-test-framework/examples/building_comfort/ci/$VARIANT/run_test_ci.sh" >> "$GITHUB_ENV"
               ;;
           esac
 
@@ -255,10 +256,11 @@ jobs:
           # run_dynamic.sh defaults to medium. Applied to all dynamic variants'
           # query components; perf-only, results must not change.
           QUERY_TUNING: ${{ inputs.query_tuning }}
-          # Server instance-config profile (standard|persist_index|state_store).
-          # Empty on scheduled runs -> run_dynamic.sh defaults to standard.
-          # Selects the committed base yaml; results must not change.
-          SERVER_PROFILE: ${{ inputs.server_profile }}
+          # Server instance-config toggles (independent). Empty on scheduled
+          # runs -> run_dynamic.sh defaults both to false (standard). Each
+          # combination selects a committed base yaml.
+          PERSIST_INDEX: ${{ inputs.persist_index }}
+          STATE_STORE: ${{ inputs.state_store }}
           # gRPC reaction batching preset (low|medium|high). Empty on scheduled
           # runs -> run_dynamic.sh defaults to low (= no batching). Loss-free:
           # the test handler counts each result item, so results must not change.

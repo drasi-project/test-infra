@@ -69,13 +69,14 @@
 #                         on (500000). Must exceed the scenario's total events so
 #                         the default RejectIncoming policy never drops any.
 #   REACTION_BATCHING     gRPC reaction batching preset: low|medium|high (low).
-#                         Sets batchSize / batchFlushTimeoutMs on gRPC reaction
-#                         components. Loss-free: the test handler counts each
-#                         result item separately (unpacks batches), so the record
-#                         count and determinism SHAs are unchanged. 'low' == the
-#                         committed default (batchSize 1 = no batching). Only
-#                         reactions that already carry batchSize (gRPC) are
-#                         touched; HTTP reactions are left as-is.
+#                         gRPC: sets batchSize / batchFlushTimeoutMs. HTTP: sets
+#                         the adaptive batcher + batchEndpoint "/batch". Loss-free:
+#                         the test handler counts each result item separately
+#                         (gRPC unpacks the repeated field; HTTP unpacks the
+#                         {batch:[...]} envelope), so the record count and
+#                         determinism SHAs are unchanged. 'low' == the committed
+#                         default (batchSize 1 = no batching); HTTP stays in
+#                         per-result mode at 'low'.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -515,17 +516,27 @@ apply_server_components() {
     local r
     while IFS= read -r r; do
         [[ -z "$r" ]] && continue
-        local rid; rid="$(printf '%s' "$r" | jq -r '.id')"
-        # Apply the reaction-batching preset only to reactions that already
-        # carry a batchSize field (gRPC). HTTP reactions have deny_unknown_fields
-        # and no batchSize, so they are passed through untouched.
-        local r_body
-        r_body="$(printf '%s' "$r" | jq --argjson bs "$REACTION_BATCH_SIZE" --argjson ft "$REACTION_FLUSH_MS" \
-            'if has("batchSize") then .batchSize = $bs | .batchFlushTimeoutMs = $ft else . end')"
-        if printf '%s' "$r_body" | jq -e 'has("batchSize")' >/dev/null 2>&1; then
-            log "  -> reaction $rid (batchSize=$REACTION_BATCH_SIZE, batchFlushTimeoutMs=$REACTION_FLUSH_MS)"
+        local rid kind; rid="$(printf '%s' "$r" | jq -r '.id')"; kind="$(printf '%s' "$r" | jq -r '.kind')"
+        # Apply the reaction-batching preset per transport:
+        #   gRPC -> batchSize / batchFlushTimeoutMs (batched into one ProcessResults call).
+        #   HTTP -> adaptive batcher + batchEndpoint "/batch" (one POST per batch).
+        # Both are loss-free: the test handler counts each result item (the gRPC
+        # handler unpacks the repeated field; the HTTP handler unpacks the
+        # {batch:[...]} envelope). 'low' (batchSize 1) = no batching, so HTTP is
+        # left in per-result mode too. The test HTTP reaction handler listens on
+        # a /batch route on each reaction's port.
+        local r_body="$r"
+        if [[ "$kind" == "grpc" ]]; then
+            r_body="$(printf '%s' "$r" | jq --argjson bs "$REACTION_BATCH_SIZE" --argjson ft "$REACTION_FLUSH_MS" \
+                'if has("batchSize") then .batchSize = $bs | .batchFlushTimeoutMs = $ft else . end')"
+            log "  -> reaction $rid [grpc] (batchSize=$REACTION_BATCH_SIZE, batchFlushTimeoutMs=$REACTION_FLUSH_MS)"
+        elif [[ "$kind" == "http" && "$REACTION_BATCH_SIZE" -gt 1 ]]; then
+            r_body="$(printf '%s' "$r" | jq --argjson mx "$REACTION_BATCH_SIZE" --argjson to "$REACTION_FLUSH_MS" \
+                '.adaptive = {adaptiveMinBatchSize: 1, adaptiveMaxBatchSize: $mx, adaptiveWindowSize: 5, adaptiveBatchTimeoutMs: $to}
+                 | .batchEndpoint = "/batch"')"
+            log "  -> reaction $rid [http] adaptive (adaptiveMaxBatchSize=$REACTION_BATCH_SIZE, adaptiveBatchTimeoutMs=$REACTION_FLUSH_MS)"
         else
-            log "  -> reaction $rid"
+            log "  -> reaction $rid [$kind]"
         fi
         drasi_apply "/reactions" "$r_body"
     done < <(jq -c '.[]' "$rxn_file")

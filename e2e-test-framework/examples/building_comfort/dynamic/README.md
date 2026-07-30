@@ -81,7 +81,7 @@ signal, not a config nuisance.
 | Query capacity | `QUERY_TUNING` | `query_tuning` | low / medium / high (**medium**) | `priorityQueueCapacity`, `dispatchBufferCapacity`, `bootstrapBufferSize` on every query | all dynamic |
 | Persistent index | `PERSIST_INDEX` | `persist_index` | true / false (**false**) | instance-level `persistIndex: true` (built-in RocksDB) + source WAL durability | all dynamic |
 | State store | `STATE_STORE` | `state_store` | true / false (**false**) | instance-level redb `stateStore` | all dynamic |
-| Reaction batching | `REACTION_BATCHING` | `reaction_batching` | low / medium / high (**low**) | gRPC reaction `batchSize` + `batchFlushTimeoutMs` | gRPC reactions only |
+| Reaction batching | `REACTION_BATCHING` | `reaction_batching` | low / medium / high (**low**) | gRPC: `batchSize` + `batchFlushTimeoutMs`; HTTP: adaptive batcher + `batchEndpoint` | gRPC + HTTP reactions |
 
 `medium` (batching/query), `low` (reaction) and `false` (index/state store)
 equal the committed defaults, so those settings are explicit no-ops; only the
@@ -216,11 +216,12 @@ Queries stay constant (`queries.json`) across transports.
   slower here, dominated by the WAL doing one fsync'd redb transaction per event.
   This is a performance limitation, not a correctness issue — see
   [issue-drafts/wal-per-event-fsync-throughput.md](../../../../issue-drafts/wal-per-event-fsync-throughput.md).
-- **HTTP reaction batching is not wired.** Only gRPC reaction batching is
-  supported: the test framework's HTTP reaction handler can't parse the Drasi
-  Server's `{ "batch": [...] }` envelope, so a batched HTTP reaction would drop
-  results and hang — see
-  [issue-drafts/http-reaction-batch-envelope-mismatch.md](../../../../issue-drafts/http-reaction-batch-envelope-mismatch.md).
+- **HTTP reaction batching is loss-free.** Both gRPC and HTTP reaction batching
+  are supported. The test framework's HTTP reaction handler unpacks the Drasi
+  Server's `{ "batch": [...] }` envelope and counts each item as a separate
+  invocation (mirroring gRPC), so the record count and determinism SHAs are
+  unchanged vs per-result delivery. At `reaction_batching: low` HTTP stays in
+  per-result mode.
 - **drasi-lib config is out of scope** for this phase (Drasi Server only). The
   embedded drasi-lib instance runs with near-default config; its runtime /
   metrics / auth knobs are not currently configurable through the framework.

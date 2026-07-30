@@ -81,20 +81,19 @@ signal, not a config nuisance.
 | Query capacity | `QUERY_TUNING` | `query_tuning` | low / medium / high (**medium**) | `priorityQueueCapacity`, `dispatchBufferCapacity`, `bootstrapBufferSize` on every query | all dynamic |
 | Persistent index | `PERSIST_INDEX` | `persist_index` | true / false (**false**) | instance-level `persistIndex: true` (built-in RocksDB) + source WAL durability | all dynamic |
 | State store | `STATE_STORE` | `state_store` | true / false (**false**) | instance-level redb `stateStore` | all dynamic |
-| Reaction batching | `REACTION_BATCHING` | `reaction_batching` | low / medium / high (**low**) | gRPC: `batchSize` + `batchFlushTimeoutMs`; HTTP: adaptive batcher + `batchEndpoint` | gRPC + HTTP reactions |
 
-`medium` (batching/query), `low` (reaction) and `false` (index/state store)
-equal the committed defaults, so those settings are explicit no-ops; only the
-other values change behavior. `persist_index` and `state_store` are
-**independent** — any of the four on/off combinations is valid.
+`medium` (batching/query) and `false` (index/state store) equal the committed
+defaults, so those settings are explicit no-ops; only the other values change
+behavior. `persist_index` and `state_store` are **independent** — any of the
+four on/off combinations is valid.
 
 ### Preset values
 
-| Preset | `batching_speed` (batch_size / wait_ms) | `query_tuning` (priorityQueue / dispatchBuffer / bootstrapBuffer) | `reaction_batching` (batchSize / flush_ms) |
-| --- | --- | --- | --- |
-| low | 100 / 10 | 1000 / 100 / 1000 | 1 / 100 (no batching) |
-| medium | 1000 / 50 | 10000 / 1000 / 10000 | 100 / 100 |
-| high | 5000 / 200 | 100000 / 10000 / 100000 | 1000 / 50 |
+| Preset | `batching_speed` (batch_size / wait_ms) | `query_tuning` (priorityQueue / dispatchBuffer / bootstrapBuffer) |
+| --- | --- | --- |
+| low | 100 / 10 | 1000 / 100 / 1000 |
+| medium | 1000 / 50 | 10000 / 1000 / 10000 |
+| high | 5000 / 200 | 100000 / 10000 / 100000 |
 
 ### Server instance profiles (`persist_index` × `state_store`)
 
@@ -160,8 +159,8 @@ DRASI_SOURCE_PORT=9000 TEST_CFG_SRC="$PWD/config.http.json" ./run_dynamic.sh
 The config presets are independent env vars, combinable with any variant:
 
 ```bash
-# gRPC standard with high query buffers, RocksDB index, and batched reactions
-QUERY_TUNING=high PERSIST_INDEX=true REACTION_BATCHING=high \
+# gRPC standard with high query buffers and the RocksDB index
+QUERY_TUNING=high PERSIST_INDEX=true \
 SERVER_SOURCE_FILE=source_grpc.json SERVER_REACTIONS_FILE=reactions_grpc.json \
 DRASI_SOURCE_PORT=50051 ./run_dynamic.sh
 ```
@@ -183,14 +182,14 @@ as checkboxes); tick any of:
 
 **Config axes** are separate dropdown/checkbox inputs applied to whichever
 dynamic variants run: `batching_speed`, `query_tuning`, `persist_index`,
-`state_store`, `reaction_batching` (see the matrix above). On **scheduled** runs
-the inputs are absent, so the driver falls back to each axis's default.
+`state_store` (see the matrix above). On **scheduled** runs the inputs are
+absent, so the driver falls back to each axis's default.
 
 The workflow's *Resolve variant* step maps every non-`drasi_lib` variant onto the
 `run_dynamic.sh` `*_FILE` / port / `TEST_CFG_SRC` env knobs; `drasi_lib` uses its
 own `ci/drasi_lib/run_test_ci.sh`. The config-axis env vars (`BATCHING_SPEED`,
-`QUERY_TUNING`, `PERSIST_INDEX`, `STATE_STORE`, `REACTION_BATCHING`) are passed
-straight through on the *Run test* step.
+`QUERY_TUNING`, `PERSIST_INDEX`, `STATE_STORE`) are passed straight through on
+the *Run test* step.
 
 
 ## Adding a new variant
@@ -205,24 +204,19 @@ Queries stay constant (`queries.json`) across transports.
 
 ## Known limitations & invariants
 
-- **Loss-free invariant.** Every config axis (`batching_speed`, `query_tuning`,
-  `reaction_batching`) and both instance toggles (`persist_index`,
-  `state_store`) must yield determinism SHAs
-  equal to the standard/memory baselines — they change performance or
-  persistence, not results. A SHA mismatch or a hang (stop trigger never firing)
-  is a real bug signal.
+- **Loss-free invariant.** Every config axis (`batching_speed`, `query_tuning`)
+  and both instance toggles (`persist_index`, `state_store`) must yield
+  determinism SHAs equal to the standard/memory baselines — they change
+  performance or persistence, not results. A SHA mismatch or a hang (stop
+  trigger never firing) is a real bug signal.
 - **`persist_index` is much slower.** The RocksDB index plus the *mandatory*
   source WAL durability (a persistent query rejects non-replay sources) is ~10x
   slower here, dominated by the WAL doing one fsync'd redb transaction per event.
   This is a performance limitation, not a correctness issue — see
   [issue-drafts/wal-per-event-fsync-throughput.md](../../../../issue-drafts/wal-per-event-fsync-throughput.md).
-- **HTTP reaction batching is loss-free.** Both gRPC and HTTP reaction batching
-  are supported. The test framework's HTTP reaction handler unpacks the Drasi
-  Server's `{ "batch": [...] }` envelope and counts each item as a separate
-  invocation (mirroring gRPC), so the record count and determinism SHAs are
-  unchanged vs per-result delivery. At `reaction_batching: low` HTTP stays in
-  per-result mode.
 - **drasi-lib config is out of scope** for this phase (Drasi Server only). The
+  embedded drasi-lib instance runs with near-default config; its runtime /
+  metrics / auth knobs are not currently configurable through the framework.
   embedded drasi-lib instance runs with near-default config; its runtime /
   metrics / auth knobs are not currently configurable through the framework.
 

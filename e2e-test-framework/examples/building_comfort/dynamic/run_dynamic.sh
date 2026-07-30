@@ -116,13 +116,19 @@ mkdir -p "$WORK_DIR" "$LOG_DIR" "$ARTIFACTS_DIR"
 
 DRASI_PID=""
 SERVICE_PID=""
+MONITOR_PID=""
+# Lightweight memory sampler: RSS of drasi-server + test-service and system
+# memory, every MONITOR_INTERVAL_SECS, into a CSV that lands in the artifacts.
+RESOURCE_MONITOR="${RESOURCE_MONITOR:-true}"
+MONITOR_INTERVAL_SECS="${MONITOR_INTERVAL_SECS:-5}"
+RESOURCE_CSV="$LOG_DIR/resource_usage.csv"
 
 log() { echo "[dyn] $*"; }
 
 cleanup() {
     local exit_code=$?
     set +e
-    for pid_name in SERVICE_PID DRASI_PID; do
+    for pid_name in MONITOR_PID SERVICE_PID DRASI_PID; do
         pid="${!pid_name}"
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
             log "Stopping $pid_name (pid=$pid)"
@@ -525,6 +531,31 @@ start_test_service() {
     fi
 }
 
+# Sample memory (RSS of drasi-server + test-service, and system memory) at a
+# fixed interval into a CSV that is copied into the artifacts and summarized in
+# the job summary. Cheap (a couple of `ps`/`free` calls per tick). Disable with
+# RESOURCE_MONITOR=false. `free` is Linux-only; on macOS the system columns are
+# left blank but per-process RSS still works.
+start_resource_monitor() {
+    [[ "$RESOURCE_MONITOR" == "true" ]] || return 0
+    echo "epoch_s,drasi_server_rss_kb,test_service_rss_kb,sys_mem_used_mb,sys_mem_total_mb" > "$RESOURCE_CSV"
+    (
+        while true; do
+            ts=$(date +%s)
+            drss=$(ps -o rss= -p "${DRASI_PID:-0}" 2>/dev/null | tr -d ' ')
+            srss=$(ps -o rss= -p "${SERVICE_PID:-0}" 2>/dev/null | tr -d ' ')
+            used=""; total=""
+            if command -v free >/dev/null 2>&1; then
+                read -r used total < <(free -m | awk '/^Mem:/{print $3, $2}')
+            fi
+            echo "${ts},${drss:-0},${srss:-0},${used},${total}" >> "$RESOURCE_CSV"
+            sleep "$MONITOR_INTERVAL_SECS"
+        done
+    ) &
+    MONITOR_PID=$!
+    log "Resource monitor started (pid=$MONITOR_PID, every ${MONITOR_INTERVAL_SECS}s) -> $(basename "$RESOURCE_CSV")"
+}
+
 fetch_final_reaction_state() {
     local reaction_id="$1"
     local state_file="$ARTIFACTS_DIR/final_reaction_state__${reaction_id}.json"
@@ -704,6 +735,26 @@ write_step_summary() {
         done < <(find "$DATA_CACHE" -path '*output_log/performance_metrics/*.json' -type f -print0 2>/dev/null || true)
         echo
 
+        if [[ -s "$RESOURCE_CSV" ]]; then
+            echo "### Memory (peak)"
+            echo
+            echo "| Process | Peak RSS |"
+            echo "| --- | ---: |"
+            awk -F, 'NR>1 {
+                        if ($2+0 > dm) dm=$2+0;
+                        if ($3+0 > sm) sm=$3+0;
+                        if ($4+0 > su) su=$4+0;
+                     }
+                     END {
+                        printf "| drasi-server | %.0f MB |\n", dm/1024;
+                        printf "| test-service | %.0f MB |\n", sm/1024;
+                        if (su > 0) printf "| system used | %d MB |\n", su;
+                     }' "$RESOURCE_CSV"
+            echo
+            echo "_Full time series in the run artifacts: \`logs/$(basename "$RESOURCE_CSV")\`._"
+            echo
+        fi
+
         if [[ -s "$verdict_file" ]]; then
             echo "### Determinism verdict"
             echo
@@ -722,6 +773,7 @@ patch_configs
 start_drasi_server
 apply_server_components
 start_test_service
+start_resource_monitor
 
 poll_rc=0
 if wait_for_completion_signal; then

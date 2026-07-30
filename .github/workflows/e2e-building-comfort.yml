@@ -71,7 +71,7 @@ on:
         type: boolean
         default: false
       reaction_batching:
-        description: "gRPC reaction batching preset (batchSize/flush)."
+        description: "Reaction batching preset — gRPC batchSize/flush, HTTP adaptive batcher. Applies to whichever reaction the variant uses."
         type: choice
         options:
           - low

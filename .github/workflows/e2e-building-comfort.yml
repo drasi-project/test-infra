@@ -70,14 +70,6 @@ on:
         description: "Use the redb plugin state store (stateStore). Independent of persist_index."
         type: boolean
         default: false
-      reaction_batching:
-        description: "Reaction batching preset — gRPC batchSize/flush, HTTP adaptive batcher. Applies to whichever reaction the variant uses."
-        type: choice
-        options:
-          - low
-          - medium
-          - high
-        default: low
 
       # --- Run settings ---
       drasi_server_version:
@@ -265,10 +257,6 @@ jobs:
           # combination selects a committed base yaml.
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
-          # gRPC reaction batching preset (low|medium|high). Empty on scheduled
-          # runs -> run_dynamic.sh defaults to low (= no batching). Loss-free:
-          # the test handler counts each result item, so results must not change.
-          REACTION_BATCHING: ${{ inputs.reaction_batching }}
         run: bash "${RUN_SCRIPT}"
 
       - name: Upload artifacts

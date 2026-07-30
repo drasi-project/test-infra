@@ -348,8 +348,7 @@ async fn handle_reaction(
     // Check if this is a batch request (array of batch results or single batch result)
     let is_batch = uri.path().contains("/batch")
         || request_body.is_array()
-        || (request_body.is_object()
-            && (request_body.get("results").is_some() || request_body.get("batch").is_some()));
+        || (request_body.is_object() && request_body.get("results").is_some());
 
     log::debug!(
         "HTTP Reaction Handler received {} request to {} with body type: {}",
@@ -363,24 +362,6 @@ async fn handle_reaction(
         let batch_items = if request_body.is_array() {
             // Direct array of batch results
             request_body.as_array().unwrap().clone()
-        } else if let Some(batch) = request_body.get("batch").and_then(|v| v.as_array()) {
-            // Drasi Server HTTP reaction BatchEnvelope: { "batch": [ notification, ... ] }.
-            // Each item is a flat DefaultChangeNotification (operation / queryId /
-            // before / after) with no nested `results`. Wrap each as a
-            // single-result batch item so the per-result loop below emits exactly
-            // one invocation per item (matching the gRPC handler). The hashed
-            // payload is `request_body` (the notification itself), so batching is
-            // loss-free — the determinism SHA is unchanged vs per-result delivery.
-            batch
-                .iter()
-                .map(|item| {
-                    let qid = item
-                        .get("queryId")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(&state.settings.test_run_query_id.test_query_id);
-                    serde_json::json!({ "query_id": qid, "results": [item] })
-                })
-                .collect()
         } else if let Some(results) = request_body.get("results") {
             // Single batch result with results array
             if let Some(_arr) = results.as_array() {

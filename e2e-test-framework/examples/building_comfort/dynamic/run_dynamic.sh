@@ -10,7 +10,7 @@
 # DYNAMIC building_comfort E2E driver.
 #
 # Instead of booting Drasi Server from a fully-populated static YAML (see
-# ci/drasi_server_grpc), this driver boots a BARE server from
+# local/drasi_server_grpc), this driver boots a BARE server from
 # base/drasi_server.empty.yaml and then applies the scenario at runtime via
 # the Drasi Server admin REST API (POST /api/v1/{sources,queries,reactions}),
 # composing it from reusable building blocks under components/server/.

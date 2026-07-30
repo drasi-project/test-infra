@@ -23,7 +23,7 @@ name: E2E - building_comfort
 on:
   workflow_dispatch:
     inputs:
-      # One checkbox per variant (GitHub renders boolean inputs as checkboxes).
+      # --- Variants (one checkbox each; GitHub renders booleans as checkboxes) ---
       drasi_lib:
         description: "drasi_lib (embedded, in-process)"
         type: boolean
@@ -44,10 +44,8 @@ on:
         description: "grpc_adaptive (gRPC adaptive dispatcher)"
         type: boolean
         default: false
-      drasi_server_version:
-        description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
-        required: false
-        default: ""
+
+      # --- Config axes (applied to whichever variants run) ---
       batching_speed:
         description: "Adaptive batching speed preset (affects adaptive variants only)."
         type: choice
@@ -80,6 +78,12 @@ on:
           - medium
           - high
         default: low
+
+      # --- Run settings ---
+      drasi_server_version:
+        description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
+        required: false
+        default: ""
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false

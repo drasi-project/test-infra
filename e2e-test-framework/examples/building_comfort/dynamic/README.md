@@ -1,6 +1,7 @@
 # Building Comfort — Dynamic component-config driver
 
-This is a **dynamic** alternative to the static `ci/drasi_server_*` folders.
+This is a **dynamic** alternative to static per-variant server folders (e.g.
+`local/drasi_server_grpc`).
 Instead of a fully-populated `drasi_server_config.yaml` per variant, it boots a
 **bare Drasi Server** ([base/drasi_server.empty.yaml](base/drasi_server.empty.yaml))
 and applies the scenario at runtime through the Drasi Server admin REST API,
@@ -236,7 +237,7 @@ check** (`GET /api/v1/plugins/kinds`) and fails fast with an actionable message.
 
 Known gap: on **darwin-arm64** the registry may not publish plugin builds for
 the server's SDK version, so the plugins won't resolve locally. This affects the
-static `ci/drasi_server_*` configs identically — it is not specific to this
+static `local/drasi_server_*` configs identically — it is not specific to this
 driver. To get a green run:
 
 - run on a **Linux x86_64** host / CI (where the registry has the plugins), or

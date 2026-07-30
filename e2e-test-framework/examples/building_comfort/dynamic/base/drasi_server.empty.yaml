@@ -1,6 +1,7 @@
 # Empty Drasi Server config for the building_comfort DYNAMIC test driver.
 #
-# Unlike the static ci/drasi_server_grpc setup, this file declares NO
+# Unlike a static per-variant server config (e.g. local/drasi_server_grpc), this
+# file declares NO
 # sources / queries / reactions. The `run_dynamic.sh` driver boots this
 # bare server and then applies components at runtime via the Drasi Server
 # admin REST API (POST /api/v1/{sources,queries,reactions}), composing the

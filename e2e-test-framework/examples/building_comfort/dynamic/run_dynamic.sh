@@ -536,14 +536,21 @@ start_test_service() {
 # the job summary. Cheap (a couple of `ps`/`free` calls per tick). Disable with
 # RESOURCE_MONITOR=false. `free` is Linux-only; on macOS the system columns are
 # left blank but per-process RSS still works.
+#
+# Sample by process *name*, not the captured PID: each service is launched in a
+# `( cd ...; binary ) &` subshell, so $DRASI_PID / $SERVICE_PID point at the
+# ~3 MB bash wrapper, and the real process runs as a child (test-service is a
+# grandchild under `cargo run`). Summing RSS by comm captures the actual memory.
 start_resource_monitor() {
     [[ "$RESOURCE_MONITOR" == "true" ]] || return 0
     echo "epoch_s,drasi_server_rss_kb,test_service_rss_kb,sys_mem_used_mb,sys_mem_total_mb" > "$RESOURCE_CSV"
     (
         while true; do
             ts=$(date +%s)
-            drss=$(ps -o rss= -p "${DRASI_PID:-0}" 2>/dev/null | tr -d ' ')
-            srss=$(ps -o rss= -p "${SERVICE_PID:-0}" 2>/dev/null | tr -d ' ')
+            # comm-based sum (KB). Match on the basename so it works whether ps
+            # reports the short name (Linux) or the full path (macOS).
+            drss=$(ps -eo comm=,rss= 2>/dev/null | awk '{c=$1; sub(/.*\//,"",c); if(c=="drasi-server") s+=$2} END{print s+0}')
+            srss=$(ps -eo comm=,rss= 2>/dev/null | awk '{c=$1; sub(/.*\//,"",c); if(c=="test-service") s+=$2} END{print s+0}')
             used=""; total=""
             if command -v free >/dev/null 2>&1; then
                 read -r used total < <(free -m | awk '/^Mem:/{print $3, $2}')

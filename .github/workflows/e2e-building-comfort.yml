@@ -63,11 +63,11 @@ on:
           - high
         default: medium
       persist_index:
-        description: "Use the built-in RocksDB persistent index (persistIndex). Independent of state_store."
+        description: "Use the built-in RocksDB persistent index (persistIndex)."
         type: boolean
         default: false
       state_store:
-        description: "Use the redb plugin state store (stateStore). Independent of persist_index."
+        description: "Use the redb plugin state store (stateStore)."
         type: boolean
         default: false
 

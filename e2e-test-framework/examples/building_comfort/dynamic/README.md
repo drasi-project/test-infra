@@ -151,16 +151,28 @@ The logger reports separate `bootstrap` and `steady_state` blocks
 (duration + records/sec) in its metrics JSON, surfaced in the workflow's
 **Throughput** summary table.
 
+### Rooms-only (default)
+
+Bootstrap presets currently run **only the per-room `building-comfort`
+query/reaction** (`BOOTSTRAP_ROOMS_ONLY=true`, the default); the floor-aggregate
+is dropped. Reason: the aggregate reaction emits **incrementally during
+bootstrap** and reaches its stop count *mid-bootstrap*, which stops it draining
+and backpressures the still-dispatching source. Because the test-service binds
+its REST port only **after** source auto-start, that stall prevents the run from
+ever becoming reachable. The per-room reaction's stop count sits above the
+bootstrap count, so it keeps draining throughout bootstrap and avoids this.
+Re-enabling the aggregate (`BOOTSTRAP_ROOMS_ONLY=false`) is deferred until the
+backpressure / startup-ordering issues are addressed (follow-up).
+
 After bootstrap the driver runs the full steady-state workload
 (`BOOTSTRAP_CHANGE_COUNT` changes, default **100000**, matching the original
 scenario so steady numbers are comparable). Completion requires the source to
-finish **and** every reaction to reach its stop count, so each stop is set to
-`K + steady_target`, where the steady target is safely below the reaction's
-natural output: **90%** of the change budget for `building-comfort` (~1 result
-per change) and **40%** for `building-comfort-floor-agg` (~1 result per 2
-changes — multiple room updates on a floor coalesce into one aggregate emit).
-Override the targets with `BOOTSTRAP_STEADY_MAIN` / `BOOTSTRAP_STEADY_AGG` if
-needed.
+finish **and** the reaction to reach its stop count, so the stop is set to
+`K + steady_target` with the target safely below the reaction's natural output:
+**95%** of the change budget for `building-comfort` (~1 result per change). The
+remaining ~5% tail is absorbed by the server's query buffers after the reaction
+stops, so the source still finishes. Override with `BOOTSTRAP_STEADY_MAIN`
+(and `BOOTSTRAP_STEADY_AGG` when the aggregate is re-enabled).
 
 ### Determinism baseline
 

@@ -151,10 +151,16 @@ The logger reports separate `bootstrap` and `steady_state` blocks
 (duration + records/sec) in its metrics JSON, surfaced in the workflow's
 **Throughput** summary table.
 
-Each reaction runs until it has collected `K + BOOTSTRAP_STEADY_SAMPLE`
-records (`BOOTSTRAP_STEADY_SAMPLE` defaults to 5000), so every run captures the
-full bootstrap plus a fixed steady-state sample. The steady-state change budget
-(`change_count`) is sized automatically to reach that sample.
+After bootstrap the driver runs the full steady-state workload
+(`BOOTSTRAP_CHANGE_COUNT` changes, default **100000**, matching the original
+scenario so steady numbers are comparable). Completion requires the source to
+finish **and** every reaction to reach its stop count, so each stop is set to
+`K + steady_target`, where the steady target is safely below the reaction's
+natural output: **90%** of the change budget for `building-comfort` (~1 result
+per change) and **40%** for `building-comfort-floor-agg` (~1 result per 2
+changes — multiple room updates on a floor coalesce into one aggregate emit).
+Override the targets with `BOOTSTRAP_STEADY_MAIN` / `BOOTSTRAP_STEADY_AGG` if
+needed.
 
 ### Determinism baseline
 

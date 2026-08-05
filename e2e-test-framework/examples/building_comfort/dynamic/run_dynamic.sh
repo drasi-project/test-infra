@@ -73,13 +73,18 @@
 #                         inserts) to N rooms so bootstrap load time/throughput
 #                         can be measured separately from steady-state. Off keeps
 #                         the committed small scenario unchanged.
-#   BOOTSTRAP_STEADY_SAMPLE  steady-state reaction records to collect AFTER the
-#                         bootstrap phase, per reaction (5000). Stop trigger is
-#                         set to bootstrap_K + this value.
+#   BOOTSTRAP_CHANGE_COUNT   steady-state changes generated AFTER bootstrap
+#                         (100000, matching the original scenario so steady
+#                         numbers are comparable). The run captures the full
+#                         bootstrap plus this steady workload.
 #   BOOTSTRAP_K_MAIN / BOOTSTRAP_K_AGG  optional overrides for the bootstrap
 #                         record count (phase boundary) of the per-room /
 #                         floor-aggregate reactions. Defaults are computed from
 #                         the preset graph shape (rooms / floors).
+#   BOOTSTRAP_STEADY_MAIN / BOOTSTRAP_STEADY_AGG  optional overrides for the
+#                         steady-state record target per reaction (defaults 90%
+#                         / 40% of BOOTSTRAP_CHANGE_COUNT — safely below the
+#                         observed ~1:1 / ~1:2 emit ratios so stops stay reached).
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -116,13 +121,18 @@ WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
 # (delivered as op:"i" inserts) so bootstrap load time/throughput can be measured
 # separately from steady-state. Empty/off keeps the committed small scenario.
 BOOTSTRAP_SIZE="${BOOTSTRAP_SIZE:-}"
-# Steady-state reaction records to collect AFTER the bootstrap phase, per
-# reaction. The stop trigger is set to bootstrap_K + this value.
-BOOTSTRAP_STEADY_SAMPLE="${BOOTSTRAP_STEADY_SAMPLE:-5000}"
+# Steady-state change budget generated AFTER bootstrap (default 100000, matching
+# the original scenario so steady numbers are comparable).
+BOOTSTRAP_CHANGE_COUNT="${BOOTSTRAP_CHANGE_COUNT:-100000}"
 # Optional overrides for the bootstrap record count (phase boundary) per
 # reaction; defaults computed analytically from the preset graph shape.
 BOOTSTRAP_K_MAIN="${BOOTSTRAP_K_MAIN:-}"
 BOOTSTRAP_K_AGG="${BOOTSTRAP_K_AGG:-}"
+# Optional overrides for the steady-state record target per reaction; defaults
+# 90% / 40% of the change budget (safely below the observed ~1:1 / ~1:2 emit
+# ratios so the stop counts stay reachable and the run doesn't hang).
+BOOTSTRAP_STEADY_MAIN="${BOOTSTRAP_STEADY_MAIN:-}"
+BOOTSTRAP_STEADY_AGG="${BOOTSTRAP_STEADY_AGG:-}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -322,24 +332,24 @@ resolve_bootstrap_preset() {
     BS_TOTAL_FLOORS=$(( BS_BUILDINGS * BS_FLOORS ))
     BS_K_MAIN="${BOOTSTRAP_K_MAIN:-$BS_TOTAL_ROOMS}"
     BS_K_AGG="${BOOTSTRAP_K_AGG:-$BS_TOTAL_FLOORS}"
-    # Steady-state change budget. The run completes only when the source
-    # FINISHES (all change_count events dispatched) AND every reaction reaches
-    # its stop count (tracker.rs::all_components_finished). Each change updates
-    # one room: the per-room reaction emits ~1 result/change, but the
-    # floor-aggregate reaction emits only ~0.5 result/change (multiple room
-    # updates on a floor coalesce into one aggregate emit — cf. the small
-    # scenario's 49860 vs 99981). So to GUARANTEE both reactions collect
-    # BOOTSTRAP_STEADY_SAMPLE steady records before the source finishes (else a
-    # reaction never reaches its stop count and the run hangs), budget ~10x the
-    # sample. spacing_mode is "none", so surplus changes are cheap and the
-    # bootstrap insert burst dominates runtime regardless.
-    BS_CHANGE_COUNT=$(( BOOTSTRAP_STEADY_SAMPLE * 10 ))
-    (( BS_CHANGE_COUNT < 20000 )) && BS_CHANGE_COUNT=20000
-    BS_STOP_MAIN=$(( BS_K_MAIN + BOOTSTRAP_STEADY_SAMPLE ))
-    BS_STOP_AGG=$(( BS_K_AGG + BOOTSTRAP_STEADY_SAMPLE ))
+    # Steady-state workload: run the full change budget (default 100000 changes)
+    # AFTER bootstrap, matching the original scenario so the steady numbers are
+    # comparable. Completion needs the source Finished AND every reaction Stopped
+    # (its stop count reached — tracker.rs::all_components_finished), so each
+    # stop count must be reachable. Each change updates one room: the per-room
+    # reaction emits ~1 result/change (~100000 from 100000 changes; small
+    # scenario 99981) and the floor-aggregate reaction ~0.5 result/change (small
+    # scenario 49860). So we set the per-reaction steady target safely BELOW
+    # those (90% / 40% of the change budget). Scaling to more floors only reduces
+    # aggregate coalescing (raises the ratio), so these stay reachable.
+    BS_CHANGE_COUNT="${BOOTSTRAP_CHANGE_COUNT:-100000}"
+    BS_STEADY_MAIN="${BOOTSTRAP_STEADY_MAIN:-$(( BS_CHANGE_COUNT * 9 / 10 ))}"
+    BS_STEADY_AGG="${BOOTSTRAP_STEADY_AGG:-$(( BS_CHANGE_COUNT * 4 / 10 ))}"
+    BS_STOP_MAIN=$(( BS_K_MAIN + BS_STEADY_MAIN ))
+    BS_STOP_AGG=$(( BS_K_AGG + BS_STEADY_AGG ))
     log "Bootstrap preset '$BOOTSTRAP_SIZE' -> buildings=$BS_BUILDINGS floors=$BS_FLOORS rooms/floor=$BS_ROOMS (rooms=$BS_TOTAL_ROOMS, floors=$BS_TOTAL_FLOORS)"
     log "  bootstrap_record_count: building-comfort=$BS_K_MAIN, building-comfort-floor-agg=$BS_K_AGG"
-    log "  steady sample=$BOOTSTRAP_STEADY_SAMPLE, change_count=$BS_CHANGE_COUNT, stop: main=$BS_STOP_MAIN agg=$BS_STOP_AGG"
+    log "  change_count=$BS_CHANGE_COUNT, steady target: main=$BS_STEADY_MAIN agg=$BS_STEADY_AGG, stop: main=$BS_STOP_MAIN agg=$BS_STOP_AGG"
 
     # Guard: the WAL retention cap (used when PERSIST_INDEX is on) must exceed the
     # total events this preset emits (initial inserts + steady-state changes), or

@@ -322,10 +322,19 @@ resolve_bootstrap_preset() {
     BS_TOTAL_FLOORS=$(( BS_BUILDINGS * BS_FLOORS ))
     BS_K_MAIN="${BOOTSTRAP_K_MAIN:-$BS_TOTAL_ROOMS}"
     BS_K_AGG="${BOOTSTRAP_K_AGG:-$BS_TOTAL_FLOORS}"
-    # Steady-state change budget: ~1 building-comfort result per change, so a
-    # budget of 2x the sample comfortably reaches BOOTSTRAP_STEADY_SAMPLE.
-    BS_CHANGE_COUNT=$(( BOOTSTRAP_STEADY_SAMPLE * 2 ))
-    (( BS_CHANGE_COUNT < 1000 )) && BS_CHANGE_COUNT=1000
+    # Steady-state change budget. The run completes only when the source
+    # FINISHES (all change_count events dispatched) AND every reaction reaches
+    # its stop count (tracker.rs::all_components_finished). Each change updates
+    # one room: the per-room reaction emits ~1 result/change, but the
+    # floor-aggregate reaction emits only ~0.5 result/change (multiple room
+    # updates on a floor coalesce into one aggregate emit — cf. the small
+    # scenario's 49860 vs 99981). So to GUARANTEE both reactions collect
+    # BOOTSTRAP_STEADY_SAMPLE steady records before the source finishes (else a
+    # reaction never reaches its stop count and the run hangs), budget ~10x the
+    # sample. spacing_mode is "none", so surplus changes are cheap and the
+    # bootstrap insert burst dominates runtime regardless.
+    BS_CHANGE_COUNT=$(( BOOTSTRAP_STEADY_SAMPLE * 10 ))
+    (( BS_CHANGE_COUNT < 20000 )) && BS_CHANGE_COUNT=20000
     BS_STOP_MAIN=$(( BS_K_MAIN + BOOTSTRAP_STEADY_SAMPLE ))
     BS_STOP_AGG=$(( BS_K_AGG + BOOTSTRAP_STEADY_SAMPLE ))
     log "Bootstrap preset '$BOOTSTRAP_SIZE' -> buildings=$BS_BUILDINGS floors=$BS_FLOORS rooms/floor=$BS_ROOMS (rooms=$BS_TOTAL_ROOMS, floors=$BS_TOTAL_FLOORS)"

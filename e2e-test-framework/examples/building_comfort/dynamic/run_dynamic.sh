@@ -725,6 +725,22 @@ fetch_final_reaction_state() {
     esac
 }
 
+# Fetch a compact per-reaction progress string (record count + status) from the
+# test-service REST API, e.g. " [building-comfort: 45000 recs, Running]". Makes
+# the completion wait observable (distinguishes a slow run from a stall).
+reaction_progress() {
+    local id url body count status out=""
+    for id in $TEST_REACTION_IDS; do
+        url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/reactions/${id}"
+        body="$(curl -sS "$url" 2>/dev/null || true)"
+        [[ -z "$body" ]] && continue
+        count="$(printf '%s' "$body" | jq -r '.reaction_observer.result_summary.reaction_invocation_count // "?"' 2>/dev/null || echo '?')"
+        status="$(printf '%s' "$body" | jq -r '.reaction_observer.status // "?"' 2>/dev/null || echo '?')"
+        out+=" [$id: $count recs, $status]"
+    done
+    printf '%s' "$out"
+}
+
 wait_for_completion_signal() {
     local log_file="$LOG_DIR/test-service.log"
     local marker="TestRun '${TEST_RUN_ID}' completed:"
@@ -748,7 +764,7 @@ wait_for_completion_signal() {
         local now elapsed
         now=$(date +%s); elapsed=$(( now - start_ts ))
         if (( now - last_log_ts >= 30 )); then
-            log "waiting for completion t=${elapsed}s (no marker yet)"; last_log_ts=$now
+            log "waiting for completion t=${elapsed}s (no marker yet)$(reaction_progress)"; last_log_ts=$now
         fi
         sleep "$POLL_INTERVAL_SECS"
     done

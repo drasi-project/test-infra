@@ -70,6 +70,15 @@ on:
         description: "Use the redb plugin state store (stateStore)."
         type: boolean
         default: false
+      bootstrap_size:
+        description: "Large-bootstrap preset (rooms). Scales the initial graph so bootstrap load is measured separately from steady-state. Dynamic variants only."
+        type: choice
+        options:
+          - "off"
+          - 1k
+          - 10k
+          - 100k
+        default: "off"
 
       # --- Run settings ---
       drasi_server_version:
@@ -257,6 +266,10 @@ jobs:
           # combination selects a committed base yaml.
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
+          # Large-bootstrap preset (off|1k|10k|100k). Empty on scheduled runs ->
+          # run_dynamic.sh leaves the committed small scenario unchanged. Only
+          # the dynamic variants consume it; drasi_lib ignores it.
+          BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size == 'off' && '' || inputs.bootstrap_size }}
         run: bash "${RUN_SCRIPT}"
 
       - name: Upload artifacts

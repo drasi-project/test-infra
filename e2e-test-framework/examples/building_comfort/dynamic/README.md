@@ -114,6 +114,72 @@ source tree.
 
 
 
+## Large-bootstrap presets (issue #78)
+
+The driver can scale the building_comfort **initial dataset** (the graph that is
+delivered as `op:"i"` inserts before steady-state begins) so that bootstrap load
+time and throughput can be measured **separately** from steady-state throughput.
+
+Select a preset with `BOOTSTRAP_SIZE` (env) or the workflow's `bootstrap_size`
+input. The value is the target **room count** (the dominant element); the graph
+is scaled `buildings × floors × rooms/floor` with `floors=10`, `rooms/floor=10`:
+
+| `BOOTSTRAP_SIZE` | buildings | rooms (total) | floors (total) |
+| --- | ---: | ---: | ---: |
+| `1k`   | 10   | 1,000   | 100    |
+| `10k`  | 100  | 10,000  | 1,000  |
+| `100k` | 1000 | 100,000 | 10,000 |
+
+Empty / `off` (the default, and on scheduled runs) keeps the committed small
+scenario unchanged.
+
+### How the split is measured
+
+The initial graph is delivered as insert change events **before** the first
+steady-state change (`send_initial_inserts` runs to completion, then the change
+stream starts — a single ordered source stream). The reaction's
+`PerformanceMetrics` logger is given a `bootstrap_record_count` (K) equal to the
+number of records the query emits during bootstrap:
+
+- `building-comfort` (`MATCH (r:Room)`) emits **one result per room**, so
+  `K = rooms`.
+- `building-comfort-floor-agg` (per-floor aggregate) emits per floor, so
+  `K = floors` (approximate — override with `BOOTSTRAP_K_AGG` to pin a
+  calibrated value).
+
+The logger reports separate `bootstrap` and `steady_state` blocks
+(duration + records/sec) in its metrics JSON, surfaced in the workflow's
+**Throughput** summary table.
+
+Each reaction runs until it has collected `K + BOOTSTRAP_STEADY_SAMPLE`
+records (`BOOTSTRAP_STEADY_SAMPLE` defaults to 5000), so every run captures the
+full bootstrap plus a fixed steady-state sample. The steady-state change budget
+(`change_count`) is sized automatically to reach that sample.
+
+### Determinism baseline
+
+Because the bootstrap resultset differs from the committed small scenario, the
+preset clears the inline `Sha256Determinism` baselines and sets
+`missing_baseline: Warn` — the run computes and reports the hash (in the summary)
+without failing. Pin a baseline by copying the reported SHA back into a config
+once a green reference run exists.
+
+### Run it locally
+
+```bash
+cd e2e-test-framework/examples/building_comfort/dynamic
+BOOTSTRAP_SIZE=1k ./run_dynamic.sh          # gRPC, 1k-room bootstrap
+
+# HTTP transport, 10k-room bootstrap
+BOOTSTRAP_SIZE=10k \
+SERVER_SOURCE_FILE=source_http.json SERVER_REACTIONS_FILE=reactions_http.json \
+DRASI_SOURCE_PORT=9000 TEST_CFG_SRC="$PWD/config.http.json" ./run_dynamic.sh
+```
+
+> Note: `100k` produces a large initial insert burst; allow extra time and, if
+> combined with `PERSIST_INDEX=true`, expect it to be much slower (WAL fsync per
+> event) — the driver auto-raises `WAL_MAX_EVENTS` to cover the bigger dataset.
+
 ## Apply order
 
 The driver applies **source → queries → reactions** (a query needs its source to

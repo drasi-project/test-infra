@@ -68,6 +68,18 @@
 #   WAL_MAX_EVENTS        WAL retention cap when PERSIST_INDEX forces durability
 #                         on (500000). Must exceed the scenario's total events so
 #                         the default RejectIncoming policy never drops any.
+#   BOOTSTRAP_SIZE        large-bootstrap preset: ""|1k|10k|100k (""=off). Scales
+#                         the building_comfort initial graph (delivered as op:"i"
+#                         inserts) to N rooms so bootstrap load time/throughput
+#                         can be measured separately from steady-state. Off keeps
+#                         the committed small scenario unchanged.
+#   BOOTSTRAP_STEADY_SAMPLE  steady-state reaction records to collect AFTER the
+#                         bootstrap phase, per reaction (5000). Stop trigger is
+#                         set to bootstrap_K + this value.
+#   BOOTSTRAP_K_MAIN / BOOTSTRAP_K_AGG  optional overrides for the bootstrap
+#                         record count (phase boundary) of the per-room /
+#                         floor-aggregate reactions. Defaults are computed from
+#                         the preset graph shape (rooms / floors).
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -99,6 +111,18 @@ SERVER_PROFILE_STATE_STORE="${STATE_STORE:-false}"
 # exceed the total events this scenario emits so the default RejectIncoming
 # capacity policy never drops events.
 WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
+# --- Large-bootstrap presets (#78) ---
+# BOOTSTRAP_SIZE selects a preset that scales the building_comfort initial graph
+# (delivered as op:"i" inserts) so bootstrap load time/throughput can be measured
+# separately from steady-state. Empty/off keeps the committed small scenario.
+BOOTSTRAP_SIZE="${BOOTSTRAP_SIZE:-}"
+# Steady-state reaction records to collect AFTER the bootstrap phase, per
+# reaction. The stop trigger is set to bootstrap_K + this value.
+BOOTSTRAP_STEADY_SAMPLE="${BOOTSTRAP_STEADY_SAMPLE:-5000}"
+# Optional overrides for the bootstrap record count (phase boundary) per
+# reaction; defaults computed analytically from the preset graph shape.
+BOOTSTRAP_K_MAIN="${BOOTSTRAP_K_MAIN:-}"
+BOOTSTRAP_K_AGG="${BOOTSTRAP_K_AGG:-}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -268,6 +292,102 @@ resolve_server_config() {
         SERVER_PERSIST_INDEX=false
     fi
     log "Server config -> base=$base (persistIndex=$pi, stateStore=$ss)"
+}
+
+# Resolve the BOOTSTRAP_SIZE preset (#78) into concrete graph-scale knobs. The
+# building_comfort initial graph is delivered as op:"i" inserts (see
+# send_initial_inserts); scaling it lets us measure bootstrap load time and
+# throughput separately from steady-state. The per-room query emits one result
+# per room on bootstrap (K_main = rooms); the floor aggregate emits per floor
+# (K_agg = floors, calibratable via BOOTSTRAP_K_AGG). Each reaction runs until it
+# has collected K + BOOTSTRAP_STEADY_SAMPLE records, so the run always captures
+# the full bootstrap plus a fixed steady-state sample.
+resolve_bootstrap_preset() {
+    case "$(printf '%s' "$BOOTSTRAP_SIZE" | tr '[:upper:]' '[:lower:]')" in
+        ""|off|none|false)
+            BOOTSTRAP_ENABLED=false
+            log "Bootstrap preset: off (committed small scenario)"
+            return 0
+            ;;
+        1k)   BS_BUILDINGS=10;   BS_FLOORS=10; BS_ROOMS=10 ;;
+        10k)  BS_BUILDINGS=100;  BS_FLOORS=10; BS_ROOMS=10 ;;
+        100k) BS_BUILDINGS=1000; BS_FLOORS=10; BS_ROOMS=10 ;;
+        *)
+            log "ERROR: invalid BOOTSTRAP_SIZE='$BOOTSTRAP_SIZE' (expected 1k|10k|100k)"
+            return 1
+            ;;
+    esac
+    BOOTSTRAP_ENABLED=true
+    BS_TOTAL_ROOMS=$(( BS_BUILDINGS * BS_FLOORS * BS_ROOMS ))
+    BS_TOTAL_FLOORS=$(( BS_BUILDINGS * BS_FLOORS ))
+    BS_K_MAIN="${BOOTSTRAP_K_MAIN:-$BS_TOTAL_ROOMS}"
+    BS_K_AGG="${BOOTSTRAP_K_AGG:-$BS_TOTAL_FLOORS}"
+    # Steady-state change budget: ~1 building-comfort result per change, so a
+    # budget of 2x the sample comfortably reaches BOOTSTRAP_STEADY_SAMPLE.
+    BS_CHANGE_COUNT=$(( BOOTSTRAP_STEADY_SAMPLE * 2 ))
+    (( BS_CHANGE_COUNT < 1000 )) && BS_CHANGE_COUNT=1000
+    BS_STOP_MAIN=$(( BS_K_MAIN + BOOTSTRAP_STEADY_SAMPLE ))
+    BS_STOP_AGG=$(( BS_K_AGG + BOOTSTRAP_STEADY_SAMPLE ))
+    log "Bootstrap preset '$BOOTSTRAP_SIZE' -> buildings=$BS_BUILDINGS floors=$BS_FLOORS rooms/floor=$BS_ROOMS (rooms=$BS_TOTAL_ROOMS, floors=$BS_TOTAL_FLOORS)"
+    log "  bootstrap_record_count: building-comfort=$BS_K_MAIN, building-comfort-floor-agg=$BS_K_AGG"
+    log "  steady sample=$BOOTSTRAP_STEADY_SAMPLE, change_count=$BS_CHANGE_COUNT, stop: main=$BS_STOP_MAIN agg=$BS_STOP_AGG"
+
+    # Guard: the WAL retention cap (used when PERSIST_INDEX is on) must exceed the
+    # total events this preset emits (initial inserts + steady-state changes), or
+    # the default RejectIncoming policy would drop events.
+    local est_inserts=$(( BS_BUILDINGS + BS_TOTAL_FLOORS + BS_TOTAL_ROOMS + BS_TOTAL_FLOORS + BS_TOTAL_ROOMS ))
+    local est_total=$(( est_inserts + BS_CHANGE_COUNT ))
+    if [[ "$SERVER_PROFILE_PERSIST_INDEX" == "true" && "$WAL_MAX_EVENTS" -lt "$est_total" ]]; then
+        log "WARNING: WAL_MAX_EVENTS=$WAL_MAX_EVENTS < estimated events $est_total; bumping."
+        WAL_MAX_EVENTS="$est_total"
+    fi
+}
+
+# Apply the resolved bootstrap preset to the CI test-service config (produced by
+# patch_configs). All edits are jq path assignments keyed by component kind /
+# reaction id, so this is robust across the gRPC and HTTP config variants.
+patch_bootstrap_preset() {
+    [[ "${BOOTSTRAP_ENABLED:-false}" == "true" ]] || return 0
+    log "Applying bootstrap preset '$BOOTSTRAP_SIZE' to $(basename "$TEST_CFG_CI")"
+    local patched
+    patched="$(jq \
+        --argjson bld "$BS_BUILDINGS" \
+        --argjson flr "$BS_FLOORS" \
+        --argjson rm "$BS_ROOMS" \
+        --argjson cc "$BS_CHANGE_COUNT" \
+        --argjson kmain "$BS_K_MAIN" \
+        --argjson kagg "$BS_K_AGG" \
+        --argjson stopmain "$BS_STOP_MAIN" \
+        --argjson stopagg "$BS_STOP_AGG" '
+        # 1. Scale the Model generator initial graph + steady-state change budget.
+        ( .data_store.test_repos[].local_tests[].sources[]
+            | select(.kind == "Model").model_data_generator )
+          |= (.building_count = [$bld, 0]
+              | .floor_count  = [$flr, 0]
+              | .room_count   = [$rm, 0]
+              | .change_count = $cc)
+        # 2. Reaction stop triggers = bootstrap K + steady-state sample.
+        | ( .data_store.test_repos[].local_tests[].reactions[]
+            | select(.test_reaction_id == "building-comfort").stop_triggers[]
+            | select(.kind == "RecordCount").record_count ) = $stopmain
+        | ( .data_store.test_repos[].local_tests[].reactions[]
+            | select(.test_reaction_id == "building-comfort-floor-agg").stop_triggers[]
+            | select(.kind == "RecordCount").record_count ) = $stopagg
+        # 3. Neutralize the committed small-scenario determinism baselines; the
+        #    bootstrap resultset differs, so compute+report (Warn) and pin later.
+        | ( .data_store.test_repos[].local_tests[].completion_handlers[]
+            | select(.kind == "Sha256Determinism") )
+          |= (.expected = {} | .missing_baseline = "Warn")
+        # 4. Set the PerformanceMetrics bootstrap phase boundary per reaction.
+        | ( .test_run_host.test_runs[].reactions[]
+            | select(.test_reaction_id == "building-comfort").output_loggers[]
+            | select(.kind == "PerformanceMetrics").bootstrap_record_count ) = $kmain
+        | ( .test_run_host.test_runs[].reactions[]
+            | select(.test_reaction_id == "building-comfort-floor-agg").output_loggers[]
+            | select(.kind == "PerformanceMetrics").bootstrap_record_count ) = $kagg
+    ' "$TEST_CFG_CI")"
+    printf '%s\n' "$patched" > "$TEST_CFG_CI"
+    log "Bootstrap preset applied (rooms=$BS_TOTAL_ROOMS, change_count=$BS_CHANGE_COUNT)"
 }
 
 patch_configs() {
@@ -692,15 +812,19 @@ write_step_summary() {
 
         echo "### Throughput"
         echo
-        echo "| Reaction | Records | Duration (s) | Records/sec |"
-        echo "| --- | ---: | ---: | ---: |"
-        local metrics_file rid records duration rps
+        echo "| Reaction | Records | Duration (s) | Records/sec | Bootstrap recs | Bootstrap (s) | Bootstrap rec/s | Steady rec/s |"
+        echo "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        local metrics_file rid records duration rps bs_recs bs_dur bs_rps ss_rps
         while IFS= read -r -d '' metrics_file; do
             rid="$(jq -r '.test_run_reaction_id // "unknown"' "$metrics_file" 2>/dev/null | awk -F'.' '{print $NF}')"
             records="$(jq -r '.record_count // "n/a"' "$metrics_file" 2>/dev/null)"
             duration="$(jq -r '(.duration_ns // 0) / 1e9 | . * 1000 | round / 1000' "$metrics_file" 2>/dev/null)"
             rps="$(jq -r '.records_per_second // "n/a" | if type == "number" then . * 100 | round / 100 else . end' "$metrics_file" 2>/dev/null)"
-            echo "| \`$rid\` | $records | $duration | $rps |"
+            bs_recs="$(jq -r '.bootstrap.record_count // "n/a"' "$metrics_file" 2>/dev/null)"
+            bs_dur="$(jq -r 'if .bootstrap then (.bootstrap.duration_ns / 1e9 | . * 1000 | round / 1000) else "n/a" end' "$metrics_file" 2>/dev/null)"
+            bs_rps="$(jq -r '.bootstrap.records_per_second // "n/a" | if type == "number" then . * 100 | round / 100 else . end' "$metrics_file" 2>/dev/null)"
+            ss_rps="$(jq -r '.steady_state.records_per_second // "n/a" | if type == "number" then . * 100 | round / 100 else . end' "$metrics_file" 2>/dev/null)"
+            echo "| \`$rid\` | $records | $duration | $rps | $bs_recs | $bs_dur | $bs_rps | $ss_rps |"
         done < <(find "$DATA_CACHE" -path '*output_log/performance_metrics/*.json' -type f -print0 2>/dev/null || true)
         echo
 
@@ -718,7 +842,9 @@ download_drasi_server
 resolve_batching_preset
 resolve_query_tuning
 resolve_server_config
+resolve_bootstrap_preset
 patch_configs
+patch_bootstrap_preset
 start_drasi_server
 apply_server_components
 start_test_service

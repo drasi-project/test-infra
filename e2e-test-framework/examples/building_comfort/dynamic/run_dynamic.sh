@@ -450,6 +450,27 @@ patch_configs() {
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
     grep -E '^(host|port):' "$DRASI_CFG_CI"
 
+    # If built plugins already sit next to the server binary (bin/plugins/*.dylib
+    # or *.so), disable autoInstallPlugins so the server loads them DIRECTLY and
+    # skips re-resolving + cosign-verifying every plugin from ghcr.io on each
+    # startup (that round-trip adds ~10-15s and needs network — painful locally
+    # and during a registry outage). The server's dynamic cdylib loader still
+    # loads the local plugins, so the components apply fine. On CI there are no
+    # pre-built plugins next to the freshly-downloaded binary, so autoInstall
+    # stays on. Force either way with DRASI_AUTOINSTALL_PLUGINS=true|false.
+    local autoinstall="${DRASI_AUTOINSTALL_PLUGINS:-}"
+    if [[ -z "$autoinstall" && -n "${DRASI_SERVER_BIN:-}" ]]; then
+        local plugins_dir; plugins_dir="$(dirname "$DRASI_SERVER_BIN")/plugins"
+        if compgen -G "$plugins_dir/*.dylib" >/dev/null 2>&1 || compgen -G "$plugins_dir/*.so" >/dev/null 2>&1; then
+            autoinstall=false
+            log "Local plugins found in $plugins_dir; disabling autoInstallPlugins (load local, skip registry)"
+        fi
+    fi
+    if [[ "$autoinstall" == "false" ]]; then
+        sed -E 's/^autoInstallPlugins:[[:space:]]*true[[:space:]]*$/autoInstallPlugins: false/' \
+            "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    fi
+
     log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \
         '.data_store.data_store_path = $cache
@@ -563,40 +584,72 @@ drasi_apply() {
 }
 
 # Preflight: confirm the plugins our components need actually loaded. The
-# server auto-installs the plugins listed in the base yaml from the OCI
-# registry, but install failures are non-fatal (logged as warnings) — so a
-# missing plugin only surfaces later as "Unknown source kind". This turns
-# that into an early, actionable failure. Common cause: the registry has no
-# build for the current platform (e.g. darwin-arm64); use a Linux runner or
-# point pluginRegistry at a local plugins dir.
+# server auto-installs the plugins listed in the base yaml (from the OCI
+# registry, or locally-built plugins next to the binary), but this is
+# ASYNCHRONOUS — on a fast host (Linux CI, registry cache) they're ready
+# immediately, but a local darwin-arm64 install can lag a few seconds. So we
+# POLL for up to PLUGIN_WAIT_SECS rather than checking once (a single check
+# races the install and fails spuriously). Install failures are otherwise
+# non-fatal and only surface later as "Unknown source kind".
 check_plugins() {
     local src_file="$1" rxn_file="$2"
-    local kinds_json
-    kinds_json="$(curl -fsS "${DRASI_API}/plugins/kinds" 2>/dev/null || echo '{}')"
-    local have_sources have_reactions
-    have_sources="$(printf '%s' "$kinds_json" | jq -r '[.sources[]?.kind] | join(",")' 2>/dev/null || echo '')"
-    have_reactions="$(printf '%s' "$kinds_json" | jq -r '[.reactions[]?.kind] | join(",")' 2>/dev/null || echo '')"
-    log "Available source kinds: [${have_sources}]  reaction kinds: [${have_reactions}]"
+    local timeout="${PLUGIN_WAIT_SECS:-60}"
+    local deadline=$(( $(date +%s) + timeout ))
+    local drasi_log="$LOG_DIR/drasi-server.log"
+    local kinds_json have_sources have_reactions missing kind last_log=0
 
-    local missing=0 kind
-    kind="$(jq -r '.kind' "$src_file")"
-    if ! printf '%s' "$kinds_json" | jq -e --arg k "$kind" '[.sources[]?.kind] | index($k)' >/dev/null 2>&1; then
-        log "ERROR: source plugin kind '$kind' not loaded"; missing=1
-    fi
+    # The needed kinds this run applies.
+    local src_kind; src_kind="$(jq -r '.kind' "$src_file")"
+    local -a rxn_kinds=()
     while IFS= read -r kind; do
-        [[ -z "$kind" ]] && continue
-        if ! printf '%s' "$kinds_json" | jq -e --arg k "$kind" '[.reactions[]?.kind] | index($k)' >/dev/null 2>&1; then
-            log "ERROR: reaction plugin kind '$kind' not loaded"; missing=1
-        fi
+        [[ -n "$kind" ]] && rxn_kinds+=("$kind")
     done < <(jq -r '.[].kind' "$rxn_file" | sort -u)
 
-    if (( missing )); then
-        log "ERROR: required plugins are not available. The server could not"
-        log "       resolve them from the registry ($([[ -n "$have_sources$have_reactions" ]] && echo 'partial' || echo 'none available'))."
-        log "       On darwin-arm64 the OCI registry may not publish plugin builds;"
-        log "       run on a Linux x86_64 host/CI, or set pluginRegistry to a local dir."
-        return 3
-    fi
+    # A kind is satisfied if the /plugins/kinds API reports it OR the server log
+    # confirms it was dynamically loaded ("[cdylib] <type>: <kind>"). Some server
+    # builds surface cdylib (locally-built) plugins only via the log, not the
+    # API, so the log is the authoritative signal for locally-loaded plugins.
+    while :; do
+        kinds_json="$(curl -fsS "${DRASI_API}/plugins/kinds" 2>/dev/null || echo '{}')"
+        missing=0
+
+        if ! printf '%s' "$kinds_json" | jq -e --arg k "$src_kind" '[.sources[]?.kind] | index($k)' >/dev/null 2>&1 \
+           && ! grep -qE "\[cdylib\] source: ${src_kind}([[:space:]]|\$)" "$drasi_log" 2>/dev/null; then
+            missing=1
+        fi
+        for kind in "${rxn_kinds[@]}"; do
+            if ! printf '%s' "$kinds_json" | jq -e --arg k "$kind" '[.reactions[]?.kind] | index($k)' >/dev/null 2>&1 \
+               && ! grep -qE "\[cdylib\] reaction: ${kind}([[:space:]]|\$)" "$drasi_log" 2>/dev/null; then
+                missing=1
+            fi
+        done
+
+        have_sources="$(printf '%s' "$kinds_json" | jq -r '[.sources[]?.kind] | join(",")' 2>/dev/null || echo '')"
+        have_reactions="$(printf '%s' "$kinds_json" | jq -r '[.reactions[]?.kind] | join(",")' 2>/dev/null || echo '')"
+
+        if (( ! missing )); then
+            log "Plugins ready (source '$src_kind' + reactions [${rxn_kinds[*]}]). API kinds: sources=[${have_sources}] reactions=[${have_reactions}]"
+            return 0
+        fi
+
+        local now; now=$(date +%s)
+        if (( now >= deadline )); then
+            break
+        fi
+        if (( now - last_log >= 5 )); then
+            log "Waiting for plugins to load... API sources=[${have_sources}] reactions=[${have_reactions}]"
+            last_log=$now
+        fi
+        sleep 2
+    done
+
+    log "ERROR: required plugins not available after ${timeout}s."
+    log "       Needed: source '$src_kind', reactions [${rxn_kinds[*]}]."
+    log "       API reported: sources=[${have_sources}] reactions=[${have_reactions}];"
+    log "       server log had no matching '[cdylib] <type>: <kind>' load lines either."
+    log "       On darwin-arm64 provide locally-built plugins next to the binary"
+    log "       (bin/plugins/*.dylib), or run on a Linux x86_64 host/CI."
+    return 3
 }
 
 apply_server_components() {

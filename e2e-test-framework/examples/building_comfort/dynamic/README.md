@@ -126,9 +126,9 @@ is scaled `buildings × floors × rooms/floor` with `floors=10`, `rooms/floor=10
 
 | `BOOTSTRAP_SIZE` | buildings | rooms (total) | floors (total) |
 | --- | ---: | ---: | ---: |
-| `1k`   | 10   | 1,000   | 100    |
-| `10k`  | 100  | 10,000  | 1,000  |
-| `100k` | 1000 | 100,000 | 10,000 |
+| `10k` | 100   | 10,000    | 1,000   |
+| `100k`| 1000  | 100,000   | 10,000  |
+| `1m`  | 10000 | 1,000,000 | 100,000 |
 
 Empty / `off` (the default, and on scheduled runs) keeps the committed small
 scenario unchanged.
@@ -190,17 +190,18 @@ once a green reference run exists.
 
 ```bash
 cd e2e-test-framework/examples/building_comfort/dynamic
-BOOTSTRAP_SIZE=1k ./run_dynamic.sh          # gRPC, 1k-room bootstrap
+BOOTSTRAP_SIZE=10k ./run_dynamic.sh         # gRPC, 10k-room bootstrap
 
-# HTTP transport, 10k-room bootstrap
-BOOTSTRAP_SIZE=10k \
+# HTTP transport, 100k-room bootstrap
+BOOTSTRAP_SIZE=100k \
 SERVER_SOURCE_FILE=source_http.json SERVER_REACTIONS_FILE=reactions_http.json \
 DRASI_SOURCE_PORT=9000 TEST_CFG_SRC="$PWD/config.http.json" ./run_dynamic.sh
 ```
 
-> Note: `100k` produces a large initial insert burst; allow extra time and, if
-> combined with `PERSIST_INDEX=true`, expect it to be much slower (WAL fsync per
-> event) — the driver auto-raises `WAL_MAX_EVENTS` to cover the bigger dataset.
+> Note: `100k` and especially `1m` produce a large initial insert burst
+> (`1m` ≈ 2.21M bootstrap events); allow extra time and, if combined with
+> `PERSIST_INDEX=true`, expect it to be much slower (WAL fsync per event) — the
+> driver auto-raises `WAL_MAX_EVENTS` to cover the bigger dataset.
 
 ## Apply order
 

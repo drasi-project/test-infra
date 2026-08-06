@@ -75,9 +75,9 @@ on:
         type: choice
         options:
           - "off"
-          - 1k
           - 10k
           - 100k
+          - 1m
         default: "off"
 
       # --- Run settings ---
@@ -266,7 +266,7 @@ jobs:
           # combination selects a committed base yaml.
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
-          # Large-bootstrap preset (off|1k|10k|100k). Empty on scheduled runs ->
+          # Large-bootstrap preset (off|10k|100k|1m). Empty on scheduled runs ->
           # run_dynamic.sh leaves the committed small scenario unchanged. Only
           # the dynamic variants consume it; drasi_lib ignores it.
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size == 'off' && '' || inputs.bootstrap_size }}

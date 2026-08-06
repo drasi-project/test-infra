@@ -68,7 +68,7 @@
 #   WAL_MAX_EVENTS        WAL retention cap when PERSIST_INDEX forces durability
 #                         on (500000). Must exceed the scenario's total events so
 #                         the default RejectIncoming policy never drops any.
-#   BOOTSTRAP_SIZE        large-bootstrap preset: ""|1k|10k|100k (""=off). Scales
+#   BOOTSTRAP_SIZE        large-bootstrap preset: ""|10k|100k|1m (""=off). Scales
 #                         the building_comfort initial graph (delivered as op:"i"
 #                         inserts) to N rooms so bootstrap load time/throughput
 #                         can be measured separately from steady-state. Off keeps
@@ -134,14 +134,17 @@ BOOTSTRAP_K_AGG="${BOOTSTRAP_K_AGG:-}"
 BOOTSTRAP_STEADY_MAIN="${BOOTSTRAP_STEADY_MAIN:-}"
 BOOTSTRAP_STEADY_AGG="${BOOTSTRAP_STEADY_AGG:-}"
 # Rooms-only: during bootstrap presets, run just the per-room (building-comfort)
-# query/reaction and drop the floor-aggregate. The aggregate reaction emits
-# incrementally during bootstrap and hits its stop MID-bootstrap, which
-# backpressures the still-dispatching source; and because the test-service binds
-# its REST port only AFTER source auto-start, that stalls the whole run. The
-# per-room reaction's stop is above the bootstrap count, so it stays draining
-# throughout bootstrap and never triggers that. Default true until the
-# backpressure / startup-ordering issues are addressed (follow-up).
-BOOTSTRAP_ROOMS_ONLY="${BOOTSTRAP_ROOMS_ONLY:-true}"
+# query/reaction and drop the floor-aggregate. This used to default true because
+# the aggregate reaction hit its stop MID-bootstrap and backpressured the
+# still-dispatching source (which, combined with the test-service binding its
+# REST port only AFTER source auto-start, stalled the whole run). ROOT CAUSE was
+# a mis-calibrated K_agg: the floor aggregate re-emits once per FLOOR_ROOM
+# relation, so its bootstrap output is total ROOMS, not total floors (measured:
+# a 10k run emitted RoomCount 1..10 x1000 floors = exactly 10000 = rooms). With
+# K_agg = rooms the stop now sits above the bootstrap output, so the aggregate
+# stays draining through bootstrap and completes (verified end-to-end at 10k).
+# Default false (run the aggregate); set true to isolate the per-room path.
+BOOTSTRAP_ROOMS_ONLY="${BOOTSTRAP_ROOMS_ONLY:-false}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -317,10 +320,14 @@ resolve_server_config() {
 # building_comfort initial graph is delivered as op:"i" inserts (see
 # send_initial_inserts); scaling it lets us measure bootstrap load time and
 # throughput separately from steady-state. The per-room query emits one result
-# per room on bootstrap (K_main = rooms); the floor aggregate emits per floor
-# (K_agg = floors, calibratable via BOOTSTRAP_K_AGG). Each reaction runs until it
-# has collected K + BOOTSTRAP_STEADY_SAMPLE records, so the run always captures
-# the full bootstrap plus a fixed steady-state sample.
+# per room on bootstrap (K_main = rooms); the floor aggregate ALSO emits once per
+# room on bootstrap (K_agg = rooms, calibratable via BOOTSTRAP_K_AGG) because it
+# re-emits its floor's aggregate for every FLOOR_ROOM relation added -- a floor
+# with 10 rooms emits RoomCount 1..10 as the rooms join, so the bootstrap output
+# equals the FLOOR_ROOM relation count = total rooms, NOT total floors. (Measured
+# empirically at 10k: RoomCount 1..10 x 1000 floors = exactly 10000 = rooms.)
+# Each reaction runs until it has collected K + BOOTSTRAP_STEADY_SAMPLE records,
+# so the run always captures the full bootstrap plus a fixed steady-state sample.
 resolve_bootstrap_preset() {
     case "$(printf '%s' "$BOOTSTRAP_SIZE" | tr '[:upper:]' '[:lower:]')" in
         ""|off|none|false)
@@ -328,11 +335,11 @@ resolve_bootstrap_preset() {
             log "Bootstrap preset: off (committed small scenario)"
             return 0
             ;;
-        1k)   BS_BUILDINGS=10;   BS_FLOORS=10; BS_ROOMS=10 ;;
-        10k)  BS_BUILDINGS=100;  BS_FLOORS=10; BS_ROOMS=10 ;;
-        100k) BS_BUILDINGS=1000; BS_FLOORS=10; BS_ROOMS=10 ;;
+        10k)  BS_BUILDINGS=100;   BS_FLOORS=10; BS_ROOMS=10 ;;
+        100k) BS_BUILDINGS=1000;  BS_FLOORS=10; BS_ROOMS=10 ;;
+        1m)   BS_BUILDINGS=10000; BS_FLOORS=10; BS_ROOMS=10 ;;
         *)
-            log "ERROR: invalid BOOTSTRAP_SIZE='$BOOTSTRAP_SIZE' (expected 1k|10k|100k)"
+            log "ERROR: invalid BOOTSTRAP_SIZE='$BOOTSTRAP_SIZE' (expected 10k|100k|1m)"
             return 1
             ;;
     esac
@@ -340,7 +347,13 @@ resolve_bootstrap_preset() {
     BS_TOTAL_ROOMS=$(( BS_BUILDINGS * BS_FLOORS * BS_ROOMS ))
     BS_TOTAL_FLOORS=$(( BS_BUILDINGS * BS_FLOORS ))
     BS_K_MAIN="${BOOTSTRAP_K_MAIN:-$BS_TOTAL_ROOMS}"
-    BS_K_AGG="${BOOTSTRAP_K_AGG:-$BS_TOTAL_FLOORS}"
+    # The floor aggregate re-emits once per FLOOR_ROOM relation during bootstrap,
+    # so its bootstrap output = total rooms (one emit per room as it joins its
+    # floor), NOT total floors. Calibrate K_agg to rooms so the stop trigger
+    # lands ABOVE the bootstrap output and the aggregate stays draining through
+    # bootstrap (mis-calibrating to floors stopped it mid-bootstrap -> source
+    # backpressure -> hang; see BOOTSTRAP_ROOMS_ONLY note).
+    BS_K_AGG="${BOOTSTRAP_K_AGG:-$BS_TOTAL_ROOMS}"
     # The generator's change_count limit counts EVERY dispatched event, including
     # the bootstrap inserts (send_initial_inserts bumps num_source_change_events;
     # mod.rs:902 finishes the source once num_source_change_events >= change_count).

@@ -341,19 +341,24 @@ resolve_bootstrap_preset() {
     BS_TOTAL_FLOORS=$(( BS_BUILDINGS * BS_FLOORS ))
     BS_K_MAIN="${BOOTSTRAP_K_MAIN:-$BS_TOTAL_ROOMS}"
     BS_K_AGG="${BOOTSTRAP_K_AGG:-$BS_TOTAL_FLOORS}"
-    # Steady-state workload: run the full change budget (default 100000 changes)
-    # AFTER bootstrap, matching the original scenario so the steady numbers are
-    # comparable. Completion needs the source Finished AND every reaction Stopped
-    # (its stop count reached — tracker.rs::all_components_finished), so each
-    # stop count must be reachable. Each change updates one room: the per-room
-    # reaction emits ~1 result/change (~100000 from 100000 changes; small
-    # scenario 99981) and the floor-aggregate reaction ~0.5 result/change (small
-    # scenario 49860). So we set the per-reaction steady target safely BELOW
-    # those (90% / 40% of the change budget). Scaling to more floors only reduces
-    # aggregate coalescing (raises the ratio), so these stay reachable.
-    BS_CHANGE_COUNT="${BOOTSTRAP_CHANGE_COUNT:-100000}"
-    BS_STEADY_MAIN="${BOOTSTRAP_STEADY_MAIN:-$(( BS_CHANGE_COUNT * 95 / 100 ))}"
-    BS_STEADY_AGG="${BOOTSTRAP_STEADY_AGG:-$(( BS_CHANGE_COUNT * 4 / 10 ))}"
+    # The generator's change_count limit counts EVERY dispatched event, including
+    # the bootstrap inserts (send_initial_inserts bumps num_source_change_events;
+    # mod.rs:902 finishes the source once num_source_change_events >= change_count).
+    # So to actually run N steady changes AFTER bootstrap, change_count must be
+    # bootstrap_events + N -- otherwise the source "Finishes" the instant bootstrap
+    # exceeds change_count and the steady phase never runs (observed: source
+    # finished at 221001 for a 221000-event bootstrap with change_count=100000).
+    # bootstrap_events = buildings + floors + rooms + building-floor rels
+    #                    + floor-room rels = buildings + 2*floors + 2*rooms.
+    BS_BOOTSTRAP_EVENTS=$(( BS_BUILDINGS + 2 * BS_TOTAL_FLOORS + 2 * BS_TOTAL_ROOMS ))
+    BS_STEADY_CHANGES="${BOOTSTRAP_CHANGE_COUNT:-100000}"
+    BS_CHANGE_COUNT=$(( BS_BOOTSTRAP_EVENTS + BS_STEADY_CHANGES ))
+    # Per-reaction steady record target, safely below the reaction's natural
+    # output from BS_STEADY_CHANGES changes (per-room ~1:1, floor-agg ~1:2). The
+    # small post-stop tail is absorbed by the server query buffers so the source
+    # still finishes.
+    BS_STEADY_MAIN="${BOOTSTRAP_STEADY_MAIN:-$(( BS_STEADY_CHANGES * 95 / 100 ))}"
+    BS_STEADY_AGG="${BOOTSTRAP_STEADY_AGG:-$(( BS_STEADY_CHANGES * 4 / 10 ))}"
     BS_STOP_MAIN=$(( BS_K_MAIN + BS_STEADY_MAIN ))
     BS_STOP_AGG=$(( BS_K_AGG + BS_STEADY_AGG ))
     log "Bootstrap preset '$BOOTSTRAP_SIZE' -> buildings=$BS_BUILDINGS floors=$BS_FLOORS rooms/floor=$BS_ROOMS (rooms=$BS_TOTAL_ROOMS, floors=$BS_TOTAL_FLOORS)"
@@ -364,16 +369,15 @@ resolve_bootstrap_preset() {
         TEST_REACTION_IDS="building-comfort"
     fi
     log "  bootstrap_record_count: building-comfort=$BS_K_MAIN, building-comfort-floor-agg=$BS_K_AGG"
-    log "  change_count=$BS_CHANGE_COUNT, steady target: main=$BS_STEADY_MAIN agg=$BS_STEADY_AGG, stop: main=$BS_STOP_MAIN agg=$BS_STOP_AGG"
+    log "  bootstrap_events=$BS_BOOTSTRAP_EVENTS, steady_changes=$BS_STEADY_CHANGES, change_count=$BS_CHANGE_COUNT"
+    log "  steady target: main=$BS_STEADY_MAIN agg=$BS_STEADY_AGG, stop: main=$BS_STOP_MAIN agg=$BS_STOP_AGG"
 
     # Guard: the WAL retention cap (used when PERSIST_INDEX is on) must exceed the
-    # total events this preset emits (initial inserts + steady-state changes), or
-    # the default RejectIncoming policy would drop events.
-    local est_inserts=$(( BS_BUILDINGS + BS_TOTAL_FLOORS + BS_TOTAL_ROOMS + BS_TOTAL_FLOORS + BS_TOTAL_ROOMS ))
-    local est_total=$(( est_inserts + BS_CHANGE_COUNT ))
-    if [[ "$SERVER_PROFILE_PERSIST_INDEX" == "true" && "$WAL_MAX_EVENTS" -lt "$est_total" ]]; then
-        log "WARNING: WAL_MAX_EVENTS=$WAL_MAX_EVENTS < estimated events $est_total; bumping."
-        WAL_MAX_EVENTS="$est_total"
+    # total events this preset emits (BS_CHANGE_COUNT already = bootstrap inserts
+    # + steady changes), or the default RejectIncoming policy would drop events.
+    if [[ "$SERVER_PROFILE_PERSIST_INDEX" == "true" && "$WAL_MAX_EVENTS" -lt "$BS_CHANGE_COUNT" ]]; then
+        log "WARNING: WAL_MAX_EVENTS=$WAL_MAX_EVENTS < total events $BS_CHANGE_COUNT; bumping."
+        WAL_MAX_EVENTS="$BS_CHANGE_COUNT"
     fi
 }
 

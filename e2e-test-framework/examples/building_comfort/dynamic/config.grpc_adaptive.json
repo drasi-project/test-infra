@@ -18,8 +18,8 @@
               {
                 "kind": "Sha256Determinism",
                 "expected": {
-                  "building-comfort": "490f70250d0d0bb97d4a6cf1a278e90cee084f72777d0958a2ec2cfc25cc2e63",
-                  "building-comfort-floor-agg": "27986794cd4e79e70cceda8ede79a7ee1af4a3318cad1395a3c720c4e38a3768"
+                  "building-comfort": "4e5d57a4b349361bf79bf0c97633a556879958a283f864ee32c36e6e2ab619c6",
+                  "building-comfort-floor-agg": "91c222eafe3df5c1ada87376bbf8f30670de91035510da4213d05d941c095990"
                 },
                 "missing_baseline": "Fail"
               },

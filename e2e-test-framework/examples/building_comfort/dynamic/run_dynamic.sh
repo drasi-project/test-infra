@@ -85,6 +85,16 @@
 #                         steady-state record target per reaction (defaults 90%
 #                         / 40% of BOOTSTRAP_CHANGE_COUNT — safely below the
 #                         observed ~1:1 / ~1:2 emit ratios so stops stay reached).
+#   BOOTSTRAP_BASELINE_MAIN / BOOTSTRAP_BASELINE_AGG  optional one-off pins for
+#                         the determinism SHA of a bootstrap run (building-comfort
+#                         / building-comfort-floor-agg). The bootstrap resultset
+#                         differs by BOTH preset size AND transport (http vs
+#                         grpc), so there's a lookup table in
+#                         resolve_bootstrap_baseline() keyed "$BOOTSTRAP_SIZE:$TRANSPORT"
+#                         -- add a row there once a preset/transport combo has a
+#                         confirmed CI SHA. Until pinned (table or env), the run
+#                         stays in compute-and-report mode (missing_baseline=Warn)
+#                         so it never fails on an unconfirmed baseline.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -189,12 +199,20 @@ trap cleanup EXIT INT TERM
 wait_for_port() {
     local host="$1" port="$2" name="$3" timeout="${4:-120}"
     local deadline=$(( $(date +%s) + timeout ))
-    while (( $(date +%s) < deadline )); do
+    local now
+    # Read the clock into a variable before comparing -- embedding
+    # $(date +%s) directly inside (( )) crashes with a syntax error if the
+    # command substitution ever returns empty (observed under the heavy
+    # system load a 1M-room bootstrap puts on the CI runner); a variable
+    # reference degrades safely to 0 when empty instead.
+    now=$(date +%s)
+    while (( now < deadline )); do
         if (echo > "/dev/tcp/$host/$port") >/dev/null 2>&1; then
             log "$name is listening on $host:$port"
             return 0
         fi
         sleep 1
+        now=$(date +%s)
     done
     log "ERROR: $name did not start listening on $host:$port within ${timeout}s"
     return 1
@@ -203,12 +221,15 @@ wait_for_port() {
 wait_for_http() {
     local url="$1" name="$2" timeout="${3:-120}"
     local deadline=$(( $(date +%s) + timeout ))
-    while (( $(date +%s) < deadline )); do
+    local now
+    now=$(date +%s)
+    while (( now < deadline )); do
         if curl -fsS "$url" >/dev/null 2>&1; then
             log "$name is responding at $url"
             return 0
         fi
         sleep 1
+        now=$(date +%s)
     done
     log "ERROR: $name did not respond at $url within ${timeout}s"
     return 1
@@ -394,11 +415,54 @@ resolve_bootstrap_preset() {
     fi
 }
 
+# Resolve a pinned determinism baseline for the current BOOTSTRAP_SIZE preset,
+# if one is known. The bootstrap resultset differs by BOTH preset size (rooms
+# scale the graph) AND transport (http vs grpc dispatch produces different
+# result ordering/serialization -- confirmed: the committed OFF-scenario
+# baselines differ between config.http.json and config.json/grpc_adaptive).
+# Transport is inferred from the TEST_CFG_SRC basename (adaptive vs standard
+# share the same baseline per transport -- confirmed on the off scenario, where
+# config.json and config.grpc_adaptive.json carry identical committed SHAs).
+# Add a row below once a preset/transport combo has a CI-confirmed SHA pair;
+# until then (or via BOOTSTRAP_BASELINE_MAIN/_AGG override) the preset stays in
+# compute-and-report mode so an unconfirmed baseline can never fail the run.
+resolve_bootstrap_baseline() {
+    BS_TRANSPORT="grpc"
+    case "$(basename "$TEST_CFG_SRC")" in
+        config.http.json) BS_TRANSPORT="http" ;;
+    esac
+    BS_BASELINE_MAIN="${BOOTSTRAP_BASELINE_MAIN:-}"
+    BS_BASELINE_AGG="${BOOTSTRAP_BASELINE_AGG:-}"
+    if [[ -z "$BS_BASELINE_MAIN" && -z "$BS_BASELINE_AGG" ]]; then
+        case "${BOOTSTRAP_SIZE}:${BS_TRANSPORT}" in
+            # 10k:http)   BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
+            # 10k:grpc)   BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
+            100k:http)
+                BS_BASELINE_MAIN="e1ad5640897910d04053f151a491ce5012af77d50f95def9f045859f455f5308"
+                BS_BASELINE_AGG="c2d0c32334d9550b67ab44ad972afb54b4dac6b591a23b4dccad37135a1375af"
+                ;;
+            100k:grpc)
+                BS_BASELINE_MAIN="490f70250d0d0bb97d4a6cf1a278e90cee084f72777d0958a2ec2cfc25cc2e63"
+                BS_BASELINE_AGG="27986794cd4e79e70cceda8ede79a7ee1af4a3318cad1395a3c720c4e38a3768"
+                ;;
+            # 1m:http)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
+            # 1m:grpc)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
+            *) : ;;
+        esac
+    fi
+    if [[ -n "$BS_BASELINE_MAIN" && -n "$BS_BASELINE_AGG" ]]; then
+        log "  determinism baseline: PINNED for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT (missing_baseline=Fail)"
+    else
+        log "  determinism baseline: not yet captured for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT -- compute+report only (missing_baseline=Warn)"
+    fi
+}
+
 # Apply the resolved bootstrap preset to the CI test-service config (produced by
 # patch_configs). All edits are jq path assignments keyed by component kind /
 # reaction id, so this is robust across the gRPC and HTTP config variants.
 patch_bootstrap_preset() {
     [[ "${BOOTSTRAP_ENABLED:-false}" == "true" ]] || return 0
+    resolve_bootstrap_baseline
     log "Applying bootstrap preset '$BOOTSTRAP_SIZE' to $(basename "$TEST_CFG_CI")"
     local patched
     patched="$(jq \
@@ -409,7 +473,9 @@ patch_bootstrap_preset() {
         --argjson kmain "$BS_K_MAIN" \
         --argjson kagg "$BS_K_AGG" \
         --argjson stopmain "$BS_STOP_MAIN" \
-        --argjson stopagg "$BS_STOP_AGG" '
+        --argjson stopagg "$BS_STOP_AGG" \
+        --arg baseline_main "$BS_BASELINE_MAIN" \
+        --arg baseline_agg "$BS_BASELINE_AGG" '
         # 1. Scale the Model generator initial graph + steady-state change budget.
         ( .data_store.test_repos[].local_tests[].sources[]
             | select(.kind == "Model").model_data_generator )
@@ -424,11 +490,17 @@ patch_bootstrap_preset() {
         | ( .data_store.test_repos[].local_tests[].reactions[]
             | select(.test_reaction_id == "building-comfort-floor-agg").stop_triggers[]
             | select(.kind == "RecordCount").record_count ) = $stopagg
-        # 3. Neutralize the committed small-scenario determinism baselines; the
-        #    bootstrap resultset differs, so compute+report (Warn) and pin later.
+        # 3. Determinism baseline: pin per (preset, transport) once known (Fail);
+        #    otherwise the bootstrap resultset has no confirmed baseline yet, so
+        #    compute+report only (Warn) rather than fail on an unconfirmed SHA.
         | ( .data_store.test_repos[].local_tests[].completion_handlers[]
             | select(.kind == "Sha256Determinism") )
-          |= (.expected = {} | .missing_baseline = "Warn")
+          |= (if ($baseline_main | length) > 0 and ($baseline_agg | length) > 0 then
+                .expected = {"building-comfort": $baseline_main, "building-comfort-floor-agg": $baseline_agg}
+                | .missing_baseline = "Fail"
+              else
+                .expected = {} | .missing_baseline = "Warn"
+              end)
         # 4. Set the PerformanceMetrics bootstrap phase boundary per reaction.
         | ( .test_run_host.test_runs[].reactions[]
             | select(.test_reaction_id == "building-comfort").output_loggers[]
@@ -819,7 +891,14 @@ wait_for_completion_signal() {
     local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
     local start_ts=$(( $(date +%s) ))
     local last_log_ts=0
-    while (( $(date +%s) < deadline )); do
+    # Read the clock into a variable before comparing -- embedding
+    # $(date +%s) directly inside (( )) crashes with a syntax error if the
+    # command substitution ever returns empty (observed under the heavy
+    # system load a 1M-room bootstrap puts on the CI runner); a variable
+    # reference degrades safely to 0 when empty instead.
+    local now
+    now=$(date +%s)
+    while (( now < deadline )); do
         if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
             log "ERROR: test-service exited unexpectedly"; return 1
         fi
@@ -831,12 +910,13 @@ wait_for_completion_signal() {
             grep -F "$marker" "$log_file" | tail -n1 | sed 's/^/[completion] /'
             return 0
         fi
-        local now elapsed
-        now=$(date +%s); elapsed=$(( now - start_ts ))
+        local elapsed
+        elapsed=$(( now - start_ts ))
         if (( now - last_log_ts >= 30 )); then
             log "waiting for completion t=${elapsed}s (no marker yet)$(reaction_progress)"; last_log_ts=$now
         fi
         sleep "$POLL_INTERVAL_SECS"
+        now=$(date +%s)
     done
     log "ERROR: completion signal not observed within ${TIMEOUT_SECS}s"
     log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" || true
@@ -867,7 +947,9 @@ verify_test_run_status() {
     local status_file="$ARTIFACTS_DIR/final_test_run_status.json"
     local deadline=$(( $(date +%s) + 30 ))
     local body status
-    while (( $(date +%s) < deadline )); do
+    local now
+    now=$(date +%s)
+    while (( now < deadline )); do
         body="$(curl -sS "$url" 2>/dev/null || true)"
         if [[ -n "$body" ]]; then
             echo "$body" > "$status_file"
@@ -878,6 +960,7 @@ verify_test_run_status() {
             esac
         fi
         sleep 1
+        now=$(date +%s)
     done
     log "WARNING: could not confirm final test-run status from $url"
     [[ -s "$status_file" ]] && cat "$status_file"

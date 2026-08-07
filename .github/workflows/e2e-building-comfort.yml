@@ -71,7 +71,7 @@ on:
         type: boolean
         default: false
       bootstrap_size:
-        description: "Large-bootstrap preset (rooms). Scales the initial graph so bootstrap load is measured separately from steady-state. Dynamic variants only."
+        description: "Large-bootstrap preset (rooms). Scales the initial graph so bootstrap load is measured separately from steady-state."
         type: choice
         options:
           - "off"

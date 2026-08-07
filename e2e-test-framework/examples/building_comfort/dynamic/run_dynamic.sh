@@ -175,9 +175,60 @@ SERVICE_PID=""
 
 log() { echo "[dyn] $*"; }
 
+MEM_MONITOR_PID=""
+
+# Background memory sampler (#78 1m-preset diagnostics). Large bootstrap presets
+# hold the ENTIRE initial-insert batch as one in-memory Vec before dispatching
+# (building_hierarchy/mod.rs send_initial_inserts()), and drasi-server keeps its
+# whole continuous-query state in memory (persistIndex/stateStore both false).
+# The 1m preset (2.21M bootstrap events, 1M rooms, 100k floor-agg groups) has
+# died on the CI runner (ubuntu-latest, 7GB RAM) with no error in our own logs
+# -- consistent with an OOM kill. Sample RSS for both processes + system free
+# memory every few seconds so a repeat failure has hard evidence instead of
+# just a suspicious silence.
+start_mem_monitor() {
+    local out="$LOG_DIR/mem_usage.log"
+    : > "$out"
+    (
+        while true; do
+            {
+                printf '%s ' "$(date -u +%FT%TZ)"
+                if [[ -r /proc/meminfo ]]; then
+                    awk '/^MemTotal:|^MemAvailable:/ {printf "%s=%dMB ", $1, $2/1024}' /proc/meminfo | tr -d ':'
+                fi
+                for pid_name in DRASI_PID SERVICE_PID; do
+                    pid="${!pid_name:-}"
+                    if [[ -n "$pid" ]] && [[ -r "/proc/$pid/status" ]]; then
+                        rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null)
+                        printf '%s_rss=%sKB ' "$pid_name" "${rss:-?}"
+                    fi
+                done
+                printf '\n'
+            } >> "$out" 2>/dev/null
+            sleep 5
+        done
+    ) &
+    MEM_MONITOR_PID=$!
+}
+
 cleanup() {
     local exit_code=$?
     set +e
+    if [[ -n "$MEM_MONITOR_PID" ]]; then
+        kill "$MEM_MONITOR_PID" 2>/dev/null
+    fi
+    # Surface any OOM-killer activity so a mysterious termination (no error in
+    # our own logs, just "Terminated") can be confirmed or ruled out as memory
+    # exhaustion rather than guessed at.
+    if command -v dmesg >/dev/null 2>&1; then
+        local oom_hits
+        oom_hits="$(dmesg -T 2>/dev/null | grep -iE 'killed process|out of memory|oom' | tail -n 20)"
+        if [[ -n "$oom_hits" ]]; then
+            log "WARNING: OOM-killer activity detected in dmesg:"
+            printf '%s\n' "$oom_hits" | sed 's/^/[dyn]   /'
+            printf '%s\n' "$oom_hits" > "$LOG_DIR/oom_dmesg.log" 2>/dev/null
+        fi
+    fi
     for pid_name in SERVICE_PID DRASI_PID; do
         pid="${!pid_name}"
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
@@ -435,8 +486,14 @@ resolve_bootstrap_baseline() {
     BS_BASELINE_AGG="${BOOTSTRAP_BASELINE_AGG:-}"
     if [[ -z "$BS_BASELINE_MAIN" && -z "$BS_BASELINE_AGG" ]]; then
         case "${BOOTSTRAP_SIZE}:${BS_TRANSPORT}" in
-            # 10k:http)   BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
-            # 10k:grpc)   BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
+            10k:http)
+                BS_BASELINE_MAIN="7f4f25db88552fcf521e0e6e6f70cce965a4e0324ebe8c18ee30a967ec224b4e"
+                BS_BASELINE_AGG="70aa37de5f5f9eb5b6fb4db2badf2fe8c674ae8d430e42b218bc771679c5de87"
+                ;;
+            10k:grpc)
+                BS_BASELINE_MAIN="a5d89950f456b00b802b2659eeb8855afa09bfda222ef9a9c89becef301b4fa5"
+                BS_BASELINE_AGG="aaa6e7bc9e2f8ed07014b4ded3656816ba063b45abbdd252a49d790255fef556"
+                ;;
             100k:http)
                 BS_BASELINE_MAIN="e1ad5640897910d04053f151a491ce5012af77d50f95def9f045859f455f5308"
                 BS_BASELINE_AGG="c2d0c32334d9550b67ab44ad972afb54b4dac6b591a23b4dccad37135a1375af"
@@ -1075,6 +1132,7 @@ resolve_server_config
 resolve_bootstrap_preset
 patch_configs
 patch_bootstrap_preset
+start_mem_monitor
 start_drasi_server
 apply_server_components
 start_test_service

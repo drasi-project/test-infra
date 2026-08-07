@@ -182,16 +182,23 @@ MEM_MONITOR_PID=""
 # (building_hierarchy/mod.rs send_initial_inserts()), and drasi-server keeps its
 # whole continuous-query state in memory (persistIndex/stateStore both false).
 # The 1m preset (2.21M bootstrap events, 1M rooms, 100k floor-agg groups) has
-# died on the CI runner (ubuntu-latest, 7GB RAM) with no error in our own logs
-# -- consistent with an OOM kill. Sample RSS for both processes + system free
-# memory every few seconds so a repeat failure has hard evidence instead of
-# just a suspicious silence.
+# died on the CI runner (ubuntu-latest, 7GB RAM) with "The operation was
+# canceled" at ~6min (far under the 60min job timeout) and no error in our own
+# logs -- the runner VM itself is lost, consistent with an OOM kill.
+#
+# CRITICAL: emit each sample to STDOUT (the live job log), not just a file. When
+# the runner VM is OOM-killed the job dies too hard to upload artifacts (the
+# Upload artifacts step is skipped), so a file-only log is lost. GitHub captures
+# step stdout server-side in real time, so the last samples before the VM dies
+# survive there -- that's the evidence channel that actually works for a runner
+# death. A file copy is kept too (harmless when artifacts do upload).
 start_mem_monitor() {
     local out="$LOG_DIR/mem_usage.log"
     : > "$out"
     (
         while true; do
-            {
+            local line
+            line="$(
                 printf '%s ' "$(date -u +%FT%TZ)"
                 if [[ -r /proc/meminfo ]]; then
                     awk '/^MemTotal:|^MemAvailable:/ {printf "%s=%dMB ", $1, $2/1024}' /proc/meminfo | tr -d ':'
@@ -199,13 +206,15 @@ start_mem_monitor() {
                 for pid_name in DRASI_PID SERVICE_PID; do
                     pid="${!pid_name:-}"
                     if [[ -n "$pid" ]] && [[ -r "/proc/$pid/status" ]]; then
-                        rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status" 2>/dev/null)
-                        printf '%s_rss=%sKB ' "$pid_name" "${rss:-?}"
+                        rss=$(awk '/^VmRSS:/ {print $2/1024}' "/proc/$pid/status" 2>/dev/null)
+                        printf '%s_rss=%sMB ' "$pid_name" "${rss:-?}"
                     fi
                 done
-                printf '\n'
-            } >> "$out" 2>/dev/null
-            sleep 5
+            )"
+            # Live job log (survives a runner death) + file copy (for artifacts).
+            echo "[dyn][mem] $line"
+            printf '%s\n' "$line" >> "$out" 2>/dev/null
+            sleep 3
         done
     ) &
     MEM_MONITOR_PID=$!

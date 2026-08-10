@@ -175,69 +175,9 @@ SERVICE_PID=""
 
 log() { echo "[dyn] $*"; }
 
-MEM_MONITOR_PID=""
-
-# Background memory sampler (#78 1m-preset diagnostics). Large bootstrap presets
-# hold the ENTIRE initial-insert batch as one in-memory Vec before dispatching
-# (building_hierarchy/mod.rs send_initial_inserts()), and drasi-server keeps its
-# whole continuous-query state in memory (persistIndex/stateStore both false).
-# The 1m preset (2.21M bootstrap events, 1M rooms, 100k floor-agg groups) has
-# died on the CI runner (ubuntu-latest, 7GB RAM) with "The operation was
-# canceled" at ~6min (far under the 60min job timeout) and no error in our own
-# logs -- the runner VM itself is lost, consistent with an OOM kill.
-#
-# CRITICAL: emit each sample to STDOUT (the live job log), not just a file. When
-# the runner VM is OOM-killed the job dies too hard to upload artifacts (the
-# Upload artifacts step is skipped), so a file-only log is lost. GitHub captures
-# step stdout server-side in real time, so the last samples before the VM dies
-# survive there -- that's the evidence channel that actually works for a runner
-# death. A file copy is kept too (harmless when artifacts do upload).
-start_mem_monitor() {
-    local out="$LOG_DIR/mem_usage.log"
-    : > "$out"
-    (
-        while true; do
-            local line
-            line="$(
-                printf '%s ' "$(date -u +%FT%TZ)"
-                if [[ -r /proc/meminfo ]]; then
-                    awk '/^MemTotal:|^MemAvailable:/ {printf "%s=%dMB ", $1, $2/1024}' /proc/meminfo | tr -d ':'
-                fi
-                for pid_name in DRASI_PID SERVICE_PID; do
-                    pid="${!pid_name:-}"
-                    if [[ -n "$pid" ]] && [[ -r "/proc/$pid/status" ]]; then
-                        rss=$(awk '/^VmRSS:/ {print $2/1024}' "/proc/$pid/status" 2>/dev/null)
-                        printf '%s_rss=%sMB ' "$pid_name" "${rss:-?}"
-                    fi
-                done
-            )"
-            # Live job log (survives a runner death) + file copy (for artifacts).
-            echo "[dyn][mem] $line"
-            printf '%s\n' "$line" >> "$out" 2>/dev/null
-            sleep 3
-        done
-    ) &
-    MEM_MONITOR_PID=$!
-}
-
 cleanup() {
     local exit_code=$?
     set +e
-    if [[ -n "$MEM_MONITOR_PID" ]]; then
-        kill "$MEM_MONITOR_PID" 2>/dev/null
-    fi
-    # Surface any OOM-killer activity so a mysterious termination (no error in
-    # our own logs, just "Terminated") can be confirmed or ruled out as memory
-    # exhaustion rather than guessed at.
-    if command -v dmesg >/dev/null 2>&1; then
-        local oom_hits
-        oom_hits="$(dmesg -T 2>/dev/null | grep -iE 'killed process|out of memory|oom' | tail -n 20)"
-        if [[ -n "$oom_hits" ]]; then
-            log "WARNING: OOM-killer activity detected in dmesg:"
-            printf '%s\n' "$oom_hits" | sed 's/^/[dyn]   /'
-            printf '%s\n' "$oom_hits" > "$LOG_DIR/oom_dmesg.log" 2>/dev/null
-        fi
-    fi
     for pid_name in SERVICE_PID DRASI_PID; do
         pid="${!pid_name}"
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
@@ -1141,7 +1081,6 @@ resolve_server_config
 resolve_bootstrap_preset
 patch_configs
 patch_bootstrap_preset
-start_mem_monitor
 start_drasi_server
 apply_server_components
 start_test_service

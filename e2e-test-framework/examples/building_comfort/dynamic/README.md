@@ -233,6 +233,32 @@ export WORK_DIR="$PWD/.local_run/work"
 On CI/Linux the driver downloads `drasi-server-x86_64-linux-gnu` automatically
 (override with `DRASI_SERVER_VERSION` / `DRASI_TARGET`).
 
+To build the server from source instead, set `DRASI_SERVER_REF` to a branch,
+tag, or commit SHA. `DRASI_REPO` can target a fork:
+
+```bash
+DRASI_REPO=drasi-project/drasi-server DRASI_SERVER_REF=main ./run_dynamic.sh
+```
+
+When `DRASI_CORE_REF` is also set to a branch, the driver injects a temporary
+`[patch.crates-io]` into its disposable drasi-server clone. This redirects all
+drasi-core repository crates used by the server to `DRASI_CORE_REPO` at that
+branch. It relaxes only the clone's direct core-family version constraints,
+updates only those Cargo.lock entries, and verifies with `cargo metadata` that
+no patched package silently remained on crates.io. The repository's real
+`Cargo.toml` is not changed:
+
+```bash
+DRASI_SERVER_REF=main \
+DRASI_CORE_REPO=drasi-project/drasi-core DRASI_CORE_REF=main \
+./run_dynamic.sh
+```
+
+Set `DRASI_PLUGIN_TAG` to pin every untagged plugin reference in the generated
+server config. The server resolver appends the current platform suffix, so
+`DRASI_PLUGIN_TAG=drasi-nightly-test` resolves, for example, to
+`source/grpc:drasi-nightly-test-linux-amd64`.
+
 ### Selecting a variant locally
 
 ```bash
@@ -282,6 +308,31 @@ own `ci/drasi_lib/run_test_ci.sh`. The config-axis env vars (`BATCHING_SPEED`,
 `QUERY_TUNING`, `PERSIST_INDEX`, `STATE_STORE`) are passed straight through on
 the *Run test* step.
 
+### Nightly full-stack performance test
+
+`.github/workflows/nightly-perf.yml` runs daily at 22:00 UTC, allowing for both
+GitHub scheduling delays and drasi-core's roughly 2.5-hour nightly plugin build.
+It can also be started manually.
+
+The workflow first queries the latest completed `nightly.yml` run in
+`drasi-project/drasi-core`. It proceeds only when that run succeeded within the
+last 24 hours; otherwise it skips neutrally because core's own nightly reports
+its failures.
+
+Each performance job:
+
+1. builds drasi-server from `main`;
+2. patches its drasi-core dependencies to drasi-core `main`;
+3. pins server plugins to `drasi-nightly-test`;
+4. runs the `http_standard` and `grpc_standard` building-comfort variants with
+   the `10k` bootstrap preset; and
+5. uploads metrics, determinism verdicts, and logs.
+
+All cross-repository references remain in the dependency direction
+test-infra → drasi-server → drasi-core. Neither lower-level repository needs a
+branch containing a modified `Cargo.toml`, and drasi-core does not reference or
+trigger test-infra.
+
 
 ## Adding a new variant
 
@@ -328,4 +379,3 @@ driver. To get a green run:
 
 - run on a **Linux x86_64** host / CI (where the registry has the plugins), or
 - point `pluginRegistry` at a local plugins directory built from `drasi-core`.
-

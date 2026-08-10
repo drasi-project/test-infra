@@ -24,7 +24,9 @@
 # the framework does not let us inject over its own REST API).
 #
 # Flow:
-#   1. Download the drasi-server release binary (unless DRASI_SERVER_BIN set).
+#   1. Obtain the drasi-server binary: download a release, OR build it from a
+#      branch/tag/SHA (DRASI_SERVER_REF) of DRASI_REPO -- optionally patching the
+#      drasi-core crates to DRASI_CORE_REF -- unless DRASI_SERVER_BIN is set.
 #   2. Patch configs for CI safety (admin port, keep artifacts, data path).
 #   3. Start the bare drasi-server and wait for its admin/REST API.
 #   4. Apply source -> queries -> reactions via REST (order matters).
@@ -33,9 +35,24 @@
 #   7. Snapshot reactions, verify determinism, write summary.
 #
 # Env vars (defaults in parens):
-#   DRASI_REPO            releases repo (drasi-project/drasi-server)
-#   DRASI_SERVER_VERSION  release tag ("" = latest)
-#   DRASI_SERVER_BIN      pre-downloaded binary (skips download)
+#   DRASI_REPO            drasi-server repo owner/name, used for BOTH the release
+#                         download and the source build (drasi-project/drasi-server).
+#                         Point at a fork to build/download from it.
+#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used in release mode.
+#   DRASI_SERVER_REF      branch/tag/SHA of DRASI_REPO to BUILD drasi-server from
+#                         source with cargo. When set, overrides the release
+#                         download. Empty = download the release binary (default).
+#   DRASI_CORE_REPO       drasi-core repo owner/name for the [patch.crates-io]
+#                         override injected during a source build (drasi-project/drasi-core).
+#   DRASI_CORE_REF        branch of DRASI_CORE_REPO to pin the drasi-core
+#                         family of crates to via [patch.crates-io] when building
+#                         drasi-server from source. Empty = no patch (server links
+#                         its published crates.io drasi-core). Requires DRASI_SERVER_REF.
+#   DRASI_PLUGIN_TAG      OCI tag to pin every plugin ref in the base server config
+#                         to (e.g. drasi-nightly-test), so autoInstallPlugins pulls
+#                         that tag from the registry. Empty = leave refs untagged
+#                         (server resolves the latest compatible release).
+#   DRASI_SERVER_BIN      pre-built binary (skips both download and source build)
 #   DRASI_ADMIN_PORT      admin/REST port patched into empty.yaml (8090)
 #   DRASI_SOURCE_PORT     source ingress port to wait for (50051)
 #   SERVER_SOURCE_FILE    components/server/ file (source_grpc.json)
@@ -105,6 +122,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
+# Build-from-source knobs. When DRASI_SERVER_REF is set, drasi-server is cloned
+# from DRASI_REPO@DRASI_SERVER_REF and built with cargo instead of downloading a
+# release. DRASI_CORE_REF (optional) additionally redirects the drasi-core family
+# of crates to DRASI_CORE_REPO@DRASI_CORE_REF via an injected [patch.crates-io].
+DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
+DRASI_CORE_REPO="${DRASI_CORE_REPO:-drasi-project/drasi-core}"
+DRASI_CORE_REF="${DRASI_CORE_REF:-}"
+# OCI tag to pin every plugin ref in the base server config to (e.g. the nightly
+# plugin tag). Empty leaves refs untagged so the server resolves latest-compatible.
+DRASI_PLUGIN_TAG="${DRASI_PLUGIN_TAG:-}"
 DRASI_ADMIN_PORT="${DRASI_ADMIN_PORT:-8090}"
 DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-50051}"
 
@@ -160,6 +187,7 @@ WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
 LOG_DIR="$WORK_DIR/logs"
 DOWNLOAD_DIR="$WORK_DIR/drasi-server-download"
+SRC_BUILD_DIR="$WORK_DIR/drasi-server-src"
 DATA_CACHE="$WORK_DIR/test_data_cache"
 DRASI_CFG_SRC="$SCRIPT_DIR/base/drasi_server.empty.yaml"
 TEST_CFG_SRC="${TEST_CFG_SRC:-$SCRIPT_DIR/config.json}"
@@ -172,6 +200,9 @@ mkdir -p "$WORK_DIR" "$LOG_DIR" "$ARTIFACTS_DIR"
 
 DRASI_PID=""
 SERVICE_PID=""
+# Human-readable description of where DRASI_SERVER_BIN came from (release tag,
+# source build + optional core patch, or preset). Surfaced in the step summary.
+DRASI_BUILD_SOURCE=""
 
 log() { echo "[dyn] $*"; }
 
@@ -298,8 +329,198 @@ wait_for_http() {
 download_drasi_server() {
     if [[ -n "${DRASI_SERVER_BIN:-}" ]]; then
         log "Using pre-set DRASI_SERVER_BIN=$DRASI_SERVER_BIN"
+        DRASI_BUILD_SOURCE="preset ${DRASI_SERVER_BIN}"
         return 0
     fi
+    if [[ -n "$DRASI_SERVER_REF" ]]; then
+        build_drasi_server_from_source
+        return 0
+    fi
+    download_drasi_server_release
+}
+
+# Direct drasi-core-family dependencies declared by drasi-server. Their version
+# requirements are relaxed only in the disposable clone before [patch.crates-io]
+# is injected. Without this, Cargo silently ignores a git patch whose current
+# version falls outside the server's published requirement (for example,
+# drasi-index-rocksdb 0.6.0 on core main vs. server's crates.io requirement
+# 0.5.8), producing a mixed nightly/release binary.
+CORE_DIRECT_CRATES=(
+    drasi-core drasi-lib drasi-host-sdk drasi-plugin-sdk
+    drasi-index-rocksdb drasi-state-store-redb drasi-wal-redb
+    drasi-reaction-application drasi-bootstrap-application drasi-bootstrap-noop
+)
+
+# Every drasi-core-repo crate currently present in drasi-server's dependency
+# graph. Resolution is verified after patch injection; any present package with
+# one of these names must come from the requested git branch, never crates.io.
+CORE_PATCH_CRATES=(
+    "${CORE_DIRECT_CRATES[@]}"
+    drasi-ffi-primitives drasi-middleware
+    drasi-functions-cypher drasi-functions-gql
+    drasi-query-ast drasi-query-cypher drasi-query-gql
+)
+
+relax_server_core_requirements() {
+    local cargo_toml="$SRC_BUILD_DIR/Cargo.toml"
+    local direct_crates
+    direct_crates="$(IFS=,; echo "${CORE_DIRECT_CRATES[*]}")"
+    python3 - "$cargo_toml" "$direct_crates" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+expected = set(sys.argv[2].split(","))
+seen = set()
+lines = []
+
+for line in path.read_text().splitlines(keepends=True):
+    ending = "\n" if line.endswith("\n") else ""
+    content = line[:-1] if ending else line
+    match = re.match(r'^(\s*)(drasi-[A-Za-z0-9-]+)(\s*=\s*)(.*)$', content)
+    if match and match.group(2) in expected:
+        name, rhs = match.group(2), match.group(4)
+        if rhs.lstrip().startswith('"'):
+            rhs = re.sub(r'"[^"]+"', '"*"', rhs, count=1)
+        elif re.search(r'\bversion\s*=\s*"[^"]+"', rhs):
+            rhs = re.sub(r'\bversion\s*=\s*"[^"]+"', 'version = "*"', rhs, count=1)
+        else:
+            raise SystemExit(f"cannot relax {name}: unsupported dependency form: {content}")
+        line = f"{match.group(1)}{name}{match.group(3)}{rhs}{ending}"
+        seen.add(name)
+    lines.append(line)
+
+missing = expected - seen
+if missing:
+    raise SystemExit(f"drasi-server Cargo.toml is missing expected core dependencies: {sorted(missing)}")
+
+path.write_text("".join(lines))
+print(f"Relaxed {len(seen)} direct drasi-core dependency requirements in {path}")
+PY
+}
+
+# Inject a [patch.crates-io] block into the cloned drasi-server's root Cargo.toml
+# so the whole drasi-core family resolves from DRASI_CORE_REPO@DRASI_CORE_REF
+# instead of crates.io. This is how the nightly perf run links core HEAD rather
+# than the published release the server normally depends on.
+inject_core_patch() {
+    local cargo_toml="$SRC_BUILD_DIR/Cargo.toml"
+    local core_url="https://github.com/${DRASI_CORE_REPO}.git"
+    local ref="$DRASI_CORE_REF"
+
+    relax_server_core_requirements
+    log "Injecting [patch.crates-io] -> $DRASI_CORE_REPO@$ref for ${#CORE_PATCH_CRATES[@]} drasi-core crates"
+    {
+        echo ""
+        echo "# --- injected by run_dynamic.sh for nightly perf: pin drasi-core to HEAD ---"
+        echo "[patch.crates-io]"
+        local c
+        for c in "${CORE_PATCH_CRATES[@]}"; do
+            echo "${c} = { git = \"${core_url}\", branch = \"${ref}\" }"
+        done
+    } >> "$cargo_toml"
+    log "Patched $cargo_toml; Cargo will update the patched packages while preserving the server lockfile"
+}
+
+update_core_lock_entries() {
+    local package_args=()
+    local c
+    for c in "${CORE_DIRECT_CRATES[@]}"; do
+        package_args+=(-p "$c")
+    done
+    log "Updating only the direct drasi-core-family entries in Cargo.lock"
+    ( cd "$SRC_BUILD_DIR" && cargo update "${package_args[@]}" )
+}
+
+verify_core_patch_resolution() {
+    local metadata="$SRC_BUILD_DIR/target/nightly-core-metadata.json"
+    local expected_source="git+https://github.com/${DRASI_CORE_REPO}?branch=${DRASI_CORE_REF}#"
+    local expected_source_dot_git="git+https://github.com/${DRASI_CORE_REPO}.git?branch=${DRASI_CORE_REF}#"
+    mkdir -p "$(dirname "$metadata")"
+    log "Resolving Cargo metadata to verify the drasi-core git patch"
+    ( cd "$SRC_BUILD_DIR" && cargo metadata --format-version 1 > "$metadata" )
+
+    local c sources source found
+    for c in "${CORE_PATCH_CRATES[@]}"; do
+        sources="$(jq -r --arg name "$c" \
+            '.packages[] | select(.name == $name) | (.source // "path")' \
+            "$metadata" | sort -u)"
+        [[ -n "$sources" ]] || continue
+        while IFS= read -r source; do
+            if [[ "$source" != "$expected_source"* && "$source" != "$expected_source_dot_git"* ]]; then
+                log "ERROR: $c resolved from '$source', expected the $DRASI_CORE_REPO@$DRASI_CORE_REF git source"
+                return 1
+            fi
+        done <<< "$sources"
+    done
+
+    # Direct dependencies must all be present, in addition to being git-backed.
+    for c in "${CORE_DIRECT_CRATES[@]}"; do
+        found="$(jq -r --arg name "$c" \
+            '[.packages[] | select(.name == $name)] | length' "$metadata")"
+        if [[ "$found" -eq 0 ]]; then
+            log "ERROR: expected direct core dependency '$c' is absent from Cargo metadata"
+            return 1
+        fi
+    done
+    log "Verified: all resolved drasi-core-family packages come from $DRASI_CORE_REPO@$DRASI_CORE_REF"
+}
+
+# Build drasi-server from a branch/tag/SHA of $DRASI_REPO using cargo, then set
+# DRASI_SERVER_BIN to the freshly built binary. When DRASI_CORE_REF is set, the
+# drasi-core crates are additionally patched to that ref (see inject_core_patch).
+build_drasi_server_from_source() {
+    local ref="$DRASI_SERVER_REF"
+    local repo_url="https://github.com/${DRASI_REPO}.git"
+    log "Building drasi-server from source: repo=$DRASI_REPO ref=$ref"
+
+    rm -rf "$SRC_BUILD_DIR"
+    # Shallow branch/tag clone is fastest; fall back to a full clone + checkout
+    # when $ref is a commit SHA (which --branch does not accept). A core patch
+    # needs the full history unshallowed only if we later pin by SHA there; the
+    # git dependency is fetched separately by cargo, so a shallow server clone
+    # is fine regardless.
+    if ! git clone --depth 1 --branch "$ref" "$repo_url" "$SRC_BUILD_DIR" 2>/dev/null; then
+        log "Shallow clone of ref '$ref' failed; retrying with full clone + checkout"
+        rm -rf "$SRC_BUILD_DIR"
+        git clone "$repo_url" "$SRC_BUILD_DIR"
+        git -C "$SRC_BUILD_DIR" checkout "$ref"
+    fi
+
+    local built_sha
+    built_sha="$(git -C "$SRC_BUILD_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    log "Checked out $DRASI_REPO @ $ref ($built_sha)"
+
+    local core_desc=""
+    if [[ -n "$DRASI_CORE_REF" ]]; then
+        inject_core_patch
+        update_core_lock_entries
+        verify_core_patch_resolution
+        core_desc=" + core ${DRASI_CORE_REPO}@${DRASI_CORE_REF}"
+    fi
+
+    log "Running cargo build --release --bin drasi-server"
+    if ! ( cd "$SRC_BUILD_DIR" && cargo build --release --bin drasi-server ); then
+        log "cargo build --bin drasi-server failed; retrying default release build"
+        ( cd "$SRC_BUILD_DIR" && cargo build --release )
+    fi
+
+    local built_bin="$SRC_BUILD_DIR/target/release/drasi-server"
+    if [[ ! -x "$built_bin" ]]; then
+        # Bin name may differ from the crate default; locate it under target/release.
+        built_bin="$(find "$SRC_BUILD_DIR/target/release" -maxdepth 1 -type f -name 'drasi-server*' -perm -u+x 2>/dev/null | head -n1)"
+    fi
+    [[ -n "$built_bin" && -x "$built_bin" ]] || { log "ERROR: cargo build did not produce a drasi-server binary"; return 1; }
+
+    DRASI_SERVER_BIN="$built_bin"
+    export DRASI_SERVER_BIN
+    DRASI_BUILD_SOURCE="source ${DRASI_REPO}@${ref} (${built_sha})${core_desc}"
+    log "DRASI_SERVER_BIN=$DRASI_SERVER_BIN"
+    "$DRASI_SERVER_BIN" --version || true
+}
+
+download_drasi_server_release() {
     mkdir -p "$DOWNLOAD_DIR"
     cd "$DOWNLOAD_DIR"
     local tag="$DRASI_SERVER_VERSION"
@@ -324,6 +545,7 @@ download_drasi_server() {
     mv "$asset_name" drasi-server
     DRASI_SERVER_BIN="$DOWNLOAD_DIR/drasi-server"
     export DRASI_SERVER_BIN
+    DRASI_BUILD_SOURCE="release ${tag} (${DRASI_REPO})"
     log "DRASI_SERVER_BIN=$DRASI_SERVER_BIN"
     "$DRASI_SERVER_BIN" --version || true
     cd - >/dev/null
@@ -596,11 +818,25 @@ patch_bootstrap_preset() {
     fi
 }
 
+# Pin every plugin ref in the base server config to $DRASI_PLUGIN_TAG so the
+# server's autoInstall resolves that exact OCI tag (e.g. the nightly plugin tag)
+# from the registry. Refs already carrying an explicit `:tag` are left untouched.
+# No-op when DRASI_PLUGIN_TAG is empty (server resolves latest-compatible).
+pin_plugin_tags() {
+    [[ -n "$DRASI_PLUGIN_TAG" ]] || return 0
+    # Match `  - ref: <value>` where <value> has no colon (untagged) and append
+    # `:<tag>`. `[^[:space:]:]+` stops before any existing `:tag`, so tagged refs
+    # don't match the end-of-line anchor and are preserved verbatim.
+    sed -E "s|^([[:space:]]*-[[:space:]]*ref:[[:space:]]*)([^[:space:]:]+)[[:space:]]*\$|\1\2:${DRASI_PLUGIN_TAG}|" \
+        "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    log "Pinned plugin refs to tag '$DRASI_PLUGIN_TAG':"
+    grep -E '^[[:space:]]*-[[:space:]]*ref:' "$DRASI_CFG_CI" | sed 's/^/  /'
+}
+
 patch_configs() {
     log "Patching empty server config admin port -> $DRASI_ADMIN_PORT"
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
     grep -E '^(host|port):' "$DRASI_CFG_CI"
-
     # If built plugins already sit next to the server binary (bin/plugins/*.dylib
     # or *.so), disable autoInstallPlugins so the server loads them DIRECTLY and
     # skips re-resolving + cosign-verifying every plugin from ghcr.io on each
@@ -621,6 +857,8 @@ patch_configs() {
         sed -E 's/^autoInstallPlugins:[[:space:]]*true[[:space:]]*$/autoInstallPlugins: false/' \
             "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
     fi
+
+    pin_plugin_tags
 
     log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \
@@ -1052,7 +1290,8 @@ write_step_summary() {
     fi
 
     local out="$GITHUB_STEP_SUMMARY"
-    local drasi_version="${DRASI_SERVER_VERSION:-latest}"
+    local drasi_source="${DRASI_BUILD_SOURCE:-unknown}"
+    local plugin_tag="${DRASI_PLUGIN_TAG:-<latest-compatible>}"
     local server_version
     server_version="$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n1 || echo unknown)"
 
@@ -1061,8 +1300,9 @@ write_step_summary() {
         echo
         echo "- test run: \`$TEST_RUN_ID\`"
         echo "- transport: dynamic (bare drasi-server, components applied via REST)"
-        echo "- drasi-server tag: \`$drasi_version\`"
+        echo "- drasi-server source: \`$drasi_source\`"
         echo "- drasi-server binary: \`$server_version\`"
+        echo "- plugin tag: \`$plugin_tag\`"
         echo "- source component: \`$SERVER_SOURCE_FILE\` (ingress port $DRASI_SOURCE_PORT)"
         echo "- reactions component: \`$SERVER_REACTIONS_FILE\`"
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"

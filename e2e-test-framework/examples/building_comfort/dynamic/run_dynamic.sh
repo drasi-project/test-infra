@@ -217,12 +217,8 @@ MEM_MONITOR_PID=""
 # canceled" at ~6min (far under the 60min job timeout) and no error in our own
 # logs -- the runner VM itself is lost, consistent with an OOM kill.
 #
-# CRITICAL: emit each sample to STDOUT (the live job log), not just a file. When
-# the runner VM is OOM-killed the job dies too hard to upload artifacts (the
-# Upload artifacts step is skipped), so a file-only log is lost. GitHub captures
-# step stdout server-side in real time, so the last samples before the VM dies
-# survive there -- that's the evidence channel that actually works for a runner
-# death. A file copy is kept too (harmless when artifacts do upload).
+# Samples are written only to an artifact file to avoid flooding the live job
+# log. Successful and normally-failing runs upload this file during cleanup.
 start_mem_monitor() {
     local out="$LOG_DIR/mem_usage.log"
     : > "$out"
@@ -242,8 +238,6 @@ start_mem_monitor() {
                     fi
                 done
             )"
-            # Live job log (survives a runner death) + file copy (for artifacts).
-            echo "[dyn][mem] $line"
             printf '%s\n' "$line" >> "$out" 2>/dev/null
             sleep 3
         done
@@ -1036,6 +1030,29 @@ check_plugins() {
     log "       Needed: source '$src_kind', reactions [${rxn_kinds[*]}]."
     log "       API reported: sources=[${have_sources}] reactions=[${have_reactions}];"
     log "       server log had no matching '[cdylib] <type>: <kind>' load lines either."
+
+    # The most common cause on CI is an ABI mismatch: the cdylib loader requires
+    # the plugin's FFI SDK major.minor to equal the host's. That happens when the
+    # pinned plugin tag was built from a different drasi-core commit than the one
+    # the server links (e.g. DRASI_PLUGIN_TAG's nightly publish predates a
+    # breaking FFI change on DRASI_CORE_REF). Surface it explicitly -- the generic
+    # message below sends people down a completely unrelated path.
+    local mismatches
+    mismatches="$(grep -E 'SDK version mismatch' "$drasi_log" 2>/dev/null | head -n 5)"
+    if [[ -n "$mismatches" ]]; then
+        local plugin_sdk host_sdk
+        plugin_sdk="$(sed -nE 's/.*plugin=([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<< "$mismatches" | head -n1)"
+        host_sdk="$(sed -nE 's/.*host=([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<< "$mismatches" | head -n1)"
+        log ""
+        log "       ROOT CAUSE: plugin/host FFI SDK ABI mismatch (plugin=${plugin_sdk:-?}, host=${host_sdk:-?})."
+        log "       The plugins pinned to tag '${DRASI_PLUGIN_TAG:-<none>}' were built from a different"
+        log "       drasi-core commit than the server links${DRASI_CORE_REF:+ (core ref: $DRASI_CORE_REF)}."
+        log "       Fix: republish that plugin tag from the same drasi-core commit"
+        log "       (or point DRASI_CORE_REF / DRASI_PLUGIN_TAG at matching revisions)."
+        printf '%s\n' "$mismatches" | sed 's/^/[dyn]         /'
+        return 4
+    fi
+
     log "       On darwin-arm64 provide locally-built plugins next to the binary"
     log "       (bin/plugins/*.dylib), or run on a Linux x86_64 host/CI."
     return 3

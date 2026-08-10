@@ -83,12 +83,13 @@ jobs:
       - name: Evaluate core nightly freshness
         id: check
         env:
-          CORE_REPO: ${{ inputs.drasi_core_repo || env.DEFAULT_CORE_REPO }}
+          CORE_REPO: ${{ inputs.drasi_core_repo }}
           FORCE: ${{ inputs.force }}
           IN_VARIANTS: ${{ inputs.variants }}
         run: |
           set -euo pipefail
 
+          CORE_REPO="${CORE_REPO:-$DEFAULT_CORE_REPO}"
           variants_raw="${IN_VARIANTS:-$DEFAULT_VARIANTS}"
           read -r -a variant_arr <<< "${variants_raw//,/ }"
           variants_json="$(printf '%s\n' "${variant_arr[@]}" | jq -R . | jq -sc 'map(select(length > 0))')"
@@ -148,14 +149,37 @@ jobs:
         variant: ${{ fromJSON(needs.gate.outputs.variants) }}
     env:
       VARIANT: ${{ matrix.variant }}
-      DRASI_REPO: ${{ inputs.drasi_server_repo || env.DEFAULT_SERVER_REPO }}
-      DRASI_SERVER_REF: ${{ inputs.drasi_server_ref || env.DEFAULT_SERVER_REF }}
-      DRASI_CORE_REPO: ${{ inputs.drasi_core_repo || env.DEFAULT_CORE_REPO }}
-      DRASI_CORE_REF: ${{ inputs.drasi_core_ref || env.DEFAULT_CORE_REF }}
-      DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag || env.DEFAULT_PLUGIN_TAG }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Resolve nightly inputs
+        env:
+          IN_SERVER_REPO: ${{ inputs.drasi_server_repo }}
+          IN_SERVER_REF: ${{ inputs.drasi_server_ref }}
+          IN_CORE_REPO: ${{ inputs.drasi_core_repo }}
+          IN_CORE_REF: ${{ inputs.drasi_core_ref }}
+          IN_PLUGIN_TAG: ${{ inputs.plugin_tag }}
+          IN_BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
+          IN_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        run: |
+          set -euo pipefail
+          bootstrap_size="${IN_BOOTSTRAP_SIZE:-$DEFAULT_BOOTSTRAP_SIZE}"
+          timeout_minutes="${IN_TIMEOUT_MINUTES:-$DEFAULT_TIMEOUT_MINUTES}"
+          [[ "$bootstrap_size" == "off" ]] && bootstrap_size=""
+          if [[ ! "$timeout_minutes" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid timeout_minutes: $timeout_minutes" >&2
+            exit 1
+          fi
+          {
+            echo "DRASI_REPO=${IN_SERVER_REPO:-$DEFAULT_SERVER_REPO}"
+            echo "DRASI_SERVER_REF=${IN_SERVER_REF:-$DEFAULT_SERVER_REF}"
+            echo "DRASI_CORE_REPO=${IN_CORE_REPO:-$DEFAULT_CORE_REPO}"
+            echo "DRASI_CORE_REF=${IN_CORE_REF:-$DEFAULT_CORE_REF}"
+            echo "DRASI_PLUGIN_TAG=${IN_PLUGIN_TAG:-$DEFAULT_PLUGIN_TAG}"
+            echo "BOOTSTRAP_SIZE=$bootstrap_size"
+            echo "TIMEOUT_SECS=$(( timeout_minutes * 60 ))"
+          } >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -174,11 +198,6 @@ jobs:
 
       - name: Set JQ_LIB_DIR
         run: echo "JQ_LIB_DIR=$(dirname "$(find /usr/lib -name 'libjq.so' | head -1)")" >> "$GITHUB_ENV"
-
-      - name: Compute timeout
-        run: |
-          mins="${{ inputs.timeout_minutes || env.DEFAULT_TIMEOUT_MINUTES }}"
-          echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
 
       - name: Resolve variant
         run: |
@@ -212,7 +231,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
           WORK_DIR: ${{ runner.temp }}/ci_work
-          BOOTSTRAP_SIZE: ${{ (inputs.bootstrap_size || env.DEFAULT_BOOTSTRAP_SIZE) == 'off' && '' || (inputs.bootstrap_size || env.DEFAULT_BOOTSTRAP_SIZE) }}
         run: bash "$RUN_SCRIPT"
 
       - name: Upload artifacts

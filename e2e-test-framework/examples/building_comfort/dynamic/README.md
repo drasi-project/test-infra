@@ -143,26 +143,28 @@ number of records the query emits during bootstrap:
 
 - `building-comfort` (`MATCH (r:Room)`) emits **one result per room**, so
   `K = rooms`.
-- `building-comfort-floor-agg` (per-floor aggregate) emits per floor, so
-  `K = floors` (approximate — override with `BOOTSTRAP_K_AGG` to pin a
-  calibrated value).
+- `building-comfort-floor-agg` (per-floor aggregate) re-emits its floor's
+  aggregate once per `FLOOR_ROOM` relation added during bootstrap — i.e. once
+  per room as it joins its floor — so its bootstrap output equals the room
+  count, `K = rooms` (override with `BOOTSTRAP_K_AGG`).
 
 The logger reports separate `bootstrap` and `steady_state` blocks
 (duration + records/sec) in its metrics JSON, surfaced in the workflow's
 **Throughput** summary table.
 
-### Rooms-only (default)
+### Rooms-only (opt-in)
 
-Bootstrap presets currently run **only the per-room `building-comfort`
-query/reaction** (`BOOTSTRAP_ROOMS_ONLY=true`, the default); the floor-aggregate
-is dropped. Reason: the aggregate reaction emits **incrementally during
-bootstrap** and reaches its stop count *mid-bootstrap*, which stops it draining
-and backpressures the still-dispatching source. Because the test-service binds
-its REST port only **after** source auto-start, that stall prevents the run from
-ever becoming reachable. The per-room reaction's stop count sits above the
-bootstrap count, so it keeps draining throughout bootstrap and avoids this.
-Re-enabling the aggregate (`BOOTSTRAP_ROOMS_ONLY=false`) is deferred until the
-backpressure / startup-ordering issues are addressed (follow-up).
+By default both queries run during bootstrap. The floor aggregate re-emits its
+floor's aggregate once per `FLOOR_ROOM` relation, so its bootstrap output equals
+the **room** count (not the floor count); the stop trigger is calibrated to
+`K = rooms` so it stays above the bootstrap output and keeps draining throughout
+bootstrap. (An earlier `K = floors` mis-calibration stopped it *mid-bootstrap*,
+which backpressured the still-dispatching shared source and hung the run — that
+was why rooms-only used to be the default.)
+
+Set `BOOTSTRAP_ROOMS_ONLY=true` to run **only** the per-room `building-comfort`
+query/reaction and drop the floor-aggregate — useful for isolating the per-room
+path.
 
 After bootstrap the driver runs the full steady-state workload
 (`BOOTSTRAP_CHANGE_COUNT` **steady** changes, default **100000**). Note the

@@ -154,11 +154,7 @@ jobs:
     # (seconds)" below). Checkout + Rust toolchain + cargo build + drasi-server
     # download + component setup can themselves take a large chunk of this
     # budget, so it must comfortably exceed setup time + the actual test run.
-    # Bumped from 60 -> 120: a 60-min cap silently killed a BOOTSTRAP_SIZE=1m
-    # run right as test-service started (plain "Terminated" == SIGTERM, i.e.
-    # the job's own timeout firing, not an app error or OOM SIGKILL) because
-    # setup steps alone had already consumed most of the 60 minutes.
-    timeout-minutes: 120
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

@@ -1,0 +1,293 @@
+# Manual building-comfort performance run on the Azure self-hosted profile.
+
+name: Building comfort Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: "Comma/space-separated variants."
+        required: false
+        default: "http_standard grpc_standard"
+      drasi_server_repo:
+        description: "drasi-server repository to build (owner/name)."
+        required: false
+        default: "drasi-project/drasi-server"
+      drasi_server_ref:
+        description: "drasi-server branch/tag/SHA to build."
+        required: false
+        default: "main"
+      drasi_core_repo:
+        description: "drasi-core repository used by the Cargo patch (owner/name)."
+        required: false
+        default: "drasi-project/drasi-core"
+      drasi_core_ref:
+        description: "drasi-core branch used by the Cargo patch."
+        required: false
+        default: "main"
+      plugin_tag:
+        description: "OCI tag applied to every plugin reference."
+        required: false
+        default: "drasi-nightly-test"
+      bootstrap_size:
+        description: "Large-bootstrap performance preset."
+        type: choice
+        options:
+          - "off"
+          - 10k
+          - 100k
+          - 1m
+        default: 10k
+      timeout_minutes:
+        description: "Maximum minutes to wait for each test."
+        required: false
+        default: "45"
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_VARIANTS: "http_standard grpc_standard"
+  DEFAULT_SERVER_REPO: "drasi-project/drasi-server"
+  DEFAULT_SERVER_REF: "main"
+  DEFAULT_CORE_REPO: "drasi-project/drasi-core"
+  DEFAULT_CORE_REF: "main"
+  DEFAULT_PLUGIN_TAG: "drasi-nightly-test"
+  DEFAULT_BOOTSTRAP_SIZE: "10k"
+  DEFAULT_TIMEOUT_MINUTES: "45"
+  PERF_PROFILE_ID: azure-baseline-v1
+  PERF_WORK_BASE: /mnt/drasi-perf
+
+jobs:
+  resolve:
+    name: Resolve inputs
+    runs-on: ubuntu-latest
+    outputs:
+      variants: ${{ steps.resolve.outputs.variants }}
+    steps:
+      - name: Resolve variant matrix
+        id: resolve
+        env:
+          IN_VARIANTS: ${{ inputs.variants }}
+        run: |
+          set -euo pipefail
+
+          variants_raw="${IN_VARIANTS:-$DEFAULT_VARIANTS}"
+          read -r -a variant_arr <<< "${variants_raw//,/ }"
+          variants_json="$(printf '%s\n' "${variant_arr[@]}" | jq -R . | jq -sc 'map(select(length > 0))')"
+
+          if [[ "$variants_json" == "[]" ]]; then
+            echo "At least one variant is required." >&2
+            exit 1
+          fi
+
+          echo "variants=$variants_json" >> "$GITHUB_OUTPUT"
+          echo "Variants: $variants_json"
+
+  building-comfort-azure:
+    name: azure-baseline-v1 / ${{ matrix.variant }}
+    needs: resolve
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - drasi-perf
+      - azure-baseline-v1
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.resolve.outputs.variants) }}
+    env:
+      VARIANT: ${{ matrix.variant }}
+      PERF_WORK_ROOT: /mnt/drasi-perf/building-comfort-azure/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.variant }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve run inputs
+        env:
+          IN_SERVER_REPO: ${{ inputs.drasi_server_repo }}
+          IN_SERVER_REF: ${{ inputs.drasi_server_ref }}
+          IN_CORE_REPO: ${{ inputs.drasi_core_repo }}
+          IN_CORE_REF: ${{ inputs.drasi_core_ref }}
+          IN_PLUGIN_TAG: ${{ inputs.plugin_tag }}
+          IN_BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
+          IN_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        run: |
+          set -euo pipefail
+
+          bootstrap_size="${IN_BOOTSTRAP_SIZE:-$DEFAULT_BOOTSTRAP_SIZE}"
+          timeout_minutes="${IN_TIMEOUT_MINUTES:-$DEFAULT_TIMEOUT_MINUTES}"
+          [[ "$bootstrap_size" == "off" ]] && bootstrap_size=""
+
+          if [[ ! "$timeout_minutes" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid timeout_minutes: $timeout_minutes" >&2
+            exit 1
+          fi
+
+          {
+            echo "DRASI_REPO=${IN_SERVER_REPO:-$DEFAULT_SERVER_REPO}"
+            echo "DRASI_SERVER_REF=${IN_SERVER_REF:-$DEFAULT_SERVER_REF}"
+            echo "DRASI_CORE_REPO=${IN_CORE_REPO:-$DEFAULT_CORE_REPO}"
+            echo "DRASI_CORE_REF=${IN_CORE_REF:-$DEFAULT_CORE_REF}"
+            echo "DRASI_PLUGIN_TAG=${IN_PLUGIN_TAG:-$DEFAULT_PLUGIN_TAG}"
+            echo "BOOTSTRAP_SIZE=$bootstrap_size"
+            echo "TIMEOUT_SECS=$(( timeout_minutes * 60 ))"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: e2e-test-framework
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            jq curl build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+            libprotobuf-dev protobuf-compiler cmake clang libclang-dev lsof
+
+      - name: Set JQ_LIB_DIR
+        run: echo "JQ_LIB_DIR=$(dirname "$(find /usr/lib -name 'libjq.so' | head -1)")" >> "$GITHUB_ENV"
+
+      - name: Preflight Azure runner
+        env:
+          ARTIFACTS_DIR: ${{ env.PERF_WORK_ROOT }}/artifacts
+          WORK_DIR: ${{ env.PERF_WORK_ROOT }}/ci_work
+        run: |
+          set -euo pipefail
+
+          expected_cpus=4
+          min_mem_kb=$((14 * 1024 * 1024))
+
+          actual_cpus="$(nproc)"
+          mem_total_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+
+          if [[ "$actual_cpus" -ne "$expected_cpus" ]]; then
+            echo "Expected $expected_cpus CPUs for $PERF_PROFILE_ID, found $actual_cpus" >&2
+            exit 1
+          fi
+          if [[ "$mem_total_kb" -lt "$min_mem_kb" ]]; then
+            echo "Expected at least ${min_mem_kb}KB memory for $PERF_PROFILE_ID, found ${mem_total_kb}KB" >&2
+            exit 1
+          fi
+          if [[ ! -d "$PERF_WORK_BASE" || ! -w "$PERF_WORK_BASE" ]]; then
+            echo "Expected writable work directory at $PERF_WORK_BASE for $PERF_PROFILE_ID" >&2
+            exit 1
+          fi
+
+          mkdir -p "$ARTIFACTS_DIR" "$WORK_DIR"
+
+          jq -n \
+            --arg profile_id "$PERF_PROFILE_ID" \
+            --arg variant "$VARIANT" \
+            --arg runner_name "$RUNNER_NAME" \
+            --arg runner_os "$RUNNER_OS" \
+            --arg runner_arch "$RUNNER_ARCH" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow_sha "$GITHUB_SHA" \
+            --arg drasi_repo "$DRASI_REPO" \
+            --arg drasi_server_ref "$DRASI_SERVER_REF" \
+            --arg drasi_core_repo "$DRASI_CORE_REPO" \
+            --arg drasi_core_ref "$DRASI_CORE_REF" \
+            --arg bootstrap_size "$BOOTSTRAP_SIZE" \
+            --arg timestamp "$(date -u +%FT%TZ)" \
+            --arg kernel "$(uname -srmo)" \
+            --arg os_release "$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')" \
+            --argjson cpu_count "$actual_cpus" \
+            --argjson mem_total_kb "$mem_total_kb" \
+            --arg df_json "$(df -P -k "$PERF_WORK_BASE" | awk 'NR==2 {printf "{\"filesystem\":\"%s\",\"size_kb\":%s,\"used_kb\":%s,\"available_kb\":%s,\"mount\":\"%s\"}", $1, $2, $3, $4, $6}')" \
+            '{
+              profile_id: $profile_id,
+              variant: $variant,
+              timestamp: $timestamp,
+              github: {
+                repository: $repository,
+                workflow_sha: $workflow_sha,
+                run_id: $run_id,
+                run_attempt: $run_attempt
+              },
+              runner: {
+                name: $runner_name,
+                os: $runner_os,
+                arch: $runner_arch
+              },
+              workload: {
+                drasi_repo: $drasi_repo,
+                drasi_server_ref: $drasi_server_ref,
+                drasi_core_repo: $drasi_core_repo,
+                drasi_core_ref: $drasi_core_ref,
+                bootstrap_size: $bootstrap_size
+              },
+              observed: {
+                kernel: $kernel,
+                os_release: $os_release,
+                cpu_count: $cpu_count,
+                mem_total_kb: $mem_total_kb,
+                work_filesystem: ($df_json | fromjson)
+              }
+            }' > "$ARTIFACTS_DIR/run-metadata.json"
+
+          echo "Azure runner metadata:"
+          jq '.' "$ARTIFACTS_DIR/run-metadata.json"
+
+      - name: Resolve variant
+        run: |
+          DD="e2e-test-framework/examples/building_comfort/dynamic"
+          echo "RUN_SCRIPT=$DD/run_dynamic.sh" >> "$GITHUB_ENV"
+          echo "SERVER_QUERIES_FILE=queries.json" >> "$GITHUB_ENV"
+          case "$VARIANT" in
+            http_standard)
+              echo "SERVER_SOURCE_FILE=source_http.json" >> "$GITHUB_ENV"
+              echo "SERVER_REACTIONS_FILE=reactions_http.json" >> "$GITHUB_ENV"
+              echo "DRASI_SOURCE_PORT=9000" >> "$GITHUB_ENV"
+              echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
+              ;;
+            grpc_standard)
+              echo "SERVER_SOURCE_FILE=source_grpc.json" >> "$GITHUB_ENV"
+              echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
+              echo "DRASI_SOURCE_PORT=50051" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Unsupported building comfort Azure variant: $VARIANT" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Build test-service
+        working-directory: e2e-test-framework
+        run: cargo build --release --manifest-path test-service/Cargo.toml
+
+      - name: Run test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACTS_DIR: ${{ env.PERF_WORK_ROOT }}/artifacts
+          WORK_DIR: ${{ env.PERF_WORK_ROOT }}/ci_work
+        run: bash "$RUN_SCRIPT"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: building-comfort-azure-${{ env.PERF_PROFILE_ID }}-${{ matrix.variant }}
+          path: ${{ env.PERF_WORK_ROOT }}/artifacts
+          if-no-files-found: warn
+
+      - name: Cleanup Azure runner workspace
+        if: always()
+        run: |
+          set +e
+          for port in 8090 9000 50051 63123; do
+            pids="$(lsof -ti "tcp:$port" 2>/dev/null || true)"
+            for pid in $pids; do
+              echo "Stopping stale process on port $port (pid=$pid)"
+              kill "$pid" 2>/dev/null || true
+            done
+          done
+          rm -rf "$PERF_WORK_ROOT"

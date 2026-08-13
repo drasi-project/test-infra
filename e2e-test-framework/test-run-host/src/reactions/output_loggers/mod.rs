@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub use console_logger::{ConsoleOutputLogger, ConsoleOutputLoggerConfig};
+pub use determinism_hash_logger::{DeterminismHashOutputLogger, DeterminismHashOutputLoggerConfig};
 pub use jsonl_file_logger::{JsonlFileOutputLogger, JsonlFileOutputLoggerConfig};
 pub use performance_metrics_logger::{
     PerformanceMetricsOutputLogger, PerformanceMetricsOutputLoggerConfig,
@@ -27,6 +28,7 @@ use test_data_store::test_run_storage::{TestRunReactionId, TestRunReactionStorag
 use crate::common::HandlerRecord;
 
 pub mod console_logger;
+pub mod determinism_hash_logger;
 pub mod jsonl_file_logger;
 pub mod performance_metrics_logger;
 
@@ -34,6 +36,7 @@ pub mod performance_metrics_logger;
 #[serde(tag = "kind")]
 pub enum OutputLoggerConfig {
     Console(ConsoleOutputLoggerConfig),
+    DeterminismHash(DeterminismHashOutputLoggerConfig),
     JsonlFile(JsonlFileOutputLoggerConfig),
     PerformanceMetrics(PerformanceMetricsOutputLoggerConfig),
 }
@@ -58,6 +61,11 @@ pub struct OutputLoggerResult {
     pub has_output: bool,
     pub logger_name: String,
     pub output_folder_path: Option<PathBuf>,
+    /// Free-form per-logger summary made available to completion handlers via
+    /// the test-service reaction-state API. `None` for loggers that don't
+    /// publish a structured summary (e.g. `Console`, `JsonlFile`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<serde_json::Value>,
 }
 
 #[async_trait]
@@ -84,6 +92,9 @@ pub async fn create_output_logger(
     log::info!("create_output_logger called for {test_run_reaction_id} with config: {config:?}");
     match config {
         OutputLoggerConfig::Console(cfg) => ConsoleOutputLogger::new(test_run_reaction_id, cfg),
+        OutputLoggerConfig::DeterminismHash(cfg) => {
+            DeterminismHashOutputLogger::new(test_run_reaction_id, cfg)
+        }
         OutputLoggerConfig::JsonlFile(cfg) => {
             JsonlFileOutputLogger::new(test_run_reaction_id, cfg, output_storage).await
         }

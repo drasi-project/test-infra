@@ -18,13 +18,19 @@
 //! of component completion states. They can perform actions like logging
 //! results, uploading files, sending notifications, or terminating services.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
+
+use test_data_store::{test_run_storage::TestRunId, TestDataStore};
 
 use super::types::ComponentCompletionSummary;
 
 pub mod log;
+pub mod sha256_determinism;
 
 pub use log::LogCompletionHandler;
+pub use sha256_determinism::Sha256DeterminismCompletionHandler;
 
 /// Trait for handlers that execute when a TestRun completes.
 #[async_trait]
@@ -47,20 +53,24 @@ pub trait CompletionHandler: Send + Sync {
 
 /// Create a completion handler from a test definition.
 ///
-/// Completion handlers are defined in the test definition (like stop triggers)
-/// because they define how the test completes - they're intrinsic to the test itself.
-///
-/// # MVP Implementation
-/// Currently only supports LogCompletionHandler. Future handlers will be
-/// added as additional enum variants are implemented.
+/// Handlers are constructed once per TestRun when the run is added to the
+/// host. The factory receives the test-data store and the run id so handlers
+/// that need to write artifacts (verdict files, etc.) can resolve their own
+/// storage paths without being passed a back-reference to the host.
 pub fn create_completion_handler(
     config: &test_data_store::test_repo_storage::models::CompletionHandlerDefinition,
+    data_store: Arc<TestDataStore>,
+    test_run_id: TestRunId,
 ) -> anyhow::Result<Box<dyn CompletionHandler>> {
     use test_data_store::test_repo_storage::models::CompletionHandlerDefinition;
 
     match config {
         CompletionHandlerDefinition::Log(log_config) => {
+            let _ = (&data_store, &test_run_id);
             Ok(Box::new(LogCompletionHandler::new(log_config)))
         }
+        CompletionHandlerDefinition::Sha256Determinism(cfg) => Ok(Box::new(
+            Sha256DeterminismCompletionHandler::new(cfg, data_store, test_run_id),
+        )),
     }
 }

@@ -26,8 +26,8 @@ pub mod drasi {
 }
 
 use drasi::v1::{
-    ChangeType, Element, ElementMetadata, ElementReference, Node, QueryResult, Relation,
-    SourceChange,
+    ChangeType, Element, ElementMetadata, ElementReference, Node, QueryResult, QueryResultItemType,
+    Relation, SourceChange,
 };
 
 /// Convert a test framework SourceChangeEvent to Drasi SourceChange
@@ -57,9 +57,16 @@ pub fn convert_to_drasi_source_change(
     // Handle different change types
     match change_type {
         ChangeType::Delete => {
-            // For delete, we only need metadata
-            if let Some(after_obj) = event.payload.after.as_object() {
-                let element_id = after_obj
+            // CDC-style deletes carry the prior state in `before`; some test
+            // generators put it in `after`. Accept either so we always have
+            // labels + id to send drasi-server's metadata-only delete event.
+            let obj = event
+                .payload
+                .before
+                .as_object()
+                .or_else(|| event.payload.after.as_object());
+            if let Some(obj) = obj {
+                let element_id = obj
                     .get("id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
@@ -70,7 +77,7 @@ pub fn convert_to_drasi_source_change(
                         source_id: source_id.to_string(),
                         element_id,
                     }),
-                    labels: extract_labels(after_obj),
+                    labels: extract_labels(obj),
                     effective_from: event.payload.source.ts_ns,
                 };
 
@@ -114,20 +121,40 @@ fn create_element_from_json(
         effective_from: event.payload.source.ts_ns,
     };
 
-    // Check if this is a relationship (has startId and endId)
+    // Check if this is a relationship (has start/end endpoints). Accept both
+    // the camelCase keys used by some clients and the snake_case keys used by
+    // the test framework's script source / RelationRecord serialization.
     if let (Some(start_id), Some(end_id)) = (
-        obj.get("startId").and_then(|v| v.as_str()),
-        obj.get("endId").and_then(|v| v.as_str()),
+        obj.get("startId")
+            .or_else(|| obj.get("start_id"))
+            .and_then(|v| v.as_str()),
+        obj.get("endId")
+            .or_else(|| obj.get("end_id"))
+            .and_then(|v| v.as_str()),
     ) {
+        // Optional cross-source endpoints: each side may live in a different
+        // source. When the key is absent, fall back to the dispatcher's own
+        // source_id (the in-source case).
+        let start_source = obj
+            .get("startSourceId")
+            .or_else(|| obj.get("start_source_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(source_id);
+        let end_source = obj
+            .get("endSourceId")
+            .or_else(|| obj.get("end_source_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(source_id);
+
         // This is a Relation
         let relation = Relation {
             metadata: Some(metadata),
             in_node: Some(ElementReference {
-                source_id: source_id.to_string(),
+                source_id: start_source.to_string(),
                 element_id: start_id.to_string(),
             }),
             out_node: Some(ElementReference {
-                source_id: source_id.to_string(),
+                source_id: end_source.to_string(),
                 element_id: end_id.to_string(),
             }),
             properties: Some(properties),
@@ -180,7 +207,13 @@ fn extract_properties(obj: &Map<String, JsonValue>) -> Result<Struct> {
             if key == "id"
                 || key == "labels"
                 || key == "startId"
+                || key == "start_id"
                 || key == "endId"
+                || key == "end_id"
+                || key == "startSourceId"
+                || key == "start_source_id"
+                || key == "endSourceId"
+                || key == "end_source_id"
                 || key == "properties"
             {
                 continue;
@@ -248,26 +281,24 @@ pub fn convert_from_drasi_query_result(result: QueryResult) -> Result<Vec<JsonVa
     for item in result.results {
         let mut json_obj = Map::new();
 
-        // Set the change type
-        json_obj.insert("type".to_string(), JsonValue::String(item.r#type.clone()));
+        // Map the operation enum to a string ("ADD" / "UPDATE" / "DELETE").
+        let type_str = match QueryResultItemType::from_i32(item.item_type) {
+            Some(QueryResultItemType::Add) => "ADD",
+            Some(QueryResultItemType::Update) => "UPDATE",
+            Some(QueryResultItemType::Delete) => "DELETE",
+            _ => "UNSPECIFIED",
+        };
+        json_obj.insert("type".to_string(), JsonValue::String(type_str.to_string()));
 
-        // Add data fields
-        if let Some(data) = item.data {
-            if let Some(obj) = proto_struct_to_json(&data)?.as_object() {
-                for (k, v) in obj {
-                    json_obj.insert(k.clone(), v.clone());
-                }
-            }
+        // Raw row state carried on either side of the change:
+        //   ADD    -> only `after`
+        //   DELETE -> only `before`
+        //   UPDATE -> both
+        if let Some(before) = item.before {
+            json_obj.insert("before".to_string(), proto_struct_to_json(&before)?);
         }
-
-        // For UPDATE, add before and after
-        if item.r#type == "UPDATE" {
-            if let Some(before) = item.before {
-                json_obj.insert("before".to_string(), proto_struct_to_json(&before)?);
-            }
-            if let Some(after) = item.after {
-                json_obj.insert("after".to_string(), proto_struct_to_json(&after)?);
-            }
+        if let Some(after) = item.after {
+            json_obj.insert("after".to_string(), proto_struct_to_json(&after)?);
         }
 
         output.push(JsonValue::Object(json_obj));

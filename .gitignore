@@ -16,3 +16,7 @@ Cargo.lock
 
 # AI plans files
 .plans/
+
+# Local-runner scratch dirs produced by examples/*/local/*/run_test*.sh
+# (downloaded drasi-server binary + plugins, ad-hoc artifacts)
+.local_run/

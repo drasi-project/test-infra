@@ -210,6 +210,7 @@ impl ComponentStateTracker {
             reactions_stopped: 0,
             reactions_error: 0,
             component_finish_times: self.finish_times.clone(),
+            reaction_logger_outputs: HashMap::new(),
         };
 
         for state in self.drasi_lib_instances.values() {

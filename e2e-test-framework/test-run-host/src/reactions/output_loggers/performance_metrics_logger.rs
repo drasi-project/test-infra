@@ -232,6 +232,7 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
             has_output: true,
             logger_name: "PerformanceMetrics".to_string(),
             output_folder_path: Some(output_folder),
+            summary: None,
         })
     }
 }

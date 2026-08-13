@@ -14,6 +14,10 @@
 
 use std::collections::HashMap;
 
+use test_data_store::test_run_storage::TestRunReactionId;
+
+use crate::reactions::output_loggers::OutputLoggerResult;
+
 /// State of a DrasiLibInstance component.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DrasiLibInstanceState {
@@ -65,6 +69,11 @@ pub struct ComponentCompletionSummary {
     pub reactions_error: usize,
     /// Component ID -> timestamp when it finished/stopped/errored
     pub component_finish_times: HashMap<String, u64>,
+    /// Per-reaction snapshot of `OutputLoggerResult`s observed at completion
+    /// time. Populated by the TestRun monitoring task before invoking handlers
+    /// so that handlers (e.g. `Sha256Determinism`) can read each reaction's
+    /// logger summaries without holding a reference to the host.
+    pub reaction_logger_outputs: HashMap<TestRunReactionId, Vec<OutputLoggerResult>>,
 }
 
 impl ComponentCompletionSummary {

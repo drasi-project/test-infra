@@ -73,6 +73,7 @@ impl OutputLogger for ConsoleOutputLogger {
             has_output: false,
             logger_name: "Console".to_string(),
             output_folder_path: None,
+            summary: None,
         })
     }
 

@@ -1,0 +1,222 @@
+# Scheduled E2E tests for the building_comfort scenario, run against an
+# external drasi-server over multiple transports (HTTP, gRPC) and also
+# against an embedded drasi-lib instance (in-process inside the
+# test-service crate).
+#
+# Each test pattern lives in its own example folder and exposes a
+# `run_test_ci.sh` that orchestrates the run and writes artifacts to
+# $ARTIFACTS_DIR. This workflow just sets env vars and invokes that
+# script. To add another pattern, copy one of the jobs and point WORKDIR
+# at the new example folder.
+
+name: E2E - building_comfort
+
+on:
+  workflow_dispatch:
+    inputs:
+      drasi_server_version:
+        description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
+        required: false
+        default: ""
+      timeout_minutes:
+        description: "Max minutes to wait for the test to finish."
+        required: false
+        default: "30"
+  schedule:
+    # 07:00 UTC daily.
+    - cron: "0 7 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  building-comfort-drasi-server-http:
+    name: building_comfort / drasi_server_http
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_server_http
+      DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
+      # Determinism baselines live inline in $WORKDIR/config.json under the
+      # Sha256Determinism completion handler's `expected` map. The framework
+      # flips the test-run status to Error on mismatch; the runner script
+      # surfaces that via the test-service REST API.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: e2e-test-framework
+
+      - name: Install runtime deps (jq, curl)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl
+
+      # test-run-host enables drasi-core's `middleware-jq` feature, which
+      # pulls in jq-sys; jq-sys links against the system libjq + libonig.
+      # Mirror lint.yml / drasi-server's Dockerfile.
+      - name: Install build deps for libjq
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+            libprotobuf-dev protobuf-compiler cmake clang libclang-dev
+
+      - name: Set JQ_LIB_DIR
+        run: echo "JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1))" >> "$GITHUB_ENV"
+
+      - name: Compute timeout (seconds)
+        run: |
+          mins="${{ inputs.timeout_minutes }}"
+          [[ -z "$mins" ]] && mins=30
+          echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
+
+      - name: Build test-service
+        working-directory: e2e-test-framework
+        run: cargo build --release --manifest-path test-service/Cargo.toml
+
+      - name: Run scheduled test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
+          WORK_DIR: ${{ runner.temp }}/ci_work
+        run: bash "${WORKDIR}/run_test_ci.sh"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: building_comfort-drasi_server_http
+          path: ${{ runner.temp }}/artifacts
+          if-no-files-found: warn
+
+  building-comfort-drasi-server-grpc:
+    name: building_comfort / drasi_server_grpc
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_server_grpc
+      DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
+      # Determinism baselines live inline in $WORKDIR/config.json under the
+      # Sha256Determinism completion handler's `expected` map. First run
+      # uses missing_baseline=Warn so the framework just logs the actual
+      # SHAs; lock them in by copying into `expected` and flipping the
+      # policy to Fail.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: e2e-test-framework
+
+      - name: Install runtime deps (jq, curl)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl
+
+      # test-run-host enables drasi-core's `middleware-jq` feature, which
+      # pulls in jq-sys; jq-sys links against the system libjq + libonig.
+      # Mirror lint.yml / drasi-server's Dockerfile.
+      - name: Install build deps for libjq
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+            libprotobuf-dev protobuf-compiler cmake clang libclang-dev
+
+      - name: Set JQ_LIB_DIR
+        run: echo "JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1))" >> "$GITHUB_ENV"
+
+      - name: Compute timeout (seconds)
+        run: |
+          mins="${{ inputs.timeout_minutes }}"
+          [[ -z "$mins" ]] && mins=30
+          echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
+
+      - name: Build test-service
+        working-directory: e2e-test-framework
+        run: cargo build --release --manifest-path test-service/Cargo.toml
+
+      - name: Run scheduled test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
+          WORK_DIR: ${{ runner.temp }}/ci_work
+        run: bash "${WORKDIR}/run_test_ci.sh"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: building_comfort-drasi_server_grpc
+          path: ${{ runner.temp }}/artifacts
+          if-no-files-found: warn
+
+  building-comfort-drasi-lib:
+    name: building_comfort / drasi_lib
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      WORKDIR: e2e-test-framework/examples/building_comfort/ci/drasi_lib
+      # No external drasi-server: drasi-lib runs in-process inside the
+      # test-service crate, so we skip the download/version inputs.
+      # Determinism baselines live inline in $WORKDIR/config.json under the
+      # Sha256Determinism completion handler's `expected` map. First run
+      # uses missing_baseline=Warn so the framework just logs the actual
+      # SHAs; lock them in by copying into `expected` and flipping the
+      # policy to Fail.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: e2e-test-framework
+
+      - name: Install runtime deps (jq, curl)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl
+
+      - name: Install build deps for libjq
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+            libprotobuf-dev protobuf-compiler cmake clang libclang-dev
+
+      - name: Set JQ_LIB_DIR
+        run: echo "JQ_LIB_DIR=$(dirname $(find /usr/lib -name 'libjq.so' | head -1))" >> "$GITHUB_ENV"
+
+      - name: Compute timeout (seconds)
+        run: |
+          mins="${{ inputs.timeout_minutes }}"
+          [[ -z "$mins" ]] && mins=30
+          echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
+
+      - name: Build test-service
+        working-directory: e2e-test-framework
+        run: cargo build --release --manifest-path test-service/Cargo.toml
+
+      - name: Run scheduled test
+        env:
+          ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
+          WORK_DIR: ${{ runner.temp }}/ci_work
+        run: bash "${WORKDIR}/run_test_ci.sh"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: building_comfort-drasi_lib
+          path: ${{ runner.temp }}/artifacts
+          if-no-files-found: warn

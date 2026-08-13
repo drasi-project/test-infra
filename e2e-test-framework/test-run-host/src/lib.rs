@@ -38,8 +38,8 @@ use reactions::{
 };
 use sources::{
     bootstrap_data_generators::BootstrapData, create_test_run_source,
-    source_change_generators::SourceChangeGeneratorCommandResponse, SourceStartMode, TestRunSource,
-    TestRunSourceConfig, TestRunSourceState,
+    source_change_generators::{SourceChangeGeneratorCommandResponse, SourceChangeGeneratorStatus},
+    SourceStartMode, TestRunSource, TestRunSourceConfig, TestRunSourceState,
 };
 use test_data_store::{
     test_repo_storage::models::SpacingMode,
@@ -48,7 +48,9 @@ use test_data_store::{
     },
     TestDataStore,
 };
-use test_run_completion::{create_completion_handler, ComponentStateTracker, LifecycleTx};
+use test_run_completion::{
+    create_completion_handler, ComponentLifecycleEvent, ComponentStateTracker, LifecycleTx,
+};
 
 pub mod common;
 pub mod drasi_lib_instances;
@@ -211,9 +213,13 @@ impl TestRunHost {
                 .completion_handlers
                 .iter()
                 .filter_map(|handler_def| {
-                    create_completion_handler(handler_def)
-                        .inspect_err(|e| log::error!("Failed to create completion handler: {e}"))
-                        .ok()
+                    create_completion_handler(
+                        handler_def,
+                        self.data_store.clone(),
+                        test_run_id.clone(),
+                    )
+                    .inspect_err(|e| log::error!("Failed to create completion handler: {e}"))
+                    .ok()
                 })
                 .collect();
 
@@ -229,6 +235,7 @@ impl TestRunHost {
                 let source_count = config.sources.len();
                 let query_count = config.queries.len();
                 let reaction_count = config.reactions.len();
+                let test_runs_for_task = self.test_runs.clone();
 
                 let task = tokio::spawn(async move {
                     let mut tracker = ComponentStateTracker::new(
@@ -238,20 +245,157 @@ impl TestRunHost {
                         reaction_count,
                     );
 
-                    while let Some(event) = rx.recv().await {
-                        tracker.update(&event);
+                    // Sources don't emit lifecycle events themselves, so the
+                    // monitoring task polls each source's change-generator
+                    // status from the registry and feeds synthetic events into
+                    // the tracker. `last_source_status` dedupes so we only
+                    // push on transitions.
+                    let mut poll_interval =
+                        tokio::time::interval(std::time::Duration::from_millis(500));
+                    poll_interval
+                        .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    let mut last_source_status: HashMap<
+                        TestRunSourceId,
+                        SourceChangeGeneratorStatus,
+                    > = HashMap::new();
+
+                    let now_ns = || {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0)
+                    };
+
+                    loop {
+                        tokio::select! {
+                            biased;
+                            maybe_event = rx.recv() => {
+                                match maybe_event {
+                                    Some(event) => tracker.update(&event),
+                                    None => break,
+                                }
+                            }
+                            _ = poll_interval.tick() => {
+                                let runs = test_runs_for_task.read().await;
+                                if let Some(run) = runs.get(&test_run_id_clone) {
+                                    for (source_id_str, source) in run.sources.iter() {
+                                        let source_id = TestRunSourceId::new(
+                                            &test_run_id_clone,
+                                            source_id_str,
+                                        );
+                                        let status = match source
+                                            .get_source_change_generator_state()
+                                            .await
+                                        {
+                                            Ok(state) => state.status,
+                                            Err(e) => {
+                                                log::debug!(
+                                                    "Failed to poll source {source_id} \
+                                                     generator state: {e}"
+                                                );
+                                                continue;
+                                            }
+                                        };
+                                        if last_source_status.get(&source_id) == Some(&status) {
+                                            continue;
+                                        }
+                                        let event = match status {
+                                            SourceChangeGeneratorStatus::Running
+                                            | SourceChangeGeneratorStatus::Skipping
+                                            | SourceChangeGeneratorStatus::Stepping => {
+                                                ComponentLifecycleEvent::SourceStarted {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                }
+                                            }
+                                            SourceChangeGeneratorStatus::Paused => {
+                                                ComponentLifecycleEvent::SourcePaused {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                }
+                                            }
+                                            SourceChangeGeneratorStatus::Stopped => {
+                                                ComponentLifecycleEvent::SourceStopped {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                }
+                                            }
+                                            SourceChangeGeneratorStatus::Finished => {
+                                                ComponentLifecycleEvent::SourceFinished {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                }
+                                            }
+                                            SourceChangeGeneratorStatus::Error => {
+                                                ComponentLifecycleEvent::SourceError {
+                                                    id: source_id.clone(),
+                                                    timestamp_ns: now_ns(),
+                                                    error: "source change generator entered \
+                                                            Error state"
+                                                        .to_string(),
+                                                }
+                                            }
+                                        };
+                                        tracker.update(&event);
+                                        last_source_status.insert(source_id, status);
+                                    }
+                                }
+                            }
+                        }
 
                         if tracker.all_components_finished() {
-                            let summary = tracker.get_completion_summary();
+                            let mut summary = tracker.get_completion_summary();
                             log::info!("All components finished for TestRun {test_run_id_clone}");
 
-                            // Execute all handlers
+                            // Snapshot each reaction's logger results so handlers
+                            // (e.g. Sha256Determinism) can read them without
+                            // needing a back-reference to the host.
+                            {
+                                let runs = test_runs_for_task.read().await;
+                                if let Some(run) = runs.get(&test_run_id_clone) {
+                                    for (_, reaction) in run.reactions.iter() {
+                                        match reaction.get_reaction_observer_state().await {
+                                            Ok(state) => {
+                                                summary.reaction_logger_outputs.insert(
+                                                    reaction.id.clone(),
+                                                    state.logger_results.clone(),
+                                                );
+                                            }
+                                            Err(e) => {
+                                                log::warn!(
+                                                    "Failed to snapshot logger results for \
+                                                     reaction {}: {e}",
+                                                    reaction.id
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    log::warn!(
+                                        "TestRun {test_run_id_clone} not yet in registry at \
+                                         completion; reaction logger outputs unavailable"
+                                    );
+                                }
+                            }
+
+                            // Execute all handlers, aggregate any errors so we
+                            // can flip TestRunStatus once at the end.
+                            let mut handler_errors: Vec<String> = Vec::new();
                             for handler in &handlers {
                                 if let Err(e) = handler
                                     .handle_completion(&test_run_id_clone.to_string(), &summary)
                                     .await
                                 {
                                     log::error!("Completion handler failed: {e}");
+                                    handler_errors.push(e.to_string());
+                                }
+                            }
+
+                            if !handler_errors.is_empty() {
+                                let msg = handler_errors.join("; ");
+                                let mut runs = test_runs_for_task.write().await;
+                                if let Some(run) = runs.get_mut(&test_run_id_clone) {
+                                    run.status = TestRunStatus::Error(msg);
                                 }
                             }
                             break;

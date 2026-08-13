@@ -59,12 +59,24 @@ message SourceChange {
     string source_id = 5;
 }
 
+// Operation captured by a single QueryResultItem.
+enum QueryResultItemType {
+    QUERY_RESULT_ITEM_TYPE_UNSPECIFIED = 0;
+    QUERY_RESULT_ITEM_TYPE_ADD = 1;
+    QUERY_RESULT_ITEM_TYPE_UPDATE = 2;
+    QUERY_RESULT_ITEM_TYPE_DELETE = 3;
+}
+
 // Query result item
 message QueryResultItem {
-    string type = 1; // "ADD", "UPDATE", "DELETE"
-    google.protobuf.Struct data = 2;
-    google.protobuf.Struct before = 3; // For UPDATE
-    google.protobuf.Struct after = 4; // For UPDATE
+    QueryResultItemType item_type = 1;
+    uint64 row_signature = 2;
+    google.protobuf.Struct before = 3; // Raw row state before the change (DELETE/UPDATE)
+    google.protobuf.Struct after = 4; // Raw row state after the change (ADD/UPDATE)
+    uint64 sequence = 5;
+    google.protobuf.Timestamp timestamp = 6;
+    google.protobuf.Struct metadata = 7;
+    google.protobuf.Struct payload = 8; // Canonical or templated payload
 }
 
 // Query result batch

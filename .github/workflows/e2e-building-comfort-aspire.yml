@@ -1,0 +1,91 @@
+name: E2E - building_comfort Aspire POC
+
+on:
+  workflow_dispatch:
+    inputs:
+      drasi_server_image:
+        description: "Optional Drasi Server image to run. Empty builds the Aspire POC release-binary image."
+        required: false
+        default: ""
+      timeout_minutes:
+        description: "Maximum time to wait for the one-shot runner"
+        required: false
+        default: "45"
+
+permissions:
+  contents: read
+
+jobs:
+  building-comfort-aspire:
+    name: building_comfort / aspire grpc_standard
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install Aspire CLI
+        run: |
+          dotnet tool install -g Aspire.Cli
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Show Aspire version
+        run: aspire --version
+
+      - name: Run Aspire AppHost
+        id: aspire
+        env:
+          DRASI_SERVER_IMAGE: ${{ inputs.drasi_server_image }}
+        run: |
+          aspire run \
+            --apphost aspire/Drasi.E2E.AppHost/Drasi.E2E.AppHost.csproj \
+            --detach \
+            --format Json \
+            --non-interactive \
+            | tee "$RUNNER_TEMP/aspire-run.json"
+
+      - name: Wait for e2e runner
+        env:
+          TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        run: |
+          set -euo pipefail
+          timeout_secs=$(( TIMEOUT_MINUTES * 60 ))
+          deadline=$(( $(date +%s) + timeout_secs ))
+          runner_id=""
+
+          echo "Waiting for Aspire to create the e2e-runner container..."
+          while [[ -z "$runner_id" ]]; do
+            runner_id="$(docker ps -a --filter "name=e2e-runner" --format '{{.ID}}' | head -n 1)"
+            if (( $(date +%s) >= deadline )); then
+              echo "Timed out waiting for e2e-runner container" >&2
+              docker ps -a
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "Waiting for e2e-runner container $runner_id to finish..."
+          exit_code="$(docker wait "$runner_id")"
+          docker logs "$runner_id"
+          if [[ "$exit_code" != "0" ]]; then
+            echo "e2e-runner exited with code $exit_code" >&2
+            exit "$exit_code"
+          fi
+
+      - name: Stop Aspire AppHost
+        if: always()
+        run: aspire stop --all || true
+
+      - name: Upload Aspire artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: building-comfort-aspire-grpc-standard
+          path: aspire/Drasi.E2E.AppHost/artifacts
+          if-no-files-found: warn

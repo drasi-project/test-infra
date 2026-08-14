@@ -2,8 +2,10 @@
 set -euo pipefail
 
 DRASI_SERVER_URL="${DRASI_SERVER_URL:-http://drasi-server:8080}"
-DRASI_SOURCE_HOST="${DRASI_SOURCE_HOST:-drasi-server}"
-DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-50051}"
+DRASI_SOURCE_ENDPOINT="${DRASI_SOURCE_ENDPOINT:-tcp://drasi-server:50051}"
+DRASI_SOURCE_ADDRESS="${DRASI_SOURCE_ENDPOINT#*://}"
+DRASI_SOURCE_HOST="${DRASI_SOURCE_HOST:-${DRASI_SOURCE_ADDRESS%%:*}}"
+DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-${DRASI_SOURCE_ADDRESS##*:}}"
 E2E_REACTION_HOST="${E2E_REACTION_HOST:-e2e-runner}"
 TEST_SERVICE_PORT="${TEST_SERVICE_PORT:-63123}"
 TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.building_comfort.test_run_001}"
@@ -12,7 +14,8 @@ TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-/artifacts}"
 WORK_DIR="${WORK_DIR:-/work}"
-REDIS_CONNECTION_STRING="${REDIS_CONNECTION_STRING:-}"
+REDIS_CONNECTION_STRING="${REDIS_CONNECTION_STRING:-${REDIS_URI:-}}"
+KEEP_ALIVE_AFTER_COMPLETION="${KEEP_ALIVE_AFTER_COMPLETION:-false}"
 
 SCENARIO_DIR="/app/scenario"
 COMPONENTS_DIR="$SCENARIO_DIR/components/server"
@@ -216,7 +219,7 @@ write_run_summary() {
         echo "- transport: Aspire-managed external Drasi Server (gRPC source/reactions)"
         echo "- drasi-server endpoint: \`${DRASI_SERVER_URL%/}\`"
         echo "- source ingress: \`${DRASI_SOURCE_HOST}:${DRASI_SOURCE_PORT}\`"
-        echo "- redis: \`${REDIS_CONNECTION_STRING:-n/a}\`"
+        echo "- redis: provisioned by Aspire"
         echo
 
         echo "### Reactions"
@@ -294,7 +297,7 @@ write_run_summary() {
         }' > "$summary_json"
 }
 
-log "Redis is provisioned by Aspire at: ${REDIS_CONNECTION_STRING:-<not supplied>}"
+log "Redis is provisioned by Aspire"
 wait_for_http "${DRASI_SERVER_URL%/}/health" "Drasi Server health endpoint" 180
 write_test_config
 apply_server_components
@@ -303,3 +306,8 @@ wait_for_completion
 snapshot_results
 write_run_summary
 log "Completed building_comfort grpc_standard POC"
+
+if [[ "$KEEP_ALIVE_AFTER_COMPLETION" == "true" ]]; then
+    log "Keeping the runner available for Azure Container Apps result inspection"
+    wait "$SERVICE_PID"
+fi

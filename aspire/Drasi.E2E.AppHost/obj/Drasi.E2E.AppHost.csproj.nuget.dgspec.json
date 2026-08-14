@@ -56,6 +56,10 @@
               "version": "[13.4.6, )",
               "autoReferenced": true
             },
+            "Aspire.Hosting.Azure.AppContainers": {
+              "target": "Package",
+              "version": "[13.4.6, )"
+            },
             "Aspire.Hosting.Orchestration.osx-arm64": {
               "target": "Package",
               "version": "[13.4.6, )",

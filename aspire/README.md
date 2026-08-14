@@ -81,3 +81,126 @@ uploads the AppHost artifact directory.
 
 This workflow is intentionally opt-in while the Aspire topology is being
 validated locally.
+
+## Azure Container Apps publish spike
+
+The AppHost includes an Azure Container Apps environment named
+`drasi-e2e-aca` in publish/deploy mode. Local `aspire run` behavior is
+unchanged.
+
+The Azure environment uses one Dedicated `D8` workload-profile node with fixed
+capacity and no node autoscaling. Each resource also uses one fixed replica:
+
+| Resource | CPU | Memory |
+| --- | ---: | ---: |
+| Drasi Server | 4 vCPU | 16 GiB |
+| E2E runner | 3 vCPU | 12 GiB |
+| Redis | 0.5 vCPU | 2 GiB |
+
+The remaining D8 capacity is left for the Container Apps runtime. This controls
+the ACA workload profile and container reservations, but it does not promise a
+specific physical CPU model or managed-storage performance.
+
+In publish mode, the E2E runner remains alive after writing its result
+artifacts. It is currently modeled as an internal Container App rather than an
+Azure Container Apps Job because Drasi Server must connect back to the runner's
+gRPC reaction endpoints while the test is running.
+
+Generate deployment artifacts without creating Azure resources:
+
+```bash
+aspire publish \
+  --apphost aspire/Drasi.E2E.AppHost/Drasi.E2E.AppHost.csproj \
+  --output-path aspire/Drasi.E2E.AppHost/aspire-output \
+  --environment azure-dev \
+  --non-interactive
+```
+
+The Drasi Server config is baked into its image for Azure publishing. Local
+`aspire run` still bind-mounts the config so it remains easy to edit during
+development.
+
+### Deploy to a disposable Azure resource group
+
+Sign in and select the target subscription:
+
+```bash
+az login
+az account set --subscription "<subscription-id-or-name>"
+```
+
+Set the deployment target:
+
+```bash
+export Azure__SubscriptionId="$(az account show --query id -o tsv)"
+export Azure__Location="westus2"
+export Azure__ResourceGroup="drasi-e2e-aspire-poc"
+```
+
+Deploy:
+
+```bash
+aspire deploy \
+  --apphost aspire/Drasi.E2E.AppHost/Drasi.E2E.AppHost.csproj \
+  --environment azure-dev
+```
+
+The E2E runner remains alive after the test so its internal gRPC reaction
+endpoints and result files remain available. Check the runner logs in the Azure
+portal or with the Azure CLI:
+
+```bash
+az containerapp logs show \
+  --resource-group "$Azure__ResourceGroup" \
+  --name e2e-runner \
+  --type console \
+  --follow
+```
+
+The artifacts mount becomes an Azure Files share during deployment. The
+runner's `summary.md`, `run-summary.json`, determinism verdict, and raw
+performance metrics are written there.
+
+Discover and download the generated Azure Files share:
+
+```bash
+ACA_ENV="$(az containerapp env list \
+  --resource-group "$Azure__ResourceGroup" \
+  --query '[0].name' -o tsv)"
+
+STORAGE_JSON="$(az containerapp env storage list \
+  --resource-group "$Azure__ResourceGroup" \
+  --name "$ACA_ENV" \
+  --query '[0].properties.azureFile' -o json)"
+
+STORAGE_ACCOUNT="$(jq -r '.accountName' <<< "$STORAGE_JSON")"
+FILE_SHARE="$(jq -r '.shareName' <<< "$STORAGE_JSON")"
+STORAGE_KEY="$(az storage account keys list \
+  --resource-group "$Azure__ResourceGroup" \
+  --account-name "$STORAGE_ACCOUNT" \
+  --query '[0].value' -o tsv)"
+
+mkdir -p ./azure-e2e-artifacts
+az storage file download-batch \
+  --account-name "$STORAGE_ACCOUNT" \
+  --account-key "$STORAGE_KEY" \
+  --source "$FILE_SHARE" \
+  --destination ./azure-e2e-artifacts
+```
+
+Then view:
+
+```bash
+cat ./azure-e2e-artifacts/summary.md
+jq . ./azure-e2e-artifacts/run-summary.json
+```
+
+The Dedicated D8 profile incurs charges while the environment exists. Delete
+the disposable resource group when the experiment is complete:
+
+```bash
+az group delete \
+  --name "$Azure__ResourceGroup" \
+  --yes \
+  --no-wait
+```

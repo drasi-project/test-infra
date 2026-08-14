@@ -25,6 +25,7 @@ RUN set -eux; \
 
 WORKDIR /app
 RUN mkdir -p /app/config
+COPY aspire/Drasi.E2E.AppHost/config/drasi-server.empty.yaml /app/config/drasi-server.empty.yaml
 
 EXPOSE 8080 50051
 

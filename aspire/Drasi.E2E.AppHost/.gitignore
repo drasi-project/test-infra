@@ -1,1 +1,4 @@
 artifacts/
+aspire-output/
+bin/
+obj/

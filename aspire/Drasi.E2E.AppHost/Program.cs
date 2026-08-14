@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Azure.Provisioning.AppContainers;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -16,11 +17,15 @@ var drasiServer = string.IsNullOrWhiteSpace(drasiServerImage)
     : builder.AddContainer("drasi-server", drasiServerImage);
 
 drasiServer
-    .WithBindMount(drasiServerConfigDirectory, "/app/config")
     .WithArgs("--config", "/app/config/drasi-server.empty.yaml")
     .WithHttpEndpoint(targetPort: 8080, name: "http")
     .WithEndpoint(targetPort: 50051, name: "grpc-source")
     .WithHttpHealthCheck("/health");
+
+if (builder.ExecutionContext.IsRunMode)
+{
+    drasiServer.WithBindMount(drasiServerConfigDirectory, "/app/config");
+}
 
 var redis = builder.AddRedis("redis");
 
@@ -32,13 +37,14 @@ var e2eRunner = builder.AddDockerfile(
     .WithEndpoint(targetPort: 63123, name: "test-service")
     .WithEndpoint(targetPort: 50052, name: "reaction-main")
     .WithEndpoint(targetPort: 50053, name: "reaction-floor-agg")
-    .WithEnvironment("DRASI_SERVER_URL", "http://drasi-server:8080")
-    .WithEnvironment("DRASI_SOURCE_HOST", "drasi-server")
-    .WithEnvironment("DRASI_SOURCE_PORT", "50051")
+    .WithEnvironment("DRASI_SERVER_URL", drasiServer.GetEndpoint("http"))
+    .WithEnvironment("DRASI_SOURCE_ENDPOINT", drasiServer.GetEndpoint("grpc-source"))
     .WithEnvironment("E2E_REACTION_HOST", "e2e-runner")
     .WithEnvironment("TEST_SERVICE_PORT", "63123")
-    .WithEnvironment("REDIS_CONNECTION_STRING", "redis://redis:6379")
     .WithEnvironment("ARTIFACTS_DIR", "/artifacts")
+    .WithEnvironment(
+        "KEEP_ALIVE_AFTER_COMPLETION",
+        builder.ExecutionContext.IsPublishMode ? "true" : "false")
     .WithReference(redis)
     .WaitFor(drasiServer)
     .WaitFor(redis);
@@ -47,7 +53,49 @@ WithOptionalEnvironment(e2eRunner, "TIMEOUT_SECS");
 WithOptionalEnvironment(e2eRunner, "POLL_INTERVAL_SECS");
 WithOptionalEnvironment(e2eRunner, "TEST_RUN_ID");
 
+if (builder.ExecutionContext.IsPublishMode)
+{
+    const string workloadProfileName = "dedicated-d8";
+
+    builder.AddAzureContainerAppEnvironment("drasi-e2e-aca")
+        .ConfigureInfrastructure(infrastructure =>
+        {
+            var environment = infrastructure.GetProvisionableResources()
+                .OfType<ContainerAppManagedEnvironment>()
+                .Single();
+
+            environment.WorkloadProfiles.Add(new ContainerAppWorkloadProfile
+            {
+                Name = workloadProfileName,
+                WorkloadProfileType = "D8",
+                MinimumNodeCount = 1,
+                MaximumNodeCount = 1
+            });
+        });
+
+    ConfigureAzureContainerApp(drasiServer, workloadProfileName, cpu: 4.0, memory: "16Gi");
+    ConfigureAzureContainerApp(e2eRunner, workloadProfileName, cpu: 3.0, memory: "12Gi");
+    ConfigureAzureContainerApp(redis, workloadProfileName, cpu: 0.5, memory: "2Gi");
+}
+
 builder.Build().Run();
+
+static void ConfigureAzureContainerApp<T>(
+    IResourceBuilder<T> resource,
+    string workloadProfileName,
+    double cpu,
+    string memory)
+    where T : ContainerResource
+{
+    resource.PublishAsAzureContainerApp((_, app) =>
+    {
+        app.WorkloadProfileName = workloadProfileName;
+        app.Template.Containers[0].Value!.Resources.Cpu = cpu;
+        app.Template.Containers[0].Value!.Resources.Memory = memory;
+        app.Template.Scale.MinReplicas = 1;
+        app.Template.Scale.MaxReplicas = 1;
+    });
+}
 
 static void WithOptionalEnvironment(
     IResourceBuilder<ContainerResource> resource,

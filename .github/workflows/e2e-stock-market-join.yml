@@ -72,7 +72,11 @@ jobs:
         working-directory: e2e-test-framework
         run: cargo build --release --manifest-path test-service/Cargo.toml
 
+      - name: Record start time
+        run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Run scheduled test
+        id: test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
@@ -81,8 +85,42 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: stock_market-drasi_server_http_grpc_join
           path: ${{ runner.temp }}/artifacts
           if-no-files-found: warn
+
+      # Build the durable summary record for drasi-project/test-results.
+      # Runs even when the test failed: a failed run is a datapoint too.
+      - name: Build result summary
+        if: always()
+        env:
+          WORKFLOW_FILE: e2e-stock-market-join.yml
+          RUNNER_LABEL: ubuntu-latest
+        run: |
+          python3 .github/scripts/emit_summary.py \
+            --artifacts "${{ runner.temp }}/artifacts" \
+            --scenario stock_market \
+            --variant drasi_server_http_grpc_join \
+            --job-status "${{ steps.test.outcome }}" \
+            --output "${{ runner.temp }}/summary/stock_market__drasi_server_http_grpc_join.json"
+
+      - name: Upload result summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: summary-stock_market-drasi_server_http_grpc_join
+          path: ${{ runner.temp }}/summary
+          if-no-files-found: warn
+
+  # Publish the summaries to drasi-project/test-results, which keeps a small
+  # permanent history (GitHub artifacts expire after 90 days). One job, one
+  # commit, one push - see publish-test-results.yml for why aggregating
+  # matters. `always()` so a failed test run is still recorded.
+  publish-results:
+    needs: [stock-market-drasi-server-http-grpc-join]
+    if: always() && github.event_name != 'pull_request'
+    uses: ./.github/workflows/publish-test-results.yml
+    secrets:
+      TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

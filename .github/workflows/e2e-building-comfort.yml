@@ -79,7 +79,11 @@ jobs:
         working-directory: e2e-test-framework
         run: cargo build --release --manifest-path test-service/Cargo.toml
 
+      - name: Record start time
+        run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Run scheduled test
+        id: test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
@@ -88,10 +92,33 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: building_comfort-drasi_server_http
           path: ${{ runner.temp }}/artifacts
+          if-no-files-found: warn
+
+      # Build the durable summary record for drasi-project/test-results.
+      # Runs even when the test failed: a failed run is a datapoint too.
+      - name: Build result summary
+        if: always()
+        env:
+          WORKFLOW_FILE: e2e-building-comfort.yml
+          RUNNER_LABEL: ubuntu-latest
+        run: |
+          python3 .github/scripts/emit_summary.py \
+            --artifacts "${{ runner.temp }}/artifacts" \
+            --scenario building_comfort \
+            --variant drasi_server_http \
+            --job-status "${{ steps.test.outcome }}" \
+            --output "${{ runner.temp }}/summary/building_comfort__drasi_server_http.json"
+
+      - name: Upload result summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: summary-building_comfort-drasi_server_http
+          path: ${{ runner.temp }}/summary
           if-no-files-found: warn
 
   building-comfort-drasi-server-grpc:
@@ -144,7 +171,11 @@ jobs:
         working-directory: e2e-test-framework
         run: cargo build --release --manifest-path test-service/Cargo.toml
 
+      - name: Record start time
+        run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Run scheduled test
+        id: test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
@@ -153,10 +184,33 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: building_comfort-drasi_server_grpc
           path: ${{ runner.temp }}/artifacts
+          if-no-files-found: warn
+
+      # Build the durable summary record for drasi-project/test-results.
+      # Runs even when the test failed: a failed run is a datapoint too.
+      - name: Build result summary
+        if: always()
+        env:
+          WORKFLOW_FILE: e2e-building-comfort.yml
+          RUNNER_LABEL: ubuntu-latest
+        run: |
+          python3 .github/scripts/emit_summary.py \
+            --artifacts "${{ runner.temp }}/artifacts" \
+            --scenario building_comfort \
+            --variant drasi_server_grpc \
+            --job-status "${{ steps.test.outcome }}" \
+            --output "${{ runner.temp }}/summary/building_comfort__drasi_server_grpc.json"
+
+      - name: Upload result summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: summary-building_comfort-drasi_server_grpc
+          path: ${{ runner.temp }}/summary
           if-no-files-found: warn
 
   building-comfort-drasi-lib:
@@ -207,7 +261,11 @@ jobs:
         working-directory: e2e-test-framework
         run: cargo build --release --manifest-path test-service/Cargo.toml
 
+      - name: Record start time
+        run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Run scheduled test
+        id: test
         env:
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
           WORK_DIR: ${{ runner.temp }}/ci_work
@@ -215,8 +273,42 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: building_comfort-drasi_lib
           path: ${{ runner.temp }}/artifacts
           if-no-files-found: warn
+
+      # Build the durable summary record for drasi-project/test-results.
+      # Runs even when the test failed: a failed run is a datapoint too.
+      - name: Build result summary
+        if: always()
+        env:
+          WORKFLOW_FILE: e2e-building-comfort.yml
+          RUNNER_LABEL: ubuntu-latest
+        run: |
+          python3 .github/scripts/emit_summary.py \
+            --artifacts "${{ runner.temp }}/artifacts" \
+            --scenario building_comfort \
+            --variant drasi_lib \
+            --job-status "${{ steps.test.outcome }}" \
+            --output "${{ runner.temp }}/summary/building_comfort__drasi_lib.json"
+
+      - name: Upload result summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: summary-building_comfort-drasi_lib
+          path: ${{ runner.temp }}/summary
+          if-no-files-found: warn
+
+  # Publish the summaries to drasi-project/test-results, which keeps a small
+  # permanent history (GitHub artifacts expire after 90 days). One job, one
+  # commit, one push - see publish-test-results.yml for why aggregating
+  # matters. `always()` so a failed test run is still recorded.
+  publish-results:
+    needs: [building-comfort-drasi-server-http, building-comfort-drasi-server-grpc, building-comfort-drasi-lib]
+    if: always() && github.event_name != 'pull_request'
+    uses: ./.github/workflows/publish-test-results.yml
+    secrets:
+      TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

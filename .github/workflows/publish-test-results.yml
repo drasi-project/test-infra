@@ -1,0 +1,175 @@
+# Publishes run summaries to drasi-project/test-results.
+#
+# SETUP - both of these are required before this works. See the "Publishing"
+# section of the test-results README for the full walkthrough.
+#
+#   1. GITHUB_TOKEN CANNOT be used. It is an installation token scoped to the
+#      repository running the workflow, so it has no access to test-results
+#      even though both repos are in the drasi-project org. Setting
+#      `permissions: contents: write` grants write to test-infra, not to
+#      test-results. Hence the GitHub App credentials below.
+#
+#   2. The org ruleset `drasi-org-main` protects the default branch of every
+#      repo in the org, requiring a pull request with an approving review plus
+#      a DCO check, and its only bypass actor is OrganizationAdmin. The App
+#      must be added to that ruleset's bypass list or the push is rejected.
+#
+# A GitHub App is used rather than a deploy key because the bypass has to be
+# added to an ORG-level ruleset: an App is referenced there by its own id, so
+# the exemption applies to exactly this one writer. Deploy keys are per
+# repository and cannot be singled out the same way at org level, so allowing
+# them would widen the exemption well beyond this workflow. The App also gives
+# short-lived tokens and attributable commits.
+#
+# Called by the E2E workflows once all their test jobs have finished. Each test
+# job uploads a summary JSON as an artifact; this workflow collects them and
+# makes ONE commit.
+#
+# Aggregating matters. Distinct file paths stop two jobs from producing a merge
+# conflict, but they do not stop a push race: two jobs pushing to main at the
+# same moment means the second is rejected as non-fast-forward regardless of
+# which files it touched, because git rejects the ref update rather than the
+# content. building_comfort has three jobs that finish seconds apart, so
+# pushing per job would hit this immediately.
+#
+# Publishing never fails the calling workflow. A lost datapoint is much better
+# than a red E2E run that people learn to ignore.
+
+name: Publish test results
+
+on:
+  workflow_call:
+    inputs:
+      artifact_prefix:
+        description: "Prefix of the summary artifacts to collect."
+        required: false
+        type: string
+        default: "summary-"
+    secrets:
+      TEST_RESULTS_APP_PRIVATE_KEY:
+        description: "Private key of that GitHub App."
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish summaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A publishing problem must not turn the E2E run red. Failures still show
+    # as an annotation on the job, but the workflow's own result reflects the
+    # tests, not the reporting.
+    continue-on-error: true
+    steps:
+      - name: Download summaries
+        uses: actions/download-artifact@v7
+        with:
+          pattern: "${{ inputs.artifact_prefix }}*"
+          path: summaries
+          merge-multiple: true
+
+      - name: Check for summaries
+        id: check
+        run: |
+          count=$(find summaries -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Found $count summary file(s)."
+
+      - name: Mint a token for test-results
+        if: steps.check.outputs.count != '0'
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          # App ID is a repository variable, not a secret: it is a public
+          # identifier, visible on the App's page and in commit metadata. Only
+          # the private key is secret.
+          app-id: ${{ vars.TEST_RESULTS_APP_ID }}
+          private-key: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}
+          owner: drasi-project
+          repositories: test-results
+
+      - name: Checkout test-results
+        if: steps.check.outputs.count != '0'
+        uses: actions/checkout@v5
+        with:
+          repository: drasi-project/test-results
+          token: ${{ steps.app-token.outputs.token }}
+          path: test-results
+
+      - name: Place summaries
+        if: steps.check.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          for file in summaries/*.json; do
+            scenario=$(jq -r '.dimensions.scenario' "$file")
+            variant=$(jq -r '.dimensions.variant' "$file")
+            run_id=$(jq -r '.run.run_id' "$file")
+            started=$(jq -r '.run.started_at' "$file")
+
+            if [[ -z "$scenario" || -z "$variant" || -z "$run_id" || "$started" == "null" || -z "$started" ]]; then
+              echo "::warning::skipping $file - missing scenario/variant/run_id/started_at"
+              continue
+            fi
+
+            # run_attempt is deliberately NOT in the path: run_id is stable
+            # across re-runs, so a re-run overwrites its own file rather than
+            # adding a duplicate datapoint.
+            dir="test-results/results/${started:0:4}/${started:5:2}/${started:8:2}"
+            mkdir -p "$dir"
+            cp "$file" "${dir}/${scenario}__${variant}__${run_id}.json"
+            echo "placed ${dir}/${scenario}__${variant}__${run_id}.json"
+          done
+
+      - name: Validate against the published schema
+        if: steps.check.outputs.count != '0'
+        working-directory: test-results
+        run: |
+          # The validator in test-results is the schema contract. Running it
+          # here means a malformed record fails in this repo, where the author
+          # can see it, instead of landing on main and turning that repo red.
+          python3 validate-results.py
+
+      - name: Commit and push
+        if: steps.check.outputs.count != '0'
+        working-directory: test-results
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+
+          # Commit as the App so history shows which writer produced each
+          # record. The DCO check is bypassed for this App, but keep the
+          # trailer anyway so the log is self-describing.
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+          git add results
+
+          if git diff --cached --quiet; then
+            echo "No changes - this run was already published."
+            exit 0
+          fi
+
+          git commit -m "Add results for ${GITHUB_REPOSITORY#*/} run ${GITHUB_RUN_ID}
+
+          Source: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Signed-off-by: ${APP_SLUG}[bot] <${APP_SLUG}[bot]@users.noreply.github.com>"
+
+          # Retry to cover the race with the other E2E workflow, whose
+          # schedules are only 15 minutes apart and both drift.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              echo "Pushed on attempt $attempt."
+              exit 0
+            fi
+            echo "Push rejected, rebasing (attempt $attempt)..."
+            sleep $(( RANDOM % 5 + attempt * 3 ))
+            git pull --rebase origin main || true
+          done
+
+          echo "::error::Could not push results after 5 attempts."
+          exit 1

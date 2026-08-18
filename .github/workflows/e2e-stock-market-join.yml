@@ -118,9 +118,17 @@ jobs:
   # permanent history (GitHub artifacts expire after 90 days). One job, one
   # commit, one push - see publish-test-results.yml for why aggregating
   # matters. `always()` so a failed test run is still recorded.
+  #
+  # Scheduled runs only. The published history is a time series, so every
+  # point has to be comparable: same trigger, same cadence, no operator
+  # choosing when to record. Manual runs exist to try things out - a different
+  # drasi-server version, a branch, a one-off timeout - and mixing those in
+  # would put unexplained spikes in the trend with nothing in the record to
+  # explain them. To exercise this path from a branch, temporarily widen this
+  # condition rather than publishing dispatch runs by default.
   publish-results:
     needs: [stock-market-drasi-server-http-grpc-join]
-    if: always() && github.event_name != 'pull_request'
+    if: always() && github.event_name == 'schedule'
     uses: ./.github/workflows/publish-test-results.yml
     secrets:
       TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

@@ -21,7 +21,8 @@
 # them would widen the exemption well beyond this workflow. The App also gives
 # short-lived tokens and attributable commits.
 #
-# Called by the E2E workflows once all their test jobs have finished. Each test
+# Called by the E2E workflows once all their test jobs have finished, on
+# scheduled runs only - see the callers' publish-results job for why. Each test
 # job uploads a summary JSON as an artifact; this workflow collects them and
 # makes ONE commit.
 #

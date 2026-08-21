@@ -4,9 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       location:
-        description: "Azure region for the Dedicated D8 Container Apps environment"
+        description: "Azure region for the Container Apps environment"
         required: true
         default: "westus3"
+      workload_profile:
+        description: "Azure Container Apps workload profile"
+        required: true
+        type: choice
+        options:
+          - consumption
+          - dedicated-d8
+        default: consumption
       timeout_minutes:
         description: "Maximum time to wait for the Azure E2E runner"
         required: true
@@ -68,12 +76,14 @@ jobs:
           az account show --query '{subscription:name,id:id,tenant:tenantId}' --output json
           echo "Resource group: $AZURE_RESOURCE_GROUP"
           echo "Location: ${{ inputs.location }}"
+          echo "Workload profile: ${{ inputs.workload_profile }}"
 
       - name: Deploy Aspire environment
         env:
           Azure__SubscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           Azure__Location: ${{ inputs.location }}
           Azure__ResourceGroup: ${{ env.AZURE_RESOURCE_GROUP }}
+          AZURE_WORKLOAD_PROFILE: ${{ inputs.workload_profile }}
           DRASI_SERVER_IMAGE: ${{ inputs.drasi_server_image }}
         run: |
           aspire deploy \

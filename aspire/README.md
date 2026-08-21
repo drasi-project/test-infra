@@ -88,18 +88,24 @@ The AppHost includes an Azure Container Apps environment named
 `drasi-e2e-aca` in publish/deploy mode. Local `aspire run` behavior is
 unchanged.
 
-The Azure environment uses one Dedicated `D8` workload-profile node with fixed
-capacity and no node autoscaling. Each resource also uses one fixed replica:
+The GitHub workflow defaults to the ACA `Consumption` profile so it can run in
+new subscriptions without a Dedicated-cores quota request. Each resource uses
+one fixed replica with Consumption-compatible limits:
 
 | Resource | CPU | Memory |
 | --- | ---: | ---: |
-| Drasi Server | 4 vCPU | 16 GiB |
-| E2E runner | 3 vCPU | 12 GiB |
-| Redis | 0.5 vCPU | 2 GiB |
+| Drasi Server | 4 vCPU | 8 GiB |
+| E2E runner | 4 vCPU | 8 GiB |
+| Redis | 0.5 vCPU | 1 GiB |
 
-The remaining D8 capacity is left for the Container Apps runtime. This controls
-the ACA workload profile and container reservations, but it does not promise a
-specific physical CPU model or managed-storage performance.
+Set `AZURE_WORKLOAD_PROFILE=dedicated-d8` (or select `dedicated-d8` in the
+manual workflow) to use one Dedicated D8 node with the original fixed
+allocations. That option requires at least eight Managed Environment General
+Purpose cores in the target region.
+
+Consumption fixes requested CPU, memory, and replica count but runs on shared
+serverless infrastructure, so it is suitable for validating the deployment
+pipeline rather than establishing a hardware-controlled performance baseline.
 
 In publish mode, the E2E runner remains alive after writing its result
 artifacts. It is currently modeled as an internal Container App rather than an
@@ -195,7 +201,7 @@ cat ./azure-e2e-artifacts/summary.md
 jq . ./azure-e2e-artifacts/run-summary.json
 ```
 
-The Dedicated D8 profile incurs charges while the environment exists. Delete
+Azure resources incur charges while the environment exists. Delete
 the disposable resource group when the experiment is complete:
 
 ```bash

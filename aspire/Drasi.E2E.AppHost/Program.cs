@@ -55,27 +55,46 @@ WithOptionalEnvironment(e2eRunner, "TEST_RUN_ID");
 
 if (builder.ExecutionContext.IsPublishMode)
 {
-    const string workloadProfileName = "dedicated-d8";
+    var workloadProfile = Environment.GetEnvironmentVariable("AZURE_WORKLOAD_PROFILE")?
+        .Trim()
+        .ToLowerInvariant() ?? "consumption";
 
-    builder.AddAzureContainerAppEnvironment("drasi-e2e-aca")
-        .ConfigureInfrastructure(infrastructure =>
-        {
-            var environment = infrastructure.GetProvisionableResources()
-                .OfType<ContainerAppManagedEnvironment>()
-                .Single();
+    switch (workloadProfile)
+    {
+        case "consumption":
+            builder.AddAzureContainerAppEnvironment("drasi-e2e-aca");
+            ConfigureAzureContainerApp(drasiServer, "consumption", cpu: 4.0, memory: "8Gi");
+            ConfigureAzureContainerApp(e2eRunner, "consumption", cpu: 4.0, memory: "8Gi");
+            ConfigureAzureContainerApp(redis, "consumption", cpu: 0.5, memory: "1Gi");
+            break;
 
-            environment.WorkloadProfiles.Add(new ContainerAppWorkloadProfile
-            {
-                Name = workloadProfileName,
-                WorkloadProfileType = "D8",
-                MinimumNodeCount = 1,
-                MaximumNodeCount = 1
-            });
-        });
+        case "dedicated-d8":
+            const string dedicatedProfileName = "dedicated-d8";
+            builder.AddAzureContainerAppEnvironment("drasi-e2e-aca")
+                .ConfigureInfrastructure(infrastructure =>
+                {
+                    var environment = infrastructure.GetProvisionableResources()
+                        .OfType<ContainerAppManagedEnvironment>()
+                        .Single();
 
-    ConfigureAzureContainerApp(drasiServer, workloadProfileName, cpu: 4.0, memory: "16Gi");
-    ConfigureAzureContainerApp(e2eRunner, workloadProfileName, cpu: 3.0, memory: "12Gi");
-    ConfigureAzureContainerApp(redis, workloadProfileName, cpu: 0.5, memory: "2Gi");
+                    environment.WorkloadProfiles.Add(new ContainerAppWorkloadProfile
+                    {
+                        Name = dedicatedProfileName,
+                        WorkloadProfileType = "D8",
+                        MinimumNodeCount = 1,
+                        MaximumNodeCount = 1
+                    });
+                });
+
+            ConfigureAzureContainerApp(drasiServer, dedicatedProfileName, cpu: 4.0, memory: "16Gi");
+            ConfigureAzureContainerApp(e2eRunner, dedicatedProfileName, cpu: 3.0, memory: "12Gi");
+            ConfigureAzureContainerApp(redis, dedicatedProfileName, cpu: 0.5, memory: "2Gi");
+            break;
+
+        default:
+            throw new InvalidOperationException(
+                $"Unsupported AZURE_WORKLOAD_PROFILE '{workloadProfile}'. Use 'consumption' or 'dedicated-d8'.");
+    }
 }
 
 builder.Build().Run();

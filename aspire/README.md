@@ -107,6 +107,10 @@ Consumption fixes requested CPU, memory, and replica count but runs on shared
 serverless infrastructure, so it is suitable for validating the deployment
 pipeline rather than establishing a hardware-controlled performance baseline.
 
+The Container Apps environment uses Aspire compact resource naming so globally
+unique resources such as the Azure Files storage account retain their generated
+unique suffix across subscriptions and tenants.
+
 In publish mode, the E2E runner remains alive after writing its result
 artifacts. It is currently modeled as an internal Container App rather than an
 Azure Container Apps Job because Drasi Server must connect back to the runner's

@@ -53,6 +53,7 @@ WithOptionalEnvironment(e2eRunner, "TIMEOUT_SECS");
 WithOptionalEnvironment(e2eRunner, "POLL_INTERVAL_SECS");
 WithOptionalEnvironment(e2eRunner, "TEST_RUN_ID");
 
+#pragma warning disable ASPIREACANAMING001
 if (builder.ExecutionContext.IsPublishMode)
 {
     var workloadProfile = Environment.GetEnvironmentVariable("AZURE_WORKLOAD_PROFILE")?
@@ -62,7 +63,8 @@ if (builder.ExecutionContext.IsPublishMode)
     switch (workloadProfile)
     {
         case "consumption":
-            builder.AddAzureContainerAppEnvironment("drasi-e2e-aca");
+            builder.AddAzureContainerAppEnvironment("drasi-e2e-aca")
+                .WithCompactResourceNaming();
             ConfigureAzureContainerApp(drasiServer, "consumption", cpu: 4.0, memory: "8Gi");
             ConfigureAzureContainerApp(e2eRunner, "consumption", cpu: 4.0, memory: "8Gi");
             ConfigureAzureContainerApp(redis, "consumption", cpu: 0.5, memory: "1Gi");
@@ -71,6 +73,7 @@ if (builder.ExecutionContext.IsPublishMode)
         case "dedicated-d8":
             const string dedicatedProfileName = "dedicated-d8";
             builder.AddAzureContainerAppEnvironment("drasi-e2e-aca")
+                .WithCompactResourceNaming()
                 .ConfigureInfrastructure(infrastructure =>
                 {
                     var environment = infrastructure.GetProvisionableResources()
@@ -96,6 +99,7 @@ if (builder.ExecutionContext.IsPublishMode)
                 $"Unsupported AZURE_WORKLOAD_PROFILE '{workloadProfile}'. Use 'consumption' or 'dedicated-d8'.");
     }
 }
+#pragma warning restore ASPIREACANAMING001
 
 builder.Build().Run();
 

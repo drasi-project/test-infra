@@ -34,7 +34,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: building-comfort-aspire-azure
+  group: azure-resource-group-drasi-e2e-aspire-ci
   cancel-in-progress: false
 
 env:

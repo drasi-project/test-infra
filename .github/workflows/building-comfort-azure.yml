@@ -14,9 +14,10 @@ on:
         required: true
         type: choice
         options:
-          - Standard_D4s_v3
+          - Standard_D4s_v5
+          - Standard_D4as_v5
           - Standard_D8s_v5
-        default: Standard_D4s_v3
+        default: Standard_D4s_v5
       variants:
         description: "Comma/space-separated variants, run sequentially on one VM."
         required: false
@@ -194,6 +195,27 @@ jobs:
             --urn "Canonical:ubuntu-24_04-lts:server:$image_version" \
             --output none
           echo "Resolved Ubuntu image: Canonical:ubuntu-24_04-lts:server:$image_version"
+
+          sku_json="$(
+            az vm list-skus \
+              --location "$IN_LOCATION" \
+              --resource-type virtualMachines \
+              --size "$IN_VM_SIZE" \
+              --all \
+              --query '[0]' \
+              --output json
+          )"
+          [[ "$sku_json" != "null" ]] || {
+            echo "VM SKU $IN_VM_SIZE is not offered in $IN_LOCATION" >&2
+            exit 1
+          }
+          restriction_count="$(jq '.restrictions | length' <<< "$sku_json")"
+          if (( restriction_count > 0 )); then
+            echo "VM SKU $IN_VM_SIZE is restricted for this subscription in $IN_LOCATION:" >&2
+            jq '.restrictions' <<< "$sku_json" >&2
+            exit 1
+          fi
+          echo "Validated VM SKU availability: $IN_VM_SIZE in $IN_LOCATION"
 
           {
             echo "LOCATION=$IN_LOCATION"

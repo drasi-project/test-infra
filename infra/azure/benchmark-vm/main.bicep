@@ -7,7 +7,7 @@ param resourcePrefix string
 param location string = resourceGroup().location
 
 @description('Fixed VM SKU used for the benchmark suite.')
-param vmSize string = 'Standard_D4s_v3'
+param vmSize string = 'Standard_D4s_v5'
 
 @description('Pinned Canonical Ubuntu 24.04 image version.')
 param imageVersion string

@@ -17,10 +17,6 @@ on:
           - Standard_D4s_v3
           - Standard_D8s_v5
         default: Standard_D4s_v3
-      image_version:
-        description: "Pinned Canonical Ubuntu 24.04 image version."
-        required: true
-        default: "24.04.202607280"
       variants:
         description: "Comma/space-separated variants, run sequentially on one VM."
         required: false
@@ -128,7 +124,6 @@ jobs:
         env:
           IN_LOCATION: ${{ inputs.location }}
           IN_VM_SIZE: ${{ inputs.vm_size }}
-          IN_IMAGE_VERSION: ${{ inputs.image_version }}
           IN_VARIANTS: ${{ inputs.variants }}
           IN_REPETITIONS: ${{ inputs.repetitions }}
           IN_SERVER_VERSION: ${{ inputs.drasi_server_version }}
@@ -160,10 +155,6 @@ jobs:
             echo "drasi_server_version must be a pinned release tag" >&2
             exit 1
           }
-          [[ "$IN_IMAGE_VERSION" =~ ^[0-9.]+$ && "$IN_IMAGE_VERSION" != "latest" ]] || {
-            echo "image_version must be a pinned Azure image version" >&2
-            exit 1
-          }
           [[ -z "$IN_PLUGIN_TAG" || "$IN_PLUGIN_TAG" =~ ^[A-Za-z0-9._-]+$ ]] || {
             echo "plugin_tag contains unsupported characters" >&2
             exit 1
@@ -186,11 +177,28 @@ jobs:
 
           resource_prefix="drasiperf-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           deployment_name="benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image_version="$(
+            az vm image show \
+              --location "$IN_LOCATION" \
+              --urn Canonical:ubuntu-24_04-lts:server:latest \
+              --query name \
+              --output tsv
+          )"
+          [[ "$image_version" =~ ^[0-9.]+$ ]] || {
+            echo "Could not resolve the stable Ubuntu 24.04 image in $IN_LOCATION" >&2
+            exit 1
+          }
+
+          az vm image show \
+            --location "$IN_LOCATION" \
+            --urn "Canonical:ubuntu-24_04-lts:server:$image_version" \
+            --output none
+          echo "Resolved Ubuntu image: Canonical:ubuntu-24_04-lts:server:$image_version"
 
           {
             echo "LOCATION=$IN_LOCATION"
             echo "VM_SIZE=$IN_VM_SIZE"
-            echo "IMAGE_VERSION=$IN_IMAGE_VERSION"
+            echo "IMAGE_VERSION=$image_version"
             echo "VARIANTS=$variants"
             echo "REPETITIONS=$repetitions"
             echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"

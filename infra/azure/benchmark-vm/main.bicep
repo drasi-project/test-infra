@@ -10,7 +10,7 @@ param location string = resourceGroup().location
 param vmSize string = 'Standard_D4s_v3'
 
 @description('Pinned Canonical Ubuntu 24.04 image version.')
-param imageVersion string = '24.04.202607280'
+param imageVersion string
 
 @description('Administrator username for SSH access.')
 param adminUsername string = 'githubrunner'

@@ -18,30 +18,47 @@ on:
           - Standard_D4as_v5
           - Standard_D8s_v5
         default: Standard_D4s_v5
-      variants:
-        description: "Comma/space-separated variants, run sequentially on one VM."
-        required: false
-        default: "http_standard grpc_standard"
-      repetitions:
-        description: "Clean repetitions of each variant on the same VM."
+      os_disk_type:
+        description: "OS disk type for the ephemeral VM."
         required: true
         type: choice
         options:
-          - "1"
-          - "3"
-          - "5"
-        default: "3"
-      drasi_server_version:
-        description: "Pinned drasi-server release tag."
+          - Premium_LRS
+          - StandardSSD_LRS
+          - Standard_LRS
+        default: Premium_LRS
+      os_disk_size_gb:
+        description: "OS disk size in GB."
         required: true
-        default: "0.2.2"
-      plugin_tag:
-        description: "Optional known OCI tag applied to every plugin reference."
-        required: false
-        default: ""
+        type: choice
+        options:
+          - "64"
+          - "128"
+          - "256"
+          - "512"
+        default: "128"
+
+      # --- Variants (one checkbox each; GitHub renders booleans as checkboxes) ---
+      http_standard:
+        description: "http_standard (HTTP, REST-applied)"
+        type: boolean
+        default: true
+      http_adaptive:
+        description: "http_adaptive (HTTP, server adaptiveEnabled)"
+        type: boolean
+        default: true
+      grpc_standard:
+        description: "grpc_standard (gRPC, REST-applied)"
+        type: boolean
+        default: true
+      grpc_adaptive:
+        description: "grpc_adaptive (gRPC adaptive dispatcher)"
+        type: boolean
+        default: true
+
+      # --- Config axes (applied to whichever variants run) ---
       batching_speed:
-        description: "Adaptive batching preset."
-        required: true
+        description: "Adaptive batching speed preset (affects adaptive variants only)."
         type: choice
         options:
           - low
@@ -49,8 +66,7 @@ on:
           - high
         default: medium
       query_tuning:
-        description: "Query capacity preset."
-        required: true
+        description: "Query capacity preset (priority/dispatch buffers, bootstrap buffer)."
         type: choice
         options:
           - low
@@ -58,26 +74,34 @@ on:
           - high
         default: medium
       persist_index:
-        description: "Enable the persistent RocksDB index."
-        required: true
+        description: "Use the built-in RocksDB persistent index (persistIndex)."
         type: boolean
         default: false
       state_store:
-        description: "Enable the redb state store."
-        required: true
+        description: "Use the redb plugin state store (stateStore)."
         type: boolean
         default: false
       bootstrap_size:
-        description: "Large-bootstrap performance preset."
+        description: "Large-bootstrap preset (rooms). Scales the initial graph so bootstrap load is measured separately from steady-state."
         type: choice
         options:
           - "off"
           - 10k
           - 100k
           - 1m
-        default: 10k
+        default: "off"
+
+      # --- Run settings ---
+      drasi_server_version:
+        description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
+        required: false
+        default: ""
+      plugin_tag:
+        description: "Optional known OCI tag applied to every plugin reference."
+        required: false
+        default: ""
       timeout_minutes:
-        description: "Maximum minutes to wait for each repetition."
+        description: "Max minutes to wait for the test to finish."
         required: false
         default: "45"
       cleanup_resources:
@@ -125,8 +149,12 @@ jobs:
         env:
           IN_LOCATION: ${{ inputs.location }}
           IN_VM_SIZE: ${{ inputs.vm_size }}
-          IN_VARIANTS: ${{ inputs.variants }}
-          IN_REPETITIONS: ${{ inputs.repetitions }}
+          IN_OS_DISK_TYPE: ${{ inputs.os_disk_type }}
+          IN_OS_DISK_SIZE_GB: ${{ inputs.os_disk_size_gb }}
+          V_HTTP_STD: ${{ inputs.http_standard }}
+          V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
+          V_GRPC_STD: ${{ inputs.grpc_standard }}
+          V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
           IN_SERVER_VERSION: ${{ inputs.drasi_server_version }}
           IN_PLUGIN_TAG: ${{ inputs.plugin_tag }}
           IN_BATCHING_SPEED: ${{ inputs.batching_speed }}
@@ -138,43 +166,46 @@ jobs:
         run: |
           set -euo pipefail
 
-          variants="${IN_VARIANTS:-http_standard grpc_standard}"
-          repetitions="${IN_REPETITIONS:-3}"
-          bootstrap_size="${IN_BOOTSTRAP_SIZE:-10k}"
-          timeout_minutes="${IN_TIMEOUT_MINUTES:-45}"
-          [[ "$bootstrap_size" == "off" ]] && bootstrap_size=""
-
-          [[ "$repetitions" =~ ^(1|3|5)$ ]] || {
-            echo "Invalid repetitions: $repetitions" >&2
+          variant_arr=()
+          [[ "$V_HTTP_STD" == "true" ]] && variant_arr+=(http_standard)
+          [[ "$V_HTTP_ADAPTIVE" == "true" ]] && variant_arr+=(http_adaptive)
+          [[ "$V_GRPC_STD" == "true" ]] && variant_arr+=(grpc_standard)
+          [[ "$V_GRPC_ADAPTIVE" == "true" ]] && variant_arr+=(grpc_adaptive)
+          (( ${#variant_arr[@]} > 0 )) || {
+            echo "ERROR: no variants selected. Tick at least one checkbox." >&2
             exit 1
           }
+          variants="${variant_arr[*]}"
+
+          bootstrap_size="${IN_BOOTSTRAP_SIZE:-off}"
+          timeout_minutes="${IN_TIMEOUT_MINUTES:-45}"
+          os_disk_type="${IN_OS_DISK_TYPE:-Premium_LRS}"
+          os_disk_size_gb="${IN_OS_DISK_SIZE_GB:-128}"
+          [[ "$bootstrap_size" == "off" ]] && bootstrap_size=""
+
           [[ "$timeout_minutes" =~ ^[1-9][0-9]*$ ]] || {
             echo "Invalid timeout_minutes: $timeout_minutes" >&2
             exit 1
           }
-          [[ "$IN_SERVER_VERSION" =~ ^[A-Za-z0-9._-]+$ && "$IN_SERVER_VERSION" != "latest" ]] || {
-            echo "drasi_server_version must be a pinned release tag" >&2
+          [[ -z "$IN_SERVER_VERSION" || "$IN_SERVER_VERSION" =~ ^[A-Za-z0-9._-]+$ ]] || {
+            echo "drasi_server_version contains unsupported characters" >&2
             exit 1
           }
           [[ -z "$IN_PLUGIN_TAG" || "$IN_PLUGIN_TAG" =~ ^[A-Za-z0-9._-]+$ ]] || {
             echo "plugin_tag contains unsupported characters" >&2
             exit 1
           }
-
-          read -r -a variant_arr <<< "${variants//,/ }"
-          (( ${#variant_arr[@]} > 0 )) || {
-            echo "At least one variant is required" >&2
+          case "$os_disk_type" in
+            Premium_LRS|StandardSSD_LRS|Standard_LRS) ;;
+            *)
+              echo "Unsupported OS disk type: $os_disk_type" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$os_disk_size_gb" =~ ^(64|128|256|512)$ ]] || {
+            echo "Unsupported OS disk size: $os_disk_size_gb" >&2
             exit 1
           }
-          for variant in "${variant_arr[@]}"; do
-            case "$variant" in
-              http_standard|http_adaptive|grpc_standard|grpc_adaptive) ;;
-              *)
-                echo "Unsupported building comfort Azure variant: $variant" >&2
-                exit 1
-                ;;
-            esac
-          done
 
           resource_prefix="drasiperf-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           deployment_name="benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -245,9 +276,11 @@ jobs:
           {
             echo "LOCATION=$IN_LOCATION"
             echo "VM_SIZE=$IN_VM_SIZE"
+            echo "OS_DISK_TYPE=$os_disk_type"
+            echo "OS_DISK_SIZE_GB=$os_disk_size_gb"
             echo "IMAGE_VERSION=$image_version"
             echo "VARIANTS=$variants"
-            echo "REPETITIONS=$repetitions"
+            echo "REPETITIONS=1"
             echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"
             echo "DRASI_PLUGIN_TAG=$IN_PLUGIN_TAG"
             echo "BATCHING_SPEED=${IN_BATCHING_SPEED:-medium}"
@@ -288,6 +321,8 @@ jobs:
               resourcePrefix="$RESOURCE_PREFIX" \
               location="$LOCATION" \
               vmSize="$VM_SIZE" \
+              osDiskSizeGB="$OS_DISK_SIZE_GB" \
+              osDiskStorageAccountType="$OS_DISK_TYPE" \
               imageVersion="$IMAGE_VERSION" \
               adminUsername="$ADMIN_USERNAME" \
               sshPublicKey="$(cat "$SSH_PRIVATE_KEY.pub")" \
@@ -362,7 +397,7 @@ jobs:
              sudo chown -R '$ADMIN_USERNAME:$ADMIN_USERNAME' '$REMOTE_ROOT' &&
              tar -xzf /tmp/test-infra.tar.gz -C '$REMOTE_ROOT/workspace'"
 
-      - name: Run benchmark suite
+      - name: Run test
         run: |
           set +e
           ssh \

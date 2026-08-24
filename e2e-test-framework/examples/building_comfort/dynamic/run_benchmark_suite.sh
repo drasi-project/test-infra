@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SCRIPT="${RUN_SCRIPT:-$SCRIPT_DIR/run_dynamic.sh}"
 
-VARIANTS="${VARIANTS:-http_standard grpc_standard}"
-REPETITIONS="${REPETITIONS:-3}"
+VARIANTS="${VARIANTS:-http_standard http_adaptive grpc_standard grpc_adaptive}"
+REPETITIONS="${REPETITIONS:-1}"
 SUITE_WORK_DIR="${SUITE_WORK_DIR:-$SCRIPT_DIR/.benchmark_suite}"
 SUITE_ARTIFACTS_DIR="${SUITE_ARTIFACTS_DIR:-$SCRIPT_DIR/benchmark_artifacts}"
 PERF_PROFILE_ID="${PERF_PROFILE_ID:-unknown}"

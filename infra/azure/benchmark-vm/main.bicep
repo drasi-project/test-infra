@@ -9,6 +9,23 @@ param location string = resourceGroup().location
 @description('Fixed VM SKU used for the benchmark suite.')
 param vmSize string = 'Standard_D4s_v5'
 
+@description('OS disk size in GB.')
+@allowed([
+  64
+  128
+  256
+  512
+])
+param osDiskSizeGB int = 128
+
+@description('OS disk storage type.')
+@allowed([
+  'Premium_LRS'
+  'StandardSSD_LRS'
+  'Standard_LRS'
+])
+param osDiskStorageAccountType string = 'Premium_LRS'
+
 @description('Pinned Canonical Ubuntu 24.04 image version.')
 param imageVersion string
 
@@ -149,9 +166,9 @@ resource virtualMachine 'Microsoft.Compute/virtualMachines@2024-11-01' = {
         name: '${resourcePrefix}-osdisk'
         createOption: 'FromImage'
         deleteOption: 'Delete'
-        diskSizeGB: 128
+        diskSizeGB: osDiskSizeGB
         managedDisk: {
-          storageAccountType: 'Premium_LRS'
+          storageAccountType: osDiskStorageAccountType
         }
       }
     }

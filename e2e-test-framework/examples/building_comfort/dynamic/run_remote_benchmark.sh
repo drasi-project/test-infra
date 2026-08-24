@@ -19,7 +19,8 @@ set -a
 source "$ENV_FILE"
 set +a
 
-: "${DRASI_SERVER_VERSION:?DRASI_SERVER_VERSION is required}"
+DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
+DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 : "${SUITE_WORK_DIR:?SUITE_WORK_DIR is required}"
 : "${PERF_PROFILE_ID:?PERF_PROFILE_ID is required}"
 
@@ -68,10 +69,19 @@ jq -n \
         azure: $instance
     }' > "$metadata_json"
 
+tag="$DRASI_SERVER_VERSION"
+if [[ -z "$tag" ]]; then
+    tag="$(curl -fsSL "https://api.github.com/repos/${DRASI_REPO}/releases/latest" | jq -r '.tag_name')"
+fi
+[[ -n "$tag" && "$tag" != "null" ]] || {
+    echo "Could not resolve the latest drasi-server release tag" >&2
+    exit 1
+}
+
 asset_name="drasi-server-x86_64-linux-gnu"
 curl --fail --show-error --silent --location \
     --retry 3 --retry-delay 5 --retry-all-errors \
-    "https://github.com/drasi-project/drasi-server/releases/download/${DRASI_SERVER_VERSION}/${asset_name}" \
+    "https://github.com/${DRASI_REPO}/releases/download/${tag}/${asset_name}" \
     -o "$DRASI_SERVER_BIN"
 chmod +x "$DRASI_SERVER_BIN"
 

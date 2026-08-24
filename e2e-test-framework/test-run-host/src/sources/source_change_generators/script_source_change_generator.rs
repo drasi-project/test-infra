@@ -733,10 +733,6 @@ impl ScriptSourceChangeGeneratorInternalState {
                 }
             };
 
-            if let Err(error) = &transition_response {
-                self.transition_to_error_state("Error processing source command", Some(error));
-            }
-
             if message.response_tx.is_some() {
                 let message_response = ScriptSourceChangeGeneratorMessageResponse {
                     result: transition_response,
@@ -1220,6 +1216,9 @@ impl ScriptSourceChangeGeneratorInternalState {
         self.steps_spacing_mode = None;
 
         let close_result = self.close_dispatchers().await;
+        if let Err(error) = &close_result {
+            self.transition_to_error_state("Failed to close source dispatchers", Some(error));
+        }
         self.write_result_summary().await.ok();
         close_result
     }
@@ -1238,6 +1237,9 @@ impl ScriptSourceChangeGeneratorInternalState {
         self.steps_spacing_mode = None;
 
         let close_result = self.close_dispatchers().await;
+        if let Err(error) = &close_result {
+            self.transition_to_error_state("Failed to close source dispatchers", Some(error));
+        }
         self.write_result_summary().await.ok();
         close_result
     }
@@ -1446,7 +1448,14 @@ pub async fn script_processor_thread(
                         // This avoids dealing with delayed messages from the delayer thread that are no longer relevant.
                         if change_stream_message.seq_num == state.message_seq_num && state.status.is_processing() {
                             state.process_change_stream_message(change_stream_message).await
-                                .inspect_err(|e| state.transition_to_error_state("Error calling process_change_stream_message", Some(e))).ok();
+                                .inspect_err(|e| {
+                                    if state.status != SourceChangeGeneratorStatus::Error {
+                                        state.transition_to_error_state(
+                                            "Error calling process_change_stream_message",
+                                            Some(e),
+                                        );
+                                    }
+                                }).ok();
                         }
                     }
                     None => {

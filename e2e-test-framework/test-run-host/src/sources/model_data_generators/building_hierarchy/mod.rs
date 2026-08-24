@@ -1021,10 +1021,6 @@ impl BuildingHierarchyDataGeneratorInternalState {
                 }
             };
 
-            if let Err(error) = &transition_response {
-                self.transition_to_error_state("Error processing source command", Some(error));
-            }
-
             if message.response_tx.is_some() {
                 let message_response = BuildingHierarchyDataGeneratorMessageResponse {
                     result: transition_response,
@@ -1250,8 +1246,12 @@ impl BuildingHierarchyDataGeneratorInternalState {
 
                 // If send_initial_inserts is true, send insert events for all current state
                 if self.settings.send_initial_inserts {
-                    if let Err(e) = self.send_initial_inserts().await {
-                        log::error!("Failed to send initial inserts: {e}");
+                    if let Err(error) = self.send_initial_inserts().await {
+                        self.transition_to_error_state(
+                            "Failed to send initial inserts",
+                            Some(&error),
+                        );
+                        return Err(error);
                     }
                 }
 
@@ -1417,6 +1417,9 @@ impl BuildingHierarchyDataGeneratorInternalState {
         self.steps_remaining = 0;
 
         let close_result = self.close_dispatchers().await;
+        if let Err(error) = &close_result {
+            self.transition_to_error_state("Failed to close source dispatchers", Some(error));
+        }
         self.write_result_summary().await.ok();
         close_result
     }
@@ -1433,6 +1436,9 @@ impl BuildingHierarchyDataGeneratorInternalState {
         self.steps_remaining = 0;
 
         let close_result = self.close_dispatchers().await;
+        if let Err(error) = &close_result {
+            self.transition_to_error_state("Failed to close source dispatchers", Some(error));
+        }
         self.write_result_summary().await.ok();
         close_result
     }
@@ -1635,7 +1641,14 @@ pub async fn model_host_thread(
                         log::trace!("Received change stream message: {change_stream_message:?}");
                         if change_stream_message.seq_num == state.event_seq_num && state.status.is_processing() {
                             state.process_change_stream_message(change_stream_message).await
-                                .inspect_err(|e| state.transition_to_error_state("Error calling process_change_stream_message", Some(e))).ok();
+                                .inspect_err(|e| {
+                                    if state.status != SourceChangeGeneratorStatus::Error {
+                                        state.transition_to_error_state(
+                                            "Error calling process_change_stream_message",
+                                            Some(e),
+                                        );
+                                    }
+                                }).ok();
                         }
                     }
                     None => {

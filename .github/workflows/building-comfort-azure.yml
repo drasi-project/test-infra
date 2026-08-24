@@ -217,6 +217,31 @@ jobs:
           fi
           echo "Validated VM SKU availability: $IN_VM_SIZE in $IN_LOCATION"
 
+          sku_family="$(jq -r '.family' <<< "$sku_json")"
+          required_cores="$(jq -r '[.capabilities[] | select(.name == "vCPUs")][0].value' <<< "$sku_json")"
+          quota_json="$(
+            az vm list-usage \
+              --location "$IN_LOCATION" \
+              --query "[?name.value=='$sku_family'] | [0]" \
+              --output json
+          )"
+          [[ "$quota_json" != "null" ]] || {
+            echo "Could not resolve quota $sku_family in $IN_LOCATION" >&2
+            exit 1
+          }
+          quota_current="$(jq -r '.currentValue' <<< "$quota_json")"
+          quota_limit="$(jq -r '.limit' <<< "$quota_json")"
+          quota_available=$(( quota_limit - quota_current ))
+          if (( quota_available < required_cores )); then
+            minimum_limit=$(( quota_current + required_cores ))
+            echo "Insufficient $sku_family quota in $IN_LOCATION." >&2
+            echo "Current usage: $quota_current cores; limit: $quota_limit cores." >&2
+            echo "The selected $IN_VM_SIZE requires $required_cores cores." >&2
+            echo "Request a quota limit of at least $minimum_limit cores." >&2
+            exit 1
+          fi
+          echo "Validated VM quota: $quota_available available $sku_family cores; $required_cores required"
+
           {
             echo "LOCATION=$IN_LOCATION"
             echo "VM_SIZE=$IN_VM_SIZE"

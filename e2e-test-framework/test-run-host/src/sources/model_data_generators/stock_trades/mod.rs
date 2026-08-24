@@ -818,6 +818,10 @@ impl StockTradeDataGeneratorInternalState {
                 }
             };
 
+            if let Err(error) = &transition_response {
+                self.transition_to_error_state("Error processing source command", Some(error));
+            }
+
             if message.response_tx.is_some() {
                 let message_response = StockTradeDataGeneratorMessageResponse {
                     result: transition_response,
@@ -1190,9 +1194,9 @@ impl StockTradeDataGeneratorInternalState {
         self.skips_remaining = 0;
         self.steps_remaining = 0;
 
-        self.close_dispatchers().await?;
+        let close_result = self.close_dispatchers().await;
         self.write_result_summary().await.ok();
-        Ok(())
+        close_result
     }
 
     async fn transition_to_stopped_state(&mut self) -> anyhow::Result<()> {
@@ -1206,9 +1210,9 @@ impl StockTradeDataGeneratorInternalState {
         self.skips_remaining = 0;
         self.steps_remaining = 0;
 
-        self.close_dispatchers().await?;
+        let close_result = self.close_dispatchers().await;
         self.write_result_summary().await.ok();
-        Ok(())
+        close_result
     }
 
     fn transition_to_error_state(&mut self, error_message: &str, error: Option<&anyhow::Error>) {

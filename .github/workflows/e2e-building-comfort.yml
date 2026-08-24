@@ -15,7 +15,7 @@
 # (per-room never reached its count) and was retired.
 #
 # Variant selection:
-#   - Scheduled: 07:00 UTC standard set, 07:30 UTC adaptive set (see crons).
+#   - Scheduled: 07:00 UTC runs all five variants in one matrix.
 #   - Manual: tick a checkbox per variant; the matrix is built from checked.
 
 name: E2E - building_comfort
@@ -90,10 +90,8 @@ on:
         required: false
         default: "30"
   schedule:
-    # 07:00 UTC — standard set (drasi_lib + dynamic http+grpc).
+    # 07:00 UTC — full set (drasi_lib + dynamic http/grpc, standard + adaptive).
     - cron: "0 7 * * *"
-    # 07:30 UTC — adaptive set (dynamic http+grpc adaptive).
-    - cron: "30 7 * * *"
 
 permissions:
   contents: read
@@ -101,7 +99,7 @@ permissions:
 jobs:
   # Resolve the selected variants into a JSON array consumed by the run job's
   # matrix. workflow_dispatch uses the per-variant checkboxes; scheduled runs
-  # (checkboxes absent) pick a set based on which cron fired.
+  # (checkboxes absent) cover every variant.
   select-variants:
     name: select variants
     runs-on: ubuntu-latest
@@ -111,7 +109,6 @@ jobs:
       - name: Compute variant matrix
         id: compute
         env:
-          SCHEDULE: ${{ github.event.schedule }}
           # Boolean inputs arrive as "true"/"false" (empty on scheduled runs).
           V_DRASI_LIB: ${{ inputs.drasi_lib }}
           V_HTTP_STD: ${{ inputs.http_standard }}
@@ -121,13 +118,8 @@ jobs:
         run: |
           variants=()
           if [[ -z "$V_DRASI_LIB$V_HTTP_STD$V_HTTP_ADAPTIVE$V_GRPC_STD$V_GRPC_ADAPTIVE" ]]; then
-            # No checkboxes present -> scheduled run; pick a set per cron.
-            case "$SCHEDULE" in
-              "30 7 * * *")
-                variants=(http_adaptive grpc_adaptive) ;;
-              *)
-                variants=(drasi_lib http_standard grpc_standard) ;;
-            esac
+            # No checkboxes present -> scheduled run; cover every variant.
+            variants=(drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive)
           else
             [[ "$V_DRASI_LIB"     == "true" ]] && variants+=(drasi_lib)
             [[ "$V_HTTP_STD"      == "true" ]] && variants+=(http_standard)

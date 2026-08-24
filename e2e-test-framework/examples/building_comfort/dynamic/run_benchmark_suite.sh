@@ -5,7 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SCRIPT="${RUN_SCRIPT:-$SCRIPT_DIR/run_dynamic.sh}"
 
 VARIANTS="${VARIANTS:-http_standard http_adaptive grpc_standard grpc_adaptive}"
-REPETITIONS="${REPETITIONS:-1}"
 SUITE_WORK_DIR="${SUITE_WORK_DIR:-$SCRIPT_DIR/.benchmark_suite}"
 SUITE_ARTIFACTS_DIR="${SUITE_ARTIFACTS_DIR:-$SCRIPT_DIR/benchmark_artifacts}"
 PERF_PROFILE_ID="${PERF_PROFILE_ID:-unknown}"
@@ -19,11 +18,6 @@ if [[ ! -x "$DRASI_SERVER_BIN" ]]; then
 fi
 if [[ ! -x "$TEST_SERVICE_BIN" ]]; then
     echo "TEST_SERVICE_BIN is not executable: $TEST_SERVICE_BIN" >&2
-    exit 1
-fi
-
-if [[ ! "$REPETITIONS" =~ ^[1-9][0-9]*$ ]] || (( REPETITIONS > 10 )); then
-    echo "REPETITIONS must be an integer from 1 through 10" >&2
     exit 1
 fi
 
@@ -123,69 +117,64 @@ for variant in "${variant_list[@]}"; do
     [[ -n "$variant" ]] || continue
     configure_variant "$variant"
 
-    for repetition in $(seq 1 "$REPETITIONS"); do
-        clear_benchmark_ports
-        run_name="$(printf '%s/run-%02d' "$variant" "$repetition")"
-        run_work_dir="$SUITE_WORK_DIR/$run_name"
-        run_artifacts_dir="$SUITE_ARTIFACTS_DIR/$run_name"
-        mkdir -p "$run_work_dir" "$run_artifacts_dir"
+    clear_benchmark_ports
+    run_work_dir="$SUITE_WORK_DIR/$variant"
+    run_artifacts_dir="$SUITE_ARTIFACTS_DIR/$variant"
+    mkdir -p "$run_work_dir" "$run_artifacts_dir"
 
-        echo "::group::Benchmark $variant repetition $repetition/$REPETITIONS"
-        started_at="$(date -u +%FT%TZ)"
-        run_rc=0
-        env \
-            VARIANT="$variant" \
-            DRASI_SERVER_BIN="$DRASI_SERVER_BIN" \
-            TEST_SERVICE_BIN="$TEST_SERVICE_BIN" \
-            SERVER_SOURCE_FILE="$SERVER_SOURCE_FILE" \
-            SERVER_QUERIES_FILE="$SERVER_QUERIES_FILE" \
-            SERVER_REACTIONS_FILE="$SERVER_REACTIONS_FILE" \
-            DRASI_SOURCE_PORT="$DRASI_SOURCE_PORT" \
-            TEST_CFG_SRC="$TEST_CFG_SRC" \
-            ARTIFACTS_DIR="$run_artifacts_dir" \
-            WORK_DIR="$run_work_dir" \
-            bash "$RUN_SCRIPT" || run_rc=$?
-        completed_at="$(date -u +%FT%TZ)"
-        echo "::endgroup::"
+    echo "::group::$variant"
+    started_at="$(date -u +%FT%TZ)"
+    run_rc=0
+    env \
+        VARIANT="$variant" \
+        DRASI_SERVER_BIN="$DRASI_SERVER_BIN" \
+        TEST_SERVICE_BIN="$TEST_SERVICE_BIN" \
+        SERVER_SOURCE_FILE="$SERVER_SOURCE_FILE" \
+        SERVER_QUERIES_FILE="$SERVER_QUERIES_FILE" \
+        SERVER_REACTIONS_FILE="$SERVER_REACTIONS_FILE" \
+        DRASI_SOURCE_PORT="$DRASI_SOURCE_PORT" \
+        TEST_CFG_SRC="$TEST_CFG_SRC" \
+        ARTIFACTS_DIR="$run_artifacts_dir" \
+        WORK_DIR="$run_work_dir" \
+        bash "$RUN_SCRIPT" || run_rc=$?
+    completed_at="$(date -u +%FT%TZ)"
+    echo "::endgroup::"
 
-        metrics_json="$(
-            find "$run_artifacts_dir" -path '*output_log/performance_metrics/*.json' -type f -print0 |
-                sort -z |
-                xargs -0 -r jq -s '[
-                    .[] | {
-                        reaction: (.test_run_reaction_id | split(".") | last),
-                        record_count,
-                        duration_ns,
-                        records_per_second,
-                        bootstrap,
-                        steady_state
-                    }
-                ]'
-        )"
-        [[ -n "$metrics_json" ]] || metrics_json="[]"
+    metrics_json="$(
+        find "$run_artifacts_dir" -path '*output_log/performance_metrics/*.json' -type f -print0 |
+            sort -z |
+            xargs -0 -r jq -s '[
+                .[] | {
+                    reaction: (.test_run_reaction_id | split(".") | last),
+                    record_count,
+                    duration_ns,
+                    records_per_second,
+                    bootstrap,
+                    steady_state
+                }
+            ]'
+    )"
+    [[ -n "$metrics_json" ]] || metrics_json="[]"
 
-        jq -cn \
-            --arg profile_id "$PERF_PROFILE_ID" \
-            --arg variant "$variant" \
-            --argjson repetition "$repetition" \
-            --arg started_at "$started_at" \
-            --arg completed_at "$completed_at" \
-            --argjson exit_code "$run_rc" \
-            --argjson metrics "$metrics_json" \
-            '{
-                profile_id: $profile_id,
-                variant: $variant,
-                repetition: $repetition,
-                started_at: $started_at,
-                completed_at: $completed_at,
-                exit_code: $exit_code,
-                metrics: $metrics
-            }' >> "$results_jsonl"
+    jq -cn \
+        --arg profile_id "$PERF_PROFILE_ID" \
+        --arg variant "$variant" \
+        --arg started_at "$started_at" \
+        --arg completed_at "$completed_at" \
+        --argjson exit_code "$run_rc" \
+        --argjson metrics "$metrics_json" \
+        '{
+            profile_id: $profile_id,
+            variant: $variant,
+            started_at: $started_at,
+            completed_at: $completed_at,
+            exit_code: $exit_code,
+            metrics: $metrics
+        }' >> "$results_jsonl"
 
-        if (( run_rc != 0 )); then
-            suite_rc=1
-        fi
-    done
+    if (( run_rc != 0 )); then
+        suite_rc=1
+    fi
 done
 
 clear_benchmark_ports
@@ -211,11 +200,9 @@ jq -s \
     --arg drasi_server_version "$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n 1 || echo unknown)" \
     --arg drasi_server_sha256 "$(sha256_file "$DRASI_SERVER_BIN")" \
     --arg test_service_sha256 "$(sha256_file "$TEST_SERVICE_BIN")" \
-    --argjson repetitions "$REPETITIONS" \
     --slurpfile plugins "$plugin_manifest" \
     '{
         profile_id: $profile_id,
-        repetitions: $repetitions,
         drasi_server: {
             version: $drasi_server_version,
             sha256: $drasi_server_sha256
@@ -262,18 +249,17 @@ jq -s \
     echo "## Fixed-VM building comfort benchmark"
     echo
     echo "- profile: \`$PERF_PROFILE_ID\`"
-    echo "- repetitions: \`$REPETITIONS\`"
     echo "- drasi-server: \`$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n 1 || echo unknown)\`"
     echo
-    echo "| Variant | Repetition | Reaction | Records | Duration (s) | Records/sec | Result |"
-    echo "| --- | ---: | --- | ---: | ---: | ---: | --- |"
+    echo "| Variant | Reaction | Records | Duration (s) | Records/sec | Result |"
+    echo "| --- | --- | ---: | ---: | ---: | --- |"
     jq -r '
         .runs[] as $run
         | if ($run.metrics | length) == 0 then
-            "| `\($run.variant)` | \($run.repetition) | n/a | n/a | n/a | n/a | \(if $run.exit_code == 0 then "pass" else "fail" end) |"
+            "| `\($run.variant)` | n/a | n/a | n/a | n/a | \(if $run.exit_code == 0 then "pass" else "fail" end) |"
           else
             $run.metrics[]
-            | "| `\($run.variant)` | \($run.repetition) | `\(.reaction)` | \(.record_count) | \((.duration_ns / 1e9 * 1000 | round) / 1000) | \((.records_per_second * 100 | round) / 100) | \(if $run.exit_code == 0 then "pass" else "fail" end) |"
+            | "| `\($run.variant)` | `\(.reaction)` | \(.record_count) | \((.duration_ns / 1e9 * 1000 | round) / 1000) | \((.records_per_second * 100 | round) / 100) | \(if $run.exit_code == 0 then "pass" else "fail" end) |"
           end
     ' "$SUITE_ARTIFACTS_DIR/suite-results.json"
     echo

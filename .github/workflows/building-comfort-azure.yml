@@ -280,7 +280,6 @@ jobs:
             echo "OS_DISK_SIZE_GB=$os_disk_size_gb"
             echo "IMAGE_VERSION=$image_version"
             echo "VARIANTS=$variants"
-            echo "REPETITIONS=1"
             echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"
             echo "DRASI_PLUGIN_TAG=$IN_PLUGIN_TAG"
             echo "BATCHING_SPEED=${IN_BATCHING_SPEED:-medium}"
@@ -362,7 +361,6 @@ jobs:
 
           {
             printf 'VARIANTS=%q\n' "$VARIANTS"
-            printf 'REPETITIONS=%q\n' "$REPETITIONS"
             printf 'DRASI_SERVER_VERSION=%q\n' "$DRASI_SERVER_VERSION"
             printf 'DRASI_PLUGIN_TAG=%q\n' "$DRASI_PLUGIN_TAG"
             printf 'BATCHING_SPEED=%q\n' "$BATCHING_SPEED"

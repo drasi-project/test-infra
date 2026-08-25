@@ -1,12 +1,12 @@
-@description('Prefix used for every per-run benchmark resource.')
+@description('Prefix used for every per-run test resource.')
 @minLength(3)
 @maxLength(40)
 param resourcePrefix string
 
-@description('Azure region for the benchmark VM.')
+@description('Azure region for the test VM.')
 param location string = resourceGroup().location
 
-@description('Fixed VM SKU used for the benchmark suite.')
+@description('Fixed VM SKU used for the test suite.')
 param vmSize string = 'Standard_D4s_v6'
 
 @description('OS disk size in GB.')
@@ -78,7 +78,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
     }
     subnets: [
       {
-        name: 'benchmark'
+        name: 'test'
         properties: {
           addressPrefix: '10.42.0.0/24'
         }

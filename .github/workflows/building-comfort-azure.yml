@@ -113,21 +113,21 @@ permissions:
   id-token: write
 
 concurrency:
-  group: azure-resource-group-drasi-e2e-aspire-ci
+  group: azure-resource-group-drasi-e2e-test-infra
   cancel-in-progress: false
 
 env:
-  AZURE_RESOURCE_GROUP: drasi-e2e-aspire-ci
-  BICEP_FILE: infra/azure/benchmark-vm/main.bicep
+  AZURE_RESOURCE_GROUP: drasi-e2e-test-infra
+  BICEP_FILE: infra/azure/test-vm/main.bicep
   ADMIN_USERNAME: githubrunner
-  LOCAL_ARTIFACTS_DIR: ${{ github.workspace }}/azure-benchmark-artifacts
-  REMOTE_ROOT: /opt/drasi-benchmark
+  LOCAL_ARTIFACTS_DIR: ${{ github.workspace }}/azure-test-artifacts
+  REMOTE_ROOT: /opt/drasi-test
   PERF_PROFILE_ID: ""
   VM_PUBLIC_IP: ""
-  BENCHMARK_EXIT_CODE: ""
+  TEST_EXIT_CODE: ""
 
 jobs:
-  benchmark:
+  test:
     name: building_comfort / Azure VM
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -211,7 +211,7 @@ jobs:
           }
 
           resource_prefix="drasiperf-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          deployment_name="benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          deployment_name="test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           image_version="$(
             az vm image show \
               --location "$IN_LOCATION" \
@@ -300,11 +300,19 @@ jobs:
             echo "VNET_NAME=${resource_prefix}-vnet"
           } >> "$GITHUB_ENV"
 
+      - name: Ensure Azure resource group
+        run: |
+          set -euo pipefail
+          az group create \
+            --name "$AZURE_RESOURCE_GROUP" \
+            --location "$LOCATION" \
+            --output none
+
       - name: Generate ephemeral SSH key
         run: |
           set -euo pipefail
-          ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/benchmark_ssh"
-          echo "SSH_PRIVATE_KEY=$RUNNER_TEMP/benchmark_ssh" >> "$GITHUB_ENV"
+          ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/test_ssh"
+          echo "SSH_PRIVATE_KEY=$RUNNER_TEMP/test_ssh" >> "$GITHUB_ENV"
 
       - name: Deploy test VM
         run: |
@@ -375,7 +383,7 @@ jobs:
             printf 'SUITE_WORK_DIR=%q\n' "$REMOTE_ROOT/work"
             printf 'SUITE_ARTIFACTS_DIR=%q\n' "$REMOTE_ROOT/artifacts"
             printf 'DRASI_SERVER_BIN=%q\n' "$REMOTE_ROOT/bin/drasi-server"
-          } > "$RUNNER_TEMP/benchmark.env"
+          } > "$RUNNER_TEMP/test.env"
 
       - name: Upload test workspace
         run: |
@@ -385,7 +393,7 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=accept-new \
             "$RUNNER_TEMP/test-infra.tar.gz" \
-            "$RUNNER_TEMP/benchmark.env" \
+            "$RUNNER_TEMP/test.env" \
             "$ADMIN_USERNAME@$VM_PUBLIC_IP:/tmp/"
 
           ssh \
@@ -407,15 +415,15 @@ jobs:
             -o ServerAliveCountMax=10 \
             -o StrictHostKeyChecking=accept-new \
             "$ADMIN_USERNAME@$VM_PUBLIC_IP" \
-            "bash '$REMOTE_ROOT/workspace/e2e-test-framework/examples/building_comfort/dynamic/run_remote_benchmark.sh' \
+            "bash '$REMOTE_ROOT/workspace/e2e-test-framework/examples/building_comfort/dynamic/run_remote_test.sh' \
               '$REMOTE_ROOT/workspace' \
-              /tmp/benchmark.env \
+              /tmp/test.env \
               '$REMOTE_ROOT/artifacts'"
-          benchmark_exit_code=$?
-          if [[ "$benchmark_exit_code" == "255" ]]; then
+          test_exit_code=$?
+          if [[ "$test_exit_code" == "255" ]]; then
             echo "::error::SSH transport failed while running the remote test"
           fi
-          echo "BENCHMARK_EXIT_CODE=$benchmark_exit_code" >> "$GITHUB_ENV"
+          echo "TEST_EXIT_CODE=$test_exit_code" >> "$GITHUB_ENV"
           exit 0
 
       - name: Download test artifacts
@@ -473,11 +481,11 @@ jobs:
           if-no-files-found: warn
 
       - name: Verify test result
-        if: always() && env.BENCHMARK_EXIT_CODE != ''
+        if: always() && env.TEST_EXIT_CODE != ''
         run: |
-          if [[ "$BENCHMARK_EXIT_CODE" != "0" ]]; then
-            echo "The remote test failed with exit code $BENCHMARK_EXIT_CODE" >&2
-            exit "$BENCHMARK_EXIT_CODE"
+          if [[ "$TEST_EXIT_CODE" != "0" ]]; then
+            echo "The remote test failed with exit code $TEST_EXIT_CODE" >&2
+            exit "$TEST_EXIT_CODE"
           fi
 
       - name: Delete per-run Azure resources
@@ -487,6 +495,11 @@ jobs:
 
           if [[ -z "${RESOURCE_PREFIX:-}" ]]; then
             echo "No per-run resource prefix was created; skipping cleanup"
+            exit 0
+          fi
+
+          if [[ "$(az group exists --name "$AZURE_RESOURCE_GROUP")" != "true" ]]; then
+            echo "Resource group $AZURE_RESOURCE_GROUP does not exist; skipping cleanup"
             exit 0
           fi
 

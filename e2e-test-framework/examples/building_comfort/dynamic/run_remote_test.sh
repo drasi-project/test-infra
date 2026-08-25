@@ -11,7 +11,7 @@ ENV_FILE="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 ARTIFACTS_DIR="$3"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-    echo "Benchmark environment file not found: $ENV_FILE" >&2
+    echo "Test environment file not found: $ENV_FILE" >&2
     exit 1
 fi
 
@@ -109,4 +109,4 @@ cargo build --release --locked --manifest-path test-service/Cargo.toml
 export TEST_SERVICE_BIN="$WORKSPACE/e2e-test-framework/target/release/test-service"
 
 cd "$WORKSPACE"
-bash e2e-test-framework/examples/building_comfort/dynamic/run_benchmark_suite.sh
+bash e2e-test-framework/examples/building_comfort/dynamic/run_test_suite.sh

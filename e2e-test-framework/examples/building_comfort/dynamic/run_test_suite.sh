@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SCRIPT="${RUN_SCRIPT:-$SCRIPT_DIR/../run_variant.sh}"
 
 VARIANTS="${VARIANTS:-drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive}"
-SUITE_WORK_DIR="${SUITE_WORK_DIR:-$SCRIPT_DIR/.benchmark_suite}"
-SUITE_ARTIFACTS_DIR="${SUITE_ARTIFACTS_DIR:-$SCRIPT_DIR/benchmark_artifacts}"
+SUITE_WORK_DIR="${SUITE_WORK_DIR:-$SCRIPT_DIR/.test_suite}"
+SUITE_ARTIFACTS_DIR="${SUITE_ARTIFACTS_DIR:-$SCRIPT_DIR/test_artifacts}"
 PERF_PROFILE_ID="${PERF_PROFILE_ID:-unknown}"
 DRASI_SERVER_BIN="${DRASI_SERVER_BIN:-}"
 
@@ -53,7 +53,7 @@ sha256_file() {
     fi
 }
 
-clear_benchmark_ports() {
+clear_test_ports() {
     local port pid
     local ports=(8090 9000 50051 50052 50053 63123)
     local pids=()
@@ -93,7 +93,7 @@ clear_benchmark_ports() {
 for variant in "${variant_list[@]}"; do
     [[ -n "$variant" ]] || continue
 
-    clear_benchmark_ports
+    clear_test_ports
     run_work_dir="$SUITE_WORK_DIR/$variant"
     run_artifacts_dir="$SUITE_ARTIFACTS_DIR/$variant"
     mkdir -p "$run_work_dir" "$run_artifacts_dir"
@@ -170,7 +170,7 @@ for variant in "${variant_list[@]}"; do
     fi
 done
 
-clear_benchmark_ports
+clear_test_ports
 
 plugin_manifest="$SUITE_ARTIFACTS_DIR/plugin-manifest.json"
 drasi_server_version="not used"

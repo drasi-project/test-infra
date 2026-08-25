@@ -23,13 +23,15 @@ fi
 
 read -r -a variant_list <<< "${VARIANTS//,/ }"
 if (( ${#variant_list[@]} == 0 )); then
-    echo "At least one benchmark variant is required" >&2
+    echo "At least one test variant is required" >&2
     exit 1
 fi
 
 mkdir -p "$SUITE_WORK_DIR" "$SUITE_ARTIFACTS_DIR"
 results_jsonl="$SUITE_ARTIFACTS_DIR/suite-results.jsonl"
+suite_summary="$SUITE_ARTIFACTS_DIR/summary.md"
 : > "$results_jsonl"
+: > "$suite_summary"
 suite_rc=0
 
 sha256_file() {
@@ -60,7 +62,7 @@ clear_benchmark_ports() {
         unique_pids+=("$pid")
     done < <(printf '%s\n' "${pids[@]}" | sort -un)
     pids=("${unique_pids[@]}")
-    echo "Stopping ${#pids[@]} process(es) left on benchmark ports: ${pids[*]}"
+    echo "Stopping ${#pids[@]} process(es) left on test ports: ${pids[*]}"
     kill -TERM "${pids[@]}" 2>/dev/null || true
 
     for _ in $(seq 1 30); do
@@ -73,7 +75,7 @@ clear_benchmark_ports() {
         sleep 1
     done
 
-    echo "Force-stopping benchmark processes that did not exit: ${pids[*]}"
+    echo "Force-stopping test processes that did not exit: ${pids[*]}"
     kill -KILL "${pids[@]}" 2>/dev/null || true
 }
 
@@ -97,6 +99,28 @@ for variant in "${variant_list[@]}"; do
         bash "$RUN_SCRIPT" || run_rc=$?
     completed_at="$(date -u +%FT%TZ)"
     echo "::endgroup::"
+
+    if [[ -s "$run_artifacts_dir/summary.md" ]]; then
+        if [[ -s "$suite_summary" ]]; then
+            {
+                echo
+                echo "---"
+                echo
+            } >> "$suite_summary"
+        fi
+        cat "$run_artifacts_dir/summary.md" >> "$suite_summary"
+    else
+        {
+            if [[ -s "$suite_summary" ]]; then
+                echo
+                echo "---"
+                echo
+            fi
+            echo "## E2E test summary — \`$variant\`"
+            echo
+            echo "No test summary was produced. The variant exited with code $run_rc."
+        } >> "$suite_summary"
+    fi
 
     metrics_json="$(
         find "$run_artifacts_dir" -path '*output_log/performance_metrics/*.json' -type f -print0 |
@@ -203,36 +227,8 @@ jq -s \
         )
     }' "$results_jsonl" > "$SUITE_ARTIFACTS_DIR/suite-results.json"
 
-{
-    echo "## Fixed-VM building comfort benchmark"
-    echo
-    echo "- profile: \`$PERF_PROFILE_ID\`"
-    echo "- drasi-server: \`$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n 1 || echo unknown)\`"
-    echo
-    echo "| Variant | Reaction | Records | Duration (s) | Records/sec | Result |"
-    echo "| --- | --- | ---: | ---: | ---: | --- |"
-    jq -r '
-        .runs[] as $run
-        | if ($run.metrics | length) == 0 then
-            "| `\($run.variant)` | n/a | n/a | n/a | n/a | \(if $run.exit_code == 0 then "pass" else "fail" end) |"
-          else
-            $run.metrics[]
-            | "| `\($run.variant)` | `\(.reaction)` | \(.record_count) | \((.duration_ns / 1e9 * 1000 | round) / 1000) | \((.records_per_second * 100 | round) / 100) | \(if $run.exit_code == 0 then "pass" else "fail" end) |"
-          end
-    ' "$SUITE_ARTIFACTS_DIR/suite-results.json"
-    echo
-    echo "### Aggregate throughput"
-    echo
-    echo "| Variant | Reaction | Samples | Mean records/sec | Min | Max |"
-    echo "| --- | --- | ---: | ---: | ---: | ---: |"
-    jq -r '
-        .aggregates[]
-        | "| `\(.variant)` | `\(.reaction)` | \(.samples) | \((.records_per_second.mean * 100 | round) / 100) | \((.records_per_second.min * 100 | round) / 100) | \((.records_per_second.max * 100 | round) / 100) |"
-    ' "$SUITE_ARTIFACTS_DIR/suite-results.json"
-} | tee "$SUITE_ARTIFACTS_DIR/summary.md"
-
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    cat "$SUITE_ARTIFACTS_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+    cat "$suite_summary" >> "$GITHUB_STEP_SUMMARY"
 fi
 
 exit "$suite_rc"

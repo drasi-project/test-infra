@@ -1,4 +1,4 @@
-# Native building-comfort benchmark on an ephemeral fixed-SKU Azure VM.
+# Native building-comfort test on an ephemeral fixed-SKU Azure VM.
 
 name: Building comfort Azure
 
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       location:
-        description: "Azure region for the benchmark VM."
+        description: "Azure region for the test VM."
         required: true
         default: "westus3"
       vm_size:
@@ -124,7 +124,7 @@ env:
 
 jobs:
   benchmark:
-    name: ephemeral Azure VM / native benchmark suite
+    name: building_comfort / Azure VM
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -139,7 +139,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Resolve benchmark inputs
+      - name: Resolve test inputs
         env:
           IN_LOCATION: ${{ inputs.location }}
           IN_VM_SIZE: ${{ inputs.vm_size }}
@@ -293,7 +293,7 @@ jobs:
           ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/benchmark_ssh"
           echo "SSH_PRIVATE_KEY=$RUNNER_TEMP/benchmark_ssh" >> "$GITHUB_ENV"
 
-      - name: Deploy benchmark VM
+      - name: Deploy test VM
         run: |
           set -euo pipefail
           controller_ip="$(curl -fsSL --retry 3 https://api.ipify.org)"
@@ -344,7 +344,7 @@ jobs:
           echo "Timed out waiting for SSH on $VM_PUBLIC_IP" >&2
           exit 1
 
-      - name: Package benchmark workspace
+      - name: Package test workspace
         run: |
           set -euo pipefail
           git archive --format=tar.gz --output="$RUNNER_TEMP/test-infra.tar.gz" "$GITHUB_SHA"
@@ -364,7 +364,7 @@ jobs:
             printf 'DRASI_SERVER_BIN=%q\n' "$REMOTE_ROOT/bin/drasi-server"
           } > "$RUNNER_TEMP/benchmark.env"
 
-      - name: Upload benchmark workspace
+      - name: Upload test workspace
         run: |
           set -euo pipefail
           scp \
@@ -400,12 +400,12 @@ jobs:
               '$REMOTE_ROOT/artifacts'"
           benchmark_exit_code=$?
           if [[ "$benchmark_exit_code" == "255" ]]; then
-            echo "::error::SSH transport failed while running the remote benchmark"
+            echo "::error::SSH transport failed while running the remote test"
           fi
           echo "BENCHMARK_EXIT_CODE=$benchmark_exit_code" >> "$GITHUB_ENV"
           exit 0
 
-      - name: Download benchmark artifacts
+      - name: Download test artifacts
         if: always() && env.VM_PUBLIC_IP != ''
         run: |
           set +e
@@ -418,7 +418,7 @@ jobs:
             "$ADMIN_USERNAME@$VM_PUBLIC_IP:$REMOTE_ROOT/artifacts/." \
             "$LOCAL_ARTIFACTS_DIR/"
 
-      - name: Publish benchmark summary
+      - name: Publish test summary
         if: always()
         run: |
           summary_file="$LOCAL_ARTIFACTS_DIR/summary.md"
@@ -426,13 +426,13 @@ jobs:
             cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
           else
             {
-              echo "## Fixed-VM building comfort benchmark"
+              echo "## Building comfort test"
               echo
-              echo "No benchmark summary was produced. Check the workflow logs and uploaded artifacts."
+              echo "No test summary was produced. Check the workflow logs and uploaded artifacts."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Upload benchmark artifacts
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v5
         with:
@@ -440,11 +440,11 @@ jobs:
           path: ${{ env.LOCAL_ARTIFACTS_DIR }}
           if-no-files-found: warn
 
-      - name: Verify benchmark result
+      - name: Verify test result
         if: always() && env.BENCHMARK_EXIT_CODE != ''
         run: |
           if [[ "$BENCHMARK_EXIT_CODE" != "0" ]]; then
-            echo "The remote benchmark failed with exit code $BENCHMARK_EXIT_CODE" >&2
+            echo "The remote test failed with exit code $BENCHMARK_EXIT_CODE" >&2
             exit "$BENCHMARK_EXIT_CODE"
           fi
 
@@ -505,16 +505,24 @@ jobs:
             echo "Deployment record $DEPLOYMENT_NAME is already absent"
           fi
 
-          remaining_resources="$(
-            az resource list \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --query "[?starts_with(name, '$RESOURCE_PREFIX')].id" \
-              --output tsv
-          )"
-          if [[ -n "$remaining_resources" ]]; then
-            echo "Per-run Azure resources remain after cleanup:" >&2
-            printf '%s\n' "$remaining_resources" >&2
-            exit 1
-          fi
+          remaining_resources=""
+          for attempt in $(seq 1 30); do
+            remaining_resources="$(
+              az resource list \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --query "[?starts_with(name, '$RESOURCE_PREFIX')].id" \
+                --output tsv
+            )"
+            [[ -z "$remaining_resources" ]] && break
+
+            if (( attempt == 30 )); then
+              echo "Per-run Azure resources remain after cleanup:" >&2
+              printf '%s\n' "$remaining_resources" >&2
+              exit 1
+            fi
+
+            echo "Waiting for Azure resource inventory to reflect deletion ($attempt/30)"
+            sleep 10
+          done
 
           echo "Deleted and verified all Azure resources for $RESOURCE_PREFIX"

@@ -1310,14 +1310,10 @@ copy_determinism_verdict() {
     fi
 }
 
-# Render a markdown summary into $GITHUB_STEP_SUMMARY so it shows up on the
-# workflow run page. Local runs (no GITHUB_STEP_SUMMARY env var) skip this.
+# Render a reusable markdown summary and publish it on GitHub Actions when
+# GITHUB_STEP_SUMMARY is available.
 write_step_summary() {
-    if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
-        return 0
-    fi
-
-    local out="$GITHUB_STEP_SUMMARY"
+    local out="$ARTIFACTS_DIR/summary.md"
     local drasi_source="${DRASI_BUILD_SOURCE:-unknown}"
     local plugin_tag="${DRASI_PLUGIN_TAG:-<latest-compatible>}"
     local server_version
@@ -1399,7 +1395,11 @@ write_step_summary() {
             jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
             echo '```'
         fi
-    } >> "$out"
+    } > "$out"
+
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        cat "$out" >> "$GITHUB_STEP_SUMMARY"
+    fi
 }
 
 download_drasi_server

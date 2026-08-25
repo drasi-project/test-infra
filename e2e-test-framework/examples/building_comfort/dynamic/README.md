@@ -60,6 +60,12 @@ so queries, reactions and the test-service config are identical and the
 determinism baselines match (verified in CI: both hashes equal the standard
 baseline).
 
+The HTTP reactions use `recoveryPolicy: auto_skip_gap`. Each test observer stops
+independently when it reaches its record-count target, so one callback endpoint
+can close while the other query is still draining. Skipping that expected
+post-completion delivery gap prevents the HTTP reaction from entering an error
+state and blocking the remaining query.
+
 For **gRPC**, the source has no `adaptiveEnabled` field, so `grpc_adaptive` puts
 adaptive on the framework *dispatcher* instead (`config.grpc_adaptive.json`);
 gRPC streaming delivers each event as a discrete message, so that is also

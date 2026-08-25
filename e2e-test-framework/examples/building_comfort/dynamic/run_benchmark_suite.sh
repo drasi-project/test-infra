@@ -2,9 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN_SCRIPT="${RUN_SCRIPT:-$SCRIPT_DIR/run_dynamic.sh}"
+RUN_SCRIPT="${RUN_SCRIPT:-$SCRIPT_DIR/../run_variant.sh}"
 
-VARIANTS="${VARIANTS:-http_standard http_adaptive grpc_standard grpc_adaptive}"
+VARIANTS="${VARIANTS:-drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive}"
 SUITE_WORK_DIR="${SUITE_WORK_DIR:-$SCRIPT_DIR/.benchmark_suite}"
 SUITE_ARTIFACTS_DIR="${SUITE_ARTIFACTS_DIR:-$SCRIPT_DIR/benchmark_artifacts}"
 PERF_PROFILE_ID="${PERF_PROFILE_ID:-unknown}"
@@ -77,45 +77,8 @@ clear_benchmark_ports() {
     kill -KILL "${pids[@]}" 2>/dev/null || true
 }
 
-configure_variant() {
-    local variant="$1"
-    SERVER_QUERIES_FILE="queries.json"
-
-    case "$variant" in
-        http_standard)
-            SERVER_SOURCE_FILE="source_http.json"
-            SERVER_REACTIONS_FILE="reactions_http.json"
-            DRASI_SOURCE_PORT=9000
-            TEST_CFG_SRC="$SCRIPT_DIR/config.http.json"
-            ;;
-        http_adaptive)
-            SERVER_SOURCE_FILE="source_http_adaptive.json"
-            SERVER_REACTIONS_FILE="reactions_http.json"
-            DRASI_SOURCE_PORT=9000
-            TEST_CFG_SRC="$SCRIPT_DIR/config.http.json"
-            ;;
-        grpc_standard)
-            SERVER_SOURCE_FILE="source_grpc.json"
-            SERVER_REACTIONS_FILE="reactions_grpc.json"
-            DRASI_SOURCE_PORT=50051
-            TEST_CFG_SRC="$SCRIPT_DIR/config.json"
-            ;;
-        grpc_adaptive)
-            SERVER_SOURCE_FILE="source_grpc.json"
-            SERVER_REACTIONS_FILE="reactions_grpc.json"
-            DRASI_SOURCE_PORT=50051
-            TEST_CFG_SRC="$SCRIPT_DIR/config.grpc_adaptive.json"
-            ;;
-        *)
-            echo "Unsupported building comfort benchmark variant: $variant" >&2
-            return 1
-            ;;
-    esac
-}
-
 for variant in "${variant_list[@]}"; do
     [[ -n "$variant" ]] || continue
-    configure_variant "$variant"
 
     clear_benchmark_ports
     run_work_dir="$SUITE_WORK_DIR/$variant"
@@ -129,11 +92,6 @@ for variant in "${variant_list[@]}"; do
         VARIANT="$variant" \
         DRASI_SERVER_BIN="$DRASI_SERVER_BIN" \
         TEST_SERVICE_BIN="$TEST_SERVICE_BIN" \
-        SERVER_SOURCE_FILE="$SERVER_SOURCE_FILE" \
-        SERVER_QUERIES_FILE="$SERVER_QUERIES_FILE" \
-        SERVER_REACTIONS_FILE="$SERVER_REACTIONS_FILE" \
-        DRASI_SOURCE_PORT="$DRASI_SOURCE_PORT" \
-        TEST_CFG_SRC="$TEST_CFG_SRC" \
         ARTIFACTS_DIR="$run_artifacts_dir" \
         WORK_DIR="$run_work_dir" \
         bash "$RUN_SCRIPT" || run_rc=$?

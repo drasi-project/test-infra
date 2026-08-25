@@ -7,7 +7,7 @@ param resourcePrefix string
 param location string = resourceGroup().location
 
 @description('Fixed VM SKU used for the benchmark suite.')
-param vmSize string = 'Standard_D4s_v5'
+param vmSize string = 'Standard_D4s_v6'
 
 @description('OS disk size in GB.')
 @allowed([

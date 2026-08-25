@@ -196,54 +196,11 @@ jobs:
           [[ -z "$mins" ]] && mins=30
           echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
 
-      # Resolve the variant to a runner script (+ dynamic env knobs). drasi_lib
-      # maps to ci/drasi_lib/run_test_ci.sh (embedded engine); every other
-      # variant is dynamic and maps to the shared dynamic/run_dynamic.sh with
-      # component/config selections.
-      - name: Resolve variant
-        run: |
-          case "$VARIANT" in
-            drasi_lib)
-              echo "RUN_SCRIPT=e2e-test-framework/examples/building_comfort/ci/$VARIANT/run_test_ci.sh" >> "$GITHUB_ENV"
-              ;;
-            *)
-              DD="e2e-test-framework/examples/building_comfort/dynamic"
-              echo "RUN_SCRIPT=$DD/run_dynamic.sh"     >> "$GITHUB_ENV"
-              echo "SERVER_QUERIES_FILE=queries.json"  >> "$GITHUB_ENV"
-              case "$VARIANT" in
-                http_standard)
-                  echo "SERVER_SOURCE_FILE=source_http.json"       >> "$GITHUB_ENV"
-                  echo "SERVER_REACTIONS_FILE=reactions_http.json" >> "$GITHUB_ENV"
-                  echo "DRASI_SOURCE_PORT=9000"                    >> "$GITHUB_ENV"
-                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
-                  ;;
-                http_adaptive)
-                  echo "SERVER_SOURCE_FILE=source_http_adaptive.json" >> "$GITHUB_ENV"
-                  echo "SERVER_REACTIONS_FILE=reactions_http.json"    >> "$GITHUB_ENV"
-                  echo "DRASI_SOURCE_PORT=9000"                       >> "$GITHUB_ENV"
-                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
-                  ;;
-                grpc_standard)
-                  echo "SERVER_SOURCE_FILE=source_grpc.json"       >> "$GITHUB_ENV"
-                  echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
-                  echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
-                  # TEST_CFG_SRC left unset -> driver default (config.json)
-                  ;;
-                grpc_adaptive)
-                  echo "SERVER_SOURCE_FILE=source_grpc.json"       >> "$GITHUB_ENV"
-                  echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
-                  echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
-                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.grpc_adaptive.json" >> "$GITHUB_ENV"
-                  ;;
-                *)
-                  echo "Unknown variant: $VARIANT" >&2; exit 1 ;;
-              esac
-              ;;
-          esac
-
       - name: Build test-service
         working-directory: e2e-test-framework
-        run: cargo build --release --manifest-path test-service/Cargo.toml
+        run: |
+          cargo build --release --locked --manifest-path test-service/Cargo.toml
+          echo "TEST_SERVICE_BIN=$GITHUB_WORKSPACE/e2e-test-framework/target/release/test-service" >> "$GITHUB_ENV"
 
       - name: Run test
         env:
@@ -267,7 +224,7 @@ jobs:
           # run_dynamic.sh leaves the committed small scenario unchanged. Only
           # the dynamic variants consume it; drasi_lib ignores it.
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size == 'off' && '' || inputs.bootstrap_size }}
-        run: bash "${RUN_SCRIPT}"
+        run: bash e2e-test-framework/examples/building_comfort/run_variant.sh
 
       - name: Upload artifacts
         if: always()

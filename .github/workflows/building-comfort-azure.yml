@@ -14,10 +14,10 @@ on:
         required: true
         type: choice
         options:
-          - Standard_D4s_v5
-          - Standard_D4as_v5
-          - Standard_D8s_v5
-        default: Standard_D4s_v5
+          - Standard_D4s_v6
+          - Standard_D8s_v6
+          - Standard_D16s_v6
+        default: Standard_D4s_v6
       os_disk_type:
         description: "OS disk type for the ephemeral VM."
         required: true
@@ -39,6 +39,10 @@ on:
         default: "128"
 
       # --- Variants (one checkbox each; GitHub renders booleans as checkboxes) ---
+      drasi_lib:
+        description: "drasi_lib (embedded, in-process)"
+        type: boolean
+        default: true
       http_standard:
         description: "http_standard (HTTP, REST-applied)"
         type: boolean
@@ -46,7 +50,7 @@ on:
       http_adaptive:
         description: "http_adaptive (HTTP, server adaptiveEnabled)"
         type: boolean
-        default: true
+        default: false
       grpc_standard:
         description: "grpc_standard (gRPC, REST-applied)"
         type: boolean
@@ -54,7 +58,7 @@ on:
       grpc_adaptive:
         description: "grpc_adaptive (gRPC adaptive dispatcher)"
         type: boolean
-        default: true
+        default: false
 
       # --- Config axes (applied to whichever variants run) ---
       batching_speed:
@@ -96,20 +100,10 @@ on:
         description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
         required: false
         default: ""
-      plugin_tag:
-        description: "Optional known OCI tag applied to every plugin reference."
-        required: false
-        default: ""
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false
-        default: "45"
-      cleanup_resources:
-        description: "Delete the per-run VM and network resources after collecting artifacts."
-        required: true
-        type: boolean
-        default: true
-
+        default: "30"
 permissions:
   contents: read
   id-token: write
@@ -124,7 +118,7 @@ env:
   ADMIN_USERNAME: githubrunner
   LOCAL_ARTIFACTS_DIR: ${{ github.workspace }}/azure-benchmark-artifacts
   REMOTE_ROOT: /opt/drasi-benchmark
-  PERF_PROFILE_ID: azure-ephemeral-${{ inputs.vm_size }}
+  PERF_PROFILE_ID: azure-ephemeral-${{ inputs.vm_size }}-${{ inputs.os_disk_type }}-${{ inputs.os_disk_size_gb }}gb
   VM_PUBLIC_IP: ""
   BENCHMARK_EXIT_CODE: ""
 
@@ -151,12 +145,12 @@ jobs:
           IN_VM_SIZE: ${{ inputs.vm_size }}
           IN_OS_DISK_TYPE: ${{ inputs.os_disk_type }}
           IN_OS_DISK_SIZE_GB: ${{ inputs.os_disk_size_gb }}
+          V_DRASI_LIB: ${{ inputs.drasi_lib }}
           V_HTTP_STD: ${{ inputs.http_standard }}
           V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
           V_GRPC_STD: ${{ inputs.grpc_standard }}
           V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
           IN_SERVER_VERSION: ${{ inputs.drasi_server_version }}
-          IN_PLUGIN_TAG: ${{ inputs.plugin_tag }}
           IN_BATCHING_SPEED: ${{ inputs.batching_speed }}
           IN_QUERY_TUNING: ${{ inputs.query_tuning }}
           IN_PERSIST_INDEX: ${{ inputs.persist_index }}
@@ -167,6 +161,7 @@ jobs:
           set -euo pipefail
 
           variant_arr=()
+          [[ "$V_DRASI_LIB" == "true" ]] && variant_arr+=(drasi_lib)
           [[ "$V_HTTP_STD" == "true" ]] && variant_arr+=(http_standard)
           [[ "$V_HTTP_ADAPTIVE" == "true" ]] && variant_arr+=(http_adaptive)
           [[ "$V_GRPC_STD" == "true" ]] && variant_arr+=(grpc_standard)
@@ -178,7 +173,7 @@ jobs:
           variants="${variant_arr[*]}"
 
           bootstrap_size="${IN_BOOTSTRAP_SIZE:-off}"
-          timeout_minutes="${IN_TIMEOUT_MINUTES:-45}"
+          timeout_minutes="${IN_TIMEOUT_MINUTES:-30}"
           os_disk_type="${IN_OS_DISK_TYPE:-Premium_LRS}"
           os_disk_size_gb="${IN_OS_DISK_SIZE_GB:-128}"
           [[ "$bootstrap_size" == "off" ]] && bootstrap_size=""
@@ -189,10 +184,6 @@ jobs:
           }
           [[ -z "$IN_SERVER_VERSION" || "$IN_SERVER_VERSION" =~ ^[A-Za-z0-9._-]+$ ]] || {
             echo "drasi_server_version contains unsupported characters" >&2
-            exit 1
-          }
-          [[ -z "$IN_PLUGIN_TAG" || "$IN_PLUGIN_TAG" =~ ^[A-Za-z0-9._-]+$ ]] || {
-            echo "plugin_tag contains unsupported characters" >&2
             exit 1
           }
           case "$os_disk_type" in
@@ -281,7 +272,6 @@ jobs:
             echo "IMAGE_VERSION=$image_version"
             echo "VARIANTS=$variants"
             echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"
-            echo "DRASI_PLUGIN_TAG=$IN_PLUGIN_TAG"
             echo "BATCHING_SPEED=${IN_BATCHING_SPEED:-medium}"
             echo "QUERY_TUNING=${IN_QUERY_TUNING:-medium}"
             echo "PERSIST_INDEX=${IN_PERSIST_INDEX:-false}"
@@ -362,7 +352,6 @@ jobs:
           {
             printf 'VARIANTS=%q\n' "$VARIANTS"
             printf 'DRASI_SERVER_VERSION=%q\n' "$DRASI_SERVER_VERSION"
-            printf 'DRASI_PLUGIN_TAG=%q\n' "$DRASI_PLUGIN_TAG"
             printf 'BATCHING_SPEED=%q\n' "$BATCHING_SPEED"
             printf 'QUERY_TUNING=%q\n' "$QUERY_TUNING"
             printf 'PERSIST_INDEX=%q\n' "$PERSIST_INDEX"
@@ -429,6 +418,20 @@ jobs:
             "$ADMIN_USERNAME@$VM_PUBLIC_IP:$REMOTE_ROOT/artifacts/." \
             "$LOCAL_ARTIFACTS_DIR/"
 
+      - name: Publish benchmark summary
+        if: always()
+        run: |
+          summary_file="$LOCAL_ARTIFACTS_DIR/summary.md"
+          if [[ -f "$summary_file" ]]; then
+            cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Fixed-VM building comfort benchmark"
+              echo
+              echo "No benchmark summary was produced. Check the workflow logs and uploaded artifacts."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v5
@@ -446,37 +449,72 @@ jobs:
           fi
 
       - name: Delete per-run Azure resources
-        if: always() && inputs.cleanup_resources
+        if: always()
         run: |
-          set +e
+          set -euo pipefail
 
           if [[ -z "${RESOURCE_PREFIX:-}" ]]; then
             echo "No per-run resource prefix was created; skipping cleanup"
             exit 0
           fi
 
-          az vm delete \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$VM_NAME" \
-            --yes --force-deletion true >/dev/null 2>&1
+          delete_resource() {
+            local resource_type="$1"
+            local resource_name="$2"
+            local resource_id
 
-          az disk delete \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "${RESOURCE_PREFIX}-osdisk" \
-            --yes >/dev/null 2>&1
-          az network nic delete \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$NIC_NAME" >/dev/null 2>&1
-          az network public-ip delete \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$PUBLIC_IP_NAME" >/dev/null 2>&1
-          az network vnet delete \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$VNET_NAME" >/dev/null 2>&1
-          az network nsg delete \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$NSG_NAME" >/dev/null 2>&1
+            resource_id="$(
+              az resource list \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --resource-type "$resource_type" \
+                --query "[?name=='$resource_name'].id | [0]" \
+                --output tsv
+            )"
 
-          az deployment group delete \
+            if [[ -z "$resource_id" ]]; then
+              echo "$resource_type/$resource_name is already absent"
+              return
+            fi
+
+            echo "Deleting $resource_type/$resource_name"
+            az resource delete --ids "$resource_id"
+            az resource wait \
+              --deleted \
+              --ids "$resource_id" \
+              --interval 10 \
+              --timeout 600
+          }
+
+          # Delete in dependency order. The VM may automatically remove its OS
+          # disk and NIC, so subsequent calls tolerate already-absent resources.
+          delete_resource Microsoft.Compute/virtualMachines "$VM_NAME"
+          delete_resource Microsoft.Network/networkInterfaces "$NIC_NAME"
+          delete_resource Microsoft.Compute/disks "${RESOURCE_PREFIX}-osdisk"
+          delete_resource Microsoft.Network/publicIPAddresses "$PUBLIC_IP_NAME"
+          delete_resource Microsoft.Network/virtualNetworks "$VNET_NAME"
+          delete_resource Microsoft.Network/networkSecurityGroups "$NSG_NAME"
+
+          if az deployment group show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$DEPLOYMENT_NAME" >/dev/null 2>&1
+            --name "$DEPLOYMENT_NAME" \
+            --output none 2>/dev/null; then
+            az deployment group delete \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$DEPLOYMENT_NAME"
+          else
+            echo "Deployment record $DEPLOYMENT_NAME is already absent"
+          fi
+
+          remaining_resources="$(
+            az resource list \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?starts_with(name, '$RESOURCE_PREFIX')].id" \
+              --output tsv
+          )"
+          if [[ -n "$remaining_resources" ]]; then
+            echo "Per-run Azure resources remain after cleanup:" >&2
+            printf '%s\n' "$remaining_resources" >&2
+            exit 1
+          fi
+
+          echo "Deleted and verified all Azure resources for $RESOURCE_PREFIX"

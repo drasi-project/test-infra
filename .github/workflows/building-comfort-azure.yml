@@ -421,16 +421,35 @@ jobs:
       - name: Publish test summary
         if: always()
         run: |
+          set -euo pipefail
+          mkdir -p "$LOCAL_ARTIFACTS_DIR"
           summary_file="$LOCAL_ARTIFACTS_DIR/summary.md"
+          combined_summary="$RUNNER_TEMP/building-comfort-summary.md"
+
+          {
+            echo "## Azure test environment"
+            echo
+            echo "| Setting | Value |"
+            echo "| --- | --- |"
+            echo "| Region | \`${LOCATION:-unavailable}\` |"
+            echo "| VM size | \`${VM_SIZE:-unavailable}\` |"
+            echo "| OS disk type | \`${OS_DISK_TYPE:-unavailable}\` |"
+            echo "| OS disk size | \`${OS_DISK_SIZE_GB:-unavailable} GB\` |"
+            echo
+          } > "$combined_summary"
+
           if [[ -f "$summary_file" ]]; then
-            cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
+            cat "$summary_file" >> "$combined_summary"
           else
             {
               echo "## Building comfort test"
               echo
               echo "No test summary was produced. Check the workflow logs and uploaded artifacts."
-            } >> "$GITHUB_STEP_SUMMARY"
+            } >> "$combined_summary"
           fi
+
+          mv "$combined_summary" "$summary_file"
+          cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
         if: always()

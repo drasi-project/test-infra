@@ -12,8 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM mcr.microsoft.com/azurelinux/base/rust:1.86 AS builder
-RUN tdnf update -y && tdnf install -y protobuf-devel cmake openssl-devel clang-devel
+FROM rust:1.95.0 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    cmake \
+    clang \
+    libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src
 COPY ./proxy ./proxy
@@ -24,15 +34,15 @@ RUN sed -i '/^\[lints\]$/,/^workspace = true$/d' /usr/src/proxy/Cargo.toml
 
 WORKDIR /usr/src/proxy
 
-# Generate Cargo.lock and pin dependencies if needed for Rust 1.86 compatibility
+# Generate Cargo.lock for the standalone crate build
 RUN cargo generate-lockfile
-# Only update home if it exists as a dependency
-RUN cargo update home --precise 0.5.9 || true
 RUN cargo install --locked --path .
 
-FROM mcr.microsoft.com/azurelinux/distroless/base:3.0
-COPY --from=builder /usr/lib64/libstdc++.so.6 /usr/lib64/
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 ENV RUST_BACKTRACE=1
 COPY --from=builder /usr/local/cargo/bin/proxy /usr/local/bin/proxy
-USER root
 CMD ["proxy"]

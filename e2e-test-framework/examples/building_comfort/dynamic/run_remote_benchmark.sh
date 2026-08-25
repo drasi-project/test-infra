@@ -21,8 +21,18 @@ set +a
 
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
+VARIANTS="${VARIANTS:-drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive}"
 : "${SUITE_WORK_DIR:?SUITE_WORK_DIR is required}"
 : "${PERF_PROFILE_ID:?PERF_PROFILE_ID is required}"
+
+needs_drasi_server=false
+read -r -a variant_list <<< "${VARIANTS//,/ }"
+for variant in "${variant_list[@]}"; do
+    if [[ -n "$variant" && "$variant" != "drasi_lib" ]]; then
+        needs_drasi_server=true
+        break
+    fi
+done
 
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
@@ -38,7 +48,11 @@ fi
 source "$HOME/.cargo/env"
 rustup toolchain install 1.88.0 --profile minimal
 
-mkdir -p "$ARTIFACTS_DIR" "$(dirname "$DRASI_SERVER_BIN")" "$SUITE_WORK_DIR"
+mkdir -p "$ARTIFACTS_DIR" "$SUITE_WORK_DIR"
+if [[ "$needs_drasi_server" == "true" ]]; then
+    : "${DRASI_SERVER_BIN:?DRASI_SERVER_BIN is required for server-based variants}"
+    mkdir -p "$(dirname "$DRASI_SERVER_BIN")"
+fi
 
 metadata_json="$ARTIFACTS_DIR/environment-metadata.json"
 instance_metadata="$(curl -fsS \
@@ -69,21 +83,23 @@ jq -n \
         azure: $instance
     }' > "$metadata_json"
 
-tag="$DRASI_SERVER_VERSION"
-if [[ -z "$tag" ]]; then
-    tag="$(curl -fsSL "https://api.github.com/repos/${DRASI_REPO}/releases/latest" | jq -r '.tag_name')"
-fi
-[[ -n "$tag" && "$tag" != "null" ]] || {
-    echo "Could not resolve the latest drasi-server release tag" >&2
-    exit 1
-}
+if [[ "$needs_drasi_server" == "true" ]]; then
+    tag="$DRASI_SERVER_VERSION"
+    if [[ -z "$tag" ]]; then
+        tag="$(curl -fsSL "https://api.github.com/repos/${DRASI_REPO}/releases/latest" | jq -r '.tag_name')"
+    fi
+    [[ -n "$tag" && "$tag" != "null" ]] || {
+        echo "Could not resolve the latest drasi-server release tag" >&2
+        exit 1
+    }
 
-asset_name="drasi-server-x86_64-linux-gnu"
-curl --fail --show-error --silent --location \
-    --retry 3 --retry-delay 5 --retry-all-errors \
-    "https://github.com/${DRASI_REPO}/releases/download/${tag}/${asset_name}" \
-    -o "$DRASI_SERVER_BIN"
-chmod +x "$DRASI_SERVER_BIN"
+    asset_name="drasi-server-x86_64-linux-gnu"
+    curl --fail --show-error --silent --location \
+        --retry 3 --retry-delay 5 --retry-all-errors \
+        "https://github.com/${DRASI_REPO}/releases/download/${tag}/${asset_name}" \
+        -o "$DRASI_SERVER_BIN"
+    chmod +x "$DRASI_SERVER_BIN"
+fi
 
 export JQ_LIB_DIR
 JQ_LIB_DIR="$(dirname "$(find /usr/lib -name 'libjq.so' -print -quit)")"

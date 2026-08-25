@@ -8,22 +8,33 @@ VARIANTS="${VARIANTS:-drasi_lib http_standard http_adaptive grpc_standard grpc_a
 SUITE_WORK_DIR="${SUITE_WORK_DIR:-$SCRIPT_DIR/.benchmark_suite}"
 SUITE_ARTIFACTS_DIR="${SUITE_ARTIFACTS_DIR:-$SCRIPT_DIR/benchmark_artifacts}"
 PERF_PROFILE_ID="${PERF_PROFILE_ID:-unknown}"
+DRASI_SERVER_BIN="${DRASI_SERVER_BIN:-}"
 
-: "${DRASI_SERVER_BIN:?DRASI_SERVER_BIN must point to a pinned drasi-server binary}"
 : "${TEST_SERVICE_BIN:?TEST_SERVICE_BIN must point to a pre-built test-service binary}"
-
-if [[ ! -x "$DRASI_SERVER_BIN" ]]; then
-    echo "DRASI_SERVER_BIN is not executable: $DRASI_SERVER_BIN" >&2
-    exit 1
-fi
-if [[ ! -x "$TEST_SERVICE_BIN" ]]; then
-    echo "TEST_SERVICE_BIN is not executable: $TEST_SERVICE_BIN" >&2
-    exit 1
-fi
 
 read -r -a variant_list <<< "${VARIANTS//,/ }"
 if (( ${#variant_list[@]} == 0 )); then
     echo "At least one test variant is required" >&2
+    exit 1
+fi
+
+needs_drasi_server=false
+for variant in "${variant_list[@]}"; do
+    if [[ -n "$variant" && "$variant" != "drasi_lib" ]]; then
+        needs_drasi_server=true
+        break
+    fi
+done
+
+if [[ "$needs_drasi_server" == "true" ]]; then
+    : "${DRASI_SERVER_BIN:?DRASI_SERVER_BIN must point to a pinned drasi-server binary}"
+    if [[ ! -x "$DRASI_SERVER_BIN" ]]; then
+        echo "DRASI_SERVER_BIN is not executable: $DRASI_SERVER_BIN" >&2
+        exit 1
+    fi
+fi
+if [[ ! -x "$TEST_SERVICE_BIN" ]]; then
+    echo "TEST_SERVICE_BIN is not executable: $TEST_SERVICE_BIN" >&2
     exit 1
 fi
 
@@ -161,9 +172,16 @@ done
 
 clear_benchmark_ports
 
-plugins_dir="$(dirname "$DRASI_SERVER_BIN")/plugins"
 plugin_manifest="$SUITE_ARTIFACTS_DIR/plugin-manifest.json"
-if [[ -d "$plugins_dir" ]]; then
+drasi_server_version="not used"
+drasi_server_sha256=""
+if [[ "$needs_drasi_server" == "true" ]]; then
+    plugins_dir="$(dirname "$DRASI_SERVER_BIN")/plugins"
+    drasi_server_version="$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n 1 || echo unknown)"
+    drasi_server_sha256="$(sha256_file "$DRASI_SERVER_BIN")"
+fi
+
+if [[ "$needs_drasi_server" == "true" && -d "$plugins_dir" ]]; then
     find "$plugins_dir" -maxdepth 1 \( -name '*.so' -o -name '*.dylib' \) -type f -print0 |
         sort -z |
         while IFS= read -r -d '' plugin_file; do
@@ -179,8 +197,8 @@ fi
 
 jq -s \
     --arg profile_id "$PERF_PROFILE_ID" \
-    --arg drasi_server_version "$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n 1 || echo unknown)" \
-    --arg drasi_server_sha256 "$(sha256_file "$DRASI_SERVER_BIN")" \
+    --arg drasi_server_version "$drasi_server_version" \
+    --arg drasi_server_sha256 "$drasi_server_sha256" \
     --arg test_service_sha256 "$(sha256_file "$TEST_SERVICE_BIN")" \
     --slurpfile plugins "$plugin_manifest" \
     '{

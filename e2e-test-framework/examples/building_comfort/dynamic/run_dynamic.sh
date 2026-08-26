@@ -74,6 +74,33 @@
 #   WAL_MAX_EVENTS        WAL retention cap when PERSIST_INDEX forces durability
 #                         on (500000). Must exceed the scenario's total events so
 #                         the default RejectIncoming policy never drops any.
+#   BOOTSTRAP_SIZE        large-bootstrap preset: ""|10k|100k|1m (""=off). Scales
+#                         the building_comfort initial graph (delivered as op:"i"
+#                         inserts) to N rooms so bootstrap load time/throughput
+#                         can be measured separately from steady-state. Off keeps
+#                         the committed small scenario unchanged.
+#   BOOTSTRAP_CHANGE_COUNT   steady-state changes generated AFTER bootstrap
+#                         (100000, matching the original scenario so steady
+#                         numbers are comparable). The run captures the full
+#                         bootstrap plus this steady workload.
+#   BOOTSTRAP_K_MAIN / BOOTSTRAP_K_AGG  optional overrides for the bootstrap
+#                         record count (phase boundary) of the per-room /
+#                         floor-aggregate reactions. Defaults are computed from
+#                         the preset graph shape (rooms / floors).
+#   BOOTSTRAP_STEADY_MAIN / BOOTSTRAP_STEADY_AGG  optional overrides for the
+#                         steady-state record target per reaction (defaults 90%
+#                         / 40% of BOOTSTRAP_CHANGE_COUNT — safely below the
+#                         observed ~1:1 / ~1:2 emit ratios so stops stay reached).
+#   BOOTSTRAP_BASELINE_MAIN / BOOTSTRAP_BASELINE_AGG  optional one-off pins for
+#                         the determinism SHA of a bootstrap run (building-comfort
+#                         / building-comfort-floor-agg). The bootstrap resultset
+#                         differs by BOTH preset size AND transport (http vs
+#                         grpc), so there's a lookup table in
+#                         resolve_bootstrap_baseline() keyed "$BOOTSTRAP_SIZE:$TRANSPORT"
+#                         -- add a row there once a preset/transport combo has a
+#                         confirmed CI SHA. Until pinned (table or env), the run
+#                         stays in compute-and-report mode (missing_baseline=Warn)
+#                         so it never fails on an unconfirmed baseline.
 #   ARTIFACTS_DIR / WORK_DIR  outputs / scratch
 
 set -euo pipefail
@@ -110,6 +137,35 @@ SERVER_PROFILE_STATE_STORE="${STATE_STORE:-false}"
 # exceed the total events this scenario emits so the default RejectIncoming
 # capacity policy never drops events.
 WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
+# --- Large-bootstrap presets (#78) ---
+# BOOTSTRAP_SIZE selects a preset that scales the building_comfort initial graph
+# (delivered as op:"i" inserts) so bootstrap load time/throughput can be measured
+# separately from steady-state. Empty/off keeps the committed small scenario.
+BOOTSTRAP_SIZE="${BOOTSTRAP_SIZE:-}"
+# Steady-state change budget generated AFTER bootstrap (default 100000, matching
+# the original scenario so steady numbers are comparable).
+BOOTSTRAP_CHANGE_COUNT="${BOOTSTRAP_CHANGE_COUNT:-100000}"
+# Optional overrides for the bootstrap record count (phase boundary) per
+# reaction; defaults computed analytically from the preset graph shape.
+BOOTSTRAP_K_MAIN="${BOOTSTRAP_K_MAIN:-}"
+BOOTSTRAP_K_AGG="${BOOTSTRAP_K_AGG:-}"
+# Optional overrides for the steady-state record target per reaction; defaults
+# 95% / 40% of the change budget (safely below the observed ~1:1 / ~1:2 emit
+# ratios so the stop counts stay reachable and the run doesn't hang).
+BOOTSTRAP_STEADY_MAIN="${BOOTSTRAP_STEADY_MAIN:-}"
+BOOTSTRAP_STEADY_AGG="${BOOTSTRAP_STEADY_AGG:-}"
+# Rooms-only: during bootstrap presets, run just the per-room (building-comfort)
+# query/reaction and drop the floor-aggregate. This used to default true because
+# the aggregate reaction hit its stop MID-bootstrap and backpressured the
+# still-dispatching source (which, combined with the test-service binding its
+# REST port only AFTER source auto-start, stalled the whole run). ROOT CAUSE was
+# a mis-calibrated K_agg: the floor aggregate re-emits once per FLOOR_ROOM
+# relation, so its bootstrap output is total ROOMS, not total floors (measured:
+# a 10k run emitted RoomCount 1..10 x1000 floors = exactly 10000 = rooms). With
+# K_agg = rooms the stop now sits above the bootstrap output, so the aggregate
+# stays draining through bootstrap and completes (verified end-to-end at 10k).
+# Default false (run the aggregate); set true to isolate the per-room path.
+BOOTSTRAP_ROOMS_ONLY="${BOOTSTRAP_ROOMS_ONLY:-false}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -158,12 +214,20 @@ trap cleanup EXIT INT TERM
 wait_for_port() {
     local host="$1" port="$2" name="$3" timeout="${4:-120}"
     local deadline=$(( $(date +%s) + timeout ))
-    while (( $(date +%s) < deadline )); do
+    local now
+    # Read the clock into a variable before comparing -- embedding
+    # $(date +%s) directly inside (( )) crashes with a syntax error if the
+    # command substitution ever returns empty (observed under the heavy
+    # system load a 1M-room bootstrap puts on the CI runner); a variable
+    # reference degrades safely to 0 when empty instead.
+    now=$(date +%s)
+    while (( now < deadline )); do
         if (echo > "/dev/tcp/$host/$port") >/dev/null 2>&1; then
             log "$name is listening on $host:$port"
             return 0
         fi
         sleep 1
+        now=$(date +%s)
     done
     log "ERROR: $name did not start listening on $host:$port within ${timeout}s"
     return 1
@@ -172,12 +236,15 @@ wait_for_port() {
 wait_for_http() {
     local url="$1" name="$2" timeout="${3:-120}"
     local deadline=$(( $(date +%s) + timeout ))
-    while (( $(date +%s) < deadline )); do
+    local now
+    now=$(date +%s)
+    while (( now < deadline )); do
         if curl -fsS "$url" >/dev/null 2>&1; then
             log "$name is responding at $url"
             return 0
         fi
         sleep 1
+        now=$(date +%s)
     done
     log "ERROR: $name did not respond at $url within ${timeout}s"
     return 1
@@ -359,10 +426,230 @@ resolve_server_config() {
     log "Server config -> base=$base (persistIndex=$pi, stateStore=$ss)"
 }
 
+# Resolve the BOOTSTRAP_SIZE preset (#78) into concrete graph-scale knobs. The
+# building_comfort initial graph is delivered as op:"i" inserts (see
+# send_initial_inserts); scaling it lets us measure bootstrap load time and
+# throughput separately from steady-state. The per-room query emits one result
+# per room on bootstrap (K_main = rooms); the floor aggregate ALSO emits once per
+# room on bootstrap (K_agg = rooms, calibratable via BOOTSTRAP_K_AGG) because it
+# re-emits its floor's aggregate for every FLOOR_ROOM relation added -- a floor
+# with 10 rooms emits RoomCount 1..10 as the rooms join, so the bootstrap output
+# equals the FLOOR_ROOM relation count = total rooms, NOT total floors. (Measured
+# empirically at 10k: RoomCount 1..10 x 1000 floors = exactly 10000 = rooms.)
+# Each reaction runs until it has collected K + BOOTSTRAP_STEADY_SAMPLE records,
+# so the run always captures the full bootstrap plus a fixed steady-state sample.
+resolve_bootstrap_preset() {
+    case "$(printf '%s' "$BOOTSTRAP_SIZE" | tr '[:upper:]' '[:lower:]')" in
+        ""|off|none|false)
+            BOOTSTRAP_ENABLED=false
+            log "Bootstrap preset: off (committed small scenario)"
+            return 0
+            ;;
+        10k)  BS_BUILDINGS=100;   BS_FLOORS=10; BS_ROOMS=10 ;;
+        100k) BS_BUILDINGS=1000;  BS_FLOORS=10; BS_ROOMS=10 ;;
+        1m)   BS_BUILDINGS=10000; BS_FLOORS=10; BS_ROOMS=10 ;;
+        *)
+            log "ERROR: invalid BOOTSTRAP_SIZE='$BOOTSTRAP_SIZE' (expected 10k|100k|1m)"
+            return 1
+            ;;
+    esac
+    BOOTSTRAP_ENABLED=true
+    BS_TOTAL_ROOMS=$(( BS_BUILDINGS * BS_FLOORS * BS_ROOMS ))
+    BS_TOTAL_FLOORS=$(( BS_BUILDINGS * BS_FLOORS ))
+    BS_K_MAIN="${BOOTSTRAP_K_MAIN:-$BS_TOTAL_ROOMS}"
+    # The floor aggregate re-emits once per FLOOR_ROOM relation during bootstrap,
+    # so its bootstrap output = total rooms (one emit per room as it joins its
+    # floor), NOT total floors. Calibrate K_agg to rooms so the stop trigger
+    # lands ABOVE the bootstrap output and the aggregate stays draining through
+    # bootstrap (mis-calibrating to floors stopped it mid-bootstrap -> source
+    # backpressure -> hang; see BOOTSTRAP_ROOMS_ONLY note).
+    BS_K_AGG="${BOOTSTRAP_K_AGG:-$BS_TOTAL_ROOMS}"
+    # The generator's change_count limit counts EVERY dispatched event, including
+    # the bootstrap inserts (send_initial_inserts bumps num_source_change_events;
+    # mod.rs:902 finishes the source once num_source_change_events >= change_count).
+    # So to actually run N steady changes AFTER bootstrap, change_count must be
+    # bootstrap_events + N -- otherwise the source "Finishes" the instant bootstrap
+    # exceeds change_count and the steady phase never runs (observed: source
+    # finished at 221001 for a 221000-event bootstrap with change_count=100000).
+    # bootstrap_events = buildings + floors + rooms + building-floor rels
+    #                    + floor-room rels = buildings + 2*floors + 2*rooms.
+    BS_BOOTSTRAP_EVENTS=$(( BS_BUILDINGS + 2 * BS_TOTAL_FLOORS + 2 * BS_TOTAL_ROOMS ))
+    BS_STEADY_CHANGES="${BOOTSTRAP_CHANGE_COUNT:-100000}"
+    BS_CHANGE_COUNT=$(( BS_BOOTSTRAP_EVENTS + BS_STEADY_CHANGES ))
+    # Per-reaction steady record target, safely below the reaction's natural
+    # output from BS_STEADY_CHANGES changes (per-room ~1:1, floor-agg ~1:2). The
+    # small post-stop tail is absorbed by the server query buffers so the source
+    # still finishes.
+    BS_STEADY_MAIN="${BOOTSTRAP_STEADY_MAIN:-$(( BS_STEADY_CHANGES * 95 / 100 ))}"
+    BS_STEADY_AGG="${BOOTSTRAP_STEADY_AGG:-$(( BS_STEADY_CHANGES * 4 / 10 ))}"
+    BS_STOP_MAIN=$(( BS_K_MAIN + BS_STEADY_MAIN ))
+    BS_STOP_AGG=$(( BS_K_AGG + BS_STEADY_AGG ))
+    log "Bootstrap preset '$BOOTSTRAP_SIZE' -> buildings=$BS_BUILDINGS floors=$BS_FLOORS rooms/floor=$BS_ROOMS (rooms=$BS_TOTAL_ROOMS, floors=$BS_TOTAL_FLOORS)"
+    if [[ "$BOOTSTRAP_ROOMS_ONLY" == "true" ]]; then
+        log "  rooms-only: running only the per-room 'building-comfort' query/reaction (floor-agg dropped)"
+        # The floor-agg reaction is no longer in the test-service config, so only
+        # snapshot / wait on the per-room reaction (else the post-run fetch 404s).
+        TEST_REACTION_IDS="building-comfort"
+    fi
+    log "  bootstrap_record_count: building-comfort=$BS_K_MAIN, building-comfort-floor-agg=$BS_K_AGG"
+    log "  bootstrap_events=$BS_BOOTSTRAP_EVENTS, steady_changes=$BS_STEADY_CHANGES, change_count=$BS_CHANGE_COUNT"
+    log "  steady target: main=$BS_STEADY_MAIN agg=$BS_STEADY_AGG, stop: main=$BS_STOP_MAIN agg=$BS_STOP_AGG"
+
+    # Guard: the WAL retention cap (used when PERSIST_INDEX is on) must exceed the
+    # total events this preset emits (BS_CHANGE_COUNT already = bootstrap inserts
+    # + steady changes), or the default RejectIncoming policy would drop events.
+    if [[ "$SERVER_PROFILE_PERSIST_INDEX" == "true" && "$WAL_MAX_EVENTS" -lt "$BS_CHANGE_COUNT" ]]; then
+        log "WARNING: WAL_MAX_EVENTS=$WAL_MAX_EVENTS < total events $BS_CHANGE_COUNT; bumping."
+        WAL_MAX_EVENTS="$BS_CHANGE_COUNT"
+    fi
+}
+
+# Resolve a pinned determinism baseline for the current BOOTSTRAP_SIZE preset,
+# if one is known. The bootstrap resultset differs by BOTH preset size (rooms
+# scale the graph) AND transport (http vs grpc dispatch produces different
+# result ordering/serialization -- confirmed: the committed OFF-scenario
+# baselines differ between config.http.json and config.json/grpc_adaptive).
+# Transport is inferred from the TEST_CFG_SRC basename (adaptive vs standard
+# share the same baseline per transport -- confirmed on the off scenario, where
+# config.json and config.grpc_adaptive.json carry identical committed SHAs).
+# Add a row below once a preset/transport combo has a CI-confirmed SHA pair;
+# until then (or via BOOTSTRAP_BASELINE_MAIN/_AGG override) the preset stays in
+# compute-and-report mode so an unconfirmed baseline can never fail the run.
+resolve_bootstrap_baseline() {
+    BS_TRANSPORT="grpc"
+    case "$(basename "$TEST_CFG_SRC")" in
+        config.http.json) BS_TRANSPORT="http" ;;
+    esac
+    BS_BASELINE_MAIN="${BOOTSTRAP_BASELINE_MAIN:-}"
+    BS_BASELINE_AGG="${BOOTSTRAP_BASELINE_AGG:-}"
+    if [[ -z "$BS_BASELINE_MAIN" && -z "$BS_BASELINE_AGG" ]]; then
+        case "${BOOTSTRAP_SIZE}:${BS_TRANSPORT}" in
+            10k:http)
+                BS_BASELINE_MAIN="7f4f25db88552fcf521e0e6e6f70cce965a4e0324ebe8c18ee30a967ec224b4e"
+                BS_BASELINE_AGG="70aa37de5f5f9eb5b6fb4db2badf2fe8c674ae8d430e42b218bc771679c5de87"
+                ;;
+            10k:grpc)
+                BS_BASELINE_MAIN="a5d89950f456b00b802b2659eeb8855afa09bfda222ef9a9c89becef301b4fa5"
+                BS_BASELINE_AGG="aaa6e7bc9e2f8ed07014b4ded3656816ba063b45abbdd252a49d790255fef556"
+                ;;
+            100k:http)
+                BS_BASELINE_MAIN="e1ad5640897910d04053f151a491ce5012af77d50f95def9f045859f455f5308"
+                BS_BASELINE_AGG="c2d0c32334d9550b67ab44ad972afb54b4dac6b591a23b4dccad37135a1375af"
+                ;;
+            100k:grpc)
+                BS_BASELINE_MAIN="490f70250d0d0bb97d4a6cf1a278e90cee084f72777d0958a2ec2cfc25cc2e63"
+                BS_BASELINE_AGG="27986794cd4e79e70cceda8ede79a7ee1af4a3318cad1395a3c720c4e38a3768"
+                ;;
+            # 1m:http)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
+            # 1m:grpc)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
+            *) : ;;
+        esac
+    fi
+    if [[ -n "$BS_BASELINE_MAIN" && -n "$BS_BASELINE_AGG" ]]; then
+        log "  determinism baseline: PINNED for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT (missing_baseline=Fail)"
+    else
+        log "  determinism baseline: not yet captured for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT -- compute+report only (missing_baseline=Warn)"
+    fi
+}
+
+# Apply the resolved bootstrap preset to the CI test-service config (produced by
+# patch_configs). All edits are jq path assignments keyed by component kind /
+# reaction id, so this is robust across the gRPC and HTTP config variants.
+patch_bootstrap_preset() {
+    [[ "${BOOTSTRAP_ENABLED:-false}" == "true" ]] || return 0
+    resolve_bootstrap_baseline
+    log "Applying bootstrap preset '$BOOTSTRAP_SIZE' to $(basename "$TEST_CFG_CI")"
+    local patched
+    patched="$(jq \
+        --argjson bld "$BS_BUILDINGS" \
+        --argjson flr "$BS_FLOORS" \
+        --argjson rm "$BS_ROOMS" \
+        --argjson cc "$BS_CHANGE_COUNT" \
+        --argjson kmain "$BS_K_MAIN" \
+        --argjson kagg "$BS_K_AGG" \
+        --argjson stopmain "$BS_STOP_MAIN" \
+        --argjson stopagg "$BS_STOP_AGG" \
+        --arg baseline_main "$BS_BASELINE_MAIN" \
+        --arg baseline_agg "$BS_BASELINE_AGG" '
+        # 1. Scale the Model generator initial graph + steady-state change budget.
+        ( .data_store.test_repos[].local_tests[].sources[]
+            | select(.kind == "Model").model_data_generator )
+          |= (.building_count = [$bld, 0]
+              | .floor_count  = [$flr, 0]
+              | .room_count   = [$rm, 0]
+              | .change_count = $cc)
+        # 2. Reaction stop triggers = bootstrap K + steady-state sample.
+        | ( .data_store.test_repos[].local_tests[].reactions[]
+            | select(.test_reaction_id == "building-comfort").stop_triggers[]
+            | select(.kind == "RecordCount").record_count ) = $stopmain
+        | ( .data_store.test_repos[].local_tests[].reactions[]
+            | select(.test_reaction_id == "building-comfort-floor-agg").stop_triggers[]
+            | select(.kind == "RecordCount").record_count ) = $stopagg
+        # 3. Determinism baseline: pin per (preset, transport) once known (Fail);
+        #    otherwise the bootstrap resultset has no confirmed baseline yet, so
+        #    compute+report only (Warn) rather than fail on an unconfirmed SHA.
+        | ( .data_store.test_repos[].local_tests[].completion_handlers[]
+            | select(.kind == "Sha256Determinism") )
+          |= (if ($baseline_main | length) > 0 and ($baseline_agg | length) > 0 then
+                .expected = {"building-comfort": $baseline_main, "building-comfort-floor-agg": $baseline_agg}
+                | .missing_baseline = "Fail"
+              else
+                .expected = {} | .missing_baseline = "Warn"
+              end)
+        # 4. Set the PerformanceMetrics bootstrap phase boundary per reaction.
+        | ( .test_run_host.test_runs[].reactions[]
+            | select(.test_reaction_id == "building-comfort").output_loggers[]
+            | select(.kind == "PerformanceMetrics").bootstrap_record_count ) = $kmain
+        | ( .test_run_host.test_runs[].reactions[]
+            | select(.test_reaction_id == "building-comfort-floor-agg").output_loggers[]
+            | select(.kind == "PerformanceMetrics").bootstrap_record_count ) = $kagg
+    ' "$TEST_CFG_CI")"
+    printf '%s\n' "$patched" > "$TEST_CFG_CI"
+    log "Bootstrap preset applied (rooms=$BS_TOTAL_ROOMS, change_count=$BS_CHANGE_COUNT)"
+
+    # Rooms-only: drop the floor-aggregate subscription + reaction from the
+    # test-service config so it isn't waiting on a reaction the server no longer
+    # feeds (the floor-agg query/reaction are not applied to the server).
+    if [[ "${BOOTSTRAP_ROOMS_ONLY:-true}" == "true" ]]; then
+        patched="$(jq '
+            ( .data_store.test_repos[].local_tests[].sources[]
+                | select(.kind == "Model").subscribers )
+              |= map(select(.query_id != "building-comfort-floor-agg"))
+            | ( .data_store.test_repos[].local_tests[].reactions )
+              |= map(select(.test_reaction_id != "building-comfort-floor-agg"))
+            | ( .test_run_host.test_runs[].reactions )
+              |= map(select(.test_reaction_id != "building-comfort-floor-agg"))
+        ' "$TEST_CFG_CI")"
+        printf '%s\n' "$patched" > "$TEST_CFG_CI"
+        log "Bootstrap rooms-only: dropped floor-agg subscription + reaction from test-service config"
+    fi
+}
+
 patch_configs() {
     log "Patching empty server config admin port -> $DRASI_ADMIN_PORT"
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
     grep -E '^(host|port):' "$DRASI_CFG_CI"
+
+    # If built plugins already sit next to the server binary (bin/plugins/*.dylib
+    # or *.so), disable autoInstallPlugins so the server loads them DIRECTLY and
+    # skips re-resolving + cosign-verifying every plugin from ghcr.io on each
+    # startup (that round-trip adds ~10-15s and needs network — painful locally
+    # and during a registry outage). The server's dynamic cdylib loader still
+    # loads the local plugins, so the components apply fine. On CI there are no
+    # pre-built plugins next to the freshly-downloaded binary, so autoInstall
+    # stays on. Force either way with DRASI_AUTOINSTALL_PLUGINS=true|false.
+    local autoinstall="${DRASI_AUTOINSTALL_PLUGINS:-}"
+    if [[ -z "$autoinstall" && -n "${DRASI_SERVER_BIN:-}" ]]; then
+        local plugins_dir; plugins_dir="$(dirname "$DRASI_SERVER_BIN")/plugins"
+        if compgen -G "$plugins_dir/*.dylib" >/dev/null 2>&1 || compgen -G "$plugins_dir/*.so" >/dev/null 2>&1; then
+            autoinstall=false
+            log "Local plugins found in $plugins_dir; disabling autoInstallPlugins (load local, skip registry)"
+        fi
+    fi
+    if [[ "$autoinstall" == "false" ]]; then
+        sed -E 's/^autoInstallPlugins:[[:space:]]*true[[:space:]]*$/autoInstallPlugins: false/' \
+            "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    fi
 
     log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \
@@ -477,40 +764,72 @@ drasi_apply() {
 }
 
 # Preflight: confirm the plugins our components need actually loaded. The
-# server auto-installs the plugins listed in the base yaml from the OCI
-# registry, but install failures are non-fatal (logged as warnings) — so a
-# missing plugin only surfaces later as "Unknown source kind". This turns
-# that into an early, actionable failure. Common cause: the registry has no
-# build for the current platform (e.g. darwin-arm64); use a Linux runner or
-# point pluginRegistry at a local plugins dir.
+# server auto-installs the plugins listed in the base yaml (from the OCI
+# registry, or locally-built plugins next to the binary), but this is
+# ASYNCHRONOUS — on a fast host (Linux CI, registry cache) they're ready
+# immediately, but a local darwin-arm64 install can lag a few seconds. So we
+# POLL for up to PLUGIN_WAIT_SECS rather than checking once (a single check
+# races the install and fails spuriously). Install failures are otherwise
+# non-fatal and only surface later as "Unknown source kind".
 check_plugins() {
     local src_file="$1" rxn_file="$2"
-    local kinds_json
-    kinds_json="$(curl -fsS "${DRASI_API}/plugins/kinds" 2>/dev/null || echo '{}')"
-    local have_sources have_reactions
-    have_sources="$(printf '%s' "$kinds_json" | jq -r '[.sources[]?.kind] | join(",")' 2>/dev/null || echo '')"
-    have_reactions="$(printf '%s' "$kinds_json" | jq -r '[.reactions[]?.kind] | join(",")' 2>/dev/null || echo '')"
-    log "Available source kinds: [${have_sources}]  reaction kinds: [${have_reactions}]"
+    local timeout="${PLUGIN_WAIT_SECS:-60}"
+    local deadline=$(( $(date +%s) + timeout ))
+    local drasi_log="$LOG_DIR/drasi-server.log"
+    local kinds_json have_sources have_reactions missing kind last_log=0
 
-    local missing=0 kind
-    kind="$(jq -r '.kind' "$src_file")"
-    if ! printf '%s' "$kinds_json" | jq -e --arg k "$kind" '[.sources[]?.kind] | index($k)' >/dev/null 2>&1; then
-        log "ERROR: source plugin kind '$kind' not loaded"; missing=1
-    fi
+    # The needed kinds this run applies.
+    local src_kind; src_kind="$(jq -r '.kind' "$src_file")"
+    local -a rxn_kinds=()
     while IFS= read -r kind; do
-        [[ -z "$kind" ]] && continue
-        if ! printf '%s' "$kinds_json" | jq -e --arg k "$kind" '[.reactions[]?.kind] | index($k)' >/dev/null 2>&1; then
-            log "ERROR: reaction plugin kind '$kind' not loaded"; missing=1
-        fi
+        [[ -n "$kind" ]] && rxn_kinds+=("$kind")
     done < <(jq -r '.[].kind' "$rxn_file" | sort -u)
 
-    if (( missing )); then
-        log "ERROR: required plugins are not available. The server could not"
-        log "       resolve them from the registry ($([[ -n "$have_sources$have_reactions" ]] && echo 'partial' || echo 'none available'))."
-        log "       On darwin-arm64 the OCI registry may not publish plugin builds;"
-        log "       run on a Linux x86_64 host/CI, or set pluginRegistry to a local dir."
-        return 3
-    fi
+    # A kind is satisfied if the /plugins/kinds API reports it OR the server log
+    # confirms it was dynamically loaded ("[cdylib] <type>: <kind>"). Some server
+    # builds surface cdylib (locally-built) plugins only via the log, not the
+    # API, so the log is the authoritative signal for locally-loaded plugins.
+    while :; do
+        kinds_json="$(curl -fsS "${DRASI_API}/plugins/kinds" 2>/dev/null || echo '{}')"
+        missing=0
+
+        if ! printf '%s' "$kinds_json" | jq -e --arg k "$src_kind" '[.sources[]?.kind] | index($k)' >/dev/null 2>&1 \
+           && ! grep -qE "\[cdylib\] source: ${src_kind}([[:space:]]|\$)" "$drasi_log" 2>/dev/null; then
+            missing=1
+        fi
+        for kind in "${rxn_kinds[@]}"; do
+            if ! printf '%s' "$kinds_json" | jq -e --arg k "$kind" '[.reactions[]?.kind] | index($k)' >/dev/null 2>&1 \
+               && ! grep -qE "\[cdylib\] reaction: ${kind}([[:space:]]|\$)" "$drasi_log" 2>/dev/null; then
+                missing=1
+            fi
+        done
+
+        have_sources="$(printf '%s' "$kinds_json" | jq -r '[.sources[]?.kind] | join(",")' 2>/dev/null || echo '')"
+        have_reactions="$(printf '%s' "$kinds_json" | jq -r '[.reactions[]?.kind] | join(",")' 2>/dev/null || echo '')"
+
+        if (( ! missing )); then
+            log "Plugins ready (source '$src_kind' + reactions [${rxn_kinds[*]}]). API kinds: sources=[${have_sources}] reactions=[${have_reactions}]"
+            return 0
+        fi
+
+        local now; now=$(date +%s)
+        if (( now >= deadline )); then
+            break
+        fi
+        if (( now - last_log >= 5 )); then
+            log "Waiting for plugins to load... API sources=[${have_sources}] reactions=[${have_reactions}]"
+            last_log=$now
+        fi
+        sleep 2
+    done
+
+    log "ERROR: required plugins not available after ${timeout}s."
+    log "       Needed: source '$src_kind', reactions [${rxn_kinds[*]}]."
+    log "       API reported: sources=[${have_sources}] reactions=[${have_reactions}];"
+    log "       server log had no matching '[cdylib] <type>: <kind>' load lines either."
+    log "       On darwin-arm64 provide locally-built plugins next to the binary"
+    log "       (bin/plugins/*.dylib), or run on a Linux x86_64 host/CI."
+    return 3
 }
 
 apply_server_components() {
@@ -522,6 +841,16 @@ apply_server_components() {
     done
 
     check_plugins "$src_file" "$rxn_file" || return $?
+
+    # Rooms-only bootstrap: apply only the per-room query and its reaction, so
+    # the simple MATCH (r:Room) path runs in isolation (avoids the floor-agg
+    # mid-bootstrap stop -> source backpressure -> stalled startup).
+    local q_select='.[]' r_select='.[]'
+    if [[ "${BOOTSTRAP_ENABLED:-false}" == "true" && "${BOOTSTRAP_ROOMS_ONLY:-true}" == "true" ]]; then
+        q_select='.[] | select(.id == "building-comfort")'
+        r_select='.[] | select(.id == "building-comfort-out")'
+        log "Bootstrap rooms-only: applying only query 'building-comfort' + reaction 'building-comfort-out'"
+    fi
 
     # Order matters: source before queries that subscribe to it, queries
     # before reactions that consume them.
@@ -572,7 +901,7 @@ apply_server_components() {
             | .bootstrapBufferSize = $bb')"
         log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         drasi_apply "/queries" "$q_body"
-    done < <(jq -c '.[]' "$qry_file")
+    done < <(jq -c "$q_select" "$qry_file")
 
     log "Applying reactions from $SERVER_REACTIONS_FILE"
     local r
@@ -581,7 +910,7 @@ apply_server_components() {
         local rid; rid="$(printf '%s' "$r" | jq -r '.id')"
         log "  -> reaction $rid"
         drasi_apply "/reactions" "$r"
-    done < <(jq -c '.[]' "$rxn_file")
+    done < <(jq -c "$r_select" "$rxn_file")
 
     log "Component snapshot:"
     curl -fsS "${DRASI_API}/sources"   | jq -c '.' || true
@@ -633,6 +962,22 @@ fetch_final_reaction_state() {
     esac
 }
 
+# Fetch a compact per-reaction progress string (record count + status) from the
+# test-service REST API, e.g. " [building-comfort: 45000 recs, Running]". Makes
+# the completion wait observable (distinguishes a slow run from a stall).
+reaction_progress() {
+    local id url body count status out=""
+    for id in $TEST_REACTION_IDS; do
+        url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/reactions/${id}"
+        body="$(curl -sS "$url" 2>/dev/null || true)"
+        [[ -z "$body" ]] && continue
+        count="$(printf '%s' "$body" | jq -r '.reaction_observer.result_summary.reaction_invocation_count // "?"' 2>/dev/null || echo '?')"
+        status="$(printf '%s' "$body" | jq -r '.reaction_observer.status // "?"' 2>/dev/null || echo '?')"
+        out+=" [$id: $count recs, $status]"
+    done
+    printf '%s' "$out"
+}
+
 wait_for_completion_signal() {
     local log_file="$LOG_DIR/test-service.log"
     local marker="TestRun '${TEST_RUN_ID}' completed:"
@@ -641,7 +986,14 @@ wait_for_completion_signal() {
     local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
     local start_ts=$(( $(date +%s) ))
     local last_log_ts=0
-    while (( $(date +%s) < deadline )); do
+    # Read the clock into a variable before comparing -- embedding
+    # $(date +%s) directly inside (( )) crashes with a syntax error if the
+    # command substitution ever returns empty (observed under the heavy
+    # system load a 1M-room bootstrap puts on the CI runner); a variable
+    # reference degrades safely to 0 when empty instead.
+    local now
+    now=$(date +%s)
+    while (( now < deadline )); do
         if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
             log "ERROR: test-service exited unexpectedly"; return 1
         fi
@@ -653,12 +1005,13 @@ wait_for_completion_signal() {
             grep -F "$marker" "$log_file" | tail -n1 | sed 's/^/[completion] /'
             return 0
         fi
-        local now elapsed
-        now=$(date +%s); elapsed=$(( now - start_ts ))
+        local elapsed
+        elapsed=$(( now - start_ts ))
         if (( now - last_log_ts >= 30 )); then
-            log "waiting for completion t=${elapsed}s (no marker yet)"; last_log_ts=$now
+            log "waiting for completion t=${elapsed}s (no marker yet)$(reaction_progress)"; last_log_ts=$now
         fi
         sleep "$POLL_INTERVAL_SECS"
+        now=$(date +%s)
     done
     log "ERROR: completion signal not observed within ${TIMEOUT_SECS}s"
     log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" || true
@@ -689,7 +1042,9 @@ verify_test_run_status() {
     local status_file="$ARTIFACTS_DIR/final_test_run_status.json"
     local deadline=$(( $(date +%s) + 30 ))
     local body status
-    while (( $(date +%s) < deadline )); do
+    local now
+    now=$(date +%s)
+    while (( now < deadline )); do
         body="$(curl -sS "$url" 2>/dev/null || true)"
         if [[ -n "$body" ]]; then
             echo "$body" > "$status_file"
@@ -700,6 +1055,7 @@ verify_test_run_status() {
             esac
         fi
         sleep 1
+        now=$(date +%s)
     done
     log "WARNING: could not confirm final test-run status from $url"
     [[ -s "$status_file" ]] && cat "$status_file"
@@ -781,15 +1137,19 @@ write_step_summary() {
 
         echo "### Throughput"
         echo
-        echo "| Reaction | Records | Duration (s) | Records/sec |"
-        echo "| --- | ---: | ---: | ---: |"
-        local metrics_file rid records duration rps
+        echo "| Reaction | Records | Duration (s) | Records/sec | Bootstrap recs | Bootstrap (s) | Bootstrap rec/s | Steady rec/s |"
+        echo "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        local metrics_file rid records duration rps bs_recs bs_dur bs_rps ss_rps
         while IFS= read -r -d '' metrics_file; do
             rid="$(jq -r '.test_run_reaction_id // "unknown"' "$metrics_file" 2>/dev/null | awk -F'.' '{print $NF}')"
             records="$(jq -r '.record_count // "n/a"' "$metrics_file" 2>/dev/null)"
             duration="$(jq -r '(.duration_ns // 0) / 1e9 | . * 1000 | round / 1000' "$metrics_file" 2>/dev/null)"
             rps="$(jq -r '.records_per_second // "n/a" | if type == "number" then . * 100 | round / 100 else . end' "$metrics_file" 2>/dev/null)"
-            echo "| \`$rid\` | $records | $duration | $rps |"
+            bs_recs="$(jq -r '.bootstrap.record_count // "n/a"' "$metrics_file" 2>/dev/null)"
+            bs_dur="$(jq -r 'if .bootstrap then (.bootstrap.duration_ns / 1e9 | . * 1000 | round / 1000) else "n/a" end' "$metrics_file" 2>/dev/null)"
+            bs_rps="$(jq -r '.bootstrap.records_per_second // "n/a" | if type == "number" then . * 100 | round / 100 else . end' "$metrics_file" 2>/dev/null)"
+            ss_rps="$(jq -r '.steady_state.records_per_second // "n/a" | if type == "number" then . * 100 | round / 100 else . end' "$metrics_file" 2>/dev/null)"
+            echo "| \`$rid\` | $records | $duration | $rps | $bs_recs | $bs_dur | $bs_rps | $ss_rps |"
         done < <(find "$DATA_CACHE" -path '*output_log/performance_metrics/*.json' -type f -print0 2>/dev/null || true)
         echo
 
@@ -807,7 +1167,9 @@ download_drasi_server
 resolve_batching_preset
 resolve_query_tuning
 resolve_server_config
+resolve_bootstrap_preset
 patch_configs
+patch_bootstrap_preset
 start_drasi_server
 apply_server_components
 start_test_service

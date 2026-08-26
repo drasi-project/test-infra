@@ -114,6 +114,97 @@ source tree.
 
 
 
+## Large-bootstrap presets (issue #78)
+
+The driver can scale the building_comfort **initial dataset** (the graph that is
+delivered as `op:"i"` inserts before steady-state begins) so that bootstrap load
+time and throughput can be measured **separately** from steady-state throughput.
+
+Select a preset with `BOOTSTRAP_SIZE` (env) or the workflow's `bootstrap_size`
+input. The value is the target **room count** (the dominant element); the graph
+is scaled `buildings × floors × rooms/floor` with `floors=10`, `rooms/floor=10`:
+
+| `BOOTSTRAP_SIZE` | buildings | rooms (total) | floors (total) |
+| --- | ---: | ---: | ---: |
+| `10k` | 100   | 10,000    | 1,000   |
+| `100k`| 1000  | 100,000   | 10,000  |
+| `1m`  | 10000 | 1,000,000 | 100,000 |
+
+Empty / `off` (the default, and on scheduled runs) keeps the committed small
+scenario unchanged.
+
+### How the split is measured
+
+The initial graph is delivered as insert change events **before** the first
+steady-state change (`send_initial_inserts` runs to completion, then the change
+stream starts — a single ordered source stream). The reaction's
+`PerformanceMetrics` logger is given a `bootstrap_record_count` (K) equal to the
+number of records the query emits during bootstrap:
+
+- `building-comfort` (`MATCH (r:Room)`) emits **one result per room**, so
+  `K = rooms`.
+- `building-comfort-floor-agg` (per-floor aggregate) re-emits its floor's
+  aggregate once per `FLOOR_ROOM` relation added during bootstrap — i.e. once
+  per room as it joins its floor — so its bootstrap output equals the room
+  count, `K = rooms` (override with `BOOTSTRAP_K_AGG`).
+
+The logger reports separate `bootstrap` and `steady_state` blocks
+(duration + records/sec) in its metrics JSON, surfaced in the workflow's
+**Throughput** summary table.
+
+### Rooms-only (opt-in)
+
+By default both queries run during bootstrap. The floor aggregate re-emits its
+floor's aggregate once per `FLOOR_ROOM` relation, so its bootstrap output equals
+the **room** count (not the floor count); the stop trigger is calibrated to
+`K = rooms` so it stays above the bootstrap output and keeps draining throughout
+bootstrap. (An earlier `K = floors` mis-calibration stopped it *mid-bootstrap*,
+which backpressured the still-dispatching shared source and hung the run — that
+was why rooms-only used to be the default.)
+
+Set `BOOTSTRAP_ROOMS_ONLY=true` to run **only** the per-room `building-comfort`
+query/reaction and drop the floor-aggregate — useful for isolating the per-room
+path.
+
+After bootstrap the driver runs the full steady-state workload
+(`BOOTSTRAP_CHANGE_COUNT` **steady** changes, default **100000**). Note the
+generator's `change_count` limit counts *every* dispatched event — including the
+bootstrap inserts — so the driver sets the underlying `change_count` to
+`bootstrap_events + BOOTSTRAP_CHANGE_COUNT` (else the source would "finish" the
+instant the bootstrap exceeds the limit and the steady phase would never run).
+Completion requires the source to finish **and** the reaction to reach its stop
+count, so the stop is set to `K + steady_target` with the target safely below the
+reaction's natural output: **95%** of the steady changes for `building-comfort`
+(~1 result per change). The remaining ~5% tail is absorbed by the server's query
+buffers after the reaction stops, so the source still finishes. Override with
+`BOOTSTRAP_STEADY_MAIN` (and `BOOTSTRAP_STEADY_AGG` when the aggregate is
+re-enabled).
+
+### Determinism baseline
+
+Because the bootstrap resultset differs from the committed small scenario, the
+preset clears the inline `Sha256Determinism` baselines and sets
+`missing_baseline: Warn` — the run computes and reports the hash (in the summary)
+without failing. Pin a baseline by copying the reported SHA back into a config
+once a green reference run exists.
+
+### Run it locally
+
+```bash
+cd e2e-test-framework/examples/building_comfort/dynamic
+BOOTSTRAP_SIZE=10k ./run_dynamic.sh         # gRPC, 10k-room bootstrap
+
+# HTTP transport, 100k-room bootstrap
+BOOTSTRAP_SIZE=100k \
+SERVER_SOURCE_FILE=source_http.json SERVER_REACTIONS_FILE=reactions_http.json \
+DRASI_SOURCE_PORT=9000 TEST_CFG_SRC="$PWD/config.http.json" ./run_dynamic.sh
+```
+
+> Note: `100k` and especially `1m` produce a large initial insert burst
+> (`1m` ≈ 2.21M bootstrap events); allow extra time and, if combined with
+> `PERSIST_INDEX=true`, expect it to be much slower (WAL fsync per event) — the
+> driver auto-raises `WAL_MAX_EVENTS` to cover the bigger dataset.
+
 ## Apply order
 
 The driver applies **source → queries → reactions** (a query needs its source to

@@ -110,6 +110,26 @@ The CI script will:
 Artifacts (logs, captured JSONL, reaction state) land in
 `./ci_artifacts/`.
 
+## Running in CI against a drasi-server branch or fork
+
+This variant runs as the `stock_market / drasi_server_http_grpc_join` job of
+the [`E2E - stock_market join`](../../../../../.github/workflows/e2e-stock-market-join.yml)
+workflow. By default (scheduled or a plain manual run) it downloads the latest
+`drasi-project/drasi-server` release. To instead **build drasi-server from
+source**, trigger it via *Actions → E2E - stock_market join → Run workflow* and
+set:
+
+- `drasi_server_ref` &mdash; a branch, tag, or commit SHA to build. Empty keeps
+  the default release-download behavior.
+- `drasi_server_repo` &mdash; the repo to build from (`owner/name`). Point it at
+  a fork to test a fork branch. Empty defaults to `drasi-project/drasi-server`.
+
+The runner clones that repo/ref and runs `cargo build --release`, then uses the
+freshly built binary. The step summary labels the run with the resolved source
+(`source <repo>@<ref> (<sha>)` or `release <tag> (<repo>)`). The repo/branch must
+be pushed and public (the clone is anonymous). Locally, export `DRASI_SERVER_REF`
+(and optionally `DRASI_REPO`) before running the script for the same effect.
+
 ## Default ports
 
 | Component                                          | Port                    |

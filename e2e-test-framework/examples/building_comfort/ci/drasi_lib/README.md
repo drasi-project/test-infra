@@ -52,14 +52,14 @@ test-service ── in-process channel ──> drasi-lib ── in-process chann
 
 ## Run it from CI
 
-Add a job to `.github/workflows/e2e-building-comfort.yml` that points
-`WORKDIR` at this folder; copy the existing `building-comfort-drasi-server-*`
-jobs and drop their drasi-server-specific steps if you want.
+Add a variant to `.github/workflows/e2e-building-comfort.yml`: give it a
+checkbox input, include it in the `select-variants` matrix, and map it to a
+runner script in the *Resolve variant* step.
 
 ### Targeting a drasi-core branch or fork
 
-Unlike the `drasi_server_http` / `drasi_server_grpc` variants (which build an
-external drasi-server binary), this variant compiles drasi-core / drasi-lib
+Unlike the dynamic `http_*` / `grpc_*` variants (which use an external
+drasi-server binary), this variant compiles drasi-core / drasi-lib
 **into** the test-service. There is no separate binary to point at a branch, so
 the source override is the developer's responsibility via Cargo:
 

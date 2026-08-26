@@ -82,6 +82,14 @@ export WORK_DIR="$PWD/.local_run/work"
 | Test service gRPC reaction handler (per-room)      | 50052           |
 | Test service gRPC reaction handler (floor-agg)     | 50053           |
 
+## Running in CI
+
+This variant runs as the `building_comfort / drasi_server_grpc` job of the
+`E2E - building_comfort` workflow, which downloads the latest drasi-server
+release by default or builds from a branch/fork on demand. See
+[`../README.md`](../README.md) for how to trigger it and pass a
+`drasi_server_ref` / `drasi_server_repo`.
+
 ## Troubleshooting
 
 - **`address already in use`** &mdash; one of the four ports above is held

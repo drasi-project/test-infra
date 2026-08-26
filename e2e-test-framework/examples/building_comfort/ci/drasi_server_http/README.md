@@ -102,6 +102,14 @@ Client extension (or `curl`).
 | Test service HTTP reaction handler (per-room)      | 9001 (path `/reaction`) |
 | Test service HTTP reaction handler (floor-agg)     | 9002 (path `/reaction`) |
 
+## Running in CI
+
+This variant runs as the `building_comfort / drasi_server_http` job of the
+`E2E - building_comfort` workflow, which downloads the latest drasi-server
+release by default or builds from a branch/fork on demand. See
+[`../README.md`](../README.md) for how to trigger it and pass a
+`drasi_server_ref` / `drasi_server_repo`.
+
 ## Troubleshooting
 
 - **Connection refused on 9000** &mdash; Drasi Server is not running or the

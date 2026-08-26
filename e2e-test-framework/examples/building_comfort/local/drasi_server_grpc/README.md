@@ -94,11 +94,11 @@ SHA_CHECK=1 ./run_test.sh
 ```
 
 Requires `jq` on `PATH`. Two successive runs on the same machine should
-produce identical SHAs; the CI variant
-[`ci/drasi_server_grpc`](../../ci/drasi_server_grpc) maintains a locked
+produce identical SHAs; the CI `grpc_standard` variant
+([`dynamic/config.json`](../../dynamic/config.json)) maintains a locked
 baseline. To enforce a baseline locally, paste the SHAs into a
 `Sha256Determinism` block in `config.json` directly (see the CI variant's
-`config.json` for the exact shape).
+config for the exact shape).
 
 ## Inspect / control while running
 

@@ -33,8 +33,14 @@
 #   7. Snapshot reactions, verify determinism, write summary.
 #
 # Env vars (defaults in parens):
-#   DRASI_REPO            releases repo (drasi-project/drasi-server)
-#   DRASI_SERVER_VERSION  release tag ("" = latest)
+#   DRASI_REPO            releases repo / source repo (drasi-project/drasi-server).
+#                         Setting this selects the source build: the named repo
+#                         is cloned and built. Point at a fork to test a fork.
+#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used when neither
+#                         DRASI_REPO nor DRASI_SERVER_REF is set.
+#   DRASI_SERVER_REF      branch/tag/SHA to BUILD from source with cargo. Also
+#                         selects the source build. "" with DRASI_REPO set =
+#                         that repo's default branch. Both "" = download.
 #   DRASI_SERVER_BIN      pre-downloaded binary (skips download)
 #   DRASI_ADMIN_PORT      admin/REST port patched into empty.yaml (8090)
 #   DRASI_SOURCE_PORT     source ingress port to wait for (50051)
@@ -103,8 +109,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Script lives at examples/building_comfort/dynamic/ — four levels below the repo root.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
+# Whether the caller explicitly named a repo, captured before the default is
+# applied. An explicit repo means "build from this repo's source", so it selects
+# the source build on its own — a ref is optional and narrows it to a branch.
+DRASI_REPO_EXPLICIT="${DRASI_REPO:-}"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
+DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
 DRASI_ADMIN_PORT="${DRASI_ADMIN_PORT:-8090}"
 DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-50051}"
 
@@ -160,6 +171,7 @@ WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
 LOG_DIR="$WORK_DIR/logs"
 DOWNLOAD_DIR="$WORK_DIR/drasi-server-download"
+SRC_BUILD_DIR="$WORK_DIR/drasi-server-src"
 DATA_CACHE="$WORK_DIR/test_data_cache"
 DRASI_CFG_SRC="$SCRIPT_DIR/base/drasi_server.empty.yaml"
 TEST_CFG_SRC="${TEST_CFG_SRC:-$SCRIPT_DIR/config.json}"
@@ -172,6 +184,9 @@ mkdir -p "$WORK_DIR" "$LOG_DIR" "$ARTIFACTS_DIR"
 
 DRASI_PID=""
 SERVICE_PID=""
+# Human-readable description of where DRASI_SERVER_BIN came from (release tag,
+# source build, or preset). Surfaced in the step summary for result labeling.
+DRASI_BUILD_SOURCE=""
 
 log() { echo "[dyn] $*"; }
 
@@ -238,8 +253,81 @@ wait_for_http() {
 download_drasi_server() {
     if [[ -n "${DRASI_SERVER_BIN:-}" ]]; then
         log "Using pre-set DRASI_SERVER_BIN=$DRASI_SERVER_BIN"
+        DRASI_BUILD_SOURCE="preset ${DRASI_SERVER_BIN}"
         return 0
     fi
+
+    # Build from source when the caller named a repo and/or a ref. Naming
+    # either one means "test this code", so a repo without a ref builds that
+    # repo's default branch rather than silently downloading its release
+    # binary — which would ignore the request and test the wrong thing.
+    if [[ -n "$DRASI_SERVER_REF" || -n "$DRASI_REPO_EXPLICIT" ]]; then
+        build_drasi_server_from_source
+        return 0
+    fi
+
+    download_drasi_server_release
+}
+
+# Ask GitHub for $DRASI_REPO's default branch, so a repo given without a ref
+# still builds something well-defined. Falls back to main.
+resolve_default_branch() {
+    local branch=""
+    if command -v gh >/dev/null 2>&1; then
+        branch="$(gh repo view "$DRASI_REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || true)"
+    fi
+    if [[ -z "$branch" ]]; then
+        branch="$(curl -fsSL "https://api.github.com/repos/${DRASI_REPO}" 2>/dev/null | jq -r '.default_branch // empty' || true)"
+    fi
+    echo "${branch:-main}"
+}
+
+# Build drasi-server from a branch/tag/SHA of $DRASI_REPO using cargo, then set
+# DRASI_SERVER_BIN to the freshly built binary. Point DRASI_REPO at a fork to
+# build fork branches; $DRASI_SERVER_REF may be a branch, tag, or commit SHA.
+build_drasi_server_from_source() {
+    local ref="$DRASI_SERVER_REF"
+    if [[ -z "$ref" ]]; then
+        ref="$(resolve_default_branch)"
+        log "No DRASI_SERVER_REF given; using $DRASI_REPO default branch '$ref'"
+    fi
+    local repo_url="https://github.com/${DRASI_REPO}.git"
+    log "Building drasi-server from source: repo=$DRASI_REPO ref=$ref"
+
+    rm -rf "$SRC_BUILD_DIR"
+    # Shallow branch/tag clone is fastest; fall back to a full clone + checkout
+    # when $ref is a commit SHA (which --branch does not accept).
+    if ! git clone --depth 1 --branch "$ref" "$repo_url" "$SRC_BUILD_DIR" 2>/dev/null; then
+        log "Shallow clone of ref '$ref' failed; retrying with full clone + checkout"
+        rm -rf "$SRC_BUILD_DIR"
+        git clone "$repo_url" "$SRC_BUILD_DIR"
+        git -C "$SRC_BUILD_DIR" checkout "$ref"
+    fi
+
+    local built_sha
+    built_sha="$(git -C "$SRC_BUILD_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    log "Checked out $DRASI_REPO @ $ref ($built_sha); running cargo build --release"
+
+    if ! ( cd "$SRC_BUILD_DIR" && cargo build --release --bin drasi-server ); then
+        log "cargo build --bin drasi-server failed; retrying default release build"
+        ( cd "$SRC_BUILD_DIR" && cargo build --release )
+    fi
+
+    local built_bin="$SRC_BUILD_DIR/target/release/drasi-server"
+    if [[ ! -x "$built_bin" ]]; then
+        # Bin name may differ from the crate default; locate it under target/release.
+        built_bin="$(find "$SRC_BUILD_DIR/target/release" -maxdepth 1 -type f -name 'drasi-server*' -perm -u+x 2>/dev/null | head -n1)"
+    fi
+    [[ -n "$built_bin" && -x "$built_bin" ]] || { log "ERROR: cargo build did not produce a drasi-server binary"; return 1; }
+
+    DRASI_SERVER_BIN="$built_bin"
+    export DRASI_SERVER_BIN
+    DRASI_BUILD_SOURCE="source ${DRASI_REPO}@${ref} (${built_sha})"
+    log "DRASI_SERVER_BIN=$DRASI_SERVER_BIN"
+    "$DRASI_SERVER_BIN" --version || true
+}
+
+download_drasi_server_release() {
     mkdir -p "$DOWNLOAD_DIR"
     cd "$DOWNLOAD_DIR"
     local tag="$DRASI_SERVER_VERSION"
@@ -264,6 +352,7 @@ download_drasi_server() {
     mv "$asset_name" drasi-server
     DRASI_SERVER_BIN="$DOWNLOAD_DIR/drasi-server"
     export DRASI_SERVER_BIN
+    DRASI_BUILD_SOURCE="release ${tag} (${DRASI_REPO})"
     log "DRASI_SERVER_BIN=$DRASI_SERVER_BIN"
     "$DRASI_SERVER_BIN" --version || true
     cd - >/dev/null
@@ -992,7 +1081,7 @@ write_step_summary() {
     fi
 
     local out="$GITHUB_STEP_SUMMARY"
-    local drasi_version="${DRASI_SERVER_VERSION:-latest}"
+    local drasi_source="${DRASI_BUILD_SOURCE:-unknown}"
     local server_version
     server_version="$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n1 || echo unknown)"
 
@@ -1001,7 +1090,7 @@ write_step_summary() {
         echo
         echo "- test run: \`$TEST_RUN_ID\`"
         echo "- transport: dynamic (bare drasi-server, components applied via REST)"
-        echo "- drasi-server tag: \`$drasi_version\`"
+        echo "- drasi-server source: \`$drasi_source\`"
         echo "- drasi-server binary: \`$server_version\`"
         echo "- source component: \`$SERVER_SOURCE_FILE\` (ingress port $DRASI_SOURCE_PORT)"
         echo "- reactions component: \`$SERVER_REACTIONS_FILE\`"

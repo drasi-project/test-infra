@@ -49,9 +49,9 @@ whichever variants run.
 | `query_tuning` | `medium` | Query capacity preset (priority/dispatch buffers, bootstrap buffer). Perf only &mdash; results must not change. |
 | `persist_index` | unchecked | Use the built-in RocksDB persistent index. |
 | `state_store` | unchecked | Use the redb plugin state store. |
-| `drasi_server_version` | empty | drasi-server release tag (e.g. `v0.1.5`). Empty = latest. |
-| `drasi_server_repo` | empty | drasi-server repo (`owner/name`) to build from. Empty falls back to `drasi-project/drasi-server`. Only used when `drasi_server_ref` is set. |
-| `drasi_server_ref` | empty | drasi-server branch/tag/SHA to **build from source**. Empty = download the release binary. |
+| `drasi_server_version` | empty | drasi-server release tag (e.g. `v0.1.5`). Only used when the two below are both empty. Empty = latest. |
+| `drasi_server_repo` | empty | drasi-server repo (`owner/name`) to **build from source**. Empty falls back to `drasi-project/drasi-server`. |
+| `drasi_server_ref` | empty | drasi-server branch/tag/SHA to **build from source**. Empty with a repo set = that repo's default branch. |
 | `timeout_minutes` | 30 | Max minutes to wait for each test to finish. |
 
 ### Default run (latest release)
@@ -62,10 +62,21 @@ download the latest `drasi-project/drasi-server` release and test against it
 
 ### Test a drasi-server branch or fork
 
-Set `drasi_server_ref` (and optionally `drasi_server_repo` for a fork). The
-http/grpc runner then `git clone`s that repo/ref and `cargo build --release`
-instead of downloading a release. This is a manual-dispatch escape hatch:
-scheduled runs leave it empty so the published result history stays comparable.
+Setting **either** `drasi_server_repo` or `drasi_server_ref` switches the
+http/grpc runner from downloading a release to `git clone` + `cargo build
+--release` of that source. Naming a repo but no ref builds the repo's default
+branch &mdash; it never falls back to that fork's release binary, which would
+quietly test something other than what you asked for.
+
+| `drasi_server_repo` | `drasi_server_ref` | What runs |
+| --- | --- | --- |
+| empty | empty | Release download from `drasi-project/drasi-server` (scheduled default) |
+| `my-user/drasi-server` | empty | Source build of that fork's **default branch** |
+| `my-user/drasi-server` | `my-branch` | Source build of `my-branch` on that fork |
+| empty | `my-branch` | Source build of `my-branch` on `drasi-project/drasi-server` |
+
+This is a manual-dispatch escape hatch: scheduled runs leave both empty so the
+published result history stays comparable.
 
 Example &mdash; test branch `my-branch` on a fork:
 

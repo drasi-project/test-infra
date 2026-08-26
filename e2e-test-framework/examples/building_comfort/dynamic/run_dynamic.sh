@@ -34,10 +34,13 @@
 #
 # Env vars (defaults in parens):
 #   DRASI_REPO            releases repo / source repo (drasi-project/drasi-server).
-#                         Point at a fork to build a fork branch.
-#   DRASI_SERVER_VERSION  release tag ("" = latest)
-#   DRASI_SERVER_REF      branch/tag/SHA to BUILD from source with cargo. When
-#                         set, overrides the release download. "" = download.
+#                         Setting this selects the source build: the named repo
+#                         is cloned and built. Point at a fork to test a fork.
+#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used when neither
+#                         DRASI_REPO nor DRASI_SERVER_REF is set.
+#   DRASI_SERVER_REF      branch/tag/SHA to BUILD from source with cargo. Also
+#                         selects the source build. "" with DRASI_REPO set =
+#                         that repo's default branch. Both "" = download.
 #   DRASI_SERVER_BIN      pre-downloaded binary (skips download)
 #   DRASI_ADMIN_PORT      admin/REST port patched into empty.yaml (8090)
 #   DRASI_SOURCE_PORT     source ingress port to wait for (50051)
@@ -79,6 +82,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Script lives at examples/building_comfort/dynamic/ — four levels below the repo root.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
+# Whether the caller explicitly named a repo, captured before the default is
+# applied. An explicit repo means "build from this repo's source", so it selects
+# the source build on its own — a ref is optional and narrows it to a branch.
+DRASI_REPO_EXPLICIT="${DRASI_REPO:-}"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
 DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
@@ -183,7 +190,11 @@ download_drasi_server() {
         return 0
     fi
 
-    if [[ -n "$DRASI_SERVER_REF" ]]; then
+    # Build from source when the caller named a repo and/or a ref. Naming
+    # either one means "test this code", so a repo without a ref builds that
+    # repo's default branch rather than silently downloading its release
+    # binary — which would ignore the request and test the wrong thing.
+    if [[ -n "$DRASI_SERVER_REF" || -n "$DRASI_REPO_EXPLICIT" ]]; then
         build_drasi_server_from_source
         return 0
     fi
@@ -191,11 +202,28 @@ download_drasi_server() {
     download_drasi_server_release
 }
 
+# Ask GitHub for $DRASI_REPO's default branch, so a repo given without a ref
+# still builds something well-defined. Falls back to main.
+resolve_default_branch() {
+    local branch=""
+    if command -v gh >/dev/null 2>&1; then
+        branch="$(gh repo view "$DRASI_REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || true)"
+    fi
+    if [[ -z "$branch" ]]; then
+        branch="$(curl -fsSL "https://api.github.com/repos/${DRASI_REPO}" 2>/dev/null | jq -r '.default_branch // empty' || true)"
+    fi
+    echo "${branch:-main}"
+}
+
 # Build drasi-server from a branch/tag/SHA of $DRASI_REPO using cargo, then set
 # DRASI_SERVER_BIN to the freshly built binary. Point DRASI_REPO at a fork to
 # build fork branches; $DRASI_SERVER_REF may be a branch, tag, or commit SHA.
 build_drasi_server_from_source() {
     local ref="$DRASI_SERVER_REF"
+    if [[ -z "$ref" ]]; then
+        ref="$(resolve_default_branch)"
+        log "No DRASI_SERVER_REF given; using $DRASI_REPO default branch '$ref'"
+    fi
     local repo_url="https://github.com/${DRASI_REPO}.git"
     log "Building drasi-server from source: repo=$DRASI_REPO ref=$ref"
 

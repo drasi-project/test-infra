@@ -73,19 +73,20 @@ on:
 
       # --- Run settings ---
       drasi_server_version:
-        description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
+        description: "drasi-server release tag (e.g. v0.1.5). Only used when repo/ref below are both empty. Empty = latest."
         required: false
         default: ""
-      # Source-build escape hatch, manual dispatch only: scheduled runs leave
-      # both empty and download the release binary, keeping the published time
-      # series comparable. Set drasi_server_ref to build drasi-server from that
-      # branch/tag/SHA instead, and drasi_server_repo to build from a fork.
+      # Source-build escape hatch, manual dispatch only. Setting EITHER of the
+      # next two builds drasi-server from source instead of downloading a
+      # release; a repo without a ref builds that repo's default branch.
+      # Scheduled runs leave both empty and download the release binary,
+      # keeping the published time series comparable.
       drasi_server_repo:
-        description: "drasi-server repo (owner/name) to build from. Empty defaults to drasi-project/drasi-server."
+        description: "drasi-server repo (owner/name) to BUILD from source. Empty = drasi-project/drasi-server."
         required: false
         default: ""
       drasi_server_ref:
-        description: "drasi-server branch/tag/SHA to BUILD from source. Empty = download the release binary."
+        description: "drasi-server branch/tag/SHA to BUILD from source. Empty with a repo set = that repo's default branch."
         required: false
         default: ""
       timeout_minutes:
@@ -159,11 +160,10 @@ jobs:
         variant: ${{ fromJSON(needs.select-variants.outputs.variants) }}
     env:
       VARIANT: ${{ matrix.variant }}
-      # drasi_lib runs in-process and ignores these; every other variant
-      # either downloads the matching drasi-server release binary or, when
-      # drasi_server_ref is set (manual dispatch only), builds drasi-server
-      # from that branch/tag/SHA of DRASI_REPO — a fork if drasi_server_repo
-      # points at one.
+      # drasi_lib runs in-process and ignores these. Every other variant
+      # downloads a drasi-server release binary, unless drasi_server_repo
+      # and/or drasi_server_ref is set (manual dispatch only), in which case
+      # drasi-server is built from that repo/ref's source.
       DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
       DRASI_REPO: ${{ inputs.drasi_server_repo }}
       DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}

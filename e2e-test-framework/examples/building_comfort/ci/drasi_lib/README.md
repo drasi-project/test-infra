@@ -2,9 +2,9 @@
 
 End-to-end test that runs **drasi-lib in-process** inside the E2E test
 service. No external Drasi Server is required. This is the CI variant of
-[`local/drasi_lib`](../../local/drasi_lib) and mirrors the
-[`ci/drasi_server_http`](../drasi_server_http) and
-[`ci/drasi_server_grpc`](../drasi_server_grpc) variants; the difference
+[`local/drasi_lib`](../../local/drasi_lib) and mirrors the HTTP/gRPC
+server-based variants (now the dynamic driver at
+[`../../dynamic`](../../dynamic)); the difference
 is that here drasi-lib runs in-process via an `application` source/reaction
 instead of going over HTTP or gRPC.
 
@@ -52,14 +52,14 @@ test-service ── in-process channel ──> drasi-lib ── in-process chann
 
 ## Run it from CI
 
-Add a job to `.github/workflows/e2e-building-comfort.yml` that points
-`WORKDIR` at this folder; copy the existing `building-comfort-drasi-server-*`
-jobs and drop their drasi-server-specific steps if you want.
+Add a variant to `.github/workflows/e2e-building-comfort.yml`: give it a
+checkbox input, include it in the `select-variants` matrix, and map it to a
+runner script in the *Resolve variant* step.
 
 ### Targeting a drasi-core branch or fork
 
-Unlike the `drasi_server_http` / `drasi_server_grpc` variants (which build an
-external drasi-server binary), this variant compiles drasi-core / drasi-lib
+Unlike the dynamic `http_*` / `grpc_*` variants (which use an external
+drasi-server binary), this variant compiles drasi-core / drasi-lib
 **into** the test-service. There is no separate binary to point at a branch, so
 the source override is the developer's responsibility via Cargo:
 
@@ -102,7 +102,7 @@ The drasi-lib host runs in-process, so it has no port of its own.
 - **`Unsupported drasi-lib instance source kind`** &mdash; the embedded
   drasi-lib host only supports `kind: "application"` sources/reactions.
   Don't change those in `config.json`; if you need HTTP/gRPC transport,
-  use the `ci/drasi_server_http` or `ci/drasi_server_grpc` example.
+  use the dynamic driver at `../../dynamic` (http_* / grpc_* variants).
 - **`Determinism mismatch` on local runs** &mdash; expected. The
   baselines in `expected` are captured on the GitHub Actions runner
   (Linux x86_64); local runs on macOS arm64 (or any other host) will

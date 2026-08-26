@@ -56,6 +56,26 @@ Add a job to `.github/workflows/e2e-building-comfort.yml` that points
 `WORKDIR` at this folder; copy the existing `building-comfort-drasi-server-*`
 jobs and drop their drasi-server-specific steps if you want.
 
+### Targeting a drasi-core branch or fork
+
+Unlike the `drasi_server_http` / `drasi_server_grpc` variants (which build an
+external drasi-server binary), this variant compiles drasi-core / drasi-lib
+**into** the test-service. There is no separate binary to point at a branch, so
+the source override is the developer's responsibility via Cargo:
+
+1. On your branch of this repo, uncomment the git-based `[patch.crates-io]`
+   block in [`e2e-test-framework/Cargo.toml`](../../../../Cargo.toml) and set
+   the `branch` (or `rev`/`tag`) and `git` URL (a fork URL to test a fork) for
+   the drasi-core crates.
+2. Commit and push that branch.
+3. Run the workflow *from that branch* (*Actions → E2E - building_comfort →
+   Run workflow → Use workflow from: your-branch*). GitHub checks out the
+   selected branch, so Cargo pulls the patched drasi-core sources when it
+   builds the test-service — no workflow inputs are needed for this variant.
+
+The referenced crate versions must stay semver-compatible with what the
+workspace requires, otherwise Cargo rejects the patch (a useful signal).
+
 ## Run it locally
 
 ```bash

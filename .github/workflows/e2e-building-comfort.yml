@@ -76,6 +76,18 @@ on:
         description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
         required: false
         default: ""
+      # Source-build escape hatch, manual dispatch only: scheduled runs leave
+      # both empty and download the release binary, keeping the published time
+      # series comparable. Set drasi_server_ref to build drasi-server from that
+      # branch/tag/SHA instead, and drasi_server_repo to build from a fork.
+      drasi_server_repo:
+        description: "drasi-server repo (owner/name) to build from. Empty defaults to drasi-project/drasi-server."
+        required: false
+        default: ""
+      drasi_server_ref:
+        description: "drasi-server branch/tag/SHA to BUILD from source. Empty = download the release binary."
+        required: false
+        default: ""
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false
@@ -147,9 +159,14 @@ jobs:
         variant: ${{ fromJSON(needs.select-variants.outputs.variants) }}
     env:
       VARIANT: ${{ matrix.variant }}
-      # drasi_lib runs in-process and ignores this; every other variant
-      # downloads the matching drasi-server release binary.
+      # drasi_lib runs in-process and ignores these; every other variant
+      # either downloads the matching drasi-server release binary or, when
+      # drasi_server_ref is set (manual dispatch only), builds drasi-server
+      # from that branch/tag/SHA of DRASI_REPO — a fork if drasi_server_repo
+      # points at one.
       DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
+      DRASI_REPO: ${{ inputs.drasi_server_repo }}
+      DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
       # Determinism baselines live inline in each variant's config.json under
       # the Sha256Determinism completion handler's `expected` map. The
       # framework flips the test-run status to Error on mismatch; the runner
@@ -239,7 +256,11 @@ jobs:
         working-directory: e2e-test-framework
         run: cargo build --release --manifest-path test-service/Cargo.toml
 
+      - name: Record start time
+        run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Run test
+        id: test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
@@ -261,8 +282,50 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: building_comfort-${{ matrix.variant }}
           path: ${{ runner.temp }}/artifacts
           if-no-files-found: warn
+
+      # Build the durable summary record for drasi-project/test-results.
+      # Runs even when the test failed: a failed run is a datapoint too.
+      - name: Build result summary
+        if: always()
+        env:
+          WORKFLOW_FILE: e2e-building-comfort.yml
+          RUNNER_LABEL: ubuntu-latest
+        run: |
+          python3 .github/scripts/emit_summary.py \
+            --artifacts "${{ runner.temp }}/artifacts" \
+            --scenario building_comfort \
+            --variant "${{ matrix.variant }}" \
+            --job-status "${{ steps.test.outcome }}" \
+            --output "${{ runner.temp }}/summary/building_comfort__${{ matrix.variant }}.json"
+
+      - name: Upload result summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: summary-building_comfort-${{ matrix.variant }}
+          path: ${{ runner.temp }}/summary
+          if-no-files-found: warn
+
+  # Publish the summaries to drasi-project/test-results, which keeps a small
+  # permanent history (GitHub artifacts expire after 90 days). One job, one
+  # commit, one push - see publish-test-results.yml for why aggregating
+  # matters. `always()` so a failed test run is still recorded.
+  #
+  # Scheduled runs only. The published history is a time series, so every
+  # point has to be comparable: same trigger, same cadence, no operator
+  # choosing when to record. Manual runs exist to try things out - a different
+  # drasi-server version, a branch, a one-off timeout - and mixing those in
+  # would put unexplained spikes in the trend with nothing in the record to
+  # explain them. To exercise this path from a branch, temporarily widen this
+  # condition rather than publishing dispatch runs by default.
+  publish-results:
+    needs: [building-comfort]
+    if: always() && github.event_name == 'schedule'
+    uses: ./.github/workflows/publish-test-results.yml
+    secrets:
+      TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

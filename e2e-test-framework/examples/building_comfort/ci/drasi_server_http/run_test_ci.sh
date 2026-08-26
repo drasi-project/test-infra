@@ -7,9 +7,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Scheduled / CI runner for the stock_market / drasi_server_http_grpc_join
-# E2E test. Two sources (HTTP + gRPC) feed a single Cypher query — a
-# synthetic multi-source join — and emit results via an HTTP reaction.
+# Scheduled / CI runner for the building_comfort / drasi_server_http E2E test.
 #
 # Responsibilities:
 #   1. Obtain the drasi-server binary: download a release, build from a
@@ -18,11 +16,11 @@
 #   2. Patch the example configs so the run is CI-safe (port collision, keep
 #      artifacts on shutdown).
 #   3. Start drasi-server and the test-service as background processes.
-#   4. Poll the test-service REST API until the reaction reaches Stopped.
+#   4. Poll the test-service REST API until each reaction reaches Stopped.
 #   5. Tear down both processes and copy artifacts to $ARTIFACTS_DIR.
 #
-# Required tools: bash, jq, curl, cargo. Either `gh` (preferred) or `curl`
-# is used to fetch the release.
+# Required tools: bash, jq, curl, tar/unzip, cargo. Either `gh` (preferred)
+# or `curl` is used to fetch the release.
 #
 # Environment variables (with defaults):
 #   DRASI_REPO            GitHub repo (owner/name) for the release download or
@@ -35,14 +33,13 @@
 #                         Empty = download the release binary (default).
 #   DRASI_SERVER_BIN      Pre-built binary; skips both download and source build.
 #   DRASI_ADMIN_PORT      Admin port to patch into drasi_server_config.yaml. Default: 8090
-#   DRASI_HTTP_PORT       HTTP source port. Default: 9000
-#   DRASI_GRPC_PORT       gRPC source port. Default: 50051
+#   DRASI_SOURCE_PORT     HTTP source port. Default: 9000
 #   TEST_SERVICE_PORT     test-service REST API port. Default: 63123
 #   TEST_RUN_ID           Full run id used by the API: test_repo_id.test_id.test_run_id
-#                         Default: drasi_server_dev_repo.stock_market.test_run_001
+#                         Default: drasi_server_dev_repo.building_comfort.test_run_001
 #   TEST_REACTION_IDS     Space-separated list of test_reaction_id values to
 #                         snapshot at completion.
-#                         Default: "stock-market-join"
+#                         Default: "building-comfort building-comfort-floor-agg"
 #   TIMEOUT_SECS          Max seconds to wait for the completion signal.
 #                         Default: 1800
 #   POLL_INTERVAL_SECS    Seconds between status polls. Default: 10
@@ -52,19 +49,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Script lives at examples/stock_market/ci/drasi_server_http_grpc_join/ —
-# five levels below the repo root.
+# Script lives at examples/building_comfort/ci/drasi_server_http/ — five levels
+# below the repo root.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
 DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
 DRASI_ADMIN_PORT="${DRASI_ADMIN_PORT:-8090}"
-DRASI_HTTP_PORT="${DRASI_HTTP_PORT:-9000}"
-DRASI_GRPC_PORT="${DRASI_GRPC_PORT:-50051}"
+DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-9000}"
 TEST_SERVICE_PORT="${TEST_SERVICE_PORT:-63123}"
-TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.stock_market.test_run_001}"
-TEST_REACTION_IDS="${TEST_REACTION_IDS:-watchlist-prices}"
+TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.building_comfort.test_run_001}"
+TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort building-comfort-floor-agg}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
@@ -226,12 +222,11 @@ patch_configs() {
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
     grep -E '^(host|port):' "$DRASI_CFG_CI"
 
-    log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE, source_path=$SCRIPT_DIR/dev_repo"
-    jq --arg cache "$DATA_CACHE" --arg srcroot "$SCRIPT_DIR/dev_repo" \
+    log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
+    jq --arg cache "$DATA_CACHE" \
         '.data_store.data_store_path = $cache
          | .data_store.delete_on_start = false
-         | .data_store.delete_on_stop = false
-         | (.data_store.test_repos[]? | select(.kind == "LocalStorage") | .source_path) |= $srcroot' \
+         | .data_store.delete_on_stop = false' \
         "$TEST_CFG_SRC" > "$TEST_CFG_CI"
 
     # Enforce deterministic inputs by requiring explicit seed(s) for model sources.
@@ -252,13 +247,7 @@ start_drasi_server() {
     ) &
     DRASI_PID=$!
     log "drasi-server pid=$DRASI_PID"
-    if ! wait_for_port 127.0.0.1 "$DRASI_HTTP_PORT" "drasi-server HTTP source"; then
-        log "--- drasi-server.log (last 200 lines) ---"
-        tail -n 200 "$LOG_DIR/drasi-server.log" || true
-        log "--- end drasi-server.log ---"
-        return 1
-    fi
-    if ! wait_for_port 127.0.0.1 "$DRASI_GRPC_PORT" "drasi-server gRPC source"; then
+    if ! wait_for_port 127.0.0.1 "$DRASI_SOURCE_PORT" "drasi-server source"; then
         log "--- drasi-server.log (last 200 lines) ---"
         tail -n 200 "$LOG_DIR/drasi-server.log" || true
         log "--- end drasi-server.log ---"
@@ -405,13 +394,53 @@ print_summary() {
     echo "::endgroup::"
 }
 
+# Verifies the test-run's final status via the test-service REST API. The
+# framework's Sha256Determinism completion handler flips the run status to
+# Error if any reaction's DeterminismHash logger SHA doesn't match the
+# baseline declared in the test definition; otherwise the run stays at
+# Running once all components have finished. We give the handler chain a
+# short grace period after the completion marker to settle.
 verify_test_run_status() {
-    # Best-effort snapshot of the overall test-run state.
     local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}"
-    local body
-    body="$(curl -sS --max-time 5 "$url" 2>/dev/null || true)"
-    [[ -n "$body" ]] && echo "$body" > "$ARTIFACTS_DIR/final_test_run_status.json"
+    local status_file="$ARTIFACTS_DIR/final_test_run_status.json"
+    local deadline=$(( $(date +%s) + 30 ))
+    local body status
+
+    while (( $(date +%s) < deadline )); do
+        body="$(curl -sS "$url" 2>/dev/null || true)"
+        if [[ -n "$body" ]]; then
+            echo "$body" > "$status_file"
+            status="$(echo "$body" | jq -r '.status // "Unknown"')"
+            case "$status" in
+                Error:*)
+                    log "ERROR: test-run status: $status"
+                    return 1
+                    ;;
+                Stopped|Running)
+                    log "test-run status: $status"
+                    return 0
+                    ;;
+            esac
+        fi
+        sleep 1
+    done
+
+    log "WARNING: could not confirm final test-run status from $url"
+    [[ -s "$status_file" ]] && cat "$status_file"
     return 0
+}
+
+# Best-effort copy of the determinism verdict file (written by the
+# Sha256Determinism completion handler under the test-run storage path).
+copy_determinism_verdict() {
+    local verdict
+    verdict="$(find "$DATA_CACHE" -name 'determinism_verdict.json' -type f -print -quit 2>/dev/null || true)"
+    if [[ -n "$verdict" && -f "$verdict" ]]; then
+        cp "$verdict" "$ARTIFACTS_DIR/determinism_verdict.json"
+        echo "::group::Determinism verdict"
+        jq '.' "$ARTIFACTS_DIR/determinism_verdict.json" 2>/dev/null || cat "$ARTIFACTS_DIR/determinism_verdict.json"
+        echo "::endgroup::"
+    fi
 }
 
 # Render a markdown summary into $GITHUB_STEP_SUMMARY so it shows up on the
@@ -435,20 +464,36 @@ write_step_summary() {
 
         echo "### Reactions"
         echo
-        echo "| Reaction | Status | Records | Runtime |"
-        echo "| --- | --- | ---: | --- |"
+        echo "| Reaction | Status | Records | Runtime | SHA-256 | Determinism |"
+        echo "| --- | --- | ---: | --- | --- | --- |"
 
-        local id state_file status invocations runtime
+        local verdict_file="$ARTIFACTS_DIR/determinism_verdict.json"
+        local id state_file status invocations runtime sha verdict_passed verdict_cell
         for id in $TEST_REACTION_IDS; do
             state_file="$ARTIFACTS_DIR/final_reaction_state__${id}.json"
-            status="n/a"; invocations="n/a"; runtime="n/a"
+            status="n/a"; invocations="n/a"; runtime="n/a"; sha="n/a"
             if [[ -s "$state_file" ]]; then
                 status="$(jq -r '.reaction_observer.status // "n/a"' "$state_file" 2>/dev/null)"
                 invocations="$(jq -r '.reaction_observer.result_summary.reaction_invocation_count // "n/a"' "$state_file" 2>/dev/null)"
                 runtime="$(jq -r '.reaction_observer.result_summary.observer_runtime_s // "n/a"' "$state_file" 2>/dev/null)"
+                sha="$(jq -r '
+                    (.reaction_observer.logger_results[]?
+                        | select(.logger_name == "DeterminismHash")
+                        | .summary.sha256) // "n/a"' "$state_file" 2>/dev/null)"
             fi
 
-            echo "| \`$id\` | $status | $invocations | $runtime |"
+            verdict_cell="-"
+            if [[ -s "$verdict_file" ]]; then
+                verdict_passed="$(jq -r --arg id "$id" '.results[$id].passed // empty' "$verdict_file" 2>/dev/null)"
+                case "$verdict_passed" in
+                    true)  verdict_cell="✅ pass" ;;
+                    false) verdict_cell="❌ fail" ;;
+                esac
+            fi
+
+            local sha_short="${sha:0:12}"
+            [[ "$sha" == "n/a" ]] && sha_short="n/a"
+            echo "| \`$id\` | $status | $invocations | $runtime | \`$sha_short\` | $verdict_cell |"
         done
         echo
 
@@ -465,6 +510,14 @@ write_step_summary() {
             echo "| \`$rid\` | $records | $duration | $rps |"
         done < <(find "$DATA_CACHE" -path '*output_log/performance_metrics/*.json' -type f -print0 2>/dev/null || true)
         echo
+
+        if [[ -s "$verdict_file" ]]; then
+            echo "### Determinism verdict"
+            echo
+            echo '```json'
+            jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
+            echo '```'
+        fi
     } >> "$out"
 }
 
@@ -483,7 +536,17 @@ else
 fi
 print_summary
 
-verify_test_run_status || true
+determinism_rc=0
+verify_test_run_status || determinism_rc=$?
+copy_determinism_verdict
 write_step_summary
 
-exit "$poll_rc"
+if (( poll_rc != 0 )); then
+    exit "$poll_rc"
+fi
+
+if (( determinism_rc != 0 )); then
+    exit "$determinism_rc"
+fi
+
+exit 0

@@ -12,8 +12,12 @@ name: E2E - stock_market join
 on:
   workflow_dispatch:
     inputs:
-      drasi_server_version:
-        description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
+      drasi_server_repo:
+        description: "drasi-server repo (owner/name) to build from. Empty defaults to drasi-project/drasi-server."
+        required: false
+        default: ""
+      drasi_server_ref:
+        description: "drasi-server branch/tag/SHA to BUILD from source. Empty = download the latest release binary."
         required: false
         default: ""
       timeout_minutes:
@@ -34,7 +38,11 @@ jobs:
     timeout-minutes: 60
     env:
       WORKDIR: e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join
-      DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
+      # When drasi_server_ref is set, the runner builds drasi-server from that
+      # branch/tag/SHA of DRASI_REPO (a fork if drasi_server_repo points at one)
+      # instead of downloading the latest release.
+      DRASI_REPO: ${{ inputs.drasi_server_repo }}
+      DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5

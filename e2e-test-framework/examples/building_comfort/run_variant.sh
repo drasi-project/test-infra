@@ -15,17 +15,14 @@ case "$VARIANT" in
         export TEST_CFG_SRC="$SCRIPT_DIR/dynamic/config.http.json"
         ;;
     http_adaptive)
-        export SERVER_SOURCE_FILE="source_http_adaptive.json"
-        export SERVER_REACTIONS_FILE="reactions_http.json"
-        export DRASI_SOURCE_PORT=9000
-        export TEST_CFG_SRC="$SCRIPT_DIR/dynamic/config.http.json"
-        ;;
-    http_batched)
         # HTTP with batching on BOTH sides: the framework's adaptive dispatcher
         # (config.http_adaptive.json) coalesces ingress, and the reaction
         # (reactions_http_adaptive.json) coalesces egress into {"batch":[...]}
         # POSTs. A plain server source is used because the dispatcher, not the
-        # server, does the ingress batching here.
+        # server, does the ingress batching here. This both-sided batching is
+        # what lifts HTTP throughput to the gRPC-adaptive range; server-side
+        # adaptiveEnabled alone (source_http_adaptive.json) leaves egress
+        # per-result and stays at the standard rate.
         export SERVER_SOURCE_FILE="source_http.json"
         export SERVER_REACTIONS_FILE="reactions_http_adaptive.json"
         export DRASI_SOURCE_PORT=9000

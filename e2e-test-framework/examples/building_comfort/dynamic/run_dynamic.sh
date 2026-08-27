@@ -37,11 +37,17 @@
 # Env vars (defaults in parens):
 #   DRASI_REPO            drasi-server repo owner/name, used for BOTH the release
 #                         download and the source build (drasi-project/drasi-server).
-#                         Point at a fork to build/download from it.
-#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used in release mode.
+#                         Point at a fork to build/download from it. Setting this
+#                         explicitly selects the source build: the named repo is
+#                         cloned and built (a repo without a ref builds its default
+#                         branch instead of silently downloading a release).
+#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used in release mode,
+#                         i.e. when neither DRASI_REPO nor DRASI_SERVER_REF is set.
 #   DRASI_SERVER_REF      branch/tag/SHA of DRASI_REPO to BUILD drasi-server from
 #                         source with cargo. When set, overrides the release
-#                         download. Empty = download the release binary (default).
+#                         download and selects the source build. Empty with an
+#                         explicit DRASI_REPO = that repo's default branch;
+#                         otherwise empty = download the release binary (default).
 #   DRASI_CORE_REPO       drasi-core repo owner/name for the [patch.crates-io]
 #                         override injected during a source build (drasi-project/drasi-core).
 #   DRASI_CORE_REF        branch of DRASI_CORE_REPO to pin the drasi-core
@@ -121,6 +127,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Script lives at examples/building_comfort/dynamic/ — four levels below the repo root.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
+# Whether the caller explicitly named a repo, captured before the default is
+# applied. An explicit repo means "build from this repo's source", so it selects
+# the source build on its own — a ref is optional and narrows it to a branch.
+DRASI_REPO_EXPLICIT="${DRASI_REPO:-}"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
 # Build-from-source knobs. When DRASI_SERVER_REF is set, drasi-server is cloned
@@ -202,7 +212,8 @@ mkdir -p "$WORK_DIR" "$LOG_DIR" "$ARTIFACTS_DIR"
 DRASI_PID=""
 SERVICE_PID=""
 # Human-readable description of where DRASI_SERVER_BIN came from (release tag,
-# source build + optional core patch, or preset). Surfaced in the step summary.
+# source build + optional core patch, or preset). Surfaced in the step summary
+# for result labeling.
 DRASI_BUILD_SOURCE=""
 
 log() { echo "[dyn] $*"; }
@@ -249,21 +260,6 @@ start_mem_monitor() {
 cleanup() {
     local exit_code=$?
     set +e
-    if [[ -n "$MEM_MONITOR_PID" ]]; then
-        kill "$MEM_MONITOR_PID" 2>/dev/null
-    fi
-    # Surface any OOM-killer activity so a mysterious termination (no error in
-    # our own logs, just "Terminated") can be confirmed or ruled out as memory
-    # exhaustion rather than guessed at.
-    if command -v dmesg >/dev/null 2>&1; then
-        local oom_hits
-        oom_hits="$(dmesg -T 2>/dev/null | grep -iE 'killed process|out of memory|oom' | tail -n 20)"
-        if [[ -n "$oom_hits" ]]; then
-            log "WARNING: OOM-killer activity detected in dmesg:"
-            printf '%s\n' "$oom_hits" | sed 's/^/[dyn]   /'
-            printf '%s\n' "$oom_hits" > "$LOG_DIR/oom_dmesg.log" 2>/dev/null
-        fi
-    fi
     for pid_name in SERVICE_PID DRASI_PID; do
         pid="${!pid_name}"
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
@@ -327,10 +323,15 @@ download_drasi_server() {
         DRASI_BUILD_SOURCE="preset ${DRASI_SERVER_BIN}"
         return 0
     fi
-    if [[ -n "$DRASI_SERVER_REF" ]]; then
+    # Build from source when the caller named a repo and/or a ref. Naming
+    # either one means "test this code", so a repo without a ref builds that
+    # repo's default branch rather than silently downloading its release
+    # binary — which would ignore the request and test the wrong thing.
+    if [[ -n "$DRASI_SERVER_REF" || -n "$DRASI_REPO_EXPLICIT" ]]; then
         build_drasi_server_from_source
         return 0
     fi
+
     download_drasi_server_release
 }
 
@@ -462,11 +463,30 @@ verify_core_patch_resolution() {
     log "Verified: all resolved drasi-core-family packages come from $DRASI_CORE_REPO@$DRASI_CORE_REF"
 }
 
+# Ask GitHub for $DRASI_REPO's default branch, so a repo given without a ref
+# still builds something well-defined. Falls back to main.
+resolve_default_branch() {
+    local branch=""
+    if command -v gh >/dev/null 2>&1; then
+        branch="$(gh repo view "$DRASI_REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || true)"
+    fi
+    if [[ -z "$branch" ]]; then
+        branch="$(curl -fsSL "https://api.github.com/repos/${DRASI_REPO}" 2>/dev/null | jq -r '.default_branch // empty' || true)"
+    fi
+    echo "${branch:-main}"
+}
+
 # Build drasi-server from a branch/tag/SHA of $DRASI_REPO using cargo, then set
 # DRASI_SERVER_BIN to the freshly built binary. When DRASI_CORE_REF is set, the
 # drasi-core crates are additionally patched to that ref (see inject_core_patch).
+# Point DRASI_REPO at a fork to build fork branches; $DRASI_SERVER_REF may be a
+# branch, tag, or commit SHA (empty resolves the repo's default branch).
 build_drasi_server_from_source() {
     local ref="$DRASI_SERVER_REF"
+    if [[ -z "$ref" ]]; then
+        ref="$(resolve_default_branch)"
+        log "No DRASI_SERVER_REF given; using $DRASI_REPO default branch '$ref'"
+    fi
     local repo_url="https://github.com/${DRASI_REPO}.git"
     log "Building drasi-server from source: repo=$DRASI_REPO ref=$ref"
 
@@ -1410,7 +1430,6 @@ resolve_server_config
 resolve_bootstrap_preset
 patch_configs
 patch_bootstrap_preset
-start_mem_monitor
 start_drasi_server
 apply_server_components
 start_test_service

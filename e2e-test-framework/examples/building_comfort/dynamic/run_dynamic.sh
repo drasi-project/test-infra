@@ -552,11 +552,12 @@ download_drasi_server_release() {
 # the values checked into the component/config files.
 resolve_batching_preset() {
     case "$BATCHING_SPEED" in
-        low)    BATCH_SIZE=100;  BATCH_WAIT_MS=10  ;;
-        medium) BATCH_SIZE=1000; BATCH_WAIT_MS=50  ;;
-        high)   BATCH_SIZE=5000; BATCH_WAIT_MS=200 ;;
+        low)    BATCH_SIZE=100;   BATCH_WAIT_MS=10  ;;
+        medium) BATCH_SIZE=1000;  BATCH_WAIT_MS=50  ;;
+        high)   BATCH_SIZE=5000;  BATCH_WAIT_MS=200 ;;
+        max)    BATCH_SIZE=10000; BATCH_WAIT_MS=50  ;;
         *)
-            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected low|medium|high)"
+            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected low|medium|high|max)"
             return 1
             ;;
     esac

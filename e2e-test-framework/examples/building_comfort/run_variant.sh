@@ -20,6 +20,17 @@ case "$VARIANT" in
         export DRASI_SOURCE_PORT=9000
         export TEST_CFG_SRC="$SCRIPT_DIR/dynamic/config.http.json"
         ;;
+    http_batched)
+        # HTTP with batching on BOTH sides: the framework's adaptive dispatcher
+        # (config.http_adaptive.json) coalesces ingress, and the reaction
+        # (reactions_http_adaptive.json) coalesces egress into {"batch":[...]}
+        # POSTs. A plain server source is used because the dispatcher, not the
+        # server, does the ingress batching here.
+        export SERVER_SOURCE_FILE="source_http.json"
+        export SERVER_REACTIONS_FILE="reactions_http_adaptive.json"
+        export DRASI_SOURCE_PORT=9000
+        export TEST_CFG_SRC="$SCRIPT_DIR/dynamic/config.http_adaptive.json"
+        ;;
     grpc_standard)
         export SERVER_SOURCE_FILE="source_grpc.json"
         export SERVER_REACTIONS_FILE="reactions_grpc.json"

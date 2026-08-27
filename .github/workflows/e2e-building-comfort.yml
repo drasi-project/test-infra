@@ -9,13 +9,17 @@
 #   * drasi_lib                 -> embedded in-process engine (no external server;
 #                                  runs via ci/drasi_lib/run_test_ci.sh)
 #
-# HTTP adaptive note: adaptive lives on the Drasi Server *source*
-# (adaptiveEnabled) with a standard dispatcher, which is loss-free. The old
-# framework-dispatcher /events/batch approach collapsed per-room results
-# (per-room never reached its count) and was retired.
+# HTTP adaptive note: `http_adaptive` puts adaptive on the Drasi Server *source*
+# (adaptiveEnabled) with a standard dispatcher. `http_batched` instead batches
+# on BOTH the framework dispatcher (/events/batch ingress) and the reaction
+# ({"batch":[...]} egress) -- the combination that reproduces the ~5x gRPC-style
+# throughput. This path was previously retired for collapsing per-room results;
+# it is gated by the inline Sha256Determinism baseline, so a lossy run fails
+# rather than silently passing. Treat http_batched as under evaluation until a
+# full-count determinism-passing run is confirmed.
 #
 # Variant selection:
-#   - Scheduled: 07:00 UTC runs all five variants in one matrix.
+#   - Scheduled: 07:00 UTC runs all six variants in one matrix.
 #   - Manual: tick a checkbox per variant; the matrix is built from checked.
 
 name: E2E - building_comfort
@@ -36,6 +40,10 @@ on:
         description: "http_adaptive (HTTP, server adaptiveEnabled)"
         type: boolean
         default: false
+      http_batched:
+        description: "http_batched (HTTP, dispatcher + egress batching)"
+        type: boolean
+        default: false
       grpc_standard:
         description: "grpc_standard (gRPC, REST-applied)"
         type: boolean
@@ -53,6 +61,7 @@ on:
           - low
           - medium
           - high
+          - max
         default: medium
       query_tuning:
         description: "Query capacity preset (priority/dispatch buffers, bootstrap buffer)."
@@ -113,17 +122,19 @@ jobs:
           V_DRASI_LIB: ${{ inputs.drasi_lib }}
           V_HTTP_STD: ${{ inputs.http_standard }}
           V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
+          V_HTTP_BATCHED: ${{ inputs.http_batched }}
           V_GRPC_STD: ${{ inputs.grpc_standard }}
           V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
         run: |
           variants=()
-          if [[ -z "$V_DRASI_LIB$V_HTTP_STD$V_HTTP_ADAPTIVE$V_GRPC_STD$V_GRPC_ADAPTIVE" ]]; then
+          if [[ -z "$V_DRASI_LIB$V_HTTP_STD$V_HTTP_ADAPTIVE$V_HTTP_BATCHED$V_GRPC_STD$V_GRPC_ADAPTIVE" ]]; then
             # No checkboxes present -> scheduled run; cover every variant.
-            variants=(drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive)
+            variants=(drasi_lib http_standard http_adaptive http_batched grpc_standard grpc_adaptive)
           else
             [[ "$V_DRASI_LIB"     == "true" ]] && variants+=(drasi_lib)
             [[ "$V_HTTP_STD"      == "true" ]] && variants+=(http_standard)
             [[ "$V_HTTP_ADAPTIVE" == "true" ]] && variants+=(http_adaptive)
+            [[ "$V_HTTP_BATCHED"  == "true" ]] && variants+=(http_batched)
             [[ "$V_GRPC_STD"      == "true" ]] && variants+=(grpc_standard)
             [[ "$V_GRPC_ADAPTIVE" == "true" ]] && variants+=(grpc_adaptive)
           fi
@@ -140,7 +151,12 @@ jobs:
   building-comfort:
     name: building_comfort / ${{ matrix.variant }}
     needs: select-variants
-    runs-on: ubuntu-latest
+    # Larger hosted runner: dedicated 8-vCPU VM per job (no VM-level noisy
+    # neighbour). Good enough for observing the batching throughput jump and
+    # for functional/loss checks; precise absolute numbers should still come
+    # from the pinned Azure self-hosted profile (see
+    # docs/self-hosted-performance-runners.md).
+    runs-on: ubuntu-latest-8-cores
     # Job-level hard cap (separate from the `timeout_minutes` input, which only
     # bounds the driver's internal completion-wait loop -- see "Compute timeout
     # (seconds)" below). Checkout + Rust toolchain + cargo build + drasi-server

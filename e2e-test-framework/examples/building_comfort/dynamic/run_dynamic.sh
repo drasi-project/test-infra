@@ -570,12 +570,17 @@ download_drasi_server_release() {
 # the gRPC adaptive dispatcher (batch_size / batch_timeout_ms) and the HTTP
 # adaptive source (adaptiveMaxBatchSize / adaptiveMaxWaitMs). 'medium' matches
 # the values checked into the component/config files.
+#
+# wait_ms is the max flush delay for a not-yet-full batch. The local perf_sweep
+# throughput runs (49k-54k rec/s) all used 50ms, and a longer wait only adds
+# latency to trailing batches, so the throughput presets (medium/high/max) all
+# use 50ms; only 'low' (the deliberately-throttled preset) waits less.
 resolve_batching_preset() {
     case "$BATCHING_SPEED" in
-        low)    BATCH_SIZE=100;   BATCH_WAIT_MS=10  ;;
-        medium) BATCH_SIZE=1000;  BATCH_WAIT_MS=50  ;;
-        high)   BATCH_SIZE=5000;  BATCH_WAIT_MS=200 ;;
-        max)    BATCH_SIZE=10000; BATCH_WAIT_MS=50  ;;
+        low)    BATCH_SIZE=100;   BATCH_WAIT_MS=10 ;;
+        medium) BATCH_SIZE=1000;  BATCH_WAIT_MS=50 ;;
+        high)   BATCH_SIZE=5000;  BATCH_WAIT_MS=50 ;;
+        max)    BATCH_SIZE=10000; BATCH_WAIT_MS=50 ;;
         *)
             log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected low|medium|high|max)"
             return 1

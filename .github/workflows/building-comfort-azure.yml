@@ -62,12 +62,13 @@ on:
 
       # --- Config axes (applied to whichever variants run) ---
       batching_speed:
-        description: "Adaptive batching speed preset (affects adaptive variants only)."
+        description: "Adaptive batching speed preset (affects adaptive variants only). All throughput presets flush at 50ms; 'max' = batch_size 10000."
         type: choice
         options:
           - low
           - medium
           - high
+          - max
         default: medium
       query_tuning:
         description: "Query capacity preset (priority/dispatch buffers, bootstrap buffer)."

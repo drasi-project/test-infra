@@ -44,6 +44,18 @@ sudo apt-get install -y --no-install-recommends \
     ca-certificates curl git jq build-essential pkg-config libssl-dev libjq-dev libonig-dev \
     libprotobuf-dev protobuf-compiler cmake clang libclang-dev lsof
 
+# test-run-host and drasi-server enable drasi-core's `middleware-jq` feature,
+# which pulls in jq-sys; jq-sys links against the system libjq. Export
+# JQ_LIB_DIR now, before ANY cargo build (drasi-server source build and the
+# test-service build both need it), mirroring e2e-building-comfort.yml.
+libjq_so="$(find /usr/lib -name 'libjq.so' -print -quit)"
+[[ -n "$libjq_so" ]] || {
+    echo "libjq.so not found under /usr/lib; is libjq-dev installed?" >&2
+    exit 1
+}
+export JQ_LIB_DIR
+JQ_LIB_DIR="$(dirname "$libjq_so")"
+
 if ! command -v rustup >/dev/null 2>&1; then
     curl --proto '=https' --tlsv1.2 --fail --show-error --silent \
         https://sh.rustup.rs |
@@ -161,9 +173,6 @@ if [[ "$needs_drasi_server" == "true" ]]; then
         download_drasi_server_release
     fi
 fi
-
-export JQ_LIB_DIR
-JQ_LIB_DIR="$(dirname "$(find /usr/lib -name 'libjq.so' -print -quit)")"
 
 cd "$WORKSPACE/e2e-test-framework"
 cargo build --release --locked --manifest-path test-service/Cargo.toml

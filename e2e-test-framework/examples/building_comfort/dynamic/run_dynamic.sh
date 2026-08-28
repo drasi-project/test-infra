@@ -158,6 +158,23 @@ TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 BATCHING_SPEED="${BATCHING_SPEED:-medium}"
 QUERY_TUNING="${QUERY_TUNING:-medium}"
+# Which server queries (and their subscribing reactions) to run. Default is every
+# query in the component file (SERVER_QUERIES_FILE). Deselecting a query drops the
+# reaction that subscribes to it on BOTH the server and the test-service, plus its
+# source subscription, so a single-query run does strictly less work (useful for
+# isolating one query's throughput). Space- or comma-separated; every entry must
+# be a known query id. Empty = all.
+QUERIES="${QUERIES:-}"
+SELECTED_QUERIES=""
+SELECTED_QUERIES_JSON="[]"
+# JSONL per-record audit logging on each reaction. It writes every reaction
+# record to disk (outputs_*.jsonl) purely for post-hoc forensic inspection; the
+# determinism hash and record-count checks are computed independently from the
+# live stream, so disabling it does NOT weaken loss/determinism verification --
+# it only removes the on-disk audit trail. It is per-record disk I/O in the hot
+# path, so throughput runs default it off; set LOG_JSONL=1 to re-enable it for
+# debugging.
+LOG_JSONL="${LOG_JSONL:-0}"
 SERVER_PROFILE_PERSIST_INDEX="${PERSIST_INDEX:-false}"
 SERVER_PROFILE_STATE_STORE="${STATE_STORE:-false}"
 # WAL retention cap used when PERSIST_INDEX forces source durability on. Must
@@ -608,6 +625,37 @@ resolve_query_tuning() {
     log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE"
 }
 
+# Resolve the QUERIES selector into SELECTED_QUERIES (space list) and
+# SELECTED_QUERIES_JSON (a jq array), validated against the ids in the component
+# queries file. Also narrows TEST_REACTION_IDS (test_reaction_id == query id) so
+# the poll/snapshot loops only track reactions that are actually deployed.
+resolve_selected_queries() {
+    local qfile="$COMPONENTS_DIR/$SERVER_QUERIES_FILE"
+    [[ -s "$qfile" ]] || { log "ERROR: queries file missing: $qfile"; return 1; }
+    local known
+    known="$(jq -r '.[].id' "$qfile")"
+
+    local requested="${QUERIES//,/ }"
+    [[ -n "${requested// }" ]] || requested="$known"   # empty selector = all
+
+    local sel=() q k found
+    for q in $requested; do
+        found=false
+        for k in $known; do [[ "$q" == "$k" ]] && found=true && break; done
+        if [[ "$found" != "true" ]]; then
+            log "ERROR: unknown query '$q' (known: $(echo "$known" | tr '\n' ' '))"
+            return 1
+        fi
+        case " ${sel[*]:-} " in *" $q "*) ;; *) sel+=("$q") ;; esac
+    done
+    (( ${#sel[@]} > 0 )) || { log "ERROR: QUERIES selected no queries"; return 1; }
+
+    SELECTED_QUERIES="${sel[*]}"
+    SELECTED_QUERIES_JSON="$(printf '%s\n' "${sel[@]}" | jq -R . | jq -sc .)"
+    TEST_REACTION_IDS="$SELECTED_QUERIES"
+    log "Selected queries: [$SELECTED_QUERIES] (of: $(echo "$known" | tr '\n' ' '))"
+}
+
 # Select the committed base server yaml from the two INDEPENDENT instance-config
 # toggles (PERSIST_INDEX, STATE_STORE). Each of the four combinations has its own
 # committed yaml under base/, so the yaml stays the source of truth for
@@ -908,6 +956,43 @@ patch_configs() {
     if jq -e '[.data_store.test_repos[]?.local_tests[]?.sources[]?.source_change_dispatchers[]? | select(.adaptive_enabled == true)] | length > 0' "$TEST_CFG_CI" >/dev/null 2>&1; then
         log "Applied batching preset '$BATCHING_SPEED' to adaptive gRPC dispatcher (batch_size=$BATCH_SIZE, batch_timeout_ms=$BATCH_WAIT_MS)"
     fi
+
+    # Strip the JsonlFile output logger unless LOG_JSONL=1. It is per-record disk
+    # I/O that only produces a forensic audit trail; determinism + record-count
+    # verification are independent, so removing it keeps the loss/determinism
+    # gates intact while recovering throughput.
+    if [[ "$LOG_JSONL" != "1" ]]; then
+        patched="$(jq '
+            (.test_run_host.test_runs[]?.reactions[]?.output_loggers) |=
+                (map(select(.kind != "JsonlFile")) // [])
+        ' "$TEST_CFG_CI")"
+        printf '%s\n' "$patched" > "$TEST_CFG_CI"
+        log "JSONL per-record logging disabled (LOG_JSONL=0); determinism + record-count checks unaffected"
+    else
+        log "JSONL per-record logging enabled (LOG_JSONL=1)"
+    fi
+
+    # Drop any deselected query (QUERIES) from the test-service config: remove its
+    # source subscription, its data_store reaction, and its test_run_host reaction
+    # so the test-service neither dispatches its feed nor waits on a reaction the
+    # server won't run. test_reaction_id == query id; subscribers carry query_id.
+    # (Leftover entries for the dropped query in the Sha256Determinism `expected`
+    # map are harmless: the handler only looks up reactions it actually saw.)
+    patched="$(jq --argjson sel "$SELECTED_QUERIES_JSON" '
+        ( .data_store.test_repos[]?.local_tests[]?.sources[]?
+            | select(.subscribers != null).subscribers )
+          |= map(select(.query_id as $q | $sel | index($q)))
+        | ( .data_store.test_repos[]?.local_tests[]?.reactions )
+          |= map(select(.test_reaction_id as $q | $sel | index($q)))
+        | ( .test_run_host.test_runs[]?.reactions )
+          |= map(select(.test_reaction_id as $q | $sel | index($q)))
+    ' "$TEST_CFG_CI")"
+    printf '%s\n' "$patched" > "$TEST_CFG_CI"
+    local all_queries
+    all_queries="$(jq -r '[.[].id] | join(" ")' "$COMPONENTS_DIR/$SERVER_QUERIES_FILE")"
+    if [[ "$SELECTED_QUERIES" != "$all_queries" ]]; then
+        log "Query selection: kept [$SELECTED_QUERIES]; dropped deselected reactions/subscriptions from test-service config"
+    fi
 }
 
 # Pre-create the RocksDB index base directory. The server's built-in RocksDB
@@ -1095,14 +1180,20 @@ apply_server_components() {
 
     check_plugins "$src_file" "$rxn_file" || return $?
 
-    # Rooms-only bootstrap: apply only the per-room query and its reaction, so
-    # the simple MATCH (r:Room) path runs in isolation (avoids the floor-agg
-    # mid-bootstrap stop -> source backpressure -> stalled startup).
-    local q_select='.[]' r_select='.[]'
+    # Apply only the selected queries (QUERIES) and the reactions that subscribe
+    # solely to selected queries. A reaction referencing any deselected query is
+    # dropped, so a deselected query's reaction is never deployed. Bootstrap
+    # rooms-only further narrows to the per-room query for the isolated
+    # MATCH (r:Room) bootstrap path.
+    local q_select r_select
+    q_select='.[] | select([.id] - $sel | length == 0)'
+    r_select='.[] | select(((.queries // []) - $sel) | length == 0)'
     if [[ "${BOOTSTRAP_ENABLED:-false}" == "true" && "${BOOTSTRAP_ROOMS_ONLY:-true}" == "true" ]]; then
         q_select='.[] | select(.id == "building-comfort")'
         r_select='.[] | select(.id == "building-comfort-out")'
         log "Bootstrap rooms-only: applying only query 'building-comfort' + reaction 'building-comfort-out'"
+    else
+        log "Applying selected queries [$SELECTED_QUERIES] and their reactions"
     fi
 
     # Order matters: source before queries that subscribe to it, queries
@@ -1154,7 +1245,7 @@ apply_server_components() {
             | .bootstrapBufferSize = $bb')"
         log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         drasi_apply "/queries" "$q_body"
-    done < <(jq -c "$q_select" "$qry_file")
+    done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$q_select" "$qry_file")
 
     log "Applying reactions from $SERVER_REACTIONS_FILE"
     local r
@@ -1163,7 +1254,7 @@ apply_server_components() {
         local rid; rid="$(printf '%s' "$r" | jq -r '.id')"
         log "  -> reaction $rid"
         drasi_apply "/reactions" "$r"
-    done < <(jq -c "$r_select" "$rxn_file")
+    done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$r_select" "$rxn_file")
 
     log "Component snapshot:"
     curl -fsS "${DRASI_API}/sources"   | jq -c '.' || true
@@ -1431,6 +1522,7 @@ write_step_summary() {
 download_drasi_server
 resolve_batching_preset
 resolve_query_tuning
+resolve_selected_queries
 resolve_server_config
 resolve_bootstrap_preset
 patch_configs

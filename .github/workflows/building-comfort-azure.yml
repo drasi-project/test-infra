@@ -97,7 +97,18 @@ on:
 
       # --- Run settings ---
       drasi_server_version:
-        description: "drasi-server release tag (e.g. v0.1.5). Empty = latest."
+        description: "drasi-server release tag (e.g. v0.1.5). Only used when repo/ref below are both empty. Empty = latest."
+        required: false
+        default: ""
+      # Source-build escape hatch. Setting EITHER of the next two builds
+      # drasi-server from source on the VM instead of downloading a release;
+      # a repo without a ref builds that repo's default branch.
+      drasi_server_repo:
+        description: "drasi-server repo (owner/name) to BUILD from source. Empty = drasi-project/drasi-server."
+        required: false
+        default: ""
+      drasi_server_ref:
+        description: "drasi-server branch/tag/SHA to BUILD from source. Empty with a repo set = that repo's default branch; empty with no repo = download a release."
         required: false
         default: ""
       timeout_minutes:
@@ -155,6 +166,8 @@ jobs:
           V_GRPC_STD: ${{ inputs.grpc_standard }}
           V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
           IN_SERVER_VERSION: ${{ inputs.drasi_server_version }}
+          IN_SERVER_REPO: ${{ inputs.drasi_server_repo }}
+          IN_SERVER_REF: ${{ inputs.drasi_server_ref }}
           IN_BATCHING_SPEED: ${{ inputs.batching_speed }}
           IN_QUERY_TUNING: ${{ inputs.query_tuning }}
           IN_PERSIST_INDEX: ${{ inputs.persist_index }}
@@ -196,6 +209,14 @@ jobs:
           }
           [[ -z "$IN_SERVER_VERSION" || "$IN_SERVER_VERSION" =~ ^[A-Za-z0-9._-]+$ ]] || {
             echo "drasi_server_version contains unsupported characters" >&2
+            exit 1
+          }
+          [[ -z "$IN_SERVER_REPO" || "$IN_SERVER_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || {
+            echo "drasi_server_repo must be of the form owner/name" >&2
+            exit 1
+          }
+          [[ -z "$IN_SERVER_REF" || "$IN_SERVER_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || {
+            echo "drasi_server_ref contains unsupported characters" >&2
             exit 1
           }
           case "$os_disk_type" in
@@ -285,6 +306,8 @@ jobs:
             echo "IMAGE_VERSION=$image_version"
             echo "VARIANTS=$variants"
             echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"
+            echo "DRASI_SERVER_REPO=$IN_SERVER_REPO"
+            echo "DRASI_SERVER_REF=$IN_SERVER_REF"
             echo "BATCHING_SPEED=${IN_BATCHING_SPEED:-medium}"
             echo "QUERY_TUNING=${IN_QUERY_TUNING:-medium}"
             echo "PERSIST_INDEX=${IN_PERSIST_INDEX:-false}"
@@ -373,6 +396,8 @@ jobs:
           {
             printf 'VARIANTS=%q\n' "$VARIANTS"
             printf 'DRASI_SERVER_VERSION=%q\n' "$DRASI_SERVER_VERSION"
+            printf 'DRASI_SERVER_REPO=%q\n' "$DRASI_SERVER_REPO"
+            printf 'DRASI_SERVER_REF=%q\n' "$DRASI_SERVER_REF"
             printf 'BATCHING_SPEED=%q\n' "$BATCHING_SPEED"
             printf 'QUERY_TUNING=%q\n' "$QUERY_TUNING"
             printf 'PERSIST_INDEX=%q\n' "$PERSIST_INDEX"

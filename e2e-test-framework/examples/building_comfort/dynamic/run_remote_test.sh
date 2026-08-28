@@ -20,7 +20,12 @@ source "$ENV_FILE"
 set +a
 
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
-DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
+DRASI_SERVER_REPO="${DRASI_SERVER_REPO:-}"
+DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
+# Naming either a repo or a ref means "build and test this code"; an unset repo
+# falls back to the canonical one but still builds from source when a ref is set.
+DRASI_REPO_EXPLICIT="$DRASI_SERVER_REPO"
+DRASI_REPO="${DRASI_SERVER_REPO:-drasi-project/drasi-server}"
 VARIANTS="${VARIANTS:-drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive}"
 : "${SUITE_WORK_DIR:?SUITE_WORK_DIR is required}"
 : "${PERF_PROFILE_ID:?PERF_PROFILE_ID is required}"
@@ -36,7 +41,7 @@ done
 
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-    ca-certificates curl jq build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+    ca-certificates curl git jq build-essential pkg-config libssl-dev libjq-dev libonig-dev \
     libprotobuf-dev protobuf-compiler cmake clang libclang-dev lsof
 
 if ! command -v rustup >/dev/null 2>&1; then
@@ -83,8 +88,54 @@ jq -n \
         azure: $instance
     }' > "$metadata_json"
 
-if [[ "$needs_drasi_server" == "true" ]]; then
-    tag="$DRASI_SERVER_VERSION"
+build_drasi_server_from_source() {
+    local ref="$DRASI_SERVER_REF"
+    local repo_url="https://github.com/${DRASI_REPO}.git"
+    local src_dir="$SUITE_WORK_DIR/drasi-server-src"
+
+    rm -rf "$src_dir"
+    if [[ -n "$ref" ]]; then
+        echo "Building drasi-server from source: repo=$DRASI_REPO ref=$ref"
+        # Shallow branch/tag clone is fastest; fall back to a full clone +
+        # checkout when $ref is a commit SHA (which --branch does not accept).
+        if ! git clone --depth 1 --branch "$ref" "$repo_url" "$src_dir" 2>/dev/null; then
+            echo "Shallow clone of ref '$ref' failed; retrying with full clone + checkout"
+            rm -rf "$src_dir"
+            git clone "$repo_url" "$src_dir"
+            git -C "$src_dir" checkout "$ref"
+        fi
+    else
+        echo "Building drasi-server from source: repo=$DRASI_REPO default branch"
+        git clone --depth 1 "$repo_url" "$src_dir"
+    fi
+
+    local built_sha
+    built_sha="$(git -C "$src_dir" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "Checked out $DRASI_REPO ($built_sha)"
+
+    # The clone carries its own rust-toolchain.toml, so rustup auto-fetches the
+    # toolchain drasi-server pins when cargo runs inside $src_dir.
+    if ! ( cd "$src_dir" && cargo build --release --bin drasi-server ); then
+        echo "cargo build --bin drasi-server failed; retrying default release build"
+        ( cd "$src_dir" && cargo build --release )
+    fi
+
+    local built_bin="$src_dir/target/release/drasi-server"
+    if [[ ! -x "$built_bin" ]]; then
+        built_bin="$(find "$src_dir/target/release" -maxdepth 1 -type f -name 'drasi-server*' -perm -u+x 2>/dev/null | head -n1)"
+    fi
+    [[ -n "$built_bin" && -x "$built_bin" ]] || {
+        echo "ERROR: cargo build did not produce a drasi-server binary" >&2
+        exit 1
+    }
+
+    install -m 0755 "$built_bin" "$DRASI_SERVER_BIN"
+    echo "Built drasi-server -> $DRASI_SERVER_BIN"
+    "$DRASI_SERVER_BIN" --version || true
+}
+
+download_drasi_server_release() {
+    local tag="$DRASI_SERVER_VERSION"
     if [[ -z "$tag" ]]; then
         tag="$(curl -fsSL "https://api.github.com/repos/${DRASI_REPO}/releases/latest" | jq -r '.tag_name')"
     fi
@@ -93,12 +144,22 @@ if [[ "$needs_drasi_server" == "true" ]]; then
         exit 1
     }
 
-    asset_name="drasi-server-x86_64-linux-gnu"
+    local asset_name="drasi-server-x86_64-linux-gnu"
     curl --fail --show-error --silent --location \
         --retry 3 --retry-delay 5 --retry-all-errors \
         "https://github.com/${DRASI_REPO}/releases/download/${tag}/${asset_name}" \
         -o "$DRASI_SERVER_BIN"
     chmod +x "$DRASI_SERVER_BIN"
+}
+
+if [[ "$needs_drasi_server" == "true" ]]; then
+    # Naming a repo and/or a ref selects the source build ("test this code");
+    # otherwise download the release binary (default, comparable time series).
+    if [[ -n "$DRASI_SERVER_REF" || -n "$DRASI_REPO_EXPLICIT" ]]; then
+        build_drasi_server_from_source
+    else
+        download_drasi_server_release
+    fi
 fi
 
 export JQ_LIB_DIR

@@ -10,13 +10,13 @@ on:
         required: true
         default: "westus3"
       vm_size:
-        description: "Fixed Azure VM SKU."
+        description: "Fixed 4-vCPU Azure VM SKU. All three are 4 vCPU; they vary by CPU generation (single-core performance), which is the bottleneck for this single-threaded pipeline. v3=Cascade Lake (2019, weakest), v5=Ice Lake (2021), v6=Emerald Rapids (2023, strongest)."
         required: true
         type: choice
         options:
+          - Standard_D4s_v3
+          - Standard_D4s_v5
           - Standard_D4s_v6
-          - Standard_D8s_v6
-          - Standard_D16s_v6
         default: Standard_D4s_v6
       os_disk_type:
         description: "OS disk type for the ephemeral VM."

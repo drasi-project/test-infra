@@ -175,6 +175,16 @@ SELECTED_QUERIES_JSON="[]"
 # path, so throughput runs default it off; set LOG_JSONL=1 to re-enable it for
 # debugging.
 LOG_JSONL="${LOG_JSONL:-0}"
+# PERF_MODE=1 makes the run mirror the perf_sweep throughput harness: it strips
+# ALL result-verification (the per-reaction DeterminismHash output logger AND the
+# Sha256Determinism completion handler), leaving only the RecordCount stop
+# trigger + PerformanceMetrics. This measures raw throughput without the cost of
+# hashing every record, but it CANNOT detect reordered/wrong/lost-then-refilled
+# results -- it only checks the count. The `Log` completion handler is always
+# kept because it emits the completion marker the driver waits on. Also forces
+# LOG_JSONL off. Intended for temporary throughput probing, NOT correctness runs.
+PERF_MODE="${PERF_MODE:-0}"
+if [[ "$PERF_MODE" == "1" ]]; then LOG_JSONL=0; fi
 SERVER_PROFILE_PERSIST_INDEX="${PERSIST_INDEX:-false}"
 SERVER_PROFILE_STATE_STORE="${STATE_STORE:-false}"
 # WAL retention cap used when PERSIST_INDEX forces source durability on. Must
@@ -957,19 +967,43 @@ patch_configs() {
         log "Applied batching preset '$BATCHING_SPEED' to adaptive gRPC dispatcher (batch_size=$BATCH_SIZE, batch_timeout_ms=$BATCH_WAIT_MS)"
     fi
 
-    # Strip the JsonlFile output logger unless LOG_JSONL=1. It is per-record disk
-    # I/O that only produces a forensic audit trail; determinism + record-count
-    # verification are independent, so removing it keeps the loss/determinism
-    # gates intact while recovering throughput.
+    # Strip JsonlFile logging unless LOG_JSONL=1. There are TWO JsonlFile sinks,
+    # both pure per-record disk I/O for a forensic audit trail:
+    #   1. reaction output_loggers  -> writes every reaction record (egress side)
+    #   2. source_change_dispatchers -> writes every dispatched source change
+    #      event (ingress side, the source_change_log/*.jsonl files)
+    # Determinism + record-count verification are computed independently of both,
+    # so removing them keeps the loss/determinism gates intact while recovering
+    # throughput (the ingress sink in particular is disk I/O in the hot dispatch
+    # path -- ~100k writes per run -- that perf_sweep does not do).
     if [[ "$LOG_JSONL" != "1" ]]; then
         patched="$(jq '
             (.test_run_host.test_runs[]?.reactions[]?.output_loggers) |=
                 (map(select(.kind != "JsonlFile")) // [])
+            | (.data_store.test_repos[]?.local_tests[]?.sources[]?.source_change_dispatchers) |=
+                (map(select(.kind != "JsonlFile")) // [])
         ' "$TEST_CFG_CI")"
         printf '%s\n' "$patched" > "$TEST_CFG_CI"
-        log "JSONL per-record logging disabled (LOG_JSONL=0); determinism + record-count checks unaffected"
+        log "JSONL logging disabled (LOG_JSONL=0): dropped reaction + source-dispatcher JsonlFile sinks; determinism + record-count checks unaffected"
     else
-        log "JSONL per-record logging enabled (LOG_JSONL=1)"
+        log "JSONL logging enabled (LOG_JSONL=1)"
+    fi
+
+    # PERF_MODE: mirror perf_sweep by removing ALL result verification -- the
+    # per-reaction DeterminismHash output logger and the Sha256Determinism
+    # completion handler -- leaving only RecordCount + PerformanceMetrics. The
+    # `Log` completion handler is deliberately KEPT: it emits the "TestRun ...
+    # completed:" marker the driver polls for, so dropping it would hang the run.
+    # This trades away reorder/content/loss-refill detection for raw throughput.
+    if [[ "$PERF_MODE" == "1" ]]; then
+        patched="$(jq '
+            (.data_store.test_repos[]?.local_tests[]?.completion_handlers) |=
+                (map(select(.kind != "Sha256Determinism")) // [])
+            | (.test_run_host.test_runs[]?.reactions[]?.output_loggers) |=
+                (map(select(.kind != "DeterminismHash")) // [])
+        ' "$TEST_CFG_CI")"
+        printf '%s\n' "$patched" > "$TEST_CFG_CI"
+        log "PERF_MODE=1: stripped DeterminismHash logger + Sha256Determinism handler (perf_sweep parity); ONLY record-count is checked -- results are NOT verified"
     fi
 
     # Drop any deselected query (QUERIES) from the test-service config: remove its

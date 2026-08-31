@@ -93,6 +93,10 @@ on:
         description: "Use the built-in RocksDB persistent index (persistIndex)."
         type: boolean
         default: false
+      perf_mode:
+        description: "Throughput-only mode: strip result verification (DeterminismHash + Sha256Determinism), keeping only the record-count check. Mirrors perf_sweep. Results are NOT verified."
+        type: boolean
+        default: false
       state_store:
         description: "Use the redb plugin state store (stateStore)."
         type: boolean
@@ -185,6 +189,7 @@ jobs:
           IN_BATCHING_SPEED: ${{ inputs.batching_speed }}
           IN_QUERY_TUNING: ${{ inputs.query_tuning }}
           IN_PERSIST_INDEX: ${{ inputs.persist_index }}
+          IN_PERF_MODE: ${{ inputs.perf_mode }}
           IN_STATE_STORE: ${{ inputs.state_store }}
           IN_BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
           IN_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
@@ -341,6 +346,7 @@ jobs:
             echo "BATCHING_SPEED=${IN_BATCHING_SPEED:-medium}"
             echo "QUERY_TUNING=${IN_QUERY_TUNING:-medium}"
             echo "PERSIST_INDEX=${IN_PERSIST_INDEX:-false}"
+            echo "PERF_MODE=$([[ "${IN_PERF_MODE:-false}" == "true" ]] && echo 1 || echo 0)"
             echo "STATE_STORE=${IN_STATE_STORE:-false}"
             echo "BOOTSTRAP_SIZE=$bootstrap_size"
             echo "TIMEOUT_SECS=$(( timeout_minutes * 60 ))"
@@ -432,6 +438,7 @@ jobs:
             printf 'BATCHING_SPEED=%q\n' "$BATCHING_SPEED"
             printf 'QUERY_TUNING=%q\n' "$QUERY_TUNING"
             printf 'PERSIST_INDEX=%q\n' "$PERSIST_INDEX"
+            printf 'PERF_MODE=%q\n' "$PERF_MODE"
             printf 'STATE_STORE=%q\n' "$STATE_STORE"
             printf 'BOOTSTRAP_SIZE=%q\n' "$BOOTSTRAP_SIZE"
             printf 'TIMEOUT_SECS=%q\n' "$TIMEOUT_SECS"

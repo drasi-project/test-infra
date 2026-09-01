@@ -175,16 +175,6 @@ SELECTED_QUERIES_JSON="[]"
 # path, so throughput runs default it off; set LOG_JSONL=1 to re-enable it for
 # debugging.
 LOG_JSONL="${LOG_JSONL:-0}"
-# PERF_MODE=1 makes the run mirror the perf_sweep throughput harness: it strips
-# ALL result-verification (the per-reaction DeterminismHash output logger AND the
-# Sha256Determinism completion handler), leaving only the RecordCount stop
-# trigger + PerformanceMetrics. This measures raw throughput without the cost of
-# hashing every record, but it CANNOT detect reordered/wrong/lost-then-refilled
-# results -- it only checks the count. The `Log` completion handler is always
-# kept because it emits the completion marker the driver waits on. Also forces
-# LOG_JSONL off. Intended for temporary throughput probing, NOT correctness runs.
-PERF_MODE="${PERF_MODE:-0}"
-if [[ "$PERF_MODE" == "1" ]]; then LOG_JSONL=0; fi
 SERVER_PROFILE_PERSIST_INDEX="${PERSIST_INDEX:-false}"
 SERVER_PROFILE_STATE_STORE="${STATE_STORE:-false}"
 # WAL retention cap used when PERSIST_INDEX forces source durability on. Must
@@ -987,23 +977,6 @@ patch_configs() {
         log "JSONL logging disabled (LOG_JSONL=0): dropped reaction + source-dispatcher JsonlFile sinks; determinism + record-count checks unaffected"
     else
         log "JSONL logging enabled (LOG_JSONL=1)"
-    fi
-
-    # PERF_MODE: mirror perf_sweep by removing ALL result verification -- the
-    # per-reaction DeterminismHash output logger and the Sha256Determinism
-    # completion handler -- leaving only RecordCount + PerformanceMetrics. The
-    # `Log` completion handler is deliberately KEPT: it emits the "TestRun ...
-    # completed:" marker the driver polls for, so dropping it would hang the run.
-    # This trades away reorder/content/loss-refill detection for raw throughput.
-    if [[ "$PERF_MODE" == "1" ]]; then
-        patched="$(jq '
-            (.data_store.test_repos[]?.local_tests[]?.completion_handlers) |=
-                (map(select(.kind != "Sha256Determinism")) // [])
-            | (.test_run_host.test_runs[]?.reactions[]?.output_loggers) |=
-                (map(select(.kind != "DeterminismHash")) // [])
-        ' "$TEST_CFG_CI")"
-        printf '%s\n' "$patched" > "$TEST_CFG_CI"
-        log "PERF_MODE=1: stripped DeterminismHash logger + Sha256Determinism handler (perf_sweep parity); ONLY record-count is checked -- results are NOT verified"
     fi
 
     # Drop any deselected query (QUERIES) from the test-service config: remove its

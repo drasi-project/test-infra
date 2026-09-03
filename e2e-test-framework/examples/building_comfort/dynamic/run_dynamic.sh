@@ -58,6 +58,9 @@
 #                         to (e.g. drasi-nightly-test), so autoInstallPlugins pulls
 #                         that tag from the registry. Empty = leave refs untagged
 #                         (server resolves the latest compatible release).
+#   DRASI_PLUGIN_REGISTRY OCI registry the server resolves short plugin refs against
+#                         (patched into the base config's `pluginRegistry`). Empty =
+#                         leave the config untouched (server default ghcr.io/drasi-project).
 #   DRASI_SERVER_BIN      pre-built binary (skips both download and source build)
 #   TEST_SERVICE_BIN      pre-built test-service binary (otherwise cargo run)
 #   DRASI_ADMIN_PORT      admin/REST port patched into empty.yaml (8090)
@@ -143,6 +146,11 @@ DRASI_CORE_REF="${DRASI_CORE_REF:-}"
 # OCI tag to pin every plugin ref in the base server config to (e.g. the nightly
 # plugin tag). Empty leaves refs untagged so the server resolves latest-compatible.
 DRASI_PLUGIN_TAG="${DRASI_PLUGIN_TAG:-}"
+# OCI registry the server resolves short plugin refs (source/http, ...) against.
+# Empty leaves the base config's `pluginRegistry` untouched so the server uses its
+# built-in default (ghcr.io/drasi-project). Set e.g. ghcr.io/ruokun-niu to pull the
+# plugins from a fork's package registry instead.
+DRASI_PLUGIN_REGISTRY="${DRASI_PLUGIN_REGISTRY:-}"
 DRASI_ADMIN_PORT="${DRASI_ADMIN_PORT:-8090}"
 DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-50051}"
 
@@ -902,6 +910,28 @@ pin_plugin_tags() {
     grep -E '^[[:space:]]*-[[:space:]]*ref:' "$DRASI_CFG_CI" | sed 's/^/  /'
 }
 
+# Point the server's plugin resolver at $DRASI_PLUGIN_REGISTRY by setting the
+# top-level `pluginRegistry` field in the CI config. Short plugin refs
+# (source/http, reaction/log, ...) are then resolved against this registry
+# instead of the built-in default (ghcr.io/drasi-project). Replaces an existing
+# `pluginRegistry:` line if present, otherwise inserts one after `verifyPlugins:`
+# (falling back to `autoInstallPlugins:`). No-op when DRASI_PLUGIN_REGISTRY is
+# empty (server keeps its default registry).
+set_plugin_registry() {
+    [[ -n "$DRASI_PLUGIN_REGISTRY" ]] || return 0
+    if grep -qE '^[[:space:]]*pluginRegistry:' "$DRASI_CFG_CI"; then
+        sed -E "s|^([[:space:]]*)pluginRegistry:.*\$|\1pluginRegistry: ${DRASI_PLUGIN_REGISTRY}|" \
+            "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    else
+        local anchor='verifyPlugins:'
+        grep -qE '^[[:space:]]*verifyPlugins:' "$DRASI_CFG_CI" || anchor='autoInstallPlugins:'
+        sed -E "s|^([[:space:]]*)(${anchor}.*)\$|\1\2\n\1pluginRegistry: ${DRASI_PLUGIN_REGISTRY}|" \
+            "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    fi
+    log "Set plugin registry -> $DRASI_PLUGIN_REGISTRY"
+    grep -E '^[[:space:]]*pluginRegistry:' "$DRASI_CFG_CI" | sed 's/^/  /'
+}
+
 patch_configs() {
     log "Patching empty server config admin port -> $DRASI_ADMIN_PORT"
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
@@ -928,6 +958,7 @@ patch_configs() {
     fi
 
     pin_plugin_tags
+    set_plugin_registry
 
     log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \

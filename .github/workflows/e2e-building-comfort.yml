@@ -50,17 +50,6 @@ on:
         type: boolean
         default: false
 
-      # --- Query selection (deselect to drop that query AND its subscribing
-      #     reaction from both the server and the test-service) ---
-      query_building_comfort:
-        description: "Run the per-room 'building-comfort' query"
-        type: boolean
-        default: true
-      query_floor_agg:
-        description: "Run the 'building-comfort-floor-agg' aggregate query"
-        type: boolean
-        default: true
-
       # --- Config axes (applied to whichever variants run) ---
       batching_speed:
         description: "Adaptive batching speed preset (affects adaptive variants only)."
@@ -119,6 +108,19 @@ on:
         description: "Max minutes to wait for the test to finish."
         required: false
         default: "30"
+      # --- Plugin source overrides (manual dispatch only) ---
+      # Empty on scheduled runs -> the server uses its built-in defaults
+      # (registry ghcr.io/drasi-project, latest-compatible tag). Set these to
+      # pull the source/reaction plugins from a fork's package registry and/or a
+      # specific tag (e.g. a work-in-progress build) without editing the config.
+      plugin_registry:
+        description: "OCI registry for short plugin refs (e.g. ghcr.io/ruokun-niu). Empty = server default (ghcr.io/drasi-project)."
+        required: false
+        default: ""
+      plugin_tag:
+        description: "OCI tag to pin every plugin ref to (e.g. composite-key-linux-amd64). Empty = untagged (latest-compatible)."
+        required: false
+        default: ""
   schedule:
     # 07:00 UTC — full set (drasi_lib + dynamic http/grpc, standard + adaptive).
     - cron: "0 7 * * *"
@@ -243,29 +245,6 @@ jobs:
       - name: Record start time
         run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
-      # Build the QUERIES selector from the per-query checkboxes. Empty inputs
-      # (scheduled runs) select both. Deselecting a query drops it and its
-      # subscribing reaction (server + test-service). Errors if none are ticked.
-      - name: Resolve queries
-        env:
-          V_Q_MAIN: ${{ inputs.query_building_comfort }}
-          V_Q_AGG: ${{ inputs.query_floor_agg }}
-        run: |
-          set -euo pipefail
-          queries_arr=()
-          if [[ -z "$V_Q_MAIN$V_Q_AGG" ]]; then
-            queries_arr=(building-comfort building-comfort-floor-agg)
-          else
-            [[ "$V_Q_MAIN" == "true" ]] && queries_arr+=(building-comfort)
-            [[ "$V_Q_AGG" == "true" ]] && queries_arr+=(building-comfort-floor-agg)
-          fi
-          (( ${#queries_arr[@]} > 0 )) || {
-            echo "ERROR: no queries selected. Tick at least one query." >&2
-            exit 1
-          }
-          echo "QUERIES=${queries_arr[*]}" >> "$GITHUB_ENV"
-          echo "Selected queries: ${queries_arr[*]}"
-
       - name: Run test
         id: test
         env:
@@ -280,10 +259,6 @@ jobs:
           # run_dynamic.sh defaults to medium. Applied to all dynamic variants'
           # query components; perf-only, results must not change.
           QUERY_TUNING: ${{ inputs.query_tuning }}
-          # Query selector resolved above (space-separated query ids). Deselecting
-          # a query drops it and its subscribing reaction. Consumed by
-          # run_dynamic.sh; drasi_lib ignores it.
-          QUERIES: ${{ env.QUERIES }}
           # Server instance-config toggles (independent). Empty on scheduled
           # runs -> run_dynamic.sh defaults both to false (standard). Each
           # combination selects a committed base yaml.
@@ -293,6 +268,11 @@ jobs:
           # run_dynamic.sh leaves the committed small scenario unchanged. Only
           # the dynamic variants consume it; drasi_lib ignores it.
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size == 'off' && '' || inputs.bootstrap_size }}
+          # Plugin source overrides. Empty on scheduled runs -> run_dynamic.sh
+          # leaves the base config alone (server default registry + untagged).
+          # Consumed by run_dynamic.sh; drasi_lib ignores them.
+          DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
+          DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
         run: bash e2e-test-framework/examples/building_comfort/run_variant.sh
 
       - name: Upload artifacts

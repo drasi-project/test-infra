@@ -60,17 +60,6 @@ on:
         type: boolean
         default: false
 
-      # --- Query selection (deselect to drop that query AND its subscribing
-      #     reaction from both the server and the test-service) ---
-      query_building_comfort:
-        description: "Run the per-room 'building-comfort' query"
-        type: boolean
-        default: true
-      query_floor_agg:
-        description: "Run the 'building-comfort-floor-agg' aggregate query"
-        type: boolean
-        default: true
-
       # --- Config axes (applied to whichever variants run) ---
       batching_speed:
         description: "Adaptive batching speed preset (affects adaptive variants only). All throughput presets flush at 50ms; 'max' = batch_size 10000."
@@ -127,6 +116,19 @@ on:
         description: "Max minutes to wait for the test to finish."
         required: false
         default: "30"
+      # --- Plugin source overrides ---
+      # Empty on scheduled runs -> the server uses its built-in defaults
+      # (registry ghcr.io/drasi-project, latest-compatible tag). Set these to
+      # pull the source/reaction plugins from a fork's package registry and/or a
+      # specific tag (e.g. a work-in-progress build) without editing the config.
+      plugin_registry:
+        description: "OCI registry for short plugin refs (e.g. ghcr.io/ruokun-niu). Empty = server default (ghcr.io/drasi-project)."
+        required: false
+        default: ""
+      plugin_tag:
+        description: "OCI tag to pin every plugin ref to (e.g. composite-key-linux-amd64). Empty = untagged (latest-compatible)."
+        required: false
+        default: ""
   schedule:
     # 07:00 UTC — D4s_v6 with the full variant set.
     - cron: "0 7 * * *"
@@ -177,8 +179,6 @@ jobs:
           V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
           V_GRPC_STD: ${{ inputs.grpc_standard }}
           V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
-          V_Q_MAIN: ${{ inputs.query_building_comfort }}
-          V_Q_AGG: ${{ inputs.query_floor_agg }}
           IN_SERVER_VERSION: ${{ inputs.drasi_server_version }}
           IN_SERVER_REPO: ${{ inputs.drasi_server_repo }}
           IN_SERVER_REF: ${{ inputs.drasi_server_ref }}
@@ -188,6 +188,8 @@ jobs:
           IN_STATE_STORE: ${{ inputs.state_store }}
           IN_BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
           IN_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+          IN_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
+          IN_PLUGIN_TAG: ${{ inputs.plugin_tag }}
         run: |
           set -euo pipefail
 
@@ -210,21 +212,6 @@ jobs:
             exit 1
           }
           variants="${variant_arr[*]}"
-
-          # Query selection. Empty (scheduled runs, no dispatch inputs) = both.
-          # Deselecting a query drops it and its subscribing reaction.
-          queries_arr=()
-          if [[ -z "$V_Q_MAIN$V_Q_AGG" ]]; then
-            queries_arr=(building-comfort building-comfort-floor-agg)
-          else
-            [[ "$V_Q_MAIN" == "true" ]] && queries_arr+=(building-comfort)
-            [[ "$V_Q_AGG" == "true" ]] && queries_arr+=(building-comfort-floor-agg)
-          fi
-          (( ${#queries_arr[@]} > 0 )) || {
-            echo "ERROR: no queries selected. Tick at least one query." >&2
-            exit 1
-          }
-          queries="${queries_arr[*]}"
 
           bootstrap_size="${IN_BOOTSTRAP_SIZE:-off}"
           timeout_minutes="${IN_TIMEOUT_MINUTES:-30}"
@@ -334,7 +321,6 @@ jobs:
             echo "PERF_PROFILE_ID=azure-ephemeral-${IN_VM_SIZE}-${os_disk_type}-${os_disk_size_gb}gb"
             echo "IMAGE_VERSION=$image_version"
             echo "VARIANTS=$variants"
-            echo "QUERIES=$queries"
             echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"
             echo "DRASI_SERVER_REPO=$IN_SERVER_REPO"
             echo "DRASI_SERVER_REF=$IN_SERVER_REF"
@@ -344,6 +330,8 @@ jobs:
             echo "STATE_STORE=${IN_STATE_STORE:-false}"
             echo "BOOTSTRAP_SIZE=$bootstrap_size"
             echo "TIMEOUT_SECS=$(( timeout_minutes * 60 ))"
+            echo "DRASI_PLUGIN_REGISTRY=$IN_PLUGIN_REGISTRY"
+            echo "DRASI_PLUGIN_TAG=$IN_PLUGIN_TAG"
             echo "RESOURCE_PREFIX=$resource_prefix"
             echo "DEPLOYMENT_NAME=$deployment_name"
             echo "VM_NAME=${resource_prefix}-vm"
@@ -425,7 +413,6 @@ jobs:
 
           {
             printf 'VARIANTS=%q\n' "$VARIANTS"
-            printf 'QUERIES=%q\n' "$QUERIES"
             printf 'DRASI_SERVER_VERSION=%q\n' "$DRASI_SERVER_VERSION"
             printf 'DRASI_SERVER_REPO=%q\n' "$DRASI_SERVER_REPO"
             printf 'DRASI_SERVER_REF=%q\n' "$DRASI_SERVER_REF"
@@ -435,6 +422,8 @@ jobs:
             printf 'STATE_STORE=%q\n' "$STATE_STORE"
             printf 'BOOTSTRAP_SIZE=%q\n' "$BOOTSTRAP_SIZE"
             printf 'TIMEOUT_SECS=%q\n' "$TIMEOUT_SECS"
+            printf 'DRASI_PLUGIN_REGISTRY=%q\n' "$DRASI_PLUGIN_REGISTRY"
+            printf 'DRASI_PLUGIN_TAG=%q\n' "$DRASI_PLUGIN_TAG"
             printf 'PERF_PROFILE_ID=%q\n' "$PERF_PROFILE_ID"
             printf 'SUITE_WORK_DIR=%q\n' "$REMOTE_ROOT/work"
             printf 'SUITE_ARTIFACTS_DIR=%q\n' "$REMOTE_ROOT/artifacts"

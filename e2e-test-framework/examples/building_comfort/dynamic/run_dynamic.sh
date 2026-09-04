@@ -74,16 +74,17 @@
 #   TEST_REACTION_IDS     reactions to snapshot ("building-comfort building-comfort-floor-agg")
 #   TIMEOUT_SECS          completion timeout (1800)
 #   POLL_INTERVAL_SECS    status poll interval (10)
-#   BATCHING_SPEED        adaptive batching preset: low|medium|high (medium).
-#                         Only affects adaptive components (gRPC adaptive
-#                         dispatcher batch_size/batch_timeout_ms and HTTP
-#                         adaptive source adaptiveMax*); standard variants are
-#                         left untouched.
-#   QUERY_TUNING          query capacity preset: low|medium|high (medium).
+#   BATCHING_SPEED        adaptive batch size: 5000|10000|50000 (10000). Legacy
+#                         low|medium|high|max still accepted. Only affects
+#                         adaptive components (gRPC adaptive dispatcher
+#                         batch_size/batch_timeout_ms and HTTP adaptive source
+#                         adaptiveMax*); standard variants are left untouched.
+#   QUERY_TUNING          query capacity (priorityQueueCapacity): 1000|10000|
+#                         100000 (10000). Legacy low|medium|high still accepted.
 #                         Sets priorityQueueCapacity / dispatchBufferCapacity /
 #                         bootstrapBufferSize on every server query component.
 #                         Perf/backpressure only; results (determinism SHAs)
-#                         must not change. 'medium' == server defaults.
+#                         must not change. 10000 == server defaults.
 #   PERSIST_INDEX         true|false (false). Selects a base yaml with instance-
 #                         level persistIndex: true (built-in RocksDB index). The
 #                         driver also enables source WAL durability, since a
@@ -164,8 +165,8 @@ TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.building_comfort.test_run_001}
 TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort building-comfort-floor-agg}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
-BATCHING_SPEED="${BATCHING_SPEED:-medium}"
-QUERY_TUNING="${QUERY_TUNING:-medium}"
+BATCHING_SPEED="${BATCHING_SPEED:-10000}"
+QUERY_TUNING="${QUERY_TUNING:-10000}"
 # Which server queries (and their subscribing reactions) to run. Default is every
 # query in the component file (SERVER_QUERIES_FILE). Deselecting a query drops the
 # reaction that subscribes to it on BOTH the server and the test-service, plus its
@@ -591,42 +592,46 @@ download_drasi_server_release() {
     cd - >/dev/null
 }
 
-# Map the BATCHING_SPEED preset to concrete batch-size / wait knobs shared by
-# the gRPC adaptive dispatcher (batch_size / batch_timeout_ms) and the HTTP
-# adaptive source (adaptiveMaxBatchSize / adaptiveMaxWaitMs). 'medium' matches
-# the values checked into the component/config files.
+# Map BATCHING_SPEED to concrete batch-size / wait knobs shared by the gRPC
+# adaptive dispatcher (batch_size / batch_timeout_ms) and the HTTP adaptive
+# source (adaptiveMaxBatchSize / adaptiveMaxWaitMs). BATCHING_SPEED is the
+# batch size itself (max records per batch), e.g. 5000|10000|50000. Legacy
+# named presets (low|medium|high|max) are still accepted for back-compat.
 #
 # wait_ms is the max flush delay for a not-yet-full batch. The local perf_sweep
 # throughput runs (49k-54k rec/s) all used 50ms, and a longer wait only adds
-# latency to trailing batches, so the throughput presets (medium/high/max) all
-# use 50ms; only 'low' (the deliberately-throttled preset) waits less.
+# latency to trailing batches, so every throughput size uses 50ms; only the
+# legacy 'low' preset (deliberately throttled) waits less.
 resolve_batching_preset() {
     case "$BATCHING_SPEED" in
-        low)    BATCH_SIZE=100;   BATCH_WAIT_MS=10 ;;
-        medium) BATCH_SIZE=1000;  BATCH_WAIT_MS=50 ;;
-        high)   BATCH_SIZE=5000;  BATCH_WAIT_MS=50 ;;
-        max)    BATCH_SIZE=10000; BATCH_WAIT_MS=50 ;;
-        *)
-            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected low|medium|high|max)"
+        low)         BATCH_SIZE=100;   BATCH_WAIT_MS=10 ;;
+        medium)      BATCH_SIZE=1000;  BATCH_WAIT_MS=50 ;;
+        high)        BATCH_SIZE=5000;  BATCH_WAIT_MS=50 ;;
+        max)         BATCH_SIZE=10000; BATCH_WAIT_MS=50 ;;
+        ''|*[!0-9]*)
+            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected a batch size like 5000|10000|50000)"
             return 1
             ;;
+        *)           BATCH_SIZE=$BATCHING_SPEED; BATCH_WAIT_MS=50 ;;
     esac
     log "Batching speed '$BATCHING_SPEED' -> batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS"
 }
 
 # Map the QUERY_TUNING preset to server query capacity knobs applied to every
 # query component (priorityQueueCapacity / dispatchBufferCapacity /
-# bootstrapBufferSize). These are perf/backpressure only, so all presets must
-# yield identical determinism SHAs. 'medium' matches the drasi-server defaults
-# (priorityQueueCapacity 10000, dispatchBufferCapacity 1000, bootstrapBufferSize
-# 10000), so it is effectively a no-op made explicit.
+# bootstrapBufferSize). These are perf/backpressure only, so all values must
+# yield identical determinism SHAs. QUERY_TUNING is the priorityQueueCapacity
+# (1000|10000|100000); each maps to a matching buffer tuple. 10000 matches the
+# drasi-server defaults (priorityQueueCapacity 10000, dispatchBufferCapacity
+# 1000, bootstrapBufferSize 10000), so it is effectively a no-op made explicit.
+# Legacy named presets (low|medium|high) are still accepted for back-compat.
 resolve_query_tuning() {
     case "$QUERY_TUNING" in
-        low)    PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
-        medium) PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
-        high)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000; BOOTSTRAP_BUFFER_SIZE=100000 ;;
+        low|1000)      PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
+        medium|10000)  PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
+        high|100000)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000; BOOTSTRAP_BUFFER_SIZE=100000 ;;
         *)
-            log "ERROR: invalid QUERY_TUNING='$QUERY_TUNING' (expected low|medium|high)"
+            log "ERROR: invalid QUERY_TUNING='$QUERY_TUNING' (expected 1000|10000|100000)"
             return 1
             ;;
     esac

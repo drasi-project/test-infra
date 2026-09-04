@@ -64,22 +64,21 @@ on:
 
       # --- Config axes (applied to whichever variants run) ---
       batching_speed:
-        description: "Adaptive batching speed preset (affects adaptive variants only)."
+        description: "Adaptive batch size (max records per batch; affects adaptive variants only)."
         type: choice
         options:
-          - low
-          - medium
-          - high
-          - max
-        default: medium
+          - "5000"
+          - "10000"
+          - "50000"
+        default: "10000"
       query_tuning:
-        description: "Query capacity preset (priority/dispatch buffers, bootstrap buffer)."
+        description: "Query capacity: priorityQueueCapacity (drives priority/dispatch/bootstrap buffers)."
         type: choice
         options:
-          - low
-          - medium
-          - high
-        default: medium
+          - "1000"
+          - "10000"
+          - "100000"
+        default: "10000"
       persist_index:
         description: "Use the built-in RocksDB persistent index (persistIndex)."
         type: boolean
@@ -126,11 +125,11 @@ on:
       # pull the source/reaction plugins from a fork's package registry and/or a
       # specific tag (e.g. a work-in-progress build) without editing the config.
       plugin_registry:
-        description: "OCI registry for short plugin refs (e.g. ghcr.io/ruokun-niu). Empty = server default (ghcr.io/drasi-project)."
+        description: "OCI registry for short plugin refs. Empty = server default (ghcr.io/drasi-project)."
         required: false
         default: ""
       plugin_tag:
-        description: "OCI tag to pin every plugin ref to (e.g. composite-key-linux-amd64). Empty = untagged (latest-compatible)."
+        description: "OCI tag to pin every plugin ref to. Empty = untagged (latest-compatible)."
         required: false
         default: ""
   schedule:

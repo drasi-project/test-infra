@@ -784,9 +784,11 @@ resolve_bootstrap_preset() {
 # scale the graph) AND transport (http vs grpc dispatch produces different
 # result ordering/serialization -- confirmed: the committed OFF-scenario
 # baselines differ between config.http.json and config.json/grpc_adaptive).
-# Transport is inferred from the TEST_CFG_SRC basename (adaptive vs standard
-# share the same baseline per transport -- confirmed on the off scenario, where
-# config.json and config.grpc_adaptive.json carry identical committed SHAs).
+# Transport is inferred from the TEST_CFG_SRC basename. grpc adaptive/standard
+# share one baseline per the off-scenario check (config.json and
+# config.grpc_adaptive.json carry identical committed SHAs), but http_adaptive
+# does NOT share http_standard's baseline: its both-sided batching coalesces
+# results into a distinct (still deterministic) hash, so it is its own transport.
 # Add a row below once a preset/transport combo has a CI-confirmed SHA pair;
 # until then (or via BOOTSTRAP_BASELINE_MAIN/_AGG override) the preset stays in
 # compute-and-report mode so an unconfirmed baseline can never fail the run.
@@ -794,6 +796,10 @@ resolve_bootstrap_baseline() {
     BS_TRANSPORT="grpc"
     case "$(basename "$TEST_CFG_SRC")" in
         config.http.json) BS_TRANSPORT="http" ;;
+        # http_adaptive's both-sided batching coalesces results into a distinct
+        # (still deterministic) hash, so it does NOT share http_standard's
+        # baseline -- it gets its own transport bucket.
+        config.http_adaptive.json) BS_TRANSPORT="http_adaptive" ;;
     esac
     BS_BASELINE_MAIN="${BOOTSTRAP_BASELINE_MAIN:-}"
     BS_BASELINE_AGG="${BOOTSTRAP_BASELINE_AGG:-}"
@@ -806,6 +812,10 @@ resolve_bootstrap_baseline() {
             10k:grpc)
                 BS_BASELINE_MAIN="a5d89950f456b00b802b2659eeb8855afa09bfda222ef9a9c89becef301b4fa5"
                 BS_BASELINE_AGG="aaa6e7bc9e2f8ed07014b4ded3656816ba063b45abbdd252a49d790255fef556"
+                ;;
+            10k:http_adaptive)
+                BS_BASELINE_MAIN="b2e307d623e514339a596389aa08d0d7fdb206fd4942143beb507c052152b5d6"
+                BS_BASELINE_AGG="4765e5ffc08de76663a7969893df09c7cba818de5940404d985f56806a4f1114"
                 ;;
             100k:http)
                 BS_BASELINE_MAIN="e1ad5640897910d04053f151a491ce5012af77d50f95def9f045859f455f5308"

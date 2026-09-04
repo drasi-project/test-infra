@@ -172,6 +172,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Record start time
+        run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Log in to Azure with OIDC
         uses: azure/login@v3
         with:
@@ -514,6 +517,51 @@ jobs:
             "$ADMIN_USERNAME@$VM_PUBLIC_IP:$REMOTE_ROOT/artifacts/." \
             "$LOCAL_ARTIFACTS_DIR/"
 
+      # Build the durable per-variant summary records for
+      # drasi-project/test-results, mirroring the non-Azure workflow. The remote
+      # suite writes each variant's artifacts to <LOCAL_ARTIFACTS_DIR>/<variant>/
+      # and a suite-results.jsonl with per-variant exit codes.
+      - name: Build result summaries
+        if: always() && env.VM_PUBLIC_IP != ''
+        env:
+          WORKFLOW_FILE: building-comfort-azure.yml
+          RUNNER_LABEL: ${{ env.PERF_PROFILE_ID }}
+        run: |
+          set -euo pipefail
+          summary_dir="$RUNNER_TEMP/summary"
+          mkdir -p "$summary_dir"
+          results_jsonl="$LOCAL_ARTIFACTS_DIR/suite-results.jsonl"
+
+          for variant in $VARIANTS; do
+            variant_artifacts="$LOCAL_ARTIFACTS_DIR/$variant"
+            if [[ ! -d "$variant_artifacts" ]]; then
+              echo "::warning::no artifacts for variant '$variant'; skipping summary"
+              continue
+            fi
+
+            # Per-variant status from the suite results (exit_code 0 == success).
+            status="failure"
+            if [[ -s "$results_jsonl" ]]; then
+              rc="$(jq -r --arg v "$variant" 'select(.variant == $v) | .exit_code' "$results_jsonl" 2>/dev/null | tail -n1)"
+              [[ "$rc" == "0" ]] && status="success"
+            fi
+
+            python3 .github/scripts/emit_summary.py \
+              --artifacts "$variant_artifacts" \
+              --scenario building_comfort \
+              --variant "$variant" \
+              --job-status "$status" \
+              --output "$summary_dir/building_comfort__${variant}.json"
+          done
+
+      - name: Upload result summary
+        if: always() && env.VM_PUBLIC_IP != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: summary-building_comfort-azure
+          path: ${{ runner.temp }}/summary
+          if-no-files-found: warn
+
       - name: Publish test summary
         if: always()
         run: |
@@ -665,3 +713,20 @@ jobs:
           done
 
           echo "Deleted and verified all Azure resources for $RESOURCE_PREFIX"
+
+  # Publish the per-variant summaries to drasi-project/test-results, matching the
+  # non-Azure workflow. One job, one commit, one push - see
+  # publish-test-results.yml for why aggregating matters. `always()` so a failed
+  # test run is still recorded.
+  #
+  # Scheduled runs only. The published history is a time series, so every point
+  # has to be comparable: same trigger, same cadence, no operator choosing when
+  # to record. Manual runs exist to try things out and would put unexplained
+  # spikes in the trend, so they are not published. To exercise this path from a
+  # branch, temporarily widen this condition.
+  publish-results:
+    needs: [test]
+    if: always() && github.event_name == 'schedule'
+    uses: ./.github/workflows/publish-test-results.yml
+    secrets:
+      TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

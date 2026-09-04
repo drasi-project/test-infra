@@ -132,9 +132,6 @@ on:
         description: "OCI tag to pin every plugin ref to. Empty = untagged (latest-compatible)."
         required: false
         default: ""
-  schedule:
-    # 07:00 UTC — full set (drasi_lib + dynamic http/grpc, standard + adaptive).
-    - cron: "0 7 * * *"
 
 permissions:
   contents: read

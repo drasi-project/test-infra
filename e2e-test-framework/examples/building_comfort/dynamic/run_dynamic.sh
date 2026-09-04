@@ -825,6 +825,11 @@ resolve_bootstrap_baseline() {
                 BS_BASELINE_MAIN="490f70250d0d0bb97d4a6cf1a278e90cee084f72777d0958a2ec2cfc25cc2e63"
                 BS_BASELINE_AGG="27986794cd4e79e70cceda8ede79a7ee1af4a3318cad1395a3c720c4e38a3768"
                 ;;
+            100k:http_adaptive)
+                BS_BASELINE_MAIN="490f70250d0d0bb97d4a6cf1a278e90cee084f72777d0958a2ec2cfc25cc2e63"
+                # BS_BASELINE_AGG intentionally left unset until a full-count run
+                # captures the floor-agg SHA for this preset/transport.
+                ;;
             # 1m:http)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
             # 1m:grpc)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
             *) : ;;
@@ -832,6 +837,8 @@ resolve_bootstrap_baseline() {
     fi
     if [[ -n "$BS_BASELINE_MAIN" && -n "$BS_BASELINE_AGG" ]]; then
         log "  determinism baseline: PINNED for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT (missing_baseline=Fail)"
+    elif [[ -n "$BS_BASELINE_MAIN" || -n "$BS_BASELINE_AGG" ]]; then
+        log "  determinism baseline: PARTIAL for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT -- pinned reaction(s) enforced, others compute+report (missing_baseline=Warn)"
     else
         log "  determinism baseline: not yet captured for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT -- compute+report only (missing_baseline=Warn)"
     fi
@@ -870,17 +877,17 @@ patch_bootstrap_preset() {
         | ( .data_store.test_repos[].local_tests[].reactions[]
             | select(.test_reaction_id == "building-comfort-floor-agg").stop_triggers[]
             | select(.kind == "RecordCount").record_count ) = $stopagg
-        # 3. Determinism baseline: pin per (preset, transport) once known (Fail);
-        #    otherwise the bootstrap resultset has no confirmed baseline yet, so
-        #    compute+report only (Warn) rather than fail on an unconfirmed SHA.
+        # 3. Determinism baseline: pin each reaction whose SHA is known. A
+        #    reaction WITH an expected SHA is always compared (mismatch fails),
+        #    so a main-only pin still enforces main. missing_baseline governs
+        #    only reactions with NO expected: Fail once BOTH are pinned,
+        #    otherwise Warn so an unpinned reaction cannot fail the run.
         | ( .data_store.test_repos[].local_tests[].completion_handlers[]
             | select(.kind == "Sha256Determinism") )
-          |= (if ($baseline_main | length) > 0 and ($baseline_agg | length) > 0 then
-                .expected = {"building-comfort": $baseline_main, "building-comfort-floor-agg": $baseline_agg}
-                | .missing_baseline = "Fail"
-              else
-                .expected = {} | .missing_baseline = "Warn"
-              end)
+          |= ( .expected = ( {}
+                  + (if ($baseline_main | length) > 0 then {"building-comfort": $baseline_main} else {} end)
+                  + (if ($baseline_agg  | length) > 0 then {"building-comfort-floor-agg": $baseline_agg} else {} end) )
+               | .missing_baseline = (if ($baseline_main | length) > 0 and ($baseline_agg | length) > 0 then "Fail" else "Warn" end) )
         # 4. Set the PerformanceMetrics bootstrap phase boundary per reaction.
         | ( .test_run_host.test_runs[].reactions[]
             | select(.test_reaction_id == "building-comfort").output_loggers[]

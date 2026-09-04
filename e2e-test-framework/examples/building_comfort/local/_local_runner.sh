@@ -175,6 +175,44 @@ _local_runner_detect_drasi_port() {
     ' "$config" 2>/dev/null
 }
 
+# Terminate whatever this runner launched. Registered as an EXIT/INT/TERM trap
+# before the first process is spawned, so an early failure (e.g. drasi-server
+# never binding its port) still tears things down.
+#
+# Reads pids from globals rather than the caller's locals on purpose: the trap
+# runs after run_local_test_autoexit has returned, at which point its `local`
+# svc_pid/ds_pid no longer exist. Referencing them there silently skipped every
+# kill (and errored outright under `set -u`), stranding test-service and
+# drasi-server on their ports and breaking the next run.
+_local_runner_cleanup() {
+    local svc_pid="${_LOCAL_RUNNER_SVC_PID:-}"
+    local ds_pid="${_LOCAL_RUNNER_DS_PID:-}"
+
+    if [[ -n "$svc_pid" ]] && kill -0 "$svc_pid" 2>/dev/null; then
+        kill -TERM "$svc_pid" 2>/dev/null
+        local n=0
+        while kill -0 "$svc_pid" 2>/dev/null && (( n < 30 )); do
+            sleep 1
+            n=$((n+1))
+        done
+        kill -KILL "$svc_pid" 2>/dev/null
+    fi
+
+    if [[ -n "$ds_pid" ]] && kill -0 "$ds_pid" 2>/dev/null; then
+        echo "[local] stopping drasi-server (pid=$ds_pid)" >&2
+        kill -TERM "$ds_pid" 2>/dev/null
+        local n=0
+        while kill -0 "$ds_pid" 2>/dev/null && (( n < 30 )); do
+            sleep 1
+            n=$((n+1))
+        done
+        kill -KILL "$ds_pid" 2>/dev/null
+    fi
+
+    [[ -n "${_LOCAL_RUNNER_TMP_CONFIG:-}" ]] && rm -f "$_LOCAL_RUNNER_TMP_CONFIG"
+    return 0
+}
+
 # Run the test-service in auto-exit mode: spawn it as a background process,
 # poll each reaction's status via the REST API, print a summary when all
 # reactions reach Stopped, then shut the service down.
@@ -239,6 +277,11 @@ run_local_test_autoexit() {
     # sits next to the test-service config and AUTO_DRASI_SERVER!=0.
     local ds_pid=""
     local ds_log=""
+    # Clear any pids left over from a previous run_local_test call in this
+    # same shell, so the EXIT trap never signals an unrelated process.
+    _LOCAL_RUNNER_SVC_PID=""
+    _LOCAL_RUNNER_DS_PID=""
+    trap _local_runner_cleanup EXIT INT TERM
     local script_dir
     script_dir="$(cd "$(dirname "$config")" && pwd)"
     # _LOCAL_RUNNER_SOURCE_DIR is set by run_local_test before any tmp-config
@@ -281,9 +324,14 @@ run_local_test_autoexit() {
         ds_log="$(mktemp -t bc-local-drasi.XXXXXX)"
         (
             cd "$variant_dir"
-            exec "$DRASI_SERVER_BIN" --config "$ds_yaml" >"$ds_log" 2>&1
+            # DRASI_SERVER_ARGS lets a caller pass extra flags (e.g.
+            # --plugins-dir for a statically linked build that must not pick up
+            # the cdylibs sitting next to the binary). Unquoted on purpose so
+            # multiple flags word-split.
+            exec "$DRASI_SERVER_BIN" --config "$ds_yaml" ${DRASI_SERVER_ARGS:-} >"$ds_log" 2>&1
         ) &
         ds_pid=$!
+        _LOCAL_RUNNER_DS_PID="$ds_pid"
         echo "[local] drasi-server pid=$ds_pid; log=$ds_log" >&2
 
         local ds_port
@@ -312,30 +360,7 @@ run_local_test_autoexit() {
     cargo run --release --manifest-path "$manifest" -- --config "$config" \
         > "$svc_log" 2>&1 &
     local svc_pid=$!
-
-    _local_runner_cleanup() {
-        if [[ -n "$svc_pid" ]] && kill -0 "$svc_pid" 2>/dev/null; then
-            kill -TERM "$svc_pid" 2>/dev/null
-            local n=0
-            while kill -0 "$svc_pid" 2>/dev/null && (( n < 30 )); do
-                sleep 1
-                n=$((n+1))
-            done
-            kill -KILL "$svc_pid" 2>/dev/null
-        fi
-        if [[ -n "$ds_pid" ]] && kill -0 "$ds_pid" 2>/dev/null; then
-            echo "[local] stopping drasi-server (pid=$ds_pid)" >&2
-            kill -TERM "$ds_pid" 2>/dev/null
-            local n=0
-            while kill -0 "$ds_pid" 2>/dev/null && (( n < 30 )); do
-                sleep 1
-                n=$((n+1))
-            done
-            kill -KILL "$ds_pid" 2>/dev/null
-        fi
-        [[ -n "${_LOCAL_RUNNER_TMP_CONFIG:-}" ]] && rm -f "$_LOCAL_RUNNER_TMP_CONFIG"
-    }
-    trap _local_runner_cleanup EXIT INT TERM
+    _LOCAL_RUNNER_SVC_PID="$svc_pid"
 
     echo "[local] test-service pid=$svc_pid; log=$svc_log" >&2
     echo "[local] waiting for http://127.0.0.1:$port to come up..." >&2

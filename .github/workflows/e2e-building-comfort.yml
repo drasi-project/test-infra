@@ -9,13 +9,18 @@
 #   * drasi_lib                 -> embedded in-process engine (no external server;
 #                                  runs via ci/drasi_lib/run_test_ci.sh)
 #
-# HTTP adaptive note: adaptive lives on the Drasi Server *source*
-# (adaptiveEnabled) with a standard dispatcher, which is loss-free. The old
-# framework-dispatcher /events/batch approach collapsed per-room results
-# (per-room never reached its count) and was retired.
+# HTTP note: `http_adaptive` batches on BOTH the framework dispatcher
+# (/events/batch ingress) and the reaction ({"batch":[...]} egress) -- the
+# combination that reproduces the ~5x gRPC-style throughput. (Server-side
+# adaptiveEnabled alone leaves egress per-result and stays at the standard
+# rate, so it is not wired as a variant.) This /events/batch path was
+# previously retired for collapsing per-room results; it is gated by the inline
+# Sha256Determinism baseline, so a lossy run fails rather than silently
+# passing. Treat http_adaptive as under evaluation until a full-count
+# determinism-passing run is confirmed.
 #
 # Variant selection:
-#   - Scheduled: 07:00 UTC standard set, 07:30 UTC adaptive set (see crons).
+#   - Scheduled: 07:00 UTC runs all five variants in one matrix.
 #   - Manual: tick a checkbox per variant; the matrix is built from checked.
 
 name: E2E - building_comfort
@@ -33,7 +38,7 @@ on:
         type: boolean
         default: true
       http_adaptive:
-        description: "http_adaptive (HTTP, server adaptiveEnabled)"
+        description: "http_adaptive (HTTP, dispatcher + egress batching)"
         type: boolean
         default: false
       grpc_standard:
@@ -45,23 +50,35 @@ on:
         type: boolean
         default: false
 
+      # --- Query selection (deselect to drop that query AND its subscribing
+      #     reaction from both the server and the test-service). Deselect one
+      #     to isolate a single query's throughput. ---
+      query_building_comfort:
+        description: "Run the per-room 'building-comfort' query"
+        type: boolean
+        default: true
+      query_floor_agg:
+        description: "Run the 'building-comfort-floor-agg' aggregate query"
+        type: boolean
+        default: true
+
       # --- Config axes (applied to whichever variants run) ---
       batching_speed:
-        description: "Adaptive batching speed preset (affects adaptive variants only)."
+        description: "Adaptive batch size (max records per batch; affects adaptive variants only)."
         type: choice
         options:
-          - low
-          - medium
-          - high
-        default: medium
+          - "5000"
+          - "10000"
+          - "50000"
+        default: "10000"
       query_tuning:
-        description: "Query capacity preset (priority/dispatch buffers, bootstrap buffer)."
+        description: "Query capacity: priorityQueueCapacity (drives priority/dispatch/bootstrap buffers)."
         type: choice
         options:
-          - low
-          - medium
-          - high
-        default: medium
+          - "1000"
+          - "10000"
+          - "100000"
+        default: "10000"
       persist_index:
         description: "Use the built-in RocksDB persistent index (persistIndex)."
         type: boolean
@@ -102,11 +119,19 @@ on:
         description: "Max minutes to wait for the test to finish."
         required: false
         default: "30"
-  schedule:
-    # 07:00 UTC — standard set (drasi_lib + dynamic http+grpc).
-    - cron: "0 7 * * *"
-    # 07:30 UTC — adaptive set (dynamic http+grpc adaptive).
-    - cron: "30 7 * * *"
+      # --- Plugin source overrides (manual dispatch only) ---
+      # Empty on scheduled runs -> the server uses its built-in defaults
+      # (registry ghcr.io/drasi-project, latest-compatible tag). Set these to
+      # pull the source/reaction plugins from a fork's package registry and/or a
+      # specific tag (e.g. a work-in-progress build) without editing the config.
+      plugin_registry:
+        description: "OCI registry for short plugin refs. Empty = server default (ghcr.io/drasi-project)."
+        required: false
+        default: ""
+      plugin_tag:
+        description: "OCI tag to pin every plugin ref to. Empty = untagged (latest-compatible)."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -114,7 +139,7 @@ permissions:
 jobs:
   # Resolve the selected variants into a JSON array consumed by the run job's
   # matrix. workflow_dispatch uses the per-variant checkboxes; scheduled runs
-  # (checkboxes absent) pick a set based on which cron fired.
+  # (checkboxes absent) cover every variant.
   select-variants:
     name: select variants
     runs-on: ubuntu-latest
@@ -124,7 +149,6 @@ jobs:
       - name: Compute variant matrix
         id: compute
         env:
-          SCHEDULE: ${{ github.event.schedule }}
           # Boolean inputs arrive as "true"/"false" (empty on scheduled runs).
           V_DRASI_LIB: ${{ inputs.drasi_lib }}
           V_HTTP_STD: ${{ inputs.http_standard }}
@@ -134,13 +158,8 @@ jobs:
         run: |
           variants=()
           if [[ -z "$V_DRASI_LIB$V_HTTP_STD$V_HTTP_ADAPTIVE$V_GRPC_STD$V_GRPC_ADAPTIVE" ]]; then
-            # No checkboxes present -> scheduled run; pick a set per cron.
-            case "$SCHEDULE" in
-              "30 7 * * *")
-                variants=(http_adaptive grpc_adaptive) ;;
-              *)
-                variants=(drasi_lib http_standard grpc_standard) ;;
-            esac
+            # No checkboxes present -> scheduled run; cover every variant.
+            variants=(drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive)
           else
             [[ "$V_DRASI_LIB"     == "true" ]] && variants+=(drasi_lib)
             [[ "$V_HTTP_STD"      == "true" ]] && variants+=(http_standard)
@@ -161,6 +180,10 @@ jobs:
   building-comfort:
     name: building_comfort / ${{ matrix.variant }}
     needs: select-variants
+    # ubuntu-latest (2-vCPU hosted). Larger runners (e.g. ubuntu-latest-8-cores)
+    # aren't available on personal forks. Fine for the throughput RATIO and
+    # functional/loss checks; precise absolute numbers should come from the
+    # pinned Azure self-hosted profile (docs/self-hosted-performance-runners.md).
     runs-on: ubuntu-latest
     # Job-level hard cap (separate from the `timeout_minutes` input, which only
     # bounds the driver's internal completion-wait loop -- see "Compute timeout
@@ -221,57 +244,37 @@ jobs:
           [[ -z "$mins" ]] && mins=30
           echo "TIMEOUT_SECS=$(( mins * 60 ))" >> "$GITHUB_ENV"
 
-      # Resolve the variant to a runner script (+ dynamic env knobs). drasi_lib
-      # maps to ci/drasi_lib/run_test_ci.sh (embedded engine); every other
-      # variant is dynamic and maps to the shared dynamic/run_dynamic.sh with
-      # component/config selections.
-      - name: Resolve variant
-        run: |
-          case "$VARIANT" in
-            drasi_lib)
-              echo "RUN_SCRIPT=e2e-test-framework/examples/building_comfort/ci/$VARIANT/run_test_ci.sh" >> "$GITHUB_ENV"
-              ;;
-            *)
-              DD="e2e-test-framework/examples/building_comfort/dynamic"
-              echo "RUN_SCRIPT=$DD/run_dynamic.sh"     >> "$GITHUB_ENV"
-              echo "SERVER_QUERIES_FILE=queries.json"  >> "$GITHUB_ENV"
-              case "$VARIANT" in
-                http_standard)
-                  echo "SERVER_SOURCE_FILE=source_http.json"       >> "$GITHUB_ENV"
-                  echo "SERVER_REACTIONS_FILE=reactions_http.json" >> "$GITHUB_ENV"
-                  echo "DRASI_SOURCE_PORT=9000"                    >> "$GITHUB_ENV"
-                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
-                  ;;
-                http_adaptive)
-                  echo "SERVER_SOURCE_FILE=source_http_adaptive.json" >> "$GITHUB_ENV"
-                  echo "SERVER_REACTIONS_FILE=reactions_http.json"    >> "$GITHUB_ENV"
-                  echo "DRASI_SOURCE_PORT=9000"                       >> "$GITHUB_ENV"
-                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.http.json" >> "$GITHUB_ENV"
-                  ;;
-                grpc_standard)
-                  echo "SERVER_SOURCE_FILE=source_grpc.json"       >> "$GITHUB_ENV"
-                  echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
-                  echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
-                  # TEST_CFG_SRC left unset -> driver default (config.json)
-                  ;;
-                grpc_adaptive)
-                  echo "SERVER_SOURCE_FILE=source_grpc.json"       >> "$GITHUB_ENV"
-                  echo "SERVER_REACTIONS_FILE=reactions_grpc.json" >> "$GITHUB_ENV"
-                  echo "DRASI_SOURCE_PORT=50051"                   >> "$GITHUB_ENV"
-                  echo "TEST_CFG_SRC=$GITHUB_WORKSPACE/$DD/config.grpc_adaptive.json" >> "$GITHUB_ENV"
-                  ;;
-                *)
-                  echo "Unknown variant: $VARIANT" >&2; exit 1 ;;
-              esac
-              ;;
-          esac
-
       - name: Build test-service
         working-directory: e2e-test-framework
-        run: cargo build --release --manifest-path test-service/Cargo.toml
+        run: |
+          cargo build --release --locked --manifest-path test-service/Cargo.toml
+          echo "TEST_SERVICE_BIN=$GITHUB_WORKSPACE/e2e-test-framework/target/release/test-service" >> "$GITHUB_ENV"
 
       - name: Record start time
         run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      # Build the QUERIES selector from the per-query checkboxes. Empty inputs
+      # (scheduled runs) select both. Deselecting a query drops it and its
+      # subscribing reaction (server + test-service). Errors if none are ticked.
+      - name: Resolve queries
+        env:
+          V_Q_MAIN: ${{ inputs.query_building_comfort }}
+          V_Q_AGG: ${{ inputs.query_floor_agg }}
+        run: |
+          set -euo pipefail
+          queries_arr=()
+          if [[ -z "$V_Q_MAIN$V_Q_AGG" ]]; then
+            queries_arr=(building-comfort building-comfort-floor-agg)
+          else
+            [[ "$V_Q_MAIN" == "true" ]] && queries_arr+=(building-comfort)
+            [[ "$V_Q_AGG" == "true" ]] && queries_arr+=(building-comfort-floor-agg)
+          fi
+          (( ${#queries_arr[@]} > 0 )) || {
+            echo "ERROR: no queries selected. Tick at least one query." >&2
+            exit 1
+          }
+          echo "QUERIES=${queries_arr[*]}" >> "$GITHUB_ENV"
+          echo "Selected queries: ${queries_arr[*]}"
 
       - name: Run test
         id: test
@@ -287,6 +290,10 @@ jobs:
           # run_dynamic.sh defaults to medium. Applied to all dynamic variants'
           # query components; perf-only, results must not change.
           QUERY_TUNING: ${{ inputs.query_tuning }}
+          # Query selector resolved above (space-separated query ids). Deselecting
+          # a query drops it and its subscribing reaction. Consumed by
+          # run_dynamic.sh; drasi_lib ignores it.
+          QUERIES: ${{ env.QUERIES }}
           # Server instance-config toggles (independent). Empty on scheduled
           # runs -> run_dynamic.sh defaults both to false (standard). Each
           # combination selects a committed base yaml.
@@ -296,7 +303,12 @@ jobs:
           # run_dynamic.sh leaves the committed small scenario unchanged. Only
           # the dynamic variants consume it; drasi_lib ignores it.
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size == 'off' && '' || inputs.bootstrap_size }}
-        run: bash "${RUN_SCRIPT}"
+          # Plugin source overrides. Empty on scheduled runs -> run_dynamic.sh
+          # leaves the base config alone (server default registry + untagged).
+          # Consumed by run_dynamic.sh; drasi_lib ignores them.
+          DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
+          DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
+        run: bash e2e-test-framework/examples/building_comfort/run_variant.sh
 
       - name: Upload artifacts
         if: always()

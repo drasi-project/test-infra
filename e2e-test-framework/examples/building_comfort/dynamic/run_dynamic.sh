@@ -24,7 +24,9 @@
 # the framework does not let us inject over its own REST API).
 #
 # Flow:
-#   1. Download the drasi-server release binary (unless DRASI_SERVER_BIN set).
+#   1. Obtain the drasi-server binary: download a release, OR build it from a
+#      branch/tag/SHA (DRASI_SERVER_REF) of DRASI_REPO -- optionally patching the
+#      drasi-core crates to DRASI_CORE_REF -- unless DRASI_SERVER_BIN is set.
 #   2. Patch configs for CI safety (admin port, keep artifacts, data path).
 #   3. Start the bare drasi-server and wait for its admin/REST API.
 #   4. Apply source -> queries -> reactions via REST (order matters).
@@ -33,15 +35,34 @@
 #   7. Snapshot reactions, verify determinism, write summary.
 #
 # Env vars (defaults in parens):
-#   DRASI_REPO            releases repo / source repo (drasi-project/drasi-server).
-#                         Setting this selects the source build: the named repo
-#                         is cloned and built. Point at a fork to test a fork.
-#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used when neither
-#                         DRASI_REPO nor DRASI_SERVER_REF is set.
-#   DRASI_SERVER_REF      branch/tag/SHA to BUILD from source with cargo. Also
-#                         selects the source build. "" with DRASI_REPO set =
-#                         that repo's default branch. Both "" = download.
-#   DRASI_SERVER_BIN      pre-downloaded binary (skips download)
+#   DRASI_REPO            drasi-server repo owner/name, used for BOTH the release
+#                         download and the source build (drasi-project/drasi-server).
+#                         Point at a fork to build/download from it. Setting this
+#                         explicitly selects the source build: the named repo is
+#                         cloned and built (a repo without a ref builds its default
+#                         branch instead of silently downloading a release).
+#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used in release mode,
+#                         i.e. when neither DRASI_REPO nor DRASI_SERVER_REF is set.
+#   DRASI_SERVER_REF      branch/tag/SHA of DRASI_REPO to BUILD drasi-server from
+#                         source with cargo. When set, overrides the release
+#                         download and selects the source build. Empty with an
+#                         explicit DRASI_REPO = that repo's default branch;
+#                         otherwise empty = download the release binary (default).
+#   DRASI_CORE_REPO       drasi-core repo owner/name for the [patch.crates-io]
+#                         override injected during a source build (drasi-project/drasi-core).
+#   DRASI_CORE_REF        branch of DRASI_CORE_REPO to pin the drasi-core
+#                         family of crates to via [patch.crates-io] when building
+#                         drasi-server from source. Empty = no patch (server links
+#                         its published crates.io drasi-core). Requires DRASI_SERVER_REF.
+#   DRASI_PLUGIN_TAG      OCI tag to pin every plugin ref in the base server config
+#                         to (e.g. drasi-nightly-test), so autoInstallPlugins pulls
+#                         that tag from the registry. Empty = leave refs untagged
+#                         (server resolves the latest compatible release).
+#   DRASI_PLUGIN_REGISTRY OCI registry the server resolves short plugin refs against
+#                         (patched into the base config's `pluginRegistry`). Empty =
+#                         leave the config untouched (server default ghcr.io/drasi-project).
+#   DRASI_SERVER_BIN      pre-built binary (skips both download and source build)
+#   TEST_SERVICE_BIN      pre-built test-service binary (otherwise cargo run)
 #   DRASI_ADMIN_PORT      admin/REST port patched into empty.yaml (8090)
 #   DRASI_SOURCE_PORT     source ingress port to wait for (50051)
 #   SERVER_SOURCE_FILE    components/server/ file (source_grpc.json)
@@ -53,16 +74,17 @@
 #   TEST_REACTION_IDS     reactions to snapshot ("building-comfort building-comfort-floor-agg")
 #   TIMEOUT_SECS          completion timeout (1800)
 #   POLL_INTERVAL_SECS    status poll interval (10)
-#   BATCHING_SPEED        adaptive batching preset: low|medium|high (medium).
-#                         Only affects adaptive components (gRPC adaptive
-#                         dispatcher batch_size/batch_timeout_ms and HTTP
-#                         adaptive source adaptiveMax*); standard variants are
-#                         left untouched.
-#   QUERY_TUNING          query capacity preset: low|medium|high (medium).
+#   BATCHING_SPEED        adaptive batch size: 5000|10000|50000 (10000). Legacy
+#                         low|medium|high|max still accepted. Only affects
+#                         adaptive components (gRPC adaptive dispatcher
+#                         batch_size/batch_timeout_ms and HTTP adaptive source
+#                         adaptiveMax*); standard variants are left untouched.
+#   QUERY_TUNING          query capacity (priorityQueueCapacity): 1000|10000|
+#                         100000 (10000). Legacy low|medium|high still accepted.
 #                         Sets priorityQueueCapacity / dispatchBufferCapacity /
 #                         bootstrapBufferSize on every server query component.
 #                         Perf/backpressure only; results (determinism SHAs)
-#                         must not change. 'medium' == server defaults.
+#                         must not change. 10000 == server defaults.
 #   PERSIST_INDEX         true|false (false). Selects a base yaml with instance-
 #                         level persistIndex: true (built-in RocksDB index). The
 #                         driver also enables source WAL durability, since a
@@ -115,7 +137,21 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 DRASI_REPO_EXPLICIT="${DRASI_REPO:-}"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
+# Build-from-source knobs. When DRASI_SERVER_REF is set, drasi-server is cloned
+# from DRASI_REPO@DRASI_SERVER_REF and built with cargo instead of downloading a
+# release. DRASI_CORE_REF (optional) additionally redirects the drasi-core family
+# of crates to DRASI_CORE_REPO@DRASI_CORE_REF via an injected [patch.crates-io].
 DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
+DRASI_CORE_REPO="${DRASI_CORE_REPO:-drasi-project/drasi-core}"
+DRASI_CORE_REF="${DRASI_CORE_REF:-}"
+# OCI tag to pin every plugin ref in the base server config to (e.g. the nightly
+# plugin tag). Empty leaves refs untagged so the server resolves latest-compatible.
+DRASI_PLUGIN_TAG="${DRASI_PLUGIN_TAG:-}"
+# OCI registry the server resolves short plugin refs (source/http, ...) against.
+# Empty leaves the base config's `pluginRegistry` untouched so the server uses its
+# built-in default (ghcr.io/drasi-project). Set e.g. ghcr.io/ruokun-niu to pull the
+# plugins from a fork's package registry instead.
+DRASI_PLUGIN_REGISTRY="${DRASI_PLUGIN_REGISTRY:-}"
 DRASI_ADMIN_PORT="${DRASI_ADMIN_PORT:-8090}"
 DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-50051}"
 
@@ -129,8 +165,25 @@ TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.building_comfort.test_run_001}
 TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort building-comfort-floor-agg}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
-BATCHING_SPEED="${BATCHING_SPEED:-medium}"
-QUERY_TUNING="${QUERY_TUNING:-medium}"
+BATCHING_SPEED="${BATCHING_SPEED:-10000}"
+QUERY_TUNING="${QUERY_TUNING:-10000}"
+# Which server queries (and their subscribing reactions) to run. Default is every
+# query in the component file (SERVER_QUERIES_FILE). Deselecting a query drops the
+# reaction that subscribes to it on BOTH the server and the test-service, plus its
+# source subscription, so a single-query run does strictly less work (useful for
+# isolating one query's throughput). Space- or comma-separated; every entry must
+# be a known query id. Empty = all.
+QUERIES="${QUERIES:-}"
+SELECTED_QUERIES=""
+SELECTED_QUERIES_JSON="[]"
+# JSONL per-record audit logging on each reaction. It writes every reaction
+# record to disk (outputs_*.jsonl) purely for post-hoc forensic inspection; the
+# determinism hash and record-count checks are computed independently from the
+# live stream, so disabling it does NOT weaken loss/determinism verification --
+# it only removes the on-disk audit trail. It is per-record disk I/O in the hot
+# path, so throughput runs default it off; set LOG_JSONL=1 to re-enable it for
+# debugging.
+LOG_JSONL="${LOG_JSONL:-0}"
 SERVER_PROFILE_PERSIST_INDEX="${PERSIST_INDEX:-false}"
 SERVER_PROFILE_STATE_STORE="${STATE_STORE:-false}"
 # WAL retention cap used when PERSIST_INDEX forces source durability on. Must
@@ -185,10 +238,50 @@ mkdir -p "$WORK_DIR" "$LOG_DIR" "$ARTIFACTS_DIR"
 DRASI_PID=""
 SERVICE_PID=""
 # Human-readable description of where DRASI_SERVER_BIN came from (release tag,
-# source build, or preset). Surfaced in the step summary for result labeling.
+# source build + optional core patch, or preset). Surfaced in the step summary
+# for result labeling.
 DRASI_BUILD_SOURCE=""
 
 log() { echo "[dyn] $*"; }
+
+MEM_MONITOR_PID=""
+
+# Background memory sampler (#78 1m-preset diagnostics). Large bootstrap presets
+# hold the ENTIRE initial-insert batch as one in-memory Vec before dispatching
+# (building_hierarchy/mod.rs send_initial_inserts()), and drasi-server keeps its
+# whole continuous-query state in memory (persistIndex/stateStore both false).
+# The 1m preset (2.21M bootstrap events, 1M rooms, 100k floor-agg groups) has
+# died on the CI runner (ubuntu-latest, 7GB RAM) with "The operation was
+# canceled" at ~6min (far under the 60min job timeout) and no error in our own
+# logs -- the runner VM itself is lost, consistent with an OOM kill.
+#
+# Samples are written only to an artifact file to avoid flooding the live job
+# log. Successful and normally-failing runs upload this file during cleanup.
+start_mem_monitor() {
+    local out="$LOG_DIR/mem_usage.log"
+    : > "$out"
+    (
+        while true; do
+            local line
+            line="$(
+                printf '%s ' "$(date -u +%FT%TZ)"
+                if [[ -r /proc/meminfo ]]; then
+                    awk '/^MemTotal:|^MemAvailable:/ {printf "%s=%dMB ", $1, $2/1024}' /proc/meminfo | tr -d ':'
+                fi
+                for pid_name in DRASI_PID SERVICE_PID; do
+                    pid="${!pid_name:-}"
+                    if [[ -n "$pid" ]] && [[ -r "/proc/$pid/status" ]]; then
+                        rss=$(awk '/^VmRSS:/ {print $2/1024}' "/proc/$pid/status" 2>/dev/null)
+                        printf '%s_rss=%sMB ' "$pid_name" "${rss:-?}"
+                    fi
+                done
+            )"
+            printf '%s\n' "$line" >> "$out" 2>/dev/null
+            sleep 3
+        done
+    ) &
+    MEM_MONITOR_PID=$!
+}
 
 cleanup() {
     local exit_code=$?
@@ -256,7 +349,6 @@ download_drasi_server() {
         DRASI_BUILD_SOURCE="preset ${DRASI_SERVER_BIN}"
         return 0
     fi
-
     # Build from source when the caller named a repo and/or a ref. Naming
     # either one means "test this code", so a repo without a ref builds that
     # repo's default branch rather than silently downloading its release
@@ -267,6 +359,134 @@ download_drasi_server() {
     fi
 
     download_drasi_server_release
+}
+
+# Direct drasi-core-family dependencies declared by drasi-server. Their version
+# requirements are relaxed only in the disposable clone before [patch.crates-io]
+# is injected. Without this, Cargo silently ignores a git patch whose current
+# version falls outside the server's published requirement (for example,
+# drasi-index-rocksdb 0.6.0 on core main vs. server's crates.io requirement
+# 0.5.8), producing a mixed nightly/release binary.
+CORE_DIRECT_CRATES=(
+    drasi-core drasi-lib drasi-host-sdk drasi-plugin-sdk
+    drasi-index-rocksdb drasi-state-store-redb drasi-wal-redb
+    drasi-reaction-application drasi-bootstrap-application drasi-bootstrap-noop
+)
+
+# Every drasi-core-repo crate currently present in drasi-server's dependency
+# graph. Resolution is verified after patch injection; any present package with
+# one of these names must come from the requested git branch, never crates.io.
+CORE_PATCH_CRATES=(
+    "${CORE_DIRECT_CRATES[@]}"
+    drasi-ffi-primitives drasi-middleware
+    drasi-functions-cypher drasi-functions-gql
+    drasi-query-ast drasi-query-cypher drasi-query-gql
+)
+
+relax_server_core_requirements() {
+    local cargo_toml="$SRC_BUILD_DIR/Cargo.toml"
+    local direct_crates
+    direct_crates="$(IFS=,; echo "${CORE_DIRECT_CRATES[*]}")"
+    python3 - "$cargo_toml" "$direct_crates" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+expected = set(sys.argv[2].split(","))
+seen = set()
+lines = []
+
+for line in path.read_text().splitlines(keepends=True):
+    ending = "\n" if line.endswith("\n") else ""
+    content = line[:-1] if ending else line
+    match = re.match(r'^(\s*)(drasi-[A-Za-z0-9-]+)(\s*=\s*)(.*)$', content)
+    if match and match.group(2) in expected:
+        name, rhs = match.group(2), match.group(4)
+        if rhs.lstrip().startswith('"'):
+            rhs = re.sub(r'"[^"]+"', '"*"', rhs, count=1)
+        elif re.search(r'\bversion\s*=\s*"[^"]+"', rhs):
+            rhs = re.sub(r'\bversion\s*=\s*"[^"]+"', 'version = "*"', rhs, count=1)
+        else:
+            raise SystemExit(f"cannot relax {name}: unsupported dependency form: {content}")
+        line = f"{match.group(1)}{name}{match.group(3)}{rhs}{ending}"
+        seen.add(name)
+    lines.append(line)
+
+missing = expected - seen
+if missing:
+    raise SystemExit(f"drasi-server Cargo.toml is missing expected core dependencies: {sorted(missing)}")
+
+path.write_text("".join(lines))
+print(f"Relaxed {len(seen)} direct drasi-core dependency requirements in {path}")
+PY
+}
+
+# Inject a [patch.crates-io] block into the cloned drasi-server's root Cargo.toml
+# so the whole drasi-core family resolves from DRASI_CORE_REPO@DRASI_CORE_REF
+# instead of crates.io. This is how the nightly perf run links core HEAD rather
+# than the published release the server normally depends on.
+inject_core_patch() {
+    local cargo_toml="$SRC_BUILD_DIR/Cargo.toml"
+    local core_url="https://github.com/${DRASI_CORE_REPO}.git"
+    local ref="$DRASI_CORE_REF"
+
+    relax_server_core_requirements
+    log "Injecting [patch.crates-io] -> $DRASI_CORE_REPO@$ref for ${#CORE_PATCH_CRATES[@]} drasi-core crates"
+    {
+        echo ""
+        echo "# --- injected by run_dynamic.sh for nightly perf: pin drasi-core to HEAD ---"
+        echo "[patch.crates-io]"
+        local c
+        for c in "${CORE_PATCH_CRATES[@]}"; do
+            echo "${c} = { git = \"${core_url}\", branch = \"${ref}\" }"
+        done
+    } >> "$cargo_toml"
+    log "Patched $cargo_toml; Cargo will update the patched packages while preserving the server lockfile"
+}
+
+update_core_lock_entries() {
+    local package_args=()
+    local c
+    for c in "${CORE_DIRECT_CRATES[@]}"; do
+        package_args+=(-p "$c")
+    done
+    log "Updating only the direct drasi-core-family entries in Cargo.lock"
+    ( cd "$SRC_BUILD_DIR" && cargo update "${package_args[@]}" )
+}
+
+verify_core_patch_resolution() {
+    local metadata="$SRC_BUILD_DIR/target/nightly-core-metadata.json"
+    local expected_source="git+https://github.com/${DRASI_CORE_REPO}?branch=${DRASI_CORE_REF}#"
+    local expected_source_dot_git="git+https://github.com/${DRASI_CORE_REPO}.git?branch=${DRASI_CORE_REF}#"
+    mkdir -p "$(dirname "$metadata")"
+    log "Resolving Cargo metadata to verify the drasi-core git patch"
+    ( cd "$SRC_BUILD_DIR" && cargo metadata --format-version 1 > "$metadata" )
+
+    local c sources source found
+    for c in "${CORE_PATCH_CRATES[@]}"; do
+        sources="$(jq -r --arg name "$c" \
+            '.packages[] | select(.name == $name) | (.source // "path")' \
+            "$metadata" | sort -u)"
+        [[ -n "$sources" ]] || continue
+        while IFS= read -r source; do
+            if [[ "$source" != "$expected_source"* && "$source" != "$expected_source_dot_git"* ]]; then
+                log "ERROR: $c resolved from '$source', expected the $DRASI_CORE_REPO@$DRASI_CORE_REF git source"
+                return 1
+            fi
+        done <<< "$sources"
+    done
+
+    # Direct dependencies must all be present, in addition to being git-backed.
+    for c in "${CORE_DIRECT_CRATES[@]}"; do
+        found="$(jq -r --arg name "$c" \
+            '[.packages[] | select(.name == $name)] | length' "$metadata")"
+        if [[ "$found" -eq 0 ]]; then
+            log "ERROR: expected direct core dependency '$c' is absent from Cargo metadata"
+            return 1
+        fi
+    done
+    log "Verified: all resolved drasi-core-family packages come from $DRASI_CORE_REPO@$DRASI_CORE_REF"
 }
 
 # Ask GitHub for $DRASI_REPO's default branch, so a repo given without a ref
@@ -283,8 +503,10 @@ resolve_default_branch() {
 }
 
 # Build drasi-server from a branch/tag/SHA of $DRASI_REPO using cargo, then set
-# DRASI_SERVER_BIN to the freshly built binary. Point DRASI_REPO at a fork to
-# build fork branches; $DRASI_SERVER_REF may be a branch, tag, or commit SHA.
+# DRASI_SERVER_BIN to the freshly built binary. When DRASI_CORE_REF is set, the
+# drasi-core crates are additionally patched to that ref (see inject_core_patch).
+# Point DRASI_REPO at a fork to build fork branches; $DRASI_SERVER_REF may be a
+# branch, tag, or commit SHA (empty resolves the repo's default branch).
 build_drasi_server_from_source() {
     local ref="$DRASI_SERVER_REF"
     if [[ -z "$ref" ]]; then
@@ -296,7 +518,10 @@ build_drasi_server_from_source() {
 
     rm -rf "$SRC_BUILD_DIR"
     # Shallow branch/tag clone is fastest; fall back to a full clone + checkout
-    # when $ref is a commit SHA (which --branch does not accept).
+    # when $ref is a commit SHA (which --branch does not accept). A core patch
+    # needs the full history unshallowed only if we later pin by SHA there; the
+    # git dependency is fetched separately by cargo, so a shallow server clone
+    # is fine regardless.
     if ! git clone --depth 1 --branch "$ref" "$repo_url" "$SRC_BUILD_DIR" 2>/dev/null; then
         log "Shallow clone of ref '$ref' failed; retrying with full clone + checkout"
         rm -rf "$SRC_BUILD_DIR"
@@ -306,8 +531,17 @@ build_drasi_server_from_source() {
 
     local built_sha
     built_sha="$(git -C "$SRC_BUILD_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    log "Checked out $DRASI_REPO @ $ref ($built_sha); running cargo build --release"
+    log "Checked out $DRASI_REPO @ $ref ($built_sha)"
 
+    local core_desc=""
+    if [[ -n "$DRASI_CORE_REF" ]]; then
+        inject_core_patch
+        update_core_lock_entries
+        verify_core_patch_resolution
+        core_desc=" + core ${DRASI_CORE_REPO}@${DRASI_CORE_REF}"
+    fi
+
+    log "Running cargo build --release --bin drasi-server"
     if ! ( cd "$SRC_BUILD_DIR" && cargo build --release --bin drasi-server ); then
         log "cargo build --bin drasi-server failed; retrying default release build"
         ( cd "$SRC_BUILD_DIR" && cargo build --release )
@@ -322,7 +556,7 @@ build_drasi_server_from_source() {
 
     DRASI_SERVER_BIN="$built_bin"
     export DRASI_SERVER_BIN
-    DRASI_BUILD_SOURCE="source ${DRASI_REPO}@${ref} (${built_sha})"
+    DRASI_BUILD_SOURCE="source ${DRASI_REPO}@${ref} (${built_sha})${core_desc}"
     log "DRASI_SERVER_BIN=$DRASI_SERVER_BIN"
     "$DRASI_SERVER_BIN" --version || true
 }
@@ -358,40 +592,81 @@ download_drasi_server_release() {
     cd - >/dev/null
 }
 
-# Map the BATCHING_SPEED preset to concrete batch-size / wait knobs shared by
-# the gRPC adaptive dispatcher (batch_size / batch_timeout_ms) and the HTTP
-# adaptive source (adaptiveMaxBatchSize / adaptiveMaxWaitMs). 'medium' matches
-# the values checked into the component/config files.
+# Map BATCHING_SPEED to concrete batch-size / wait knobs shared by the gRPC
+# adaptive dispatcher (batch_size / batch_timeout_ms) and the HTTP adaptive
+# source (adaptiveMaxBatchSize / adaptiveMaxWaitMs). BATCHING_SPEED is the
+# batch size itself (max records per batch), e.g. 5000|10000|50000. Legacy
+# named presets (low|medium|high|max) are still accepted for back-compat.
+#
+# wait_ms is the max flush delay for a not-yet-full batch. The local perf_sweep
+# throughput runs (49k-54k rec/s) all used 50ms, and a longer wait only adds
+# latency to trailing batches, so every throughput size uses 50ms; only the
+# legacy 'low' preset (deliberately throttled) waits less.
 resolve_batching_preset() {
     case "$BATCHING_SPEED" in
-        low)    BATCH_SIZE=100;  BATCH_WAIT_MS=10  ;;
-        medium) BATCH_SIZE=1000; BATCH_WAIT_MS=50  ;;
-        high)   BATCH_SIZE=5000; BATCH_WAIT_MS=200 ;;
-        *)
-            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected low|medium|high)"
+        low)         BATCH_SIZE=100;   BATCH_WAIT_MS=10 ;;
+        medium)      BATCH_SIZE=1000;  BATCH_WAIT_MS=50 ;;
+        high)        BATCH_SIZE=5000;  BATCH_WAIT_MS=50 ;;
+        max)         BATCH_SIZE=10000; BATCH_WAIT_MS=50 ;;
+        ''|*[!0-9]*)
+            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected a batch size like 5000|10000|50000)"
             return 1
             ;;
+        *)           BATCH_SIZE=$BATCHING_SPEED; BATCH_WAIT_MS=50 ;;
     esac
     log "Batching speed '$BATCHING_SPEED' -> batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS"
 }
 
 # Map the QUERY_TUNING preset to server query capacity knobs applied to every
 # query component (priorityQueueCapacity / dispatchBufferCapacity /
-# bootstrapBufferSize). These are perf/backpressure only, so all presets must
-# yield identical determinism SHAs. 'medium' matches the drasi-server defaults
-# (priorityQueueCapacity 10000, dispatchBufferCapacity 1000, bootstrapBufferSize
-# 10000), so it is effectively a no-op made explicit.
+# bootstrapBufferSize). These are perf/backpressure only, so all values must
+# yield identical determinism SHAs. QUERY_TUNING is the priorityQueueCapacity
+# (1000|10000|100000); each maps to a matching buffer tuple. 10000 matches the
+# drasi-server defaults (priorityQueueCapacity 10000, dispatchBufferCapacity
+# 1000, bootstrapBufferSize 10000), so it is effectively a no-op made explicit.
+# Legacy named presets (low|medium|high) are still accepted for back-compat.
 resolve_query_tuning() {
     case "$QUERY_TUNING" in
-        low)    PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
-        medium) PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
-        high)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000; BOOTSTRAP_BUFFER_SIZE=100000 ;;
+        low|1000)      PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
+        medium|10000)  PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
+        high|100000)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000; BOOTSTRAP_BUFFER_SIZE=100000 ;;
         *)
-            log "ERROR: invalid QUERY_TUNING='$QUERY_TUNING' (expected low|medium|high)"
+            log "ERROR: invalid QUERY_TUNING='$QUERY_TUNING' (expected 1000|10000|100000)"
             return 1
             ;;
     esac
     log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE"
+}
+
+# Resolve the QUERIES selector into SELECTED_QUERIES (space list) and
+# SELECTED_QUERIES_JSON (a jq array), validated against the ids in the component
+# queries file. Also narrows TEST_REACTION_IDS (test_reaction_id == query id) so
+# the poll/snapshot loops only track reactions that are actually deployed.
+resolve_selected_queries() {
+    local qfile="$COMPONENTS_DIR/$SERVER_QUERIES_FILE"
+    [[ -s "$qfile" ]] || { log "ERROR: queries file missing: $qfile"; return 1; }
+    local known
+    known="$(jq -r '.[].id' "$qfile")"
+
+    local requested="${QUERIES//,/ }"
+    [[ -n "${requested// }" ]] || requested="$known"   # empty selector = all
+
+    local sel=() q k found
+    for q in $requested; do
+        found=false
+        for k in $known; do [[ "$q" == "$k" ]] && found=true && break; done
+        if [[ "$found" != "true" ]]; then
+            log "ERROR: unknown query '$q' (known: $(echo "$known" | tr '\n' ' '))"
+            return 1
+        fi
+        case " ${sel[*]:-} " in *" $q "*) ;; *) sel+=("$q") ;; esac
+    done
+    (( ${#sel[@]} > 0 )) || { log "ERROR: QUERIES selected no queries"; return 1; }
+
+    SELECTED_QUERIES="${sel[*]}"
+    SELECTED_QUERIES_JSON="$(printf '%s\n' "${sel[@]}" | jq -R . | jq -sc .)"
+    TEST_REACTION_IDS="$SELECTED_QUERIES"
+    log "Selected queries: [$SELECTED_QUERIES] (of: $(echo "$known" | tr '\n' ' '))"
 }
 
 # Select the committed base server yaml from the two INDEPENDENT instance-config
@@ -509,9 +784,11 @@ resolve_bootstrap_preset() {
 # scale the graph) AND transport (http vs grpc dispatch produces different
 # result ordering/serialization -- confirmed: the committed OFF-scenario
 # baselines differ between config.http.json and config.json/grpc_adaptive).
-# Transport is inferred from the TEST_CFG_SRC basename (adaptive vs standard
-# share the same baseline per transport -- confirmed on the off scenario, where
-# config.json and config.grpc_adaptive.json carry identical committed SHAs).
+# Transport is inferred from the TEST_CFG_SRC basename. grpc adaptive/standard
+# share one baseline per the off-scenario check (config.json and
+# config.grpc_adaptive.json carry identical committed SHAs), but http_adaptive
+# does NOT share http_standard's baseline: its both-sided batching coalesces
+# results into a distinct (still deterministic) hash, so it is its own transport.
 # Add a row below once a preset/transport combo has a CI-confirmed SHA pair;
 # until then (or via BOOTSTRAP_BASELINE_MAIN/_AGG override) the preset stays in
 # compute-and-report mode so an unconfirmed baseline can never fail the run.
@@ -519,6 +796,10 @@ resolve_bootstrap_baseline() {
     BS_TRANSPORT="grpc"
     case "$(basename "$TEST_CFG_SRC")" in
         config.http.json) BS_TRANSPORT="http" ;;
+        # http_adaptive's both-sided batching coalesces results into a distinct
+        # (still deterministic) hash, so it does NOT share http_standard's
+        # baseline -- it gets its own transport bucket.
+        config.http_adaptive.json) BS_TRANSPORT="http_adaptive" ;;
     esac
     BS_BASELINE_MAIN="${BOOTSTRAP_BASELINE_MAIN:-}"
     BS_BASELINE_AGG="${BOOTSTRAP_BASELINE_AGG:-}"
@@ -532,6 +813,10 @@ resolve_bootstrap_baseline() {
                 BS_BASELINE_MAIN="a5d89950f456b00b802b2659eeb8855afa09bfda222ef9a9c89becef301b4fa5"
                 BS_BASELINE_AGG="aaa6e7bc9e2f8ed07014b4ded3656816ba063b45abbdd252a49d790255fef556"
                 ;;
+            10k:http_adaptive)
+                BS_BASELINE_MAIN="b2e307d623e514339a596389aa08d0d7fdb206fd4942143beb507c052152b5d6"
+                BS_BASELINE_AGG="4765e5ffc08de76663a7969893df09c7cba818de5940404d985f56806a4f1114"
+                ;;
             100k:http)
                 BS_BASELINE_MAIN="e1ad5640897910d04053f151a491ce5012af77d50f95def9f045859f455f5308"
                 BS_BASELINE_AGG="c2d0c32334d9550b67ab44ad972afb54b4dac6b591a23b4dccad37135a1375af"
@@ -540,6 +825,11 @@ resolve_bootstrap_baseline() {
                 BS_BASELINE_MAIN="490f70250d0d0bb97d4a6cf1a278e90cee084f72777d0958a2ec2cfc25cc2e63"
                 BS_BASELINE_AGG="27986794cd4e79e70cceda8ede79a7ee1af4a3318cad1395a3c720c4e38a3768"
                 ;;
+            100k:http_adaptive)
+                BS_BASELINE_MAIN="490f70250d0d0bb97d4a6cf1a278e90cee084f72777d0958a2ec2cfc25cc2e63"
+                # BS_BASELINE_AGG intentionally left unset until a full-count run
+                # captures the floor-agg SHA for this preset/transport.
+                ;;
             # 1m:http)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
             # 1m:grpc)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
             *) : ;;
@@ -547,6 +837,8 @@ resolve_bootstrap_baseline() {
     fi
     if [[ -n "$BS_BASELINE_MAIN" && -n "$BS_BASELINE_AGG" ]]; then
         log "  determinism baseline: PINNED for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT (missing_baseline=Fail)"
+    elif [[ -n "$BS_BASELINE_MAIN" || -n "$BS_BASELINE_AGG" ]]; then
+        log "  determinism baseline: PARTIAL for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT -- pinned reaction(s) enforced, others compute+report (missing_baseline=Warn)"
     else
         log "  determinism baseline: not yet captured for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT -- compute+report only (missing_baseline=Warn)"
     fi
@@ -585,17 +877,17 @@ patch_bootstrap_preset() {
         | ( .data_store.test_repos[].local_tests[].reactions[]
             | select(.test_reaction_id == "building-comfort-floor-agg").stop_triggers[]
             | select(.kind == "RecordCount").record_count ) = $stopagg
-        # 3. Determinism baseline: pin per (preset, transport) once known (Fail);
-        #    otherwise the bootstrap resultset has no confirmed baseline yet, so
-        #    compute+report only (Warn) rather than fail on an unconfirmed SHA.
+        # 3. Determinism baseline: pin each reaction whose SHA is known. A
+        #    reaction WITH an expected SHA is always compared (mismatch fails),
+        #    so a main-only pin still enforces main. missing_baseline governs
+        #    only reactions with NO expected: Fail once BOTH are pinned,
+        #    otherwise Warn so an unpinned reaction cannot fail the run.
         | ( .data_store.test_repos[].local_tests[].completion_handlers[]
             | select(.kind == "Sha256Determinism") )
-          |= (if ($baseline_main | length) > 0 and ($baseline_agg | length) > 0 then
-                .expected = {"building-comfort": $baseline_main, "building-comfort-floor-agg": $baseline_agg}
-                | .missing_baseline = "Fail"
-              else
-                .expected = {} | .missing_baseline = "Warn"
-              end)
+          |= ( .expected = ( {}
+                  + (if ($baseline_main | length) > 0 then {"building-comfort": $baseline_main} else {} end)
+                  + (if ($baseline_agg  | length) > 0 then {"building-comfort-floor-agg": $baseline_agg} else {} end) )
+               | .missing_baseline = (if ($baseline_main | length) > 0 and ($baseline_agg | length) > 0 then "Fail" else "Warn" end) )
         # 4. Set the PerformanceMetrics bootstrap phase boundary per reaction.
         | ( .test_run_host.test_runs[].reactions[]
             | select(.test_reaction_id == "building-comfort").output_loggers[]
@@ -625,11 +917,47 @@ patch_bootstrap_preset() {
     fi
 }
 
+# Pin every plugin ref in the base server config to $DRASI_PLUGIN_TAG so the
+# server's autoInstall resolves that exact OCI tag (e.g. the nightly plugin tag)
+# from the registry. Refs already carrying an explicit `:tag` are left untouched.
+# No-op when DRASI_PLUGIN_TAG is empty (server resolves latest-compatible).
+pin_plugin_tags() {
+    [[ -n "$DRASI_PLUGIN_TAG" ]] || return 0
+    # Match `  - ref: <value>` where <value> has no colon (untagged) and append
+    # `:<tag>`. `[^[:space:]:]+` stops before any existing `:tag`, so tagged refs
+    # don't match the end-of-line anchor and are preserved verbatim.
+    sed -E "s|^([[:space:]]*-[[:space:]]*ref:[[:space:]]*)([^[:space:]:]+)[[:space:]]*\$|\1\2:${DRASI_PLUGIN_TAG}|" \
+        "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    log "Pinned plugin refs to tag '$DRASI_PLUGIN_TAG':"
+    grep -E '^[[:space:]]*-[[:space:]]*ref:' "$DRASI_CFG_CI" | sed 's/^/  /'
+}
+
+# Point the server's plugin resolver at $DRASI_PLUGIN_REGISTRY by setting the
+# top-level `pluginRegistry` field in the CI config. Short plugin refs
+# (source/http, reaction/log, ...) are then resolved against this registry
+# instead of the built-in default (ghcr.io/drasi-project). Replaces an existing
+# `pluginRegistry:` line if present, otherwise inserts one after `verifyPlugins:`
+# (falling back to `autoInstallPlugins:`). No-op when DRASI_PLUGIN_REGISTRY is
+# empty (server keeps its default registry).
+set_plugin_registry() {
+    [[ -n "$DRASI_PLUGIN_REGISTRY" ]] || return 0
+    if grep -qE '^[[:space:]]*pluginRegistry:' "$DRASI_CFG_CI"; then
+        sed -E "s|^([[:space:]]*)pluginRegistry:.*\$|\1pluginRegistry: ${DRASI_PLUGIN_REGISTRY}|" \
+            "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    else
+        local anchor='verifyPlugins:'
+        grep -qE '^[[:space:]]*verifyPlugins:' "$DRASI_CFG_CI" || anchor='autoInstallPlugins:'
+        sed -E "s|^([[:space:]]*)(${anchor}.*)\$|\1\2\n\1pluginRegistry: ${DRASI_PLUGIN_REGISTRY}|" \
+            "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    fi
+    log "Set plugin registry -> $DRASI_PLUGIN_REGISTRY"
+    grep -E '^[[:space:]]*pluginRegistry:' "$DRASI_CFG_CI" | sed 's/^/  /'
+}
+
 patch_configs() {
     log "Patching empty server config admin port -> $DRASI_ADMIN_PORT"
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
     grep -E '^(host|port):' "$DRASI_CFG_CI"
-
     # If built plugins already sit next to the server binary (bin/plugins/*.dylib
     # or *.so), disable autoInstallPlugins so the server loads them DIRECTLY and
     # skips re-resolving + cosign-verifying every plugin from ghcr.io on each
@@ -650,6 +978,9 @@ patch_configs() {
         sed -E 's/^autoInstallPlugins:[[:space:]]*true[[:space:]]*$/autoInstallPlugins: false/' \
             "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
     fi
+
+    pin_plugin_tags
+    set_plugin_registry
 
     log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \
@@ -677,6 +1008,50 @@ patch_configs() {
     printf '%s\n' "$patched" > "$TEST_CFG_CI"
     if jq -e '[.data_store.test_repos[]?.local_tests[]?.sources[]?.source_change_dispatchers[]? | select(.adaptive_enabled == true)] | length > 0' "$TEST_CFG_CI" >/dev/null 2>&1; then
         log "Applied batching preset '$BATCHING_SPEED' to adaptive gRPC dispatcher (batch_size=$BATCH_SIZE, batch_timeout_ms=$BATCH_WAIT_MS)"
+    fi
+
+    # Strip JsonlFile logging unless LOG_JSONL=1. There are TWO JsonlFile sinks,
+    # both pure per-record disk I/O for a forensic audit trail:
+    #   1. reaction output_loggers  -> writes every reaction record (egress side)
+    #   2. source_change_dispatchers -> writes every dispatched source change
+    #      event (ingress side, the source_change_log/*.jsonl files)
+    # Determinism + record-count verification are computed independently of both,
+    # so removing them keeps the loss/determinism gates intact while recovering
+    # throughput (the ingress sink in particular is disk I/O in the hot dispatch
+    # path -- ~100k writes per run -- that perf_sweep does not do).
+    if [[ "$LOG_JSONL" != "1" ]]; then
+        patched="$(jq '
+            (.test_run_host.test_runs[]?.reactions[]?.output_loggers) |=
+                (map(select(.kind != "JsonlFile")) // [])
+            | (.data_store.test_repos[]?.local_tests[]?.sources[]?.source_change_dispatchers) |=
+                (map(select(.kind != "JsonlFile")) // [])
+        ' "$TEST_CFG_CI")"
+        printf '%s\n' "$patched" > "$TEST_CFG_CI"
+        log "JSONL logging disabled (LOG_JSONL=0): dropped reaction + source-dispatcher JsonlFile sinks; determinism + record-count checks unaffected"
+    else
+        log "JSONL logging enabled (LOG_JSONL=1)"
+    fi
+
+    # Drop any deselected query (QUERIES) from the test-service config: remove its
+    # source subscription, its data_store reaction, and its test_run_host reaction
+    # so the test-service neither dispatches its feed nor waits on a reaction the
+    # server won't run. test_reaction_id == query id; subscribers carry query_id.
+    # (Leftover entries for the dropped query in the Sha256Determinism `expected`
+    # map are harmless: the handler only looks up reactions it actually saw.)
+    patched="$(jq --argjson sel "$SELECTED_QUERIES_JSON" '
+        ( .data_store.test_repos[]?.local_tests[]?.sources[]?
+            | select(.subscribers != null).subscribers )
+          |= map(select(.query_id as $q | $sel | index($q)))
+        | ( .data_store.test_repos[]?.local_tests[]?.reactions )
+          |= map(select(.test_reaction_id as $q | $sel | index($q)))
+        | ( .test_run_host.test_runs[]?.reactions )
+          |= map(select(.test_reaction_id as $q | $sel | index($q)))
+    ' "$TEST_CFG_CI")"
+    printf '%s\n' "$patched" > "$TEST_CFG_CI"
+    local all_queries
+    all_queries="$(jq -r '[.[].id] | join(" ")' "$COMPONENTS_DIR/$SERVER_QUERIES_FILE")"
+    if [[ "$SELECTED_QUERIES" != "$all_queries" ]]; then
+        log "Query selection: kept [$SELECTED_QUERIES]; dropped deselected reactions/subscriptions from test-service config"
     fi
 }
 
@@ -723,7 +1098,7 @@ start_drasi_server() {
     mkdir -p "$WORK_DIR/data"
     (
         cd "$WORK_DIR"
-        "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
+        exec "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
             > "$LOG_DIR/drasi-server.log" 2>&1
     ) &
     DRASI_PID=$!
@@ -827,6 +1202,29 @@ check_plugins() {
     log "       Needed: source '$src_kind', reactions [${rxn_kinds[*]}]."
     log "       API reported: sources=[${have_sources}] reactions=[${have_reactions}];"
     log "       server log had no matching '[cdylib] <type>: <kind>' load lines either."
+
+    # The most common cause on CI is an ABI mismatch: the cdylib loader requires
+    # the plugin's FFI SDK major.minor to equal the host's. That happens when the
+    # pinned plugin tag was built from a different drasi-core commit than the one
+    # the server links (e.g. DRASI_PLUGIN_TAG's nightly publish predates a
+    # breaking FFI change on DRASI_CORE_REF). Surface it explicitly -- the generic
+    # message below sends people down a completely unrelated path.
+    local mismatches
+    mismatches="$(grep -E 'SDK version mismatch' "$drasi_log" 2>/dev/null | head -n 5)"
+    if [[ -n "$mismatches" ]]; then
+        local plugin_sdk host_sdk
+        plugin_sdk="$(sed -nE 's/.*plugin=([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<< "$mismatches" | head -n1)"
+        host_sdk="$(sed -nE 's/.*host=([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<< "$mismatches" | head -n1)"
+        log ""
+        log "       ROOT CAUSE: plugin/host FFI SDK ABI mismatch (plugin=${plugin_sdk:-?}, host=${host_sdk:-?})."
+        log "       The plugins pinned to tag '${DRASI_PLUGIN_TAG:-<none>}' were built from a different"
+        log "       drasi-core commit than the server links${DRASI_CORE_REF:+ (core ref: $DRASI_CORE_REF)}."
+        log "       Fix: republish that plugin tag from the same drasi-core commit"
+        log "       (or point DRASI_CORE_REF / DRASI_PLUGIN_TAG at matching revisions)."
+        printf '%s\n' "$mismatches" | sed 's/^/[dyn]         /'
+        return 4
+    fi
+
     log "       On darwin-arm64 provide locally-built plugins next to the binary"
     log "       (bin/plugins/*.dylib), or run on a Linux x86_64 host/CI."
     return 3
@@ -842,14 +1240,20 @@ apply_server_components() {
 
     check_plugins "$src_file" "$rxn_file" || return $?
 
-    # Rooms-only bootstrap: apply only the per-room query and its reaction, so
-    # the simple MATCH (r:Room) path runs in isolation (avoids the floor-agg
-    # mid-bootstrap stop -> source backpressure -> stalled startup).
-    local q_select='.[]' r_select='.[]'
+    # Apply only the selected queries (QUERIES) and the reactions that subscribe
+    # solely to selected queries. A reaction referencing any deselected query is
+    # dropped, so a deselected query's reaction is never deployed. Bootstrap
+    # rooms-only further narrows to the per-room query for the isolated
+    # MATCH (r:Room) bootstrap path.
+    local q_select r_select
+    q_select='.[] | select([.id] - $sel | length == 0)'
+    r_select='.[] | select(((.queries // []) - $sel) | length == 0)'
     if [[ "${BOOTSTRAP_ENABLED:-false}" == "true" && "${BOOTSTRAP_ROOMS_ONLY:-true}" == "true" ]]; then
         q_select='.[] | select(.id == "building-comfort")'
         r_select='.[] | select(.id == "building-comfort-out")'
         log "Bootstrap rooms-only: applying only query 'building-comfort' + reaction 'building-comfort-out'"
+    else
+        log "Applying selected queries [$SELECTED_QUERIES] and their reactions"
     fi
 
     # Order matters: source before queries that subscribe to it, queries
@@ -901,7 +1305,7 @@ apply_server_components() {
             | .bootstrapBufferSize = $bb')"
         log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         drasi_apply "/queries" "$q_body"
-    done < <(jq -c "$q_select" "$qry_file")
+    done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$q_select" "$qry_file")
 
     log "Applying reactions from $SERVER_REACTIONS_FILE"
     local r
@@ -910,7 +1314,7 @@ apply_server_components() {
         local rid; rid="$(printf '%s' "$r" | jq -r '.id')"
         log "  -> reaction $rid"
         drasi_apply "/reactions" "$r"
-    done < <(jq -c "$r_select" "$rxn_file")
+    done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$r_select" "$rxn_file")
 
     log "Component snapshot:"
     curl -fsS "${DRASI_API}/sources"   | jq -c '.' || true
@@ -927,13 +1331,23 @@ apply_server_components() {
 }
 
 start_test_service() {
-    log "Building & starting test-service"
-    (
-        cd "$REPO_ROOT/e2e-test-framework"
-        RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
-        cargo run --release --manifest-path "test-service/Cargo.toml" -- --config "$TEST_CFG_CI" \
-            > "$LOG_DIR/test-service.log" 2>&1
-    ) &
+    if [[ -n "${TEST_SERVICE_BIN:-}" ]]; then
+        log "Starting pre-built test-service: $TEST_SERVICE_BIN"
+        (
+            cd "$REPO_ROOT/e2e-test-framework"
+            export RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error'
+            exec "$TEST_SERVICE_BIN" --config "$TEST_CFG_CI" \
+                > "$LOG_DIR/test-service.log" 2>&1
+        ) &
+    else
+        log "Building & starting test-service"
+        (
+            cd "$REPO_ROOT/e2e-test-framework"
+            RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
+            cargo run --release --manifest-path "test-service/Cargo.toml" -- --config "$TEST_CFG_CI" \
+                > "$LOG_DIR/test-service.log" 2>&1
+        ) &
+    fi
     SERVICE_PID=$!
     log "test-service pid=$SERVICE_PID"
     if ! wait_for_port 127.0.0.1 "$TEST_SERVICE_PORT" "test-service API" 600; then
@@ -1073,15 +1487,12 @@ copy_determinism_verdict() {
     fi
 }
 
-# Render a markdown summary into $GITHUB_STEP_SUMMARY so it shows up on the
-# workflow run page. Local runs (no GITHUB_STEP_SUMMARY env var) skip this.
+# Render a reusable markdown summary and publish it on GitHub Actions when
+# GITHUB_STEP_SUMMARY is available.
 write_step_summary() {
-    if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
-        return 0
-    fi
-
-    local out="$GITHUB_STEP_SUMMARY"
+    local out="$ARTIFACTS_DIR/summary.md"
     local drasi_source="${DRASI_BUILD_SOURCE:-unknown}"
+    local plugin_tag="${DRASI_PLUGIN_TAG:-<latest-compatible>}"
     local server_version
     server_version="$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n1 || echo unknown)"
 
@@ -1092,6 +1503,7 @@ write_step_summary() {
         echo "- transport: dynamic (bare drasi-server, components applied via REST)"
         echo "- drasi-server source: \`$drasi_source\`"
         echo "- drasi-server binary: \`$server_version\`"
+        echo "- plugin tag: \`$plugin_tag\`"
         echo "- source component: \`$SERVER_SOURCE_FILE\` (ingress port $DRASI_SOURCE_PORT)"
         echo "- reactions component: \`$SERVER_REACTIONS_FILE\`"
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
@@ -1160,12 +1572,17 @@ write_step_summary() {
             jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
             echo '```'
         fi
-    } >> "$out"
+    } > "$out"
+
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        cat "$out" >> "$GITHUB_STEP_SUMMARY"
+    fi
 }
 
 download_drasi_server
 resolve_batching_preset
 resolve_query_tuning
+resolve_selected_queries
 resolve_server_config
 resolve_bootstrap_preset
 patch_configs

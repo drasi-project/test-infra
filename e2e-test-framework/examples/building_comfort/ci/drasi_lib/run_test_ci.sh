@@ -45,6 +45,7 @@
 #   TIMEOUT_SECS          Max seconds to wait for all reactions to Stop.
 #                         Default: 1800
 #   POLL_INTERVAL_SECS    Seconds between status polls. Default: 10
+#   TEST_SERVICE_BIN      Pre-built test-service binary (otherwise cargo run)
 #   ARTIFACTS_DIR         Where to copy outputs. Default: ./ci_artifacts
 #   WORK_DIR              Scratch dir. Default: ./.ci_work
 
@@ -139,13 +140,23 @@ patch_configs() {
 }
 
 start_test_service() {
-    log "Building & starting test-service"
-    (
-        cd "$REPO_ROOT/e2e-test-framework"
-        RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
-        cargo run --release --manifest-path "test-service/Cargo.toml" -- --config "$TEST_CFG_CI" \
-            > "$LOG_DIR/test-service.log" 2>&1
-    ) &
+    if [[ -n "${TEST_SERVICE_BIN:-}" ]]; then
+        log "Starting pre-built test-service: $TEST_SERVICE_BIN"
+        (
+            cd "$REPO_ROOT/e2e-test-framework"
+            export RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error'
+            exec "$TEST_SERVICE_BIN" --config "$TEST_CFG_CI" \
+                > "$LOG_DIR/test-service.log" 2>&1
+        ) &
+    else
+        log "Building & starting test-service"
+        (
+            cd "$REPO_ROOT/e2e-test-framework"
+            RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
+            cargo run --release --manifest-path "test-service/Cargo.toml" -- --config "$TEST_CFG_CI" \
+                > "$LOG_DIR/test-service.log" 2>&1
+        ) &
+    fi
     SERVICE_PID=$!
     log "test-service pid=$SERVICE_PID"
     if ! wait_for_port 127.0.0.1 "$TEST_SERVICE_PORT" "test-service API" 600; then
@@ -355,11 +366,7 @@ verify_determinism_inline() {
 }
 
 write_step_summary() {
-    if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
-        return 0
-    fi
-
-    local out="$GITHUB_STEP_SUMMARY"
+    local out="$ARTIFACTS_DIR/summary.md"
 
     {
         echo "## E2E test summary — \`$TEST_RUN_ID\`"
@@ -423,7 +430,11 @@ write_step_summary() {
             jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
             echo '```'
         fi
-    } >> "$out"
+    } > "$out"
+
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        cat "$out" >> "$GITHUB_STEP_SUMMARY"
+    fi
 }
 
 patch_configs

@@ -1,0 +1,732 @@
+# Native building-comfort test on an ephemeral fixed-SKU Azure VM.
+
+name: Building comfort Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: "Azure region for the test VM."
+        required: true
+        default: "westus3"
+      vm_size:
+        description: "Fixed 4-vCPU Azure VM SKU. All three are 4 vCPU; they vary by CPU generation (single-core performance), which is the bottleneck for this single-threaded pipeline. v3=Cascade Lake (2019, weakest), v5=Ice Lake (2021), v6=Emerald Rapids (2023, strongest)."
+        required: true
+        type: choice
+        options:
+          - Standard_D4s_v3
+          - Standard_D4s_v5
+          - Standard_D4s_v6
+        default: Standard_D4s_v6
+      os_disk_type:
+        description: "OS disk type for the ephemeral VM."
+        required: true
+        type: choice
+        options:
+          - Premium_LRS
+          - StandardSSD_LRS
+          - Standard_LRS
+        default: Premium_LRS
+      os_disk_size_gb:
+        description: "OS disk size in GB."
+        required: true
+        type: choice
+        options:
+          - "64"
+          - "128"
+          - "256"
+          - "512"
+        default: "128"
+
+      # --- Variants (one checkbox each; GitHub renders booleans as checkboxes) ---
+      drasi_lib:
+        description: "drasi_lib (embedded, in-process)"
+        type: boolean
+        default: true
+      http_standard:
+        description: "http_standard (HTTP, REST-applied)"
+        type: boolean
+        default: true
+      http_adaptive:
+        description: "http_adaptive (HTTP, server adaptiveEnabled)"
+        type: boolean
+        default: false
+      grpc_standard:
+        description: "grpc_standard (gRPC, REST-applied)"
+        type: boolean
+        default: true
+      grpc_adaptive:
+        description: "grpc_adaptive (gRPC adaptive dispatcher)"
+        type: boolean
+        default: false
+
+      # --- Query selection (deselect to drop that query AND its subscribing
+      #     reaction from both the server and the test-service). Deselect one
+      #     to isolate a single query's throughput. ---
+      query_building_comfort:
+        description: "Run the per-room 'building-comfort' query"
+        type: boolean
+        default: true
+      query_floor_agg:
+        description: "Run the 'building-comfort-floor-agg' aggregate query"
+        type: boolean
+        default: true
+
+      # --- Config axes (applied to whichever variants run) ---
+      batching_speed:
+        description: "Adaptive batch size (max records per batch; affects adaptive variants only)."
+        type: choice
+        options:
+          - "5000"
+          - "10000"
+          - "50000"
+        default: "10000"
+      query_tuning:
+        description: "Query capacity: priorityQueueCapacity (drives priority/dispatch/bootstrap buffers)."
+        type: choice
+        options:
+          - "1000"
+          - "10000"
+          - "100000"
+        default: "10000"
+      persist_index:
+        description: "Use the built-in RocksDB persistent index (persistIndex)."
+        type: boolean
+        default: false
+      state_store:
+        description: "Use the redb plugin state store (stateStore)."
+        type: boolean
+        default: false
+      bootstrap_size:
+        description: "Large-bootstrap preset (rooms). Scales the initial graph so bootstrap load is measured separately from steady-state."
+        type: choice
+        options:
+          - "off"
+          - 10k
+          - 100k
+          - 1m
+        default: "off"
+
+      # --- Run settings ---
+      drasi_server_version:
+        description: "drasi-server release tag (e.g. v0.1.5). Only used when repo/ref below are both empty. Empty = latest."
+        required: false
+        default: ""
+      # Source-build escape hatch. Setting EITHER of the next two builds
+      # drasi-server from source on the VM instead of downloading a release;
+      # a repo without a ref builds that repo's default branch.
+      drasi_server_repo:
+        description: "drasi-server repo (owner/name) to BUILD from source. Empty = drasi-project/drasi-server."
+        required: false
+        default: ""
+      drasi_server_ref:
+        description: "drasi-server branch/tag/SHA to BUILD from source. Empty with a repo set = that repo's default branch; empty with no repo = download a release."
+        required: false
+        default: ""
+      timeout_minutes:
+        description: "Max minutes to wait for the test to finish."
+        required: false
+        default: "30"
+      # --- Plugin source overrides ---
+      # Empty on scheduled runs -> the server uses its built-in defaults
+      # (registry ghcr.io/drasi-project, latest-compatible tag). Set these to
+      # pull the source/reaction plugins from a fork's package registry and/or a
+      # specific tag (e.g. a work-in-progress build) without editing the config.
+      plugin_registry:
+        description: "OCI registry for short plugin refs. Empty = server default (ghcr.io/drasi-project)."
+        required: false
+        default: ""
+      plugin_tag:
+        description: "OCI tag to pin every plugin ref to. Empty = untagged (latest-compatible)."
+        required: false
+        default: ""
+  schedule:
+    # 07:00 UTC — D4s_v6 with the full variant set.
+    - cron: "0 7 * * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-resource-group-drasi-e2e-test-infra
+  cancel-in-progress: false
+
+env:
+  AZURE_RESOURCE_GROUP: drasi-e2e-test-infra
+  BICEP_FILE: infra/azure/test-vm/main.bicep
+  ADMIN_USERNAME: githubrunner
+  LOCAL_ARTIFACTS_DIR: ${{ github.workspace }}/azure-test-artifacts
+  REMOTE_ROOT: /opt/drasi-test
+  PERF_PROFILE_ID: ""
+  VM_PUBLIC_IP: ""
+  TEST_EXIT_CODE: ""
+
+jobs:
+  test:
+    name: building_comfort / Azure VM
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Record start time
+        run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Log in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve test inputs
+        env:
+          IN_LOCATION: ${{ inputs.location }}
+          IN_VM_SIZE: ${{ inputs.vm_size }}
+          IN_OS_DISK_TYPE: ${{ inputs.os_disk_type }}
+          IN_OS_DISK_SIZE_GB: ${{ inputs.os_disk_size_gb }}
+          V_DRASI_LIB: ${{ inputs.drasi_lib }}
+          V_HTTP_STD: ${{ inputs.http_standard }}
+          V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
+          V_GRPC_STD: ${{ inputs.grpc_standard }}
+          V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
+          V_Q_MAIN: ${{ inputs.query_building_comfort }}
+          V_Q_AGG: ${{ inputs.query_floor_agg }}
+          IN_SERVER_VERSION: ${{ inputs.drasi_server_version }}
+          IN_SERVER_REPO: ${{ inputs.drasi_server_repo }}
+          IN_SERVER_REF: ${{ inputs.drasi_server_ref }}
+          IN_BATCHING_SPEED: ${{ inputs.batching_speed }}
+          IN_QUERY_TUNING: ${{ inputs.query_tuning }}
+          IN_PERSIST_INDEX: ${{ inputs.persist_index }}
+          IN_STATE_STORE: ${{ inputs.state_store }}
+          IN_BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
+          IN_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+          IN_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
+          IN_PLUGIN_TAG: ${{ inputs.plugin_tag }}
+        run: |
+          set -euo pipefail
+
+          IN_LOCATION="${IN_LOCATION:-westus3}"
+          IN_VM_SIZE="${IN_VM_SIZE:-Standard_D4s_v6}"
+
+          variant_arr=()
+          if [[ -z "$V_DRASI_LIB$V_HTTP_STD$V_HTTP_ADAPTIVE$V_GRPC_STD$V_GRPC_ADAPTIVE" ]]; then
+            # Scheduled runs have no workflow_dispatch inputs.
+            variant_arr=(drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive)
+          else
+            [[ "$V_DRASI_LIB" == "true" ]] && variant_arr+=(drasi_lib)
+            [[ "$V_HTTP_STD" == "true" ]] && variant_arr+=(http_standard)
+            [[ "$V_HTTP_ADAPTIVE" == "true" ]] && variant_arr+=(http_adaptive)
+            [[ "$V_GRPC_STD" == "true" ]] && variant_arr+=(grpc_standard)
+            [[ "$V_GRPC_ADAPTIVE" == "true" ]] && variant_arr+=(grpc_adaptive)
+          fi
+          (( ${#variant_arr[@]} > 0 )) || {
+            echo "ERROR: no variants selected. Tick at least one checkbox." >&2
+            exit 1
+          }
+          variants="${variant_arr[*]}"
+
+          # Query selection. Empty (scheduled runs, no dispatch inputs) = both.
+          # Deselecting a query drops it and its subscribing reaction.
+          queries_arr=()
+          if [[ -z "$V_Q_MAIN$V_Q_AGG" ]]; then
+            queries_arr=(building-comfort building-comfort-floor-agg)
+          else
+            [[ "$V_Q_MAIN" == "true" ]] && queries_arr+=(building-comfort)
+            [[ "$V_Q_AGG" == "true" ]] && queries_arr+=(building-comfort-floor-agg)
+          fi
+          (( ${#queries_arr[@]} > 0 )) || {
+            echo "ERROR: no queries selected. Tick at least one query." >&2
+            exit 1
+          }
+          queries="${queries_arr[*]}"
+
+          bootstrap_size="${IN_BOOTSTRAP_SIZE:-off}"
+          timeout_minutes="${IN_TIMEOUT_MINUTES:-30}"
+          os_disk_type="${IN_OS_DISK_TYPE:-Premium_LRS}"
+          os_disk_size_gb="${IN_OS_DISK_SIZE_GB:-128}"
+          [[ "$bootstrap_size" == "off" ]] && bootstrap_size=""
+
+          [[ "$timeout_minutes" =~ ^[1-9][0-9]*$ ]] || {
+            echo "Invalid timeout_minutes: $timeout_minutes" >&2
+            exit 1
+          }
+          [[ -z "$IN_SERVER_VERSION" || "$IN_SERVER_VERSION" =~ ^[A-Za-z0-9._-]+$ ]] || {
+            echo "drasi_server_version contains unsupported characters" >&2
+            exit 1
+          }
+          [[ -z "$IN_SERVER_REPO" || "$IN_SERVER_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || {
+            echo "drasi_server_repo must be of the form owner/name" >&2
+            exit 1
+          }
+          [[ -z "$IN_SERVER_REF" || "$IN_SERVER_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || {
+            echo "drasi_server_ref contains unsupported characters" >&2
+            exit 1
+          }
+          case "$os_disk_type" in
+            Premium_LRS|StandardSSD_LRS|Standard_LRS) ;;
+            *)
+              echo "Unsupported OS disk type: $os_disk_type" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$os_disk_size_gb" =~ ^(64|128|256|512)$ ]] || {
+            echo "Unsupported OS disk size: $os_disk_size_gb" >&2
+            exit 1
+          }
+
+          resource_prefix="drasiperf-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          deployment_name="test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image_version="$(
+            az vm image show \
+              --location "$IN_LOCATION" \
+              --urn Canonical:ubuntu-24_04-lts:server:latest \
+              --query name \
+              --output tsv
+          )"
+          [[ "$image_version" =~ ^[0-9.]+$ ]] || {
+            echo "Could not resolve the stable Ubuntu 24.04 image in $IN_LOCATION" >&2
+            exit 1
+          }
+
+          az vm image show \
+            --location "$IN_LOCATION" \
+            --urn "Canonical:ubuntu-24_04-lts:server:$image_version" \
+            --output none
+          echo "Resolved Ubuntu image: Canonical:ubuntu-24_04-lts:server:$image_version"
+
+          sku_json="$(
+            az vm list-skus \
+              --location "$IN_LOCATION" \
+              --resource-type virtualMachines \
+              --size "$IN_VM_SIZE" \
+              --all \
+              --query '[0]' \
+              --output json
+          )"
+          [[ "$sku_json" != "null" ]] || {
+            echo "VM SKU $IN_VM_SIZE is not offered in $IN_LOCATION" >&2
+            exit 1
+          }
+          restriction_count="$(jq '.restrictions | length' <<< "$sku_json")"
+          if (( restriction_count > 0 )); then
+            echo "VM SKU $IN_VM_SIZE is restricted for this subscription in $IN_LOCATION:" >&2
+            jq '.restrictions' <<< "$sku_json" >&2
+            exit 1
+          fi
+          echo "Validated VM SKU availability: $IN_VM_SIZE in $IN_LOCATION"
+
+          sku_family="$(jq -r '.family' <<< "$sku_json")"
+          required_cores="$(jq -r '[.capabilities[] | select(.name == "vCPUs")][0].value' <<< "$sku_json")"
+          quota_json="$(
+            az vm list-usage \
+              --location "$IN_LOCATION" \
+              --query "[?name.value=='$sku_family'] | [0]" \
+              --output json
+          )"
+          [[ "$quota_json" != "null" ]] || {
+            echo "Could not resolve quota $sku_family in $IN_LOCATION" >&2
+            exit 1
+          }
+          quota_current="$(jq -r '.currentValue' <<< "$quota_json")"
+          quota_limit="$(jq -r '.limit' <<< "$quota_json")"
+          quota_available=$(( quota_limit - quota_current ))
+          if (( quota_available < required_cores )); then
+            minimum_limit=$(( quota_current + required_cores ))
+            echo "Insufficient $sku_family quota in $IN_LOCATION." >&2
+            echo "Current usage: $quota_current cores; limit: $quota_limit cores." >&2
+            echo "The selected $IN_VM_SIZE requires $required_cores cores." >&2
+            echo "Request a quota limit of at least $minimum_limit cores." >&2
+            exit 1
+          fi
+          echo "Validated VM quota: $quota_available available $sku_family cores; $required_cores required"
+
+          {
+            echo "LOCATION=$IN_LOCATION"
+            echo "VM_SIZE=$IN_VM_SIZE"
+            echo "OS_DISK_TYPE=$os_disk_type"
+            echo "OS_DISK_SIZE_GB=$os_disk_size_gb"
+            echo "PERF_PROFILE_ID=azure-ephemeral-${IN_VM_SIZE}-${os_disk_type}-${os_disk_size_gb}gb"
+            echo "IMAGE_VERSION=$image_version"
+            echo "VARIANTS=$variants"
+            echo "QUERIES=$queries"
+            echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"
+            echo "DRASI_SERVER_REPO=$IN_SERVER_REPO"
+            echo "DRASI_SERVER_REF=$IN_SERVER_REF"
+            echo "BATCHING_SPEED=${IN_BATCHING_SPEED:-10000}"
+            echo "QUERY_TUNING=${IN_QUERY_TUNING:-10000}"
+            echo "PERSIST_INDEX=${IN_PERSIST_INDEX:-false}"
+            echo "STATE_STORE=${IN_STATE_STORE:-false}"
+            echo "BOOTSTRAP_SIZE=$bootstrap_size"
+            echo "TIMEOUT_SECS=$(( timeout_minutes * 60 ))"
+            echo "DRASI_PLUGIN_REGISTRY=$IN_PLUGIN_REGISTRY"
+            echo "DRASI_PLUGIN_TAG=$IN_PLUGIN_TAG"
+            echo "RESOURCE_PREFIX=$resource_prefix"
+            echo "DEPLOYMENT_NAME=$deployment_name"
+            echo "VM_NAME=${resource_prefix}-vm"
+            echo "NIC_NAME=${resource_prefix}-nic"
+            echo "PUBLIC_IP_NAME=${resource_prefix}-pip"
+            echo "NSG_NAME=${resource_prefix}-nsg"
+            echo "VNET_NAME=${resource_prefix}-vnet"
+          } >> "$GITHUB_ENV"
+
+      - name: Ensure Azure resource group
+        run: |
+          set -euo pipefail
+          az group create \
+            --name "$AZURE_RESOURCE_GROUP" \
+            --location "$LOCATION" \
+            --output none
+
+      - name: Generate ephemeral SSH key
+        run: |
+          set -euo pipefail
+          ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/test_ssh"
+          echo "SSH_PRIVATE_KEY=$RUNNER_TEMP/test_ssh" >> "$GITHUB_ENV"
+
+      - name: Deploy test VM
+        run: |
+          set -euo pipefail
+          controller_ip="$(curl -fsSL --retry 3 https://api.ipify.org)"
+          [[ "$controller_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Could not resolve the GitHub runner IPv4 address" >&2
+            exit 1
+          }
+
+          az deployment group create \
+            --name "$DEPLOYMENT_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file "$BICEP_FILE" \
+            --parameters \
+              resourcePrefix="$RESOURCE_PREFIX" \
+              location="$LOCATION" \
+              vmSize="$VM_SIZE" \
+              osDiskSizeGB="$OS_DISK_SIZE_GB" \
+              osDiskStorageAccountType="$OS_DISK_TYPE" \
+              imageVersion="$IMAGE_VERSION" \
+              adminUsername="$ADMIN_USERNAME" \
+              sshPublicKey="$(cat "$SSH_PRIVATE_KEY.pub")" \
+              sshSourceAddress="$controller_ip/32" \
+            --only-show-errors \
+            --output json > "$RUNNER_TEMP/deployment.json"
+
+          public_ip="$(jq -r '.properties.outputs.publicIpAddress.value' "$RUNNER_TEMP/deployment.json")"
+          [[ -n "$public_ip" && "$public_ip" != "null" ]] || {
+            echo "The deployment did not return a public IP address" >&2
+            exit 1
+          }
+          echo "VM_PUBLIC_IP=$public_ip" >> "$GITHUB_ENV"
+
+      - name: Wait for SSH
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if ssh \
+              -i "$SSH_PRIVATE_KEY" \
+              -o BatchMode=yes \
+              -o ConnectTimeout=5 \
+              -o StrictHostKeyChecking=accept-new \
+              "$ADMIN_USERNAME@$VM_PUBLIC_IP" true; then
+              exit 0
+            fi
+            echo "Waiting for SSH ($attempt/60)"
+            sleep 10
+          done
+          echo "Timed out waiting for SSH on $VM_PUBLIC_IP" >&2
+          exit 1
+
+      - name: Package test workspace
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --output="$RUNNER_TEMP/test-infra.tar.gz" "$GITHUB_SHA"
+
+          {
+            printf 'VARIANTS=%q\n' "$VARIANTS"
+            printf 'QUERIES=%q\n' "$QUERIES"
+            printf 'DRASI_SERVER_VERSION=%q\n' "$DRASI_SERVER_VERSION"
+            printf 'DRASI_SERVER_REPO=%q\n' "$DRASI_SERVER_REPO"
+            printf 'DRASI_SERVER_REF=%q\n' "$DRASI_SERVER_REF"
+            printf 'BATCHING_SPEED=%q\n' "$BATCHING_SPEED"
+            printf 'QUERY_TUNING=%q\n' "$QUERY_TUNING"
+            printf 'PERSIST_INDEX=%q\n' "$PERSIST_INDEX"
+            printf 'STATE_STORE=%q\n' "$STATE_STORE"
+            printf 'BOOTSTRAP_SIZE=%q\n' "$BOOTSTRAP_SIZE"
+            printf 'TIMEOUT_SECS=%q\n' "$TIMEOUT_SECS"
+            printf 'DRASI_PLUGIN_REGISTRY=%q\n' "$DRASI_PLUGIN_REGISTRY"
+            printf 'DRASI_PLUGIN_TAG=%q\n' "$DRASI_PLUGIN_TAG"
+            printf 'PERF_PROFILE_ID=%q\n' "$PERF_PROFILE_ID"
+            printf 'SUITE_WORK_DIR=%q\n' "$REMOTE_ROOT/work"
+            printf 'SUITE_ARTIFACTS_DIR=%q\n' "$REMOTE_ROOT/artifacts"
+            printf 'DRASI_SERVER_BIN=%q\n' "$REMOTE_ROOT/bin/drasi-server"
+          } > "$RUNNER_TEMP/test.env"
+
+      - name: Upload test workspace
+        run: |
+          set -euo pipefail
+          scp \
+            -i "$SSH_PRIVATE_KEY" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            "$RUNNER_TEMP/test-infra.tar.gz" \
+            "$RUNNER_TEMP/test.env" \
+            "$ADMIN_USERNAME@$VM_PUBLIC_IP:/tmp/"
+
+          ssh \
+            -i "$SSH_PRIVATE_KEY" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            "$ADMIN_USERNAME@$VM_PUBLIC_IP" \
+            "sudo mkdir -p '$REMOTE_ROOT/workspace' '$REMOTE_ROOT/artifacts' &&
+             sudo chown -R '$ADMIN_USERNAME:$ADMIN_USERNAME' '$REMOTE_ROOT' &&
+             tar -xzf /tmp/test-infra.tar.gz -C '$REMOTE_ROOT/workspace'"
+
+      - name: Run test
+        run: |
+          set +e
+          ssh \
+            -i "$SSH_PRIVATE_KEY" \
+            -o BatchMode=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o StrictHostKeyChecking=accept-new \
+            "$ADMIN_USERNAME@$VM_PUBLIC_IP" \
+            "bash '$REMOTE_ROOT/workspace/e2e-test-framework/examples/building_comfort/dynamic/run_remote_test.sh' \
+              '$REMOTE_ROOT/workspace' \
+              /tmp/test.env \
+              '$REMOTE_ROOT/artifacts'"
+          test_exit_code=$?
+          if [[ "$test_exit_code" == "255" ]]; then
+            echo "::error::SSH transport failed while running the remote test"
+          fi
+          echo "TEST_EXIT_CODE=$test_exit_code" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Download test artifacts
+        if: always() && env.VM_PUBLIC_IP != ''
+        run: |
+          set +e
+          mkdir -p "$LOCAL_ARTIFACTS_DIR"
+          scp \
+            -i "$SSH_PRIVATE_KEY" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -r \
+            "$ADMIN_USERNAME@$VM_PUBLIC_IP:$REMOTE_ROOT/artifacts/." \
+            "$LOCAL_ARTIFACTS_DIR/"
+
+      # Build the durable per-variant summary records for
+      # drasi-project/test-results, mirroring the non-Azure workflow. The remote
+      # suite writes each variant's artifacts to <LOCAL_ARTIFACTS_DIR>/<variant>/
+      # and a suite-results.jsonl with per-variant exit codes.
+      - name: Build result summaries
+        if: always() && env.VM_PUBLIC_IP != ''
+        env:
+          WORKFLOW_FILE: building-comfort-azure.yml
+          RUNNER_LABEL: ${{ env.PERF_PROFILE_ID }}
+        run: |
+          set -euo pipefail
+          summary_dir="$RUNNER_TEMP/summary"
+          mkdir -p "$summary_dir"
+          results_jsonl="$LOCAL_ARTIFACTS_DIR/suite-results.jsonl"
+
+          for variant in $VARIANTS; do
+            variant_artifacts="$LOCAL_ARTIFACTS_DIR/$variant"
+            if [[ ! -d "$variant_artifacts" ]]; then
+              echo "::warning::no artifacts for variant '$variant'; skipping summary"
+              continue
+            fi
+
+            # Per-variant status from the suite results (exit_code 0 == success).
+            status="failure"
+            if [[ -s "$results_jsonl" ]]; then
+              rc="$(jq -r --arg v "$variant" 'select(.variant == $v) | .exit_code' "$results_jsonl" 2>/dev/null | tail -n1)"
+              [[ "$rc" == "0" ]] && status="success"
+            fi
+
+            python3 .github/scripts/emit_summary.py \
+              --artifacts "$variant_artifacts" \
+              --scenario building_comfort \
+              --variant "$variant" \
+              --job-status "$status" \
+              --output "$summary_dir/building_comfort__${variant}.json"
+          done
+
+      - name: Upload result summary
+        if: always() && env.VM_PUBLIC_IP != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: summary-building_comfort-azure
+          path: ${{ runner.temp }}/summary
+          if-no-files-found: warn
+
+      - name: Publish test summary
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$LOCAL_ARTIFACTS_DIR"
+          summary_file="$LOCAL_ARTIFACTS_DIR/summary.md"
+          combined_summary="$RUNNER_TEMP/building-comfort-summary.md"
+
+          {
+            echo "## Azure test environment"
+            echo
+            echo "| Setting | Value |"
+            echo "| --- | --- |"
+            echo "| Region | \`${LOCATION:-unavailable}\` |"
+            echo "| VM size | \`${VM_SIZE:-unavailable}\` |"
+            echo "| OS disk type | \`${OS_DISK_TYPE:-unavailable}\` |"
+            echo "| OS disk size | \`${OS_DISK_SIZE_GB:-unavailable} GB\` |"
+            echo
+          } > "$combined_summary"
+
+          if [[ -f "$summary_file" ]]; then
+            cat "$summary_file" >> "$combined_summary"
+          else
+            {
+              echo "## Building comfort test"
+              echo
+              echo "No test summary was produced. Check the workflow logs and uploaded artifacts."
+            } >> "$combined_summary"
+          fi
+
+          mv "$combined_summary" "$summary_file"
+          cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: building-comfort-azure-${{ env.PERF_PROFILE_ID }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.LOCAL_ARTIFACTS_DIR }}
+          if-no-files-found: warn
+
+      - name: Verify test result
+        if: always() && env.TEST_EXIT_CODE != ''
+        run: |
+          if [[ "$TEST_EXIT_CODE" != "0" ]]; then
+            echo "The remote test failed with exit code $TEST_EXIT_CODE" >&2
+            exit "$TEST_EXIT_CODE"
+          fi
+
+      - name: Delete per-run Azure resources
+        if: always()
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RESOURCE_PREFIX:-}" ]]; then
+            echo "No per-run resource prefix was created; skipping cleanup"
+            exit 0
+          fi
+
+          if [[ "$(az group exists --name "$AZURE_RESOURCE_GROUP")" != "true" ]]; then
+            echo "Resource group $AZURE_RESOURCE_GROUP does not exist; skipping cleanup"
+            exit 0
+          fi
+
+          delete_resource() {
+            local resource_type="$1"
+            local resource_name="$2"
+            local resource_id=""
+
+            for attempt in $(seq 1 3); do
+              if ! resource_id="$(
+                az resource list \
+                  --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --resource-type "$resource_type" \
+                  --query "[?name=='$resource_name'].id | [0]" \
+                  --output tsv
+              )"; then
+                echo "Could not query $resource_type/$resource_name (attempt $attempt/3)" >&2
+              elif [[ -z "$resource_id" ]]; then
+                echo "$resource_type/$resource_name is already absent"
+                return 0
+              else
+                echo "Deleting $resource_type/$resource_name (attempt $attempt/3)"
+                if az resource delete --ids "$resource_id" &&
+                   az resource wait \
+                     --deleted \
+                     --ids "$resource_id" \
+                     --interval 10 \
+                     --timeout 600; then
+                  return 0
+                fi
+                echo "Deletion attempt failed for $resource_type/$resource_name" >&2
+              fi
+
+              (( attempt < 3 )) && sleep 10
+            done
+
+            return 1
+          }
+
+          # Delete in dependency order. The VM may automatically remove its OS
+          # disk and NIC, so subsequent calls tolerate already-absent resources.
+          delete_resource Microsoft.Compute/virtualMachines "$VM_NAME" || true
+          delete_resource Microsoft.Network/networkInterfaces "$NIC_NAME" || true
+          delete_resource Microsoft.Compute/disks "${RESOURCE_PREFIX}-osdisk" || true
+          delete_resource Microsoft.Network/publicIPAddresses "$PUBLIC_IP_NAME" || true
+          delete_resource Microsoft.Network/virtualNetworks "$VNET_NAME" || true
+          delete_resource Microsoft.Network/networkSecurityGroups "$NSG_NAME" || true
+
+          if az deployment group show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$DEPLOYMENT_NAME" \
+            --output none 2>/dev/null; then
+            if ! az deployment group delete \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$DEPLOYMENT_NAME"; then
+              echo "Could not delete deployment record $DEPLOYMENT_NAME; continuing verification" >&2
+            fi
+          else
+            echo "Deployment record $DEPLOYMENT_NAME is already absent"
+          fi
+
+          remaining_resources=""
+          for attempt in $(seq 1 30); do
+            if ! remaining_resources="$(
+              az resource list \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --query "[?starts_with(name, '$RESOURCE_PREFIX')].id" \
+                --output tsv
+            )"; then
+              if (( attempt == 30 )); then
+                echo "Could not verify Azure resource cleanup after 30 attempts" >&2
+                exit 1
+              fi
+              echo "Could not query Azure resource inventory ($attempt/30); retrying"
+              sleep 10
+              continue
+            fi
+            [[ -z "$remaining_resources" ]] && break
+
+            if (( attempt == 30 )); then
+              echo "Per-run Azure resources remain after cleanup:" >&2
+              printf '%s\n' "$remaining_resources" >&2
+              exit 1
+            fi
+
+            echo "Waiting for Azure resource inventory to reflect deletion ($attempt/30)"
+            sleep 10
+          done
+
+          echo "Deleted and verified all Azure resources for $RESOURCE_PREFIX"
+
+  # Publish the per-variant summaries to drasi-project/test-results, matching the
+  # non-Azure workflow. One job, one commit, one push - see
+  # publish-test-results.yml for why aggregating matters. `always()` so a failed
+  # test run is still recorded.
+  #
+  # Scheduled runs only. The published history is a time series, so every point
+  # has to be comparable: same trigger, same cadence, no operator choosing when
+  # to record. Manual runs exist to try things out and would put unexplained
+  # spikes in the trend, so they are not published. To exercise this path from a
+  # branch, temporarily widen this condition.
+  publish-results:
+    needs: [test]
+    if: always() && github.event_name == 'schedule'
+    uses: ./.github/workflows/publish-test-results.yml
+    secrets:
+      TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

@@ -60,6 +60,18 @@ on:
         type: boolean
         default: false
 
+      # --- Query selection (deselect to drop that query AND its subscribing
+      #     reaction from both the server and the test-service). Deselect one
+      #     to isolate a single query's throughput. ---
+      query_building_comfort:
+        description: "Run the per-room 'building-comfort' query"
+        type: boolean
+        default: true
+      query_floor_agg:
+        description: "Run the 'building-comfort-floor-agg' aggregate query"
+        type: boolean
+        default: true
+
       # --- Config axes (applied to whichever variants run) ---
       batching_speed:
         description: "Adaptive batching speed preset (affects adaptive variants only). All throughput presets flush at 50ms; 'max' = batch_size 10000."
@@ -179,6 +191,8 @@ jobs:
           V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
           V_GRPC_STD: ${{ inputs.grpc_standard }}
           V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
+          V_Q_MAIN: ${{ inputs.query_building_comfort }}
+          V_Q_AGG: ${{ inputs.query_floor_agg }}
           IN_SERVER_VERSION: ${{ inputs.drasi_server_version }}
           IN_SERVER_REPO: ${{ inputs.drasi_server_repo }}
           IN_SERVER_REF: ${{ inputs.drasi_server_ref }}
@@ -212,6 +226,21 @@ jobs:
             exit 1
           }
           variants="${variant_arr[*]}"
+
+          # Query selection. Empty (scheduled runs, no dispatch inputs) = both.
+          # Deselecting a query drops it and its subscribing reaction.
+          queries_arr=()
+          if [[ -z "$V_Q_MAIN$V_Q_AGG" ]]; then
+            queries_arr=(building-comfort building-comfort-floor-agg)
+          else
+            [[ "$V_Q_MAIN" == "true" ]] && queries_arr+=(building-comfort)
+            [[ "$V_Q_AGG" == "true" ]] && queries_arr+=(building-comfort-floor-agg)
+          fi
+          (( ${#queries_arr[@]} > 0 )) || {
+            echo "ERROR: no queries selected. Tick at least one query." >&2
+            exit 1
+          }
+          queries="${queries_arr[*]}"
 
           bootstrap_size="${IN_BOOTSTRAP_SIZE:-off}"
           timeout_minutes="${IN_TIMEOUT_MINUTES:-30}"
@@ -321,6 +350,7 @@ jobs:
             echo "PERF_PROFILE_ID=azure-ephemeral-${IN_VM_SIZE}-${os_disk_type}-${os_disk_size_gb}gb"
             echo "IMAGE_VERSION=$image_version"
             echo "VARIANTS=$variants"
+            echo "QUERIES=$queries"
             echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"
             echo "DRASI_SERVER_REPO=$IN_SERVER_REPO"
             echo "DRASI_SERVER_REF=$IN_SERVER_REF"
@@ -413,6 +443,7 @@ jobs:
 
           {
             printf 'VARIANTS=%q\n' "$VARIANTS"
+            printf 'QUERIES=%q\n' "$QUERIES"
             printf 'DRASI_SERVER_VERSION=%q\n' "$DRASI_SERVER_VERSION"
             printf 'DRASI_SERVER_REPO=%q\n' "$DRASI_SERVER_REPO"
             printf 'DRASI_SERVER_REF=%q\n' "$DRASI_SERVER_REF"

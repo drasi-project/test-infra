@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN_SCRIPT="${RUN_SCRIPT:-$SCRIPT_DIR/../run_variant.sh}"
+
+VARIANTS="${VARIANTS:-drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive}"
+SUITE_WORK_DIR="${SUITE_WORK_DIR:-$SCRIPT_DIR/.test_suite}"
+SUITE_ARTIFACTS_DIR="${SUITE_ARTIFACTS_DIR:-$SCRIPT_DIR/test_artifacts}"
+PERF_PROFILE_ID="${PERF_PROFILE_ID:-unknown}"
+DRASI_SERVER_BIN="${DRASI_SERVER_BIN:-}"
+
+: "${TEST_SERVICE_BIN:?TEST_SERVICE_BIN must point to a pre-built test-service binary}"
+
+read -r -a variant_list <<< "${VARIANTS//,/ }"
+if (( ${#variant_list[@]} == 0 )); then
+    echo "At least one test variant is required" >&2
+    exit 1
+fi
+
+needs_drasi_server=false
+for variant in "${variant_list[@]}"; do
+    if [[ -n "$variant" && "$variant" != "drasi_lib" ]]; then
+        needs_drasi_server=true
+        break
+    fi
+done
+
+if [[ "$needs_drasi_server" == "true" ]]; then
+    : "${DRASI_SERVER_BIN:?DRASI_SERVER_BIN must point to a pinned drasi-server binary}"
+    if [[ ! -x "$DRASI_SERVER_BIN" ]]; then
+        echo "DRASI_SERVER_BIN is not executable: $DRASI_SERVER_BIN" >&2
+        exit 1
+    fi
+fi
+if [[ ! -x "$TEST_SERVICE_BIN" ]]; then
+    echo "TEST_SERVICE_BIN is not executable: $TEST_SERVICE_BIN" >&2
+    exit 1
+fi
+
+mkdir -p "$SUITE_WORK_DIR" "$SUITE_ARTIFACTS_DIR"
+results_jsonl="$SUITE_ARTIFACTS_DIR/suite-results.jsonl"
+suite_summary="$SUITE_ARTIFACTS_DIR/summary.md"
+: > "$results_jsonl"
+: > "$suite_summary"
+suite_rc=0
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+clear_test_ports() {
+    local port pid
+    local ports=(8090 9000 50051 50052 50053 63123)
+    local pids=()
+
+    for port in "${ports[@]}"; do
+        while IFS= read -r pid; do
+            [[ -n "$pid" ]] && pids+=("$pid")
+        done < <(lsof -ti "tcp:$port" 2>/dev/null || true)
+    done
+
+    if (( ${#pids[@]} == 0 )); then
+        return 0
+    fi
+
+    local unique_pids=()
+    while IFS= read -r pid; do
+        unique_pids+=("$pid")
+    done < <(printf '%s\n' "${pids[@]}" | sort -un)
+    pids=("${unique_pids[@]}")
+    echo "Stopping ${#pids[@]} process(es) left on test ports: ${pids[*]}"
+    kill -TERM "${pids[@]}" 2>/dev/null || true
+
+    for _ in $(seq 1 30); do
+        local alive=()
+        for pid in "${pids[@]}"; do
+            kill -0 "$pid" 2>/dev/null && alive+=("$pid")
+        done
+        (( ${#alive[@]} == 0 )) && return 0
+        pids=("${alive[@]}")
+        sleep 1
+    done
+
+    echo "Force-stopping test processes that did not exit: ${pids[*]}"
+    kill -KILL "${pids[@]}" 2>/dev/null || true
+}
+
+for variant in "${variant_list[@]}"; do
+    [[ -n "$variant" ]] || continue
+
+    clear_test_ports
+    run_work_dir="$SUITE_WORK_DIR/$variant"
+    run_artifacts_dir="$SUITE_ARTIFACTS_DIR/$variant"
+    mkdir -p "$run_work_dir" "$run_artifacts_dir"
+
+    echo "::group::$variant"
+    started_at="$(date -u +%FT%TZ)"
+    run_rc=0
+    env \
+        VARIANT="$variant" \
+        DRASI_SERVER_BIN="$DRASI_SERVER_BIN" \
+        TEST_SERVICE_BIN="$TEST_SERVICE_BIN" \
+        ARTIFACTS_DIR="$run_artifacts_dir" \
+        WORK_DIR="$run_work_dir" \
+        bash "$RUN_SCRIPT" || run_rc=$?
+    completed_at="$(date -u +%FT%TZ)"
+    echo "::endgroup::"
+
+    if [[ -s "$run_artifacts_dir/summary.md" ]]; then
+        if [[ -s "$suite_summary" ]]; then
+            {
+                echo
+                echo "---"
+                echo
+            } >> "$suite_summary"
+        fi
+        cat "$run_artifacts_dir/summary.md" >> "$suite_summary"
+    else
+        {
+            if [[ -s "$suite_summary" ]]; then
+                echo
+                echo "---"
+                echo
+            fi
+            echo "## E2E test summary — \`$variant\`"
+            echo
+            echo "No test summary was produced. The variant exited with code $run_rc."
+        } >> "$suite_summary"
+    fi
+
+    metrics_json="$(
+        find "$run_artifacts_dir" -path '*output_log/performance_metrics/*.json' -type f -print0 |
+            sort -z |
+            xargs -0 -r jq -s '[
+                .[] | {
+                    reaction: (.test_run_reaction_id | split(".") | last),
+                    record_count,
+                    duration_ns,
+                    records_per_second,
+                    bootstrap,
+                    steady_state
+                }
+            ]'
+    )"
+    [[ -n "$metrics_json" ]] || metrics_json="[]"
+
+    jq -cn \
+        --arg profile_id "$PERF_PROFILE_ID" \
+        --arg variant "$variant" \
+        --arg started_at "$started_at" \
+        --arg completed_at "$completed_at" \
+        --argjson exit_code "$run_rc" \
+        --argjson metrics "$metrics_json" \
+        '{
+            profile_id: $profile_id,
+            variant: $variant,
+            started_at: $started_at,
+            completed_at: $completed_at,
+            exit_code: $exit_code,
+            metrics: $metrics
+        }' >> "$results_jsonl"
+
+    if (( run_rc != 0 )); then
+        suite_rc=1
+    fi
+done
+
+clear_test_ports
+
+plugin_manifest="$SUITE_ARTIFACTS_DIR/plugin-manifest.json"
+drasi_server_version="not used"
+drasi_server_sha256=""
+if [[ "$needs_drasi_server" == "true" ]]; then
+    plugins_dir="$(dirname "$DRASI_SERVER_BIN")/plugins"
+    drasi_server_version="$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n 1 || echo unknown)"
+    drasi_server_sha256="$(sha256_file "$DRASI_SERVER_BIN")"
+fi
+
+if [[ "$needs_drasi_server" == "true" && -d "$plugins_dir" ]]; then
+    find "$plugins_dir" -maxdepth 1 \( -name '*.so' -o -name '*.dylib' \) -type f -print0 |
+        sort -z |
+        while IFS= read -r -d '' plugin_file; do
+            jq -cn \
+                --arg file "$(basename "$plugin_file")" \
+                --arg sha256 "$(sha256_file "$plugin_file")" \
+                '{file: $file, sha256: $sha256}'
+        done |
+        jq -s '.' > "$plugin_manifest"
+else
+    echo '[]' > "$plugin_manifest"
+fi
+
+jq -s \
+    --arg profile_id "$PERF_PROFILE_ID" \
+    --arg drasi_server_version "$drasi_server_version" \
+    --arg drasi_server_sha256 "$drasi_server_sha256" \
+    --arg test_service_sha256 "$(sha256_file "$TEST_SERVICE_BIN")" \
+    --slurpfile plugins "$plugin_manifest" \
+    '{
+        profile_id: $profile_id,
+        drasi_server: {
+            version: $drasi_server_version,
+            sha256: $drasi_server_sha256
+        },
+        test_service: {
+            sha256: $test_service_sha256
+        },
+        plugins: $plugins[0],
+        runs: .,
+        aggregates: (
+            [
+                .[]
+                | select(.exit_code == 0)
+                | .variant as $variant
+                | .metrics[]
+                | {
+                    variant: $variant,
+                    reaction,
+                    duration_ns,
+                    records_per_second
+                }
+            ]
+            | sort_by(.variant, .reaction)
+            | group_by([.variant, .reaction])
+            | map({
+                variant: .[0].variant,
+                reaction: .[0].reaction,
+                samples: length,
+                duration_seconds: {
+                    mean: (map(.duration_ns / 1e9) | add / length),
+                    min: (map(.duration_ns / 1e9) | min),
+                    max: (map(.duration_ns / 1e9) | max)
+                },
+                records_per_second: {
+                    mean: (map(.records_per_second) | add / length),
+                    min: (map(.records_per_second) | min),
+                    max: (map(.records_per_second) | max)
+                }
+            })
+        )
+    }' "$results_jsonl" > "$SUITE_ARTIFACTS_DIR/suite-results.json"
+
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    cat "$suite_summary" >> "$GITHUB_STEP_SUMMARY"
+fi
+
+exit "$suite_rc"

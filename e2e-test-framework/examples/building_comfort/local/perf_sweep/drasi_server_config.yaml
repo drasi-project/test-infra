@@ -1,0 +1,75 @@
+# Drasi Server config for the building_comfort perf sweep.
+#
+# Deliberately minimal vs. drasi_server_http/: the floor-aggregate query and
+# its reaction are removed so a run measures per-room ingest throughput only.
+# The per-room result count is then exactly derivable from the generator
+# settings, which matters because RecordCount is the only stop trigger kind
+# available (an over-estimate hangs the run until TIMEOUT_SECS).
+#
+# The source `id` is rewritten by run_sweep.sh when ADAPTIVE=1, because the
+# adaptive dispatcher derives its endpoint path from `source_id`.
+
+apiVersion: drasi.io/v1
+id: building-comfort-perf-sweep
+host: "0.0.0.0"
+port: 8080
+logLevel: warn
+persistConfig: false
+
+autoInstallPlugins: true
+verifyPlugins: false
+plugins:
+  - ref: source/http
+  - ref: reaction/http
+  - ref: reaction/log
+
+sources:
+  - kind: http
+    id: facilities-db
+    autoStart: true
+    host: "0.0.0.0"
+    port: 9000
+    timeoutMs: 60000
+
+queries:
+  - id: building-comfort
+    autoStart: true
+    queryLanguage: Cypher
+    sources:
+      - sourceId: facilities-db
+    query: |
+      MATCH (r:Room)
+      RETURN elementId(r) AS RoomId,
+             r.temperature AS Temperature,
+             r.humidity AS Humidity,
+             r.co2 AS Co2
+
+reactions:
+  - kind: http
+    id: building-comfort-out
+    autoStart: true
+    queries:
+      - building-comfort
+    baseUrl: "http://localhost:9001"
+    timeoutMs: 60000
+    outputTemplates:
+      routes:
+        building-comfort:
+          added:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"
+          updated:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"
+          deleted:
+            method: POST
+            url: "/reaction"
+            headers:
+              Content-Type: "application/json"
+              X-Query-Sequence: "building-comfort"

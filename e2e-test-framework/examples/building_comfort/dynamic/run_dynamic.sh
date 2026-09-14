@@ -37,11 +37,17 @@
 # Env vars (defaults in parens):
 #   DRASI_REPO            drasi-server repo owner/name, used for BOTH the release
 #                         download and the source build (drasi-project/drasi-server).
-#                         Point at a fork to build/download from it.
-#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used in release mode.
+#                         Point at a fork to build/download from it. Setting this
+#                         explicitly selects the source build: the named repo is
+#                         cloned and built (a repo without a ref builds its default
+#                         branch instead of silently downloading a release).
+#   DRASI_SERVER_VERSION  release tag ("" = latest). Only used in release mode,
+#                         i.e. when neither DRASI_REPO nor DRASI_SERVER_REF is set.
 #   DRASI_SERVER_REF      branch/tag/SHA of DRASI_REPO to BUILD drasi-server from
 #                         source with cargo. When set, overrides the release
-#                         download. Empty = download the release binary (default).
+#                         download and selects the source build. Empty with an
+#                         explicit DRASI_REPO = that repo's default branch;
+#                         otherwise empty = download the release binary (default).
 #   DRASI_CORE_REPO       drasi-core repo owner/name for the [patch.crates-io]
 #                         override injected during a source build (drasi-project/drasi-core).
 #   DRASI_CORE_REF        branch of DRASI_CORE_REPO to pin the drasi-core
@@ -52,8 +58,12 @@
 #                         to (e.g. drasi-nightly-test), so autoInstallPlugins pulls
 #                         that tag from the registry. Empty = leave refs untagged
 #                         (server resolves the latest compatible release).
+#   DRASI_PLUGIN_REGISTRY OCI registry the server resolves short plugin refs against
+#                         (patched into the base config's `pluginRegistry`). Empty =
+#                         leave the config untouched (server default ghcr.io/drasi-project).
 #   DRASI_SERVER_BIN      pre-built binary (skips both download and source build)
 #   TEST_SERVICE_BIN      pre-built test-service binary (otherwise cargo run)
+#   TEST_SERVICE_RUST_LOG  framework log filter (info with noisy core modules suppressed)
 #   DRASI_ADMIN_PORT      admin/REST port patched into empty.yaml (8090)
 #   DRASI_SOURCE_PORT     source ingress port to wait for (50051)
 #   SERVER_SOURCE_FILE    components/server/ file (source_grpc.json)
@@ -65,16 +75,17 @@
 #   TEST_REACTION_IDS     reactions to snapshot ("building-comfort building-comfort-floor-agg")
 #   TIMEOUT_SECS          completion timeout (1800)
 #   POLL_INTERVAL_SECS    status poll interval (10)
-#   BATCHING_SPEED        adaptive batching preset: low|medium|high (medium).
-#                         Only affects adaptive components (gRPC adaptive
-#                         dispatcher batch_size/batch_timeout_ms and HTTP
-#                         adaptive source adaptiveMax*); standard variants are
-#                         left untouched.
-#   QUERY_TUNING          query capacity preset: low|medium|high (medium).
+#   BATCHING_SPEED        adaptive batch size: 5000|10000|50000 (10000). Legacy
+#                         low|medium|high|max still accepted. Only affects
+#                         adaptive components (gRPC adaptive dispatcher
+#                         batch_size/batch_timeout_ms and HTTP adaptive source
+#                         adaptiveMax*); standard variants are left untouched.
+#   QUERY_TUNING          query capacity (priorityQueueCapacity): 1000|10000|
+#                         100000 (10000). Legacy low|medium|high still accepted.
 #                         Sets priorityQueueCapacity / dispatchBufferCapacity /
 #                         bootstrapBufferSize on every server query component.
 #                         Perf/backpressure only; results (determinism SHAs)
-#                         must not change. 'medium' == server defaults.
+#                         must not change. 10000 == server defaults.
 #   PERSIST_INDEX         true|false (false). Selects a base yaml with instance-
 #                         level persistIndex: true (built-in RocksDB index). The
 #                         driver also enables source WAL durability, since a
@@ -121,6 +132,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Script lives at examples/building_comfort/dynamic/ — four levels below the repo root.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
+# Whether the caller explicitly named a repo, captured before the default is
+# applied. An explicit repo means "build from this repo's source", so it selects
+# the source build on its own — a ref is optional and narrows it to a branch.
+DRASI_REPO_EXPLICIT="${DRASI_REPO:-}"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
 # Build-from-source knobs. When DRASI_SERVER_REF is set, drasi-server is cloned
@@ -133,6 +148,11 @@ DRASI_CORE_REF="${DRASI_CORE_REF:-}"
 # OCI tag to pin every plugin ref in the base server config to (e.g. the nightly
 # plugin tag). Empty leaves refs untagged so the server resolves latest-compatible.
 DRASI_PLUGIN_TAG="${DRASI_PLUGIN_TAG:-}"
+# OCI registry the server resolves short plugin refs (source/http, ...) against.
+# Empty leaves the base config's `pluginRegistry` untouched so the server uses its
+# built-in default (ghcr.io/drasi-project). Set e.g. ghcr.io/<owner> to pull the
+# plugins from a fork's package registry instead.
+DRASI_PLUGIN_REGISTRY="${DRASI_PLUGIN_REGISTRY:-}"
 DRASI_ADMIN_PORT="${DRASI_ADMIN_PORT:-8090}"
 DRASI_SOURCE_PORT="${DRASI_SOURCE_PORT:-50051}"
 
@@ -146,14 +166,74 @@ TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.building_comfort.test_run_001}
 TEST_REACTION_IDS="${TEST_REACTION_IDS:-building-comfort building-comfort-floor-agg}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
-BATCHING_SPEED="${BATCHING_SPEED:-medium}"
-QUERY_TUNING="${QUERY_TUNING:-medium}"
+BATCHING_SPEED="${BATCHING_SPEED:-10000}"
+QUERY_TUNING="${QUERY_TUNING:-10000}"
+# Which server queries (and their subscribing reactions) to run. Default is every
+# query in the component file (SERVER_QUERIES_FILE). Deselecting a query drops the
+# reaction that subscribes to it on BOTH the server and the test-service, plus its
+# source subscription, so a single-query run does strictly less work (useful for
+# isolating one query's throughput). Space- or comma-separated; every entry must
+# be a known query id. Empty = all.
+QUERIES="${QUERIES:-}"
+SELECTED_QUERIES=""
+SELECTED_QUERIES_JSON="[]"
+# JSONL per-record audit logging on each reaction. It writes every reaction
+# record to disk (outputs_*.jsonl) purely for post-hoc forensic inspection; the
+# determinism hash and record-count checks are computed independently from the
+# live stream, so disabling it does NOT weaken loss/determinism verification --
+# it only removes the on-disk audit trail. It is per-record disk I/O in the hot
+# path, so throughput runs default it off; set LOG_JSONL=1 to re-enable it for
+# debugging.
+LOG_JSONL="${LOG_JSONL:-0}"
 SERVER_PROFILE_PERSIST_INDEX="${PERSIST_INDEX:-false}"
 SERVER_PROFILE_STATE_STORE="${STATE_STORE:-false}"
 # WAL retention cap used when PERSIST_INDEX forces source durability on. Must
 # exceed the total events this scenario emits so the default RejectIncoming
 # capacity policy never drops events.
 WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
+# --- Failure-recovery crash injection (#70 phase one) ---
+# CRASH_INJECT selects a fault-injection mode:
+#   off   (default) — no injection; today's behaviour.
+#   drain — Option A: after the source finishes DISPATCHING all changes (ingress
+#           closed) but while the server is still draining/checkpointing, SIGKILL
+#           the drasi-server process and restart it WITHOUT wiping ./data, so WAL
+#           replay + checkpoint recovery run against the persisted state. No
+#           source reconnect is needed because dispatch is already complete.
+# Recovery requires persistence, so `drain` forces PERSIST_INDEX + STATE_STORE on
+# and patches persistConfig: true (so the server restores component definitions
+# on restart instead of coming back bare).
+CRASH_INJECT="${CRASH_INJECT:-off}"
+# An optional timing delay is not a durability guarantee.
+CRASH_DELAY_MS="${CRASH_DELAY_MS:-0}"
+# What to do if the restarted server comes back with no components (i.e. the
+# persistConfig restore path did not repopulate the registry):
+#   auto (default) — re-apply components via REST only if GET shows none, and warn
+#                    loudly that this bypasses WAL-replay recovery.
+#   no             — never re-apply; let the run fail so the gap is visible.
+CRASH_REAPPLY_COMPONENTS="${CRASH_REAPPLY_COMPONENTS:-auto}"
+# RUST_LOG applied to the drasi-server process. Empty = server default. A
+# drain-injection run defaults this to `info` (below) so WAL-replay / recovery
+# lines land in drasi-server.log; override to e.g. debug for deeper tracing.
+DRASI_RUST_LOG="${DRASI_RUST_LOG:-}"
+TEST_SERVICE_RUST_LOG="${TEST_SERVICE_RUST_LOG:-info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error}"
+# Escape hatch for a NON-PERSISTENT control run. By default `drain` forces
+# persistence on (a SIGKILL with in-memory-only state cannot recover). Set this
+# to 1 to honour the PERSIST_INDEX / STATE_STORE inputs instead, so you can
+# demonstrate the "no persistence -> total loss on crash" baseline for contrast.
+CRASH_ALLOW_NO_PERSIST="${CRASH_ALLOW_NO_PERSIST:-0}"
+# A recovered server may converge its internal state WITHOUT re-emitting every
+# reaction notification, so the RecordCount-based completion marker never fires
+# and the run would otherwise hang to TIMEOUT_SECS. For a drain run we therefore
+# also treat the run as complete once the reaction record counts stop changing
+# for CRASH_SETTLE_SECS, then explicitly stop the run (which finalises each
+# reaction's DeterminismHash) so we still get a verdict. Set higher if recovery
+# catch-up is slow/bursty on the runner.
+CRASH_SETTLE_SECS="${CRASH_SETTLE_SECS:-90}"
+# Use the settle-based completion (wait for reaction counts to stop changing, then
+# probe /results and stop) even for a non-crash run. Lets a run whose stop triggers
+# are unreachable (e.g. a reduced change_count vs a 100k-calibrated RecordCount)
+# still finish and capture the results-API probe, symmetric with the crash run.
+USE_SETTLE="${USE_SETTLE:-0}"
 # --- Large-bootstrap presets (#78) ---
 # BOOTSTRAP_SIZE selects a preset that scales the building_comfort initial graph
 # (delivered as op:"i" inserts) so bootstrap load time/throughput can be measured
@@ -201,8 +281,17 @@ mkdir -p "$WORK_DIR" "$LOG_DIR" "$ARTIFACTS_DIR"
 
 DRASI_PID=""
 SERVICE_PID=""
+# Crash-injection outcome, surfaced in the summary. "no" until an injection runs;
+# then "yes" (recovered via persisted state), "reapplied" (recovered but needed a
+# REST re-apply), or "skipped" (drain window missed).
+CRASH_INJECTED="no"
+CRASH_RECOVERY_SECS=""
+# "yes" if the run was ended by count-settle (recovery converged without firing
+# the RecordCount completion marker) rather than by normal completion.
+CRASH_SETTLED="no"
 # Human-readable description of where DRASI_SERVER_BIN came from (release tag,
-# source build + optional core patch, or preset). Surfaced in the step summary.
+# source build + optional core patch, or preset). Surfaced in the step summary
+# for result labeling.
 DRASI_BUILD_SOURCE=""
 
 log() { echo "[dyn] $*"; }
@@ -249,21 +338,6 @@ start_mem_monitor() {
 cleanup() {
     local exit_code=$?
     set +e
-    if [[ -n "$MEM_MONITOR_PID" ]]; then
-        kill "$MEM_MONITOR_PID" 2>/dev/null
-    fi
-    # Surface any OOM-killer activity so a mysterious termination (no error in
-    # our own logs, just "Terminated") can be confirmed or ruled out as memory
-    # exhaustion rather than guessed at.
-    if command -v dmesg >/dev/null 2>&1; then
-        local oom_hits
-        oom_hits="$(dmesg -T 2>/dev/null | grep -iE 'killed process|out of memory|oom' | tail -n 20)"
-        if [[ -n "$oom_hits" ]]; then
-            log "WARNING: OOM-killer activity detected in dmesg:"
-            printf '%s\n' "$oom_hits" | sed 's/^/[dyn]   /'
-            printf '%s\n' "$oom_hits" > "$LOG_DIR/oom_dmesg.log" 2>/dev/null
-        fi
-    fi
     for pid_name in SERVICE_PID DRASI_PID; do
         pid="${!pid_name}"
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
@@ -327,10 +401,15 @@ download_drasi_server() {
         DRASI_BUILD_SOURCE="preset ${DRASI_SERVER_BIN}"
         return 0
     fi
-    if [[ -n "$DRASI_SERVER_REF" ]]; then
+    # Build from source when the caller named a repo and/or a ref. Naming
+    # either one means "test this code", so a repo without a ref builds that
+    # repo's default branch rather than silently downloading its release
+    # binary — which would ignore the request and test the wrong thing.
+    if [[ -n "$DRASI_SERVER_REF" || -n "$DRASI_REPO_EXPLICIT" ]]; then
         build_drasi_server_from_source
         return 0
     fi
+
     download_drasi_server_release
 }
 
@@ -462,11 +541,30 @@ verify_core_patch_resolution() {
     log "Verified: all resolved drasi-core-family packages come from $DRASI_CORE_REPO@$DRASI_CORE_REF"
 }
 
+# Ask GitHub for $DRASI_REPO's default branch, so a repo given without a ref
+# still builds something well-defined. Falls back to main.
+resolve_default_branch() {
+    local branch=""
+    if command -v gh >/dev/null 2>&1; then
+        branch="$(gh repo view "$DRASI_REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || true)"
+    fi
+    if [[ -z "$branch" ]]; then
+        branch="$(curl -fsSL "https://api.github.com/repos/${DRASI_REPO}" 2>/dev/null | jq -r '.default_branch // empty' || true)"
+    fi
+    echo "${branch:-main}"
+}
+
 # Build drasi-server from a branch/tag/SHA of $DRASI_REPO using cargo, then set
 # DRASI_SERVER_BIN to the freshly built binary. When DRASI_CORE_REF is set, the
 # drasi-core crates are additionally patched to that ref (see inject_core_patch).
+# Point DRASI_REPO at a fork to build fork branches; $DRASI_SERVER_REF may be a
+# branch, tag, or commit SHA (empty resolves the repo's default branch).
 build_drasi_server_from_source() {
     local ref="$DRASI_SERVER_REF"
+    if [[ -z "$ref" ]]; then
+        ref="$(resolve_default_branch)"
+        log "No DRASI_SERVER_REF given; using $DRASI_REPO default branch '$ref'"
+    fi
     local repo_url="https://github.com/${DRASI_REPO}.git"
     log "Building drasi-server from source: repo=$DRASI_REPO ref=$ref"
 
@@ -546,40 +644,141 @@ download_drasi_server_release() {
     cd - >/dev/null
 }
 
-# Map the BATCHING_SPEED preset to concrete batch-size / wait knobs shared by
-# the gRPC adaptive dispatcher (batch_size / batch_timeout_ms) and the HTTP
-# adaptive source (adaptiveMaxBatchSize / adaptiveMaxWaitMs). 'medium' matches
-# the values checked into the component/config files.
+# Map BATCHING_SPEED to concrete batch-size / wait knobs shared by the gRPC
+# adaptive dispatcher (batch_size / batch_timeout_ms) and the HTTP adaptive
+# source (adaptiveMaxBatchSize / adaptiveMaxWaitMs). BATCHING_SPEED is the
+# batch size itself (max records per batch), e.g. 5000|10000|50000. Legacy
+# named presets (low|medium|high|max) are still accepted for back-compat.
+#
+# wait_ms is the max flush delay for a not-yet-full batch. The local perf_sweep
+# throughput runs (49k-54k rec/s) all used 50ms, and a longer wait only adds
+# latency to trailing batches, so every throughput size uses 50ms; only the
+# legacy 'low' preset (deliberately throttled) waits less.
 resolve_batching_preset() {
     case "$BATCHING_SPEED" in
-        low)    BATCH_SIZE=100;  BATCH_WAIT_MS=10  ;;
-        medium) BATCH_SIZE=1000; BATCH_WAIT_MS=50  ;;
-        high)   BATCH_SIZE=5000; BATCH_WAIT_MS=200 ;;
-        *)
-            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected low|medium|high)"
+        low)         BATCH_SIZE=100;   BATCH_WAIT_MS=10 ;;
+        medium)      BATCH_SIZE=1000;  BATCH_WAIT_MS=50 ;;
+        high)        BATCH_SIZE=5000;  BATCH_WAIT_MS=50 ;;
+        max)         BATCH_SIZE=10000; BATCH_WAIT_MS=50 ;;
+        ''|*[!0-9]*)
+            log "ERROR: invalid BATCHING_SPEED='$BATCHING_SPEED' (expected a batch size like 5000|10000|50000)"
             return 1
             ;;
+        *)           BATCH_SIZE=$BATCHING_SPEED; BATCH_WAIT_MS=50 ;;
     esac
     log "Batching speed '$BATCHING_SPEED' -> batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS"
 }
 
+# Guardrail: cap the adaptive batch size for large bootstraps. A very large batch
+# against a large in-memory query state makes each ingress POST slow enough that
+# the dispatcher's bounded channel backs up and the single-threaded generator
+# blocks on send -- the steady phase never runs and the reaction hangs at the
+# bootstrap count until the job times out (observed for batch_size 50000 with the
+# 100k preset). batch_size 10000 drains fine at 100k, so clamp to that ceiling for
+# the 100k/1m presets. Only adaptive variants consume BATCH_SIZE, so this is a
+# no-op for standard variants. Runs before the batch size is applied to configs.
+LARGE_BOOTSTRAP_BATCH_CEILING=10000
+clamp_batch_for_bootstrap() {
+    [[ "${BOOTSTRAP_ENABLED:-false}" == "true" ]] || return 0
+    case "$(printf '%s' "$BOOTSTRAP_SIZE" | tr '[:upper:]' '[:lower:]')" in
+        100k|1m)
+            if (( BATCH_SIZE > LARGE_BOOTSTRAP_BATCH_CEILING )); then
+                log "Clamping adaptive batch_size $BATCH_SIZE -> $LARGE_BOOTSTRAP_BATCH_CEILING for bootstrap '$BOOTSTRAP_SIZE' (larger batches stall the generator at this graph scale)"
+                BATCH_SIZE=$LARGE_BOOTSTRAP_BATCH_CEILING
+            fi
+            ;;
+    esac
+}
+
 # Map the QUERY_TUNING preset to server query capacity knobs applied to every
 # query component (priorityQueueCapacity / dispatchBufferCapacity /
-# bootstrapBufferSize). These are perf/backpressure only, so all presets must
-# yield identical determinism SHAs. 'medium' matches the drasi-server defaults
-# (priorityQueueCapacity 10000, dispatchBufferCapacity 1000, bootstrapBufferSize
-# 10000), so it is effectively a no-op made explicit.
+# bootstrapBufferSize). These are perf/backpressure only, so all values must
+# yield identical determinism SHAs. QUERY_TUNING is the priorityQueueCapacity
+# (1000|10000|100000); each maps to a matching buffer tuple. 10000 matches the
+# drasi-server defaults (priorityQueueCapacity 10000, dispatchBufferCapacity
+# 1000, bootstrapBufferSize 10000), so it is effectively a no-op made explicit.
+# Legacy named presets (low|medium|high) are still accepted for back-compat.
 resolve_query_tuning() {
     case "$QUERY_TUNING" in
-        low)    PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
-        medium) PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
-        high)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000; BOOTSTRAP_BUFFER_SIZE=100000 ;;
+        low|1000)      PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
+        medium|10000)  PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
+        high|100000)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000; BOOTSTRAP_BUFFER_SIZE=100000 ;;
         *)
-            log "ERROR: invalid QUERY_TUNING='$QUERY_TUNING' (expected low|medium|high)"
+            log "ERROR: invalid QUERY_TUNING='$QUERY_TUNING' (expected 1000|10000|100000)"
             return 1
             ;;
     esac
     log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE"
+}
+
+# Resolve the QUERIES selector into SELECTED_QUERIES (space list) and
+# SELECTED_QUERIES_JSON (a jq array), validated against the ids in the component
+# queries file. Also narrows TEST_REACTION_IDS (test_reaction_id == query id) so
+# the poll/snapshot loops only track reactions that are actually deployed.
+resolve_selected_queries() {
+    local qfile="$COMPONENTS_DIR/$SERVER_QUERIES_FILE"
+    [[ -s "$qfile" ]] || { log "ERROR: queries file missing: $qfile"; return 1; }
+    local known
+    known="$(jq -r '.[].id' "$qfile")"
+
+    local requested="${QUERIES//,/ }"
+    [[ -n "${requested// }" ]] || requested="$known"   # empty selector = all
+
+    local sel=() q k found
+    for q in $requested; do
+        found=false
+        for k in $known; do [[ "$q" == "$k" ]] && found=true && break; done
+        if [[ "$found" != "true" ]]; then
+            log "ERROR: unknown query '$q' (known: $(echo "$known" | tr '\n' ' '))"
+            return 1
+        fi
+        case " ${sel[*]:-} " in *" $q "*) ;; *) sel+=("$q") ;; esac
+    done
+    (( ${#sel[@]} > 0 )) || { log "ERROR: QUERIES selected no queries"; return 1; }
+
+    SELECTED_QUERIES="${sel[*]}"
+    SELECTED_QUERIES_JSON="$(printf '%s\n' "${sel[@]}" | jq -R . | jq -sc .)"
+    TEST_REACTION_IDS="$SELECTED_QUERIES"
+    log "Selected queries: [$SELECTED_QUERIES] (of: $(echo "$known" | tr '\n' ' '))"
+}
+
+# Validate CRASH_INJECT and force the settings recovery requires. A drain-phase
+# crash can only be recovered from if the server persists its state, so `drain`
+# forces the persist_index + state_store profiles on (overriding the PERSIST_INDEX
+# / STATE_STORE inputs) and, later, patches persistConfig: true.
+resolve_crash_inject() {
+    case "$CRASH_INJECT" in
+        off) return 0 ;;
+        drain) ;;
+        *)
+            log "ERROR: CRASH_INJECT must be 'off' or 'drain' (got '$CRASH_INJECT')"
+            return 1
+            ;;
+    esac
+    if [[ "$SERVER_PROFILE_PERSIST_INDEX" != "true" || "$SERVER_PROFILE_STATE_STORE" != "true" ]]; then
+        if [[ "$CRASH_ALLOW_NO_PERSIST" == "1" ]]; then
+            log "CRASH_INJECT=drain + CRASH_ALLOW_NO_PERSIST=1: NON-PERSISTENT control run."
+            log "  Honouring inputs (persist_index=$SERVER_PROFILE_PERSIST_INDEX state_store=$SERVER_PROFILE_STATE_STORE)."
+            log "  EXPECT recovery to FAIL/LOSE state: a SIGKILL discards in-memory-only query state and the restart comes back empty."
+        else
+            log "CRASH_INJECT=drain requires persistence; forcing PERSIST_INDEX=true STATE_STORE=true (were persist_index=$SERVER_PROFILE_PERSIST_INDEX state_store=$SERVER_PROFILE_STATE_STORE)"
+            SERVER_PROFILE_PERSIST_INDEX=true
+            SERVER_PROFILE_STATE_STORE=true
+        fi
+    fi
+    # Capture the server's recovery/WAL-replay logs (default level info).
+    if [[ -z "$DRASI_RUST_LOG" ]]; then
+        DRASI_RUST_LOG="info"
+    fi
+    # Per-record reaction JSONL makes the recovered final state diffable row-by-row
+    # but adds per-record disk I/O that markedly slows a 100k-change run. Leave it
+    # to the caller (LOG_JSONL=1) rather than forcing it, so the crash run's timing
+    # matches the ordinary path; the determinism verdict + record counts already
+    # answer pass/fail without it.
+    if [[ "$LOG_JSONL" != "1" ]]; then
+        log "CRASH_INJECT=drain: LOG_JSONL=0 (fast). Set LOG_JSONL=1 for a row-level forensic diff if the SHA mismatches."
+    fi
+    log "CRASH_INJECT=drain: SIGKILL after source-finished (+${CRASH_DELAY_MS}ms), restart preserving ./data (reapply_components=$CRASH_REAPPLY_COMPONENTS, server RUST_LOG=$DRASI_RUST_LOG, LOG_JSONL=$LOG_JSONL)"
 }
 
 # Select the committed base server yaml from the two INDEPENDENT instance-config
@@ -589,8 +788,7 @@ resolve_query_tuning() {
 # The driver derives SERVER_PERSIST_INDEX from the selected yaml so it can also
 # enable source WAL durability (persistent queries reject non-replay sources) and
 # pre-create the RocksDB index dir.
-resolve_server_config() {
-    local pi="$SERVER_PROFILE_PERSIST_INDEX" ss="$SERVER_PROFILE_STATE_STORE" base
+resolve_server_config() {    local pi="$SERVER_PROFILE_PERSIST_INDEX" ss="$SERVER_PROFILE_STATE_STORE" base
     case "$pi:$ss" in
         false:false) base="drasi_server.empty.yaml" ;;
         true:false)  base="drasi_server.persist_index.yaml" ;;
@@ -697,9 +895,11 @@ resolve_bootstrap_preset() {
 # scale the graph) AND transport (http vs grpc dispatch produces different
 # result ordering/serialization -- confirmed: the committed OFF-scenario
 # baselines differ between config.http.json and config.json/grpc_adaptive).
-# Transport is inferred from the TEST_CFG_SRC basename (adaptive vs standard
-# share the same baseline per transport -- confirmed on the off scenario, where
-# config.json and config.grpc_adaptive.json carry identical committed SHAs).
+# Transport is inferred from the TEST_CFG_SRC basename. grpc adaptive/standard
+# share one baseline per the off-scenario check (config.json and
+# config.grpc_adaptive.json carry identical committed SHAs), but http_adaptive
+# does NOT share http_standard's baseline: its both-sided batching coalesces
+# results into a distinct (still deterministic) hash, so it is its own transport.
 # Add a row below once a preset/transport combo has a CI-confirmed SHA pair;
 # until then (or via BOOTSTRAP_BASELINE_MAIN/_AGG override) the preset stays in
 # compute-and-report mode so an unconfirmed baseline can never fail the run.
@@ -707,6 +907,10 @@ resolve_bootstrap_baseline() {
     BS_TRANSPORT="grpc"
     case "$(basename "$TEST_CFG_SRC")" in
         config.http.json) BS_TRANSPORT="http" ;;
+        # http_adaptive's both-sided batching coalesces results into a distinct
+        # (still deterministic) hash, so it does NOT share http_standard's
+        # baseline -- it gets its own transport bucket.
+        config.http_adaptive.json) BS_TRANSPORT="http_adaptive" ;;
     esac
     BS_BASELINE_MAIN="${BOOTSTRAP_BASELINE_MAIN:-}"
     BS_BASELINE_AGG="${BOOTSTRAP_BASELINE_AGG:-}"
@@ -720,6 +924,10 @@ resolve_bootstrap_baseline() {
                 BS_BASELINE_MAIN="a5d89950f456b00b802b2659eeb8855afa09bfda222ef9a9c89becef301b4fa5"
                 BS_BASELINE_AGG="aaa6e7bc9e2f8ed07014b4ded3656816ba063b45abbdd252a49d790255fef556"
                 ;;
+            10k:http_adaptive)
+                BS_BASELINE_MAIN="b2e307d623e514339a596389aa08d0d7fdb206fd4942143beb507c052152b5d6"
+                BS_BASELINE_AGG="4765e5ffc08de76663a7969893df09c7cba818de5940404d985f56806a4f1114"
+                ;;
             100k:http)
                 BS_BASELINE_MAIN="e1ad5640897910d04053f151a491ce5012af77d50f95def9f045859f455f5308"
                 BS_BASELINE_AGG="c2d0c32334d9550b67ab44ad972afb54b4dac6b591a23b4dccad37135a1375af"
@@ -728,6 +936,16 @@ resolve_bootstrap_baseline() {
                 BS_BASELINE_MAIN="490f70250d0d0bb97d4a6cf1a278e90cee084f72777d0958a2ec2cfc25cc2e63"
                 BS_BASELINE_AGG="27986794cd4e79e70cceda8ede79a7ee1af4a3318cad1395a3c720c4e38a3768"
                 ;;
+            100k:http_adaptive)
+                # Full record count (main 195000, agg 140000) matched grpc/
+                # http_standard, so this is a complete resultset, not a lossy one
+                # -- adaptive just orders its batched delivery differently, giving
+                # its own deterministic SHAs (distinct from both http_standard and
+                # grpc, exactly as at 10k). Reproduced across runs 33918706710,
+                # 33925188165 (main) and 33925188165 (agg).
+                BS_BASELINE_MAIN="79d8507c13fb02423bce5f2a4da6f3fb11ad7c801d85f63584f61720d56f10e8"
+                BS_BASELINE_AGG="a4a42ee48f51775acf2edc2446215acf5b697a9f5c8fa4dd1ff171743347cbf9"
+                ;;
             # 1m:http)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
             # 1m:grpc)    BS_BASELINE_MAIN="..."; BS_BASELINE_AGG="..." ;;
             *) : ;;
@@ -735,6 +953,8 @@ resolve_bootstrap_baseline() {
     fi
     if [[ -n "$BS_BASELINE_MAIN" && -n "$BS_BASELINE_AGG" ]]; then
         log "  determinism baseline: PINNED for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT (missing_baseline=Fail)"
+    elif [[ -n "$BS_BASELINE_MAIN" || -n "$BS_BASELINE_AGG" ]]; then
+        log "  determinism baseline: PARTIAL for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT -- pinned reaction(s) enforced, others compute+report (missing_baseline=Warn)"
     else
         log "  determinism baseline: not yet captured for preset=$BOOTSTRAP_SIZE transport=$BS_TRANSPORT -- compute+report only (missing_baseline=Warn)"
     fi
@@ -773,17 +993,17 @@ patch_bootstrap_preset() {
         | ( .data_store.test_repos[].local_tests[].reactions[]
             | select(.test_reaction_id == "building-comfort-floor-agg").stop_triggers[]
             | select(.kind == "RecordCount").record_count ) = $stopagg
-        # 3. Determinism baseline: pin per (preset, transport) once known (Fail);
-        #    otherwise the bootstrap resultset has no confirmed baseline yet, so
-        #    compute+report only (Warn) rather than fail on an unconfirmed SHA.
+        # 3. Determinism baseline: pin each reaction whose SHA is known. A
+        #    reaction WITH an expected SHA is always compared (mismatch fails),
+        #    so a main-only pin still enforces main. missing_baseline governs
+        #    only reactions with NO expected: Fail once BOTH are pinned,
+        #    otherwise Warn so an unpinned reaction cannot fail the run.
         | ( .data_store.test_repos[].local_tests[].completion_handlers[]
             | select(.kind == "Sha256Determinism") )
-          |= (if ($baseline_main | length) > 0 and ($baseline_agg | length) > 0 then
-                .expected = {"building-comfort": $baseline_main, "building-comfort-floor-agg": $baseline_agg}
-                | .missing_baseline = "Fail"
-              else
-                .expected = {} | .missing_baseline = "Warn"
-              end)
+          |= ( .expected = ( {}
+                  + (if ($baseline_main | length) > 0 then {"building-comfort": $baseline_main} else {} end)
+                  + (if ($baseline_agg  | length) > 0 then {"building-comfort-floor-agg": $baseline_agg} else {} end) )
+               | .missing_baseline = (if ($baseline_main | length) > 0 and ($baseline_agg | length) > 0 then "Fail" else "Warn" end) )
         # 4. Set the PerformanceMetrics bootstrap phase boundary per reaction.
         | ( .test_run_host.test_runs[].reactions[]
             | select(.test_reaction_id == "building-comfort").output_loggers[]
@@ -828,6 +1048,28 @@ pin_plugin_tags() {
     grep -E '^[[:space:]]*-[[:space:]]*ref:' "$DRASI_CFG_CI" | sed 's/^/  /'
 }
 
+# Point the server's plugin resolver at $DRASI_PLUGIN_REGISTRY by setting the
+# top-level `pluginRegistry` field in the CI config. Short plugin refs
+# (source/http, reaction/log, ...) are then resolved against this registry
+# instead of the built-in default (ghcr.io/drasi-project). Replaces an existing
+# `pluginRegistry:` line if present, otherwise inserts one after `verifyPlugins:`
+# (falling back to `autoInstallPlugins:`). No-op when DRASI_PLUGIN_REGISTRY is
+# empty (server keeps its default registry).
+set_plugin_registry() {
+    [[ -n "$DRASI_PLUGIN_REGISTRY" ]] || return 0
+    if grep -qE '^[[:space:]]*pluginRegistry:' "$DRASI_CFG_CI"; then
+        sed -E "s|^([[:space:]]*)pluginRegistry:.*\$|\1pluginRegistry: ${DRASI_PLUGIN_REGISTRY}|" \
+            "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    else
+        local anchor='verifyPlugins:'
+        grep -qE '^[[:space:]]*verifyPlugins:' "$DRASI_CFG_CI" || anchor='autoInstallPlugins:'
+        sed -E "s|^([[:space:]]*)(${anchor}.*)\$|\1\2\n\1pluginRegistry: ${DRASI_PLUGIN_REGISTRY}|" \
+            "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+    fi
+    log "Set plugin registry -> $DRASI_PLUGIN_REGISTRY"
+    grep -E '^[[:space:]]*pluginRegistry:' "$DRASI_CFG_CI" | sed 's/^/  /'
+}
+
 patch_configs() {
     log "Patching empty server config admin port -> $DRASI_ADMIN_PORT"
     sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
@@ -853,7 +1095,23 @@ patch_configs() {
             "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
     fi
 
+    # Recovery needs the server to restore its component definitions on restart,
+    # so flip persistConfig to true for a crash-injection run. The base yamls ship
+    # persistConfig: false; without this the restarted server comes back bare.
+    # Skipped for the non-persistent control run (nothing to restore anyway).
+    if [[ "$CRASH_INJECT" == "drain" && "$SERVER_PERSIST_INDEX" == "true" ]]; then
+        if grep -qE '^persistConfig:' "$DRASI_CFG_CI"; then
+            sed -E 's/^persistConfig:[[:space:]]*false[[:space:]]*$/persistConfig: true/' \
+                "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+        else
+            printf 'persistConfig: true\n' >> "$DRASI_CFG_CI"
+        fi
+        log "CRASH_INJECT=drain: patched persistConfig -> true"
+        grep -E '^persistConfig:' "$DRASI_CFG_CI" | sed 's/^/  /'
+    fi
+
     pin_plugin_tags
+    set_plugin_registry
 
     log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \
@@ -881,6 +1139,50 @@ patch_configs() {
     printf '%s\n' "$patched" > "$TEST_CFG_CI"
     if jq -e '[.data_store.test_repos[]?.local_tests[]?.sources[]?.source_change_dispatchers[]? | select(.adaptive_enabled == true)] | length > 0' "$TEST_CFG_CI" >/dev/null 2>&1; then
         log "Applied batching preset '$BATCHING_SPEED' to adaptive gRPC dispatcher (batch_size=$BATCH_SIZE, batch_timeout_ms=$BATCH_WAIT_MS)"
+    fi
+
+    # Strip JsonlFile logging unless LOG_JSONL=1. There are TWO JsonlFile sinks,
+    # both pure per-record disk I/O for a forensic audit trail:
+    #   1. reaction output_loggers  -> writes every reaction record (egress side)
+    #   2. source_change_dispatchers -> writes every dispatched source change
+    #      event (ingress side, the source_change_log/*.jsonl files)
+    # Determinism + record-count verification are computed independently of both,
+    # so removing them keeps the loss/determinism gates intact while recovering
+    # throughput (the ingress sink in particular is disk I/O in the hot dispatch
+    # path -- ~100k writes per run -- that perf_sweep does not do).
+    if [[ "$LOG_JSONL" != "1" ]]; then
+        patched="$(jq '
+            (.test_run_host.test_runs[]?.reactions[]?.output_loggers) |=
+                (map(select(.kind != "JsonlFile")) // [])
+            | (.data_store.test_repos[]?.local_tests[]?.sources[]?.source_change_dispatchers) |=
+                (map(select(.kind != "JsonlFile")) // [])
+        ' "$TEST_CFG_CI")"
+        printf '%s\n' "$patched" > "$TEST_CFG_CI"
+        log "JSONL logging disabled (LOG_JSONL=0): dropped reaction + source-dispatcher JsonlFile sinks; determinism + record-count checks unaffected"
+    else
+        log "JSONL logging enabled (LOG_JSONL=1)"
+    fi
+
+    # Drop any deselected query (QUERIES) from the test-service config: remove its
+    # source subscription, its data_store reaction, and its test_run_host reaction
+    # so the test-service neither dispatches its feed nor waits on a reaction the
+    # server won't run. test_reaction_id == query id; subscribers carry query_id.
+    # (Leftover entries for the dropped query in the Sha256Determinism `expected`
+    # map are harmless: the handler only looks up reactions it actually saw.)
+    patched="$(jq --argjson sel "$SELECTED_QUERIES_JSON" '
+        ( .data_store.test_repos[]?.local_tests[]?.sources[]?
+            | select(.subscribers != null).subscribers )
+          |= map(select(.query_id as $q | $sel | index($q)))
+        | ( .data_store.test_repos[]?.local_tests[]?.reactions )
+          |= map(select(.test_reaction_id as $q | $sel | index($q)))
+        | ( .test_run_host.test_runs[]?.reactions )
+          |= map(select(.test_reaction_id as $q | $sel | index($q)))
+    ' "$TEST_CFG_CI")"
+    printf '%s\n' "$patched" > "$TEST_CFG_CI"
+    local all_queries
+    all_queries="$(jq -r '[.[].id] | join(" ")' "$COMPONENTS_DIR/$SERVER_QUERIES_FILE")"
+    if [[ "$SELECTED_QUERIES" != "$all_queries" ]]; then
+        log "Query selection: kept [$SELECTED_QUERIES]; dropped deselected reactions/subscriptions from test-service config"
     fi
 }
 
@@ -927,6 +1229,7 @@ start_drasi_server() {
     mkdir -p "$WORK_DIR/data"
     (
         cd "$WORK_DIR"
+        [[ -n "$DRASI_RUST_LOG" ]] && export RUST_LOG="$DRASI_RUST_LOG"
         exec "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
             > "$LOG_DIR/drasi-server.log" 2>&1
     ) &
@@ -938,6 +1241,168 @@ start_drasi_server() {
         return 1
     fi
     prepare_rocksdb_index_dirs
+}
+
+# Restart drasi-server for crash-recovery: re-exec on the SAME config WITHOUT
+# wiping ./data, so RocksDB index + redb WAL + persisted config survive and the
+# server replays/recovers on startup. Appends to the existing server log so the
+# pre-crash and post-crash logs stay in one file. Updates DRASI_PID (same shell)
+# so the completion wait and cleanup track the new process.
+restart_drasi_server() {
+    log "Restarting drasi-server for recovery (preserving $WORK_DIR/data)"
+    # Clear boundary so the pre-crash and post-crash halves of the single
+    # appended log file are easy to separate when triaging a failed recovery.
+    {
+        echo "================================================================="
+        echo "[dyn] ===== DRASI-SERVER RESTART (recovery) $(date -u +%FT%TZ) ====="
+        echo "================================================================="
+    } >> "$LOG_DIR/drasi-server.log"
+    (
+        cd "$WORK_DIR"
+        [[ -n "$DRASI_RUST_LOG" ]] && export RUST_LOG="$DRASI_RUST_LOG"
+        exec "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
+            >> "$LOG_DIR/drasi-server.log" 2>&1
+    ) &
+    DRASI_PID=$!
+    log "drasi-server restarted pid=$DRASI_PID"
+    if ! wait_for_http "http://127.0.0.1:${DRASI_ADMIN_PORT}/health" "drasi-server admin API (recovery)" 120; then
+        log "--- drasi-server.log (last 200 lines) ---"
+        tail -n 200 "$LOG_DIR/drasi-server.log" || true
+        return 1
+    fi
+    prepare_rocksdb_index_dirs
+}
+
+# Block until the source generator reports it has dispatched every change, i.e.
+# the test-service log shows "Script Finished for TestRunSource". This marks the
+# point where ingress is closed but the server may still be draining — the
+# drain-phase (Option A) injection window. Bounded by TIMEOUT_SECS.
+wait_for_source_finished() {
+    local log_file="$LOG_DIR/test-service.log"
+    local marker="Script Finished for TestRunSource"
+    local completion="TestRun '${TEST_RUN_ID}' completed:"
+    log "Waiting for source-finished marker before crash injection"
+    log "  marker: $marker  (timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s)"
+    local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
+    local start_ts; start_ts=$(date +%s)
+    local last_log_ts=0
+    local now; now=$(date +%s)
+    while (( now < deadline )); do
+        if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
+            log "ERROR: test-service exited before source finished"; return 1
+        fi
+        if ! kill -0 "$DRASI_PID" 2>/dev/null; then
+            log "ERROR: drasi-server exited before source finished"; return 1
+        fi
+        if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
+            log "Source-finished marker observed"
+            return 0
+        fi
+        # If the run already completed we missed the drain window entirely.
+        if [[ -s "$log_file" ]] && grep -qF "$completion" "$log_file"; then
+            log "WARNING: run completed before source-finished marker; drain window missed"
+            return 2
+        fi
+        # Progress heartbeat so a slow-but-moving dispatch is distinguishable from
+        # a genuine stall. Shows per-reaction record counts (climbing = flowing).
+        if (( now - last_log_ts >= 30 )); then
+            log "waiting for source-finished t=$(( now - start_ts ))s (no marker yet)$(reaction_progress)"
+            last_log_ts=$now
+        fi
+        sleep "$POLL_INTERVAL_SECS"
+        now=$(date +%s)
+    done
+    log "ERROR: source-finished marker not observed within ${TIMEOUT_SECS}s"
+    log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" 2>/dev/null || true
+    log "--- drasi-server.log (last 100 lines) ---"; tail -n 100 "$LOG_DIR/drasi-server.log" 2>/dev/null || true
+    return 1
+}
+
+# Option A crash injection: wait for the drain window, SIGKILL the server, then
+# restart it against the persisted state. Returns non-zero only on a setup error
+# (a missed window is downgraded to a skip so the run still completes cleanly and
+# we can see whether the ordinary path passes).
+inject_crash_and_restart() {
+    local rc=0
+    wait_for_source_finished || rc=$?
+    if (( rc == 2 )); then
+        log "Crash injection SKIPPED (drain window missed). Increase load or lower CRASH_DELAY_MS."
+        CRASH_INJECTED="skipped"
+        return 0
+    elif (( rc != 0 )); then
+        return "$rc"
+    fi
+
+    local grace_s
+    grace_s="$(awk -v ms="$CRASH_DELAY_MS" 'BEGIN { printf "%.3f", ms/1000 }')"
+    log "Grace ${CRASH_DELAY_MS}ms before SIGKILL"
+    sleep "$grace_s"
+
+    if ! kill -0 "$DRASI_PID" 2>/dev/null; then
+        log "WARNING: drasi-server already gone before injection; skipping"
+        CRASH_INJECTED="skipped"
+        return 0
+    fi
+
+    # If the run finished during the grace period, crashing now tests nothing
+    # (the pre-crash stream already produced the verdict). Downgrade to a skip.
+    if grep -qF "TestRun '${TEST_RUN_ID}' completed:" "$LOG_DIR/test-service.log" 2>/dev/null; then
+        log "WARNING: run completed during grace window; crash injection SKIPPED (drain window too short)."
+        log "         Increase load (BOOTSTRAP_SIZE / change_count) or lower CRASH_DELAY_MS to widen it."
+        CRASH_INJECTED="skipped"
+        return 0
+    fi
+
+    local killed_pid="$DRASI_PID"
+    local crash_start; crash_start=$(date +%s)
+    log "INJECT: SIGKILL drasi-server pid=$killed_pid (drain-phase hard crash)"
+    printf '[dyn] ===== SIGKILL (drain-phase crash) pid=%s %s =====\n' \
+        "$killed_pid" "$(date -u +%FT%TZ)" >> "$LOG_DIR/drasi-server.log"
+    kill -KILL "$killed_pid" 2>/dev/null || true
+    # Reap the killed background job so it doesn't linger as a zombie.
+    wait "$killed_pid" 2>/dev/null || true
+
+    if ! restart_drasi_server; then
+        log "ERROR: drasi-server failed to restart after crash"
+        return 1
+    fi
+
+    local recovery_s=$(( $(date +%s) - crash_start ))
+    log "RECOVERY: server healthy again ${recovery_s}s after SIGKILL"
+    CRASH_INJECTED="yes"
+    CRASH_RECOVERY_SECS="$recovery_s"
+    # Reaction record counts at the moment of recovery. Compare against the
+    # completion-loop progress lines: climbing => the recovered server is
+    # re-emitting/catching up; frozen here => it delivered nothing post-restart
+    # (lost in-flight work or reaction not re-subscribed).
+    log "Reaction counts at recovery:$(reaction_progress)"
+
+    # Confirm the restart repopulated the component registry (persistConfig path).
+    # If it came back bare, optionally re-apply via REST as a fallback. The admin
+    # API wraps the list as {"success":..,"data":[..]}, so read .data (falling back
+    # to a bare array / .queries for older shapes).
+    local qcount
+    qcount="$(curl -fsS "${DRASI_API}/queries" 2>/dev/null \
+        | jq -r 'if has("data") then (.data | length)
+                 elif type=="array" then length
+                 elif has("queries") then (.queries | length)
+                 else 0 end' 2>/dev/null || echo 0)"
+    log "Post-recovery component check: /queries reports $qcount query(ies)"
+    if [[ "${qcount:-0}" == "0" ]]; then
+        case "$CRASH_REAPPLY_COMPONENTS" in
+            auto)
+                log "WARNING: recovered server has no components; re-applying via REST."
+                log "WARNING: re-applying re-bootstraps queries and BYPASSES WAL-replay recovery -- results are NOT a pure recovery signal."
+                apply_server_components || { log "ERROR: component re-apply after recovery failed"; return 1; }
+                CRASH_INJECTED="reapplied"
+                ;;
+            no)
+                log "ERROR: recovered server has no components and CRASH_REAPPLY_COMPONENTS=no; failing so the gap is visible."
+                return 1
+                ;;
+        esac
+    fi
+    return 0
 }
 
 # drasi_apply <resource-path> <json-body>
@@ -1069,14 +1534,20 @@ apply_server_components() {
 
     check_plugins "$src_file" "$rxn_file" || return $?
 
-    # Rooms-only bootstrap: apply only the per-room query and its reaction, so
-    # the simple MATCH (r:Room) path runs in isolation (avoids the floor-agg
-    # mid-bootstrap stop -> source backpressure -> stalled startup).
-    local q_select='.[]' r_select='.[]'
+    # Apply only the selected queries (QUERIES) and the reactions that subscribe
+    # solely to selected queries. A reaction referencing any deselected query is
+    # dropped, so a deselected query's reaction is never deployed. Bootstrap
+    # rooms-only further narrows to the per-room query for the isolated
+    # MATCH (r:Room) bootstrap path.
+    local q_select r_select
+    q_select='.[] | select([.id] - $sel | length == 0)'
+    r_select='.[] | select(((.queries // []) - $sel) | length == 0)'
     if [[ "${BOOTSTRAP_ENABLED:-false}" == "true" && "${BOOTSTRAP_ROOMS_ONLY:-true}" == "true" ]]; then
         q_select='.[] | select(.id == "building-comfort")'
         r_select='.[] | select(.id == "building-comfort-out")'
         log "Bootstrap rooms-only: applying only query 'building-comfort' + reaction 'building-comfort-out'"
+    else
+        log "Applying selected queries [$SELECTED_QUERIES] and their reactions"
     fi
 
     # Order matters: source before queries that subscribe to it, queries
@@ -1128,7 +1599,7 @@ apply_server_components() {
             | .bootstrapBufferSize = $bb')"
         log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         drasi_apply "/queries" "$q_body"
-    done < <(jq -c "$q_select" "$qry_file")
+    done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$q_select" "$qry_file")
 
     log "Applying reactions from $SERVER_REACTIONS_FILE"
     local r
@@ -1137,7 +1608,7 @@ apply_server_components() {
         local rid; rid="$(printf '%s' "$r" | jq -r '.id')"
         log "  -> reaction $rid"
         drasi_apply "/reactions" "$r"
-    done < <(jq -c "$r_select" "$rxn_file")
+    done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$r_select" "$rxn_file")
 
     log "Component snapshot:"
     curl -fsS "${DRASI_API}/sources"   | jq -c '.' || true
@@ -1158,7 +1629,7 @@ start_test_service() {
         log "Starting pre-built test-service: $TEST_SERVICE_BIN"
         (
             cd "$REPO_ROOT/e2e-test-framework"
-            export RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error'
+            export RUST_LOG="$TEST_SERVICE_RUST_LOG"
             exec "$TEST_SERVICE_BIN" --config "$TEST_CFG_CI" \
                 > "$LOG_DIR/test-service.log" 2>&1
         ) &
@@ -1166,7 +1637,7 @@ start_test_service() {
         log "Building & starting test-service"
         (
             cd "$REPO_ROOT/e2e-test-framework"
-            RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
+            RUST_LOG="$TEST_SERVICE_RUST_LOG" \
             cargo run --release --manifest-path "test-service/Cargo.toml" -- --config "$TEST_CFG_CI" \
                 > "$LOG_DIR/test-service.log" 2>&1
         ) &
@@ -1240,6 +1711,7 @@ wait_for_completion_signal() {
         if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
             log "Completion signal observed for $TEST_RUN_ID"
             grep -F "$marker" "$log_file" | tail -n1 | sed 's/^/[completion] /'
+            probe_query_results
             return 0
         fi
         local elapsed
@@ -1253,6 +1725,120 @@ wait_for_completion_signal() {
     log "ERROR: completion signal not observed within ${TIMEOUT_SECS}s"
     log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" || true
     log "--- drasi-server.log (last 100 lines) ---"; tail -n 100 "$LOG_DIR/drasi-server.log" || true
+    local id
+    for id in $TEST_REACTION_IDS; do fetch_final_reaction_state "$id" || true; done
+    return 1
+}
+
+# Sum reaction_invocation_count across all reactions. Echoes the total, or empty
+# on a fetch failure so the caller can skip settle bookkeeping for that tick.
+reaction_total_count() {
+    local id url body count total=0 got=0
+    for id in $TEST_REACTION_IDS; do
+        url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/reactions/${id}"
+        body="$(curl -sS "$url" 2>/dev/null || true)"
+        [[ -z "$body" ]] && continue
+        count="$(printf '%s' "$body" | jq -r '.reaction_observer.result_summary.reaction_invocation_count // 0' 2>/dev/null || echo 0)"
+        [[ "$count" =~ ^[0-9]+$ ]] || count=0
+        total=$(( total + count ))
+        got=1
+    done
+    (( got )) && printf '%s' "$total"
+}
+
+# Probe drasi-server's OWN materialised results via the admin results API
+# (GET /queries/:id/results). This reads the server's state directly, decoupled
+# from whatever any reaction received -- the true oracle for "did the server
+# recover the correct state?". Must be called while the queries are still live
+# (before any stop). Saves one file per query into $ARTIFACTS_DIR.
+probe_query_results() {
+    local qids qid out n
+    qids="$(curl -fsS "${DRASI_API}/queries" 2>/dev/null | jq -r '(.data // .)[]?.id' 2>/dev/null)"
+    if [[ -z "$qids" ]]; then
+        log "probe_query_results: no queries returned by ${DRASI_API}/queries"
+        return 0
+    fi
+    for qid in $qids; do
+        out="$ARTIFACTS_DIR/query_results__${qid}.json"
+        if curl -fsS "${DRASI_API}/queries/${qid}/results" -o "$out" 2>/dev/null; then
+            n="$(jq -r '(.data // .) | if type=="array" then length else 0 end' "$out" 2>/dev/null || echo '?')"
+            log "probe_query_results: [$qid] server holds $n result row(s) -> query_results__${qid}.json"
+        else
+            log "probe_query_results: [$qid] results API call failed"
+        fi
+    done
+}
+
+# Stop the whole test run via REST. Finalises each reaction's loggers (the
+# DeterminismHash summary is produced in reaction stop()), so a converged-but-
+# uncompleted recovery run still yields a per-reaction SHA to compare.
+stop_test_run_via_rest() {
+    local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/stop"
+    log "POST $url (finalise reactions after settle)"
+    curl -sS -X POST "$url" >/dev/null 2>&1 || log "WARNING: stop request failed"
+    # Give the reactions a moment to transition to Stopped and flush summaries.
+    local id deadline; deadline=$(( $(date +%s) + 30 ))
+    for id in $TEST_REACTION_IDS; do
+        while (( $(date +%s) < deadline )); do
+            local st
+            st="$(curl -sS "http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/reactions/${id}" 2>/dev/null \
+                | jq -r '.reaction_observer.status // "?"' 2>/dev/null || echo '?')"
+            [[ "$st" == "Stopped" || "$st" == "Error" ]] && break
+            sleep 1
+        done
+    done
+}
+
+# Completion wait for a crash-injection run. Succeeds on the normal completion
+# marker OR when reaction counts stop changing for CRASH_SETTLE_SECS -- a
+# recovered server can converge its state without re-emitting enough
+# notifications to satisfy the RecordCount stop trigger, so the marker may never
+# fire. On settle we stop the run via REST to finalise the determinism hashes.
+wait_for_recovery_completion() {
+    local log_file="$LOG_DIR/test-service.log"
+    local marker="TestRun '${TEST_RUN_ID}' completed:"
+    log "Waiting for completion OR reaction-count settle (crash run)"
+    log "  marker: $marker  settle=${CRASH_SETTLE_SECS}s timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s"
+    local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
+    local start_ts; start_ts=$(date +%s)
+    local last_count="" last_change_ts last_log_ts=0 now
+    now=$(date +%s); last_change_ts=$now
+    while (( now < deadline )); do
+        if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
+            log "ERROR: test-service exited unexpectedly"; return 1
+        fi
+        if ! kill -0 "$DRASI_PID" 2>/dev/null; then
+            log "ERROR: drasi-server exited unexpectedly (post-recovery)"; return 1
+        fi
+        if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
+            log "Completion signal observed for $TEST_RUN_ID (recovery re-emitted to threshold)"
+            probe_query_results
+            return 0
+        fi
+        local total; total="$(reaction_total_count)"
+        if [[ -n "$total" ]]; then
+            if [[ "$total" != "$last_count" ]]; then
+                last_count="$total"; last_change_ts=$now
+            elif (( now - last_change_ts >= CRASH_SETTLE_SECS )); then
+                log "Reaction counts settled at total=$total for ${CRASH_SETTLE_SECS}s with no completion marker."
+                log "  INCONCLUSIVE: quiet reaction counts do not prove query catch-up; stopping to collect diagnostics."
+                CRASH_SETTLED="yes"
+                probe_query_results
+                stop_test_run_via_rest
+                return 0
+            fi
+        fi
+        if (( now - last_log_ts >= 30 )); then
+            local stable=$(( now - last_change_ts ))
+            log "waiting for completion/settle t=$(( now - start_ts ))s total=${total:-?} stable=${stable}s$(reaction_progress)"
+            last_log_ts=$now
+        fi
+        sleep "$POLL_INTERVAL_SECS"
+        now=$(date +%s)
+    done
+    log "ERROR: neither completion nor settle within ${TIMEOUT_SECS}s"
+    log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" || true
+    log "--- drasi-server.log (last 120 lines) ---"; tail -n 120 "$LOG_DIR/drasi-server.log" || true
     local id
     for id in $TEST_REACTION_IDS; do fetch_final_reaction_state "$id" || true; done
     return 1
@@ -1310,14 +1896,57 @@ copy_determinism_verdict() {
     fi
 }
 
-# Render a markdown summary into $GITHUB_STEP_SUMMARY so it shows up on the
-# workflow run page. Local runs (no GITHUB_STEP_SUMMARY env var) skip this.
-write_step_summary() {
-    if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
-        return 0
-    fi
+# Inline determinism verdict for a crash run that ended via count-settle: the
+# completion handler that normally writes determinism_verdict.json only runs on
+# NATURAL completion, not on the explicit stop we issue after settle. Compares
+# each reaction's finalised DeterminismHash SHA to the Sha256Determinism
+# `expected` baseline in the test config. Returns 1 on any mismatch. NOTE: a
+# mismatch here is order-sensitive -- a recovery that re-emitted/reordered but
+# converged to the correct final state will also mismatch, so treat a failure as
+# "diverged stream, verify final state", not proof of data loss.
+write_crash_determinism_verdict() {
+    local verdict_file="$ARTIFACTS_DIR/determinism_verdict.json"
+    local expected_map
+    expected_map="$(jq -c '
+        .data_store.test_repos[]?.local_tests[]?.completion_handlers[]?
+        | select(.kind == "Sha256Determinism") | .expected // {}
+    ' "$TEST_CFG_CI" 2>/dev/null | head -n1)"
+    [[ -z "$expected_map" || "$expected_map" == "null" ]] && expected_map='{}'
 
-    local out="$GITHUB_STEP_SUMMARY"
+    local results="{}" fail=0 id state_file actual expected passed
+    for id in $TEST_REACTION_IDS; do
+        state_file="$ARTIFACTS_DIR/final_reaction_state__${id}.json"
+        actual=""
+        [[ -s "$state_file" ]] && actual="$(jq -r '
+            (.reaction_observer.logger_results[]?
+                | select(.logger_name == "DeterminismHash")
+                | .summary.sha256) // empty' "$state_file" 2>/dev/null)"
+        expected="$(printf '%s' "$expected_map" | jq -r --arg id "$id" '.[$id] // empty' 2>/dev/null)"
+        if [[ -z "$actual" ]]; then
+            log "[$id] no DeterminismHash SHA captured after stop"; passed=false; fail=1
+        elif [[ -z "$expected" ]]; then
+            log "[$id] determinism: no baseline; actual=$actual"; passed=true
+        elif [[ "$actual" == "$expected" ]]; then
+            log "[$id] determinism MATCH (sha=${actual:0:12}…) -- recovery reproduced the clean stream"; passed=true
+        else
+            log "[$id] determinism MISMATCH expected=${expected:0:12}… actual=${actual:0:12}… -- recovery diverged the diff stream; verify final state (reordered-but-correct vs lost data)"; passed=false; fail=1
+        fi
+        results="$(printf '%s' "$results" | jq --arg id "$id" --arg a "$actual" --arg e "$expected" --argjson p "$passed" \
+            '.[$id] = {actual: ($a // null), expected: ($e // null), passed: $p}')"
+    done
+    jq --arg run "$TEST_RUN_ID" --argjson results "$results" \
+        '{test_run_id: $run, results: $results, note: "inline crash-run verdict (count-settle); order-sensitive SHA -- a mismatch may be reordered-but-correct recovery, verify final state"}' \
+        <<<'{}' > "$verdict_file"
+    echo "::group::Determinism verdict (crash inline)"
+    jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
+    echo "::endgroup::"
+    return "$fail"
+}
+
+# Render a reusable markdown summary and publish it on GitHub Actions when
+# GITHUB_STEP_SUMMARY is available.
+write_step_summary() {
+    local out="$ARTIFACTS_DIR/summary.md"
     local drasi_source="${DRASI_BUILD_SOURCE:-unknown}"
     local plugin_tag="${DRASI_PLUGIN_TAG:-<latest-compatible>}"
     local server_version
@@ -1337,6 +1966,9 @@ write_step_summary() {
         echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
         echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         echo "- server config: persistIndex=\`$SERVER_PROFILE_PERSIST_INDEX\`, stateStore=\`$SERVER_PROFILE_STATE_STORE\`$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo " (source WAL durability on, max_events=$WAL_MAX_EVENTS)")"
+        if [[ "$CRASH_INJECT" != "off" ]]; then
+            echo "- crash injection: \`$CRASH_INJECT\` -> outcome=\`$CRASH_INJECTED\`$([[ -n "$CRASH_RECOVERY_SECS" ]] && echo ", recovery=${CRASH_RECOVERY_SECS}s"), completion=\`$([[ "$CRASH_SETTLED" == "yes" ]] && echo "count-settle" || echo "marker")\`"
+        fi
         echo
 
         echo "### Reactions"
@@ -1399,23 +2031,52 @@ write_step_summary() {
             jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
             echo '```'
         fi
-    } >> "$out"
+    } > "$out"
+
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        cat "$out" >> "$GITHUB_STEP_SUMMARY"
+    fi
 }
 
 download_drasi_server
+if [[ "${1:-}" == "--prepare-server" ]]; then
+    jq -n --arg binary "$DRASI_SERVER_BIN" --arg source "$DRASI_BUILD_SOURCE" \
+        '{binary:$binary, source:$source}' > "$ARTIFACTS_DIR/server-build.json"
+    exit 0
+fi
 resolve_batching_preset
 resolve_query_tuning
+resolve_selected_queries
+resolve_crash_inject
 resolve_server_config
 resolve_bootstrap_preset
+clamp_batch_for_bootstrap
 patch_configs
 patch_bootstrap_preset
-start_mem_monitor
 start_drasi_server
 apply_server_components
 start_test_service
 
+if [[ "$CRASH_INJECT" == "drain" ]]; then
+    inject_crash_and_restart || {
+        log "ERROR: crash injection/restart failed; continuing to capture artifacts"
+        CRASH_INJECTED="failed"
+    }
+fi
+
 poll_rc=0
-if wait_for_completion_signal; then
+if [[ "$CRASH_INJECT" == "drain" || "$USE_SETTLE" == "1" ]]; then
+    # Recovery (or a reduced-load run with unreachable stop triggers) can converge
+    # without firing the RecordCount marker, so use the settle-aware wait (it probes
+    # /results and stops the run on settle).
+    if wait_for_recovery_completion; then
+        for id in $TEST_REACTION_IDS; do
+            fetch_final_reaction_state "$id" || poll_rc=1
+        done
+    else
+        poll_rc=1
+    fi
+elif wait_for_completion_signal; then
     for id in $TEST_REACTION_IDS; do
         fetch_final_reaction_state "$id" || poll_rc=1
     done
@@ -1424,9 +2085,19 @@ else
 fi
 print_summary
 
+if [[ "$CRASH_INJECT" == "drain" && ( "$CRASH_INJECTED" != "yes" || "$CRASH_SETTLED" == "yes" ) ]]; then
+    log "ERROR: recovery was not verified (injection=$CRASH_INJECTED, count-settle=$CRASH_SETTLED)"
+    poll_rc=1
+fi
+
 determinism_rc=0
 verify_test_run_status || determinism_rc=$?
 copy_determinism_verdict
+# A crash run ended by count-settle has no handler-written verdict, so compute
+# one inline from the finalised per-reaction SHAs.
+if [[ "$CRASH_INJECT" == "drain" && ! -s "$ARTIFACTS_DIR/determinism_verdict.json" ]]; then
+    write_crash_determinism_verdict || determinism_rc=$?
+fi
 write_step_summary
 
 if (( poll_rc != 0 )); then

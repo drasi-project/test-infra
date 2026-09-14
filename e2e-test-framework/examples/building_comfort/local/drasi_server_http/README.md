@@ -98,11 +98,11 @@ SHA_CHECK=1 ./run_test.sh
 ```
 
 Requires `jq` on `PATH`. Two successive runs on the same machine should
-produce identical SHAs; the CI variant
-[`ci/drasi_server_http`](../../ci/drasi_server_http) maintains a locked
-baseline. To enforce a baseline locally, paste the SHAs into a
+produce identical SHAs; the CI `http_standard` variant
+([`dynamic/config.http.json`](../../dynamic/config.http.json)) maintains a
+locked baseline. To enforce a baseline locally, paste the SHAs into a
 `Sha256Determinism` block in `config.json` directly (see the CI variant's
-`config.json` for the exact shape).
+config for the exact shape).
 
 ## Inspect / control while running
 

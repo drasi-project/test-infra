@@ -12,14 +12,14 @@
           {
             "test_id": "building_comfort",
             "version": 1,
-            "description": "gRPC dispatcher with adaptive batching (server applied dynamically)",
+            "description": "HTTP dispatcher with adaptive batching (server applied dynamically)",
             "test_folder": "building_comfort",
             "completion_handlers": [
               {
                 "kind": "Sha256Determinism",
                 "expected": {
-                  "building-comfort": "4e5d57a4b349361bf79bf0c97633a556879958a283f864ee32c36e6e2ab619c6",
-                  "building-comfort-floor-agg": "91c222eafe3df5c1ada87376bbf8f30670de91035510da4213d05d941c095990"
+                  "building-comfort": "7eeaafbad6defe8202ae9d52fdb9b735e524f112a80e3d972bbbb6159a1ec629",
+                  "building-comfort-floor-agg": "2884a783f4964b0171253a77577de11697e76fbfa538227eea23ccf37dbbfff9"
                 },
                 "missing_baseline": "Fail"
               },
@@ -35,12 +35,11 @@
                 "kind": "Model",
                 "source_change_dispatchers": [
                   {
-                    "kind": "Grpc",
-                    "host": "localhost",
-                    "port": 50051,
+                    "kind": "Http",
+                    "url": "http://localhost",
+                    "port": 9000,
                     "timeout_seconds": 60,
                     "batch_events": true,
-                    "tls": false,
                     "source_id": "facilities-db",
                     "adaptive_enabled": true,
                     "batch_size": 10000,
@@ -158,14 +157,10 @@
               {
                 "test_reaction_id": "building-comfort",
                 "output_handler": {
-                  "kind": "Grpc",
-                  "host": "0.0.0.0",
-                  "port": 50052,
-                  "correlation_metadata_key": "x-query-sequence",
-                  "query_ids": [
-                    "building-comfort"
-                  ],
-                  "include_initial_state": false
+                  "kind": "Http",
+                  "port": 9001,
+                  "path": "/reaction",
+                  "correlation_header": "X-Query-Sequence"
                 },
                 "stop_triggers": [
                   {
@@ -177,14 +172,10 @@
               {
                 "test_reaction_id": "building-comfort-floor-agg",
                 "output_handler": {
-                  "kind": "Grpc",
-                  "host": "0.0.0.0",
-                  "port": 50053,
-                  "correlation_metadata_key": "x-query-sequence",
-                  "query_ids": [
-                    "building-comfort-floor-agg"
-                  ],
-                  "include_initial_state": false
+                  "kind": "Http",
+                  "port": 9002,
+                  "path": "/reaction",
+                  "correlation_header": "X-Query-Sequence"
                 },
                 "stop_triggers": [
                   {

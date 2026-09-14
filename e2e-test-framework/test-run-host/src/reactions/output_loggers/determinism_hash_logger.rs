@@ -134,13 +134,22 @@ pub(crate) fn canonical_payload_bytes(record: &HandlerRecord) -> anyhow::Result<
 /// participate in the determinism hash:
 ///   - `timestamp`  — the wall-clock time of the originating query emission.
 ///   - `sequenceId` — the monotonic per-emission sequence id.
+///   - `batch_index` / `result_index` — the position of a result within the
+///     HTTP reaction handler's *per-run batch grouping*. The adaptive HTTP
+///     reaction coalesces results into `{"batch":[...]}` POSTs whose boundaries
+///     are timing-dependent, so the same logical result lands in a different
+///     `batch_index`/`result_index` each run. These are framework-assigned
+///     bookkeeping fields (see the batch branch of `handle_reaction`), not
+///     query data, so stripping them keeps the adaptive HTTP hash stable
+///     run-to-run. Non-batched paths (single-event HTTP, gRPC) never emit them,
+///     so stripping is a no-op there and existing baselines are unaffected.
 ///
 /// Reaction payloads that forward the raw Drasi notification verbatim carry
 /// these fields — notably the HTTP `DefaultChangeNotification` envelope. The
 /// gRPC converter already projects items down to `{type, before, after}` and
 /// never emits them, so stripping here keeps the two transports comparable
 /// and makes the HTTP hash stable run-to-run.
-const VOLATILE_KEYS: &[&str] = &["timestamp", "sequenceId"];
+const VOLATILE_KEYS: &[&str] = &["timestamp", "sequenceId", "batch_index", "result_index"];
 
 /// Recursively remove [`VOLATILE_KEYS`] from every object in `value`.
 fn strip_volatile_keys(value: Value) -> Value {
@@ -306,6 +315,57 @@ mod tests {
         assert_eq!(
             std::str::from_utf8(&a).unwrap(),
             r#"{"after":{"id":1},"operation":"ADD","queryId":"q1"}"#
+        );
+    }
+
+    #[test]
+    fn canonical_payload_strips_batch_grouping_indices() {
+        // Reproduces the adaptive-HTTP flapping-hash bug: the batch branch of
+        // `handle_reaction` wraps each result with `batch_index`/`result_index`
+        // describing its position in that run's (timing-dependent) batch
+        // grouping. The same logical result therefore carries different indices
+        // across runs and must NOT change the hashed bytes.
+        let run_a = make_record(
+            7,
+            HandlerPayload::ReactionInvocation {
+                reaction_type: "http".into(),
+                query_id: "q1".into(),
+                request_method: "POST".into(),
+                request_path: "/reaction/batch".into(),
+                request_body: json!({
+                    "query_id": "q1",
+                    "reaction_type": "added",
+                    "batch_index": 0,
+                    "result_index": 3,
+                    "request_body": { "operation": "ADD", "after": { "id": 1 } }
+                }),
+                headers: Default::default(),
+            },
+        );
+        let run_b = make_record(
+            8,
+            HandlerPayload::ReactionInvocation {
+                reaction_type: "http".into(),
+                query_id: "q1".into(),
+                request_method: "POST".into(),
+                request_path: "/reaction/batch".into(),
+                request_body: json!({
+                    "query_id": "q1",
+                    "reaction_type": "added",
+                    "batch_index": 17,
+                    "result_index": 0,
+                    "request_body": { "operation": "ADD", "after": { "id": 1 } }
+                }),
+                headers: Default::default(),
+            },
+        );
+        let a = canonical_payload_bytes(&run_a).unwrap().unwrap();
+        let b = canonical_payload_bytes(&run_b).unwrap().unwrap();
+        // Differing batch_index / result_index must not change the hashed bytes.
+        assert_eq!(a, b);
+        assert_eq!(
+            std::str::from_utf8(&a).unwrap(),
+            r#"{"query_id":"q1","reaction_type":"added","request_body":{"after":{"id":1},"operation":"ADD"}}"#
         );
     }
 

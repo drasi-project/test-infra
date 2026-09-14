@@ -149,10 +149,12 @@ routing/process-lifecycle/cursor tests also passed previously.
 
 ## GitHub Recovery Workflow
 
-The manual [E2E - recovery workflow](../../../.github/workflows/e2e-recovery.yml)
-is separate from the building-comfort throughput workflow. It supports `all`,
-`sigkill-drain`, `restart-caught-up`, and `restart-immediate`. Each scenario runs
-on its own runner using the same binaries from one preparation job.
+The manual [PauseCommand recovery workflow](../../../.github/workflows/e2e-pause-command-recovery.yml)
+supports `all`, `restart-caught-up`, and `restart-immediate`. `all` runs only the
+two pause/restart variants, each on its own runner using the same binaries from
+one preparation job. Building-comfort SIGKILL testing has its own
+[building-comfort recovery workflow](../../../.github/workflows/e2e-building-comfort-recovery.yml),
+separate from both this workflow and the building-comfort throughput workflow.
 
 Server inputs match building-comfort:
 
@@ -172,10 +174,23 @@ compatible published plugin registry/tag. A successful build alone does not
 establish that the recovery fixes are present. The build artifact records the
 server commit and resolved Cargo lockfile for source builds, plus binary hashes.
 
-`sigkill-drain` uses standard gRPC with persistence enabled, both building-comfort
-queries, a clean run followed by the crash run, zero extra crash delay, and no
-component reapplication. Both runs must pass the committed count/hash baselines.
-`query_tuning` controls that scenario's queue capacity. The pause variants use
+The building-comfort recovery workflow provides the standard building-comfort
+inputs for HTTP/gRPC standard/adaptive variants, query selection, `batching_speed`,
+`query_tuning`, and `bootstrap_size`. Each selected variant runs a clean control
+followed by SIGKILL after ingress with the same settings, zero extra crash delay,
+and no component reapplication. `persist_index` and `state_store` default to true
+and must remain enabled. Embedded `drasi_lib` is omitted because this recovery
+runner kills an external server. Empty variant/query selections fail validation.
+
+HTTP standard and gRPC standard are selected by default, matching the standard
+workflow's external variants. Select only gRPC when using a registry/tag with
+only gRPC plugins published. Each variant requires compatible source/reaction
+plugins for its protocol. Exposing an option does not establish recovery coverage
+for it; the expanded matrix has not been executed on GitHub. Large bootstrap
+presets retain the existing runner's baseline policy and hosted-runner resource
+limits; the 1m preset previously exceeded CI memory capacity.
+
+These building-comfort configuration inputs do not affect PauseCommand. Its variants use
 the fixed 12,000-change configuration and their own fresh uninterrupted baseline;
 `pause_seconds` controls their hold duration. Both numeric time inputs accept
 positive integers up to 60.
@@ -184,7 +199,7 @@ Artifacts are uploaded on success or failure and retained for 14 days, including
 logs, verdicts, saved state, and snapshots. Immediate-restart pending-work coverage
 remains unverified unless checkpoint/replay evidence establishes it.
 
-Status: files prepared and locally validated; not published or run on GitHub.
+Status: split workflow files prepared and locally validated; not published or run on GitHub.
 Only `workflow_dispatch` is configured. GitHub normally requires this workflow
 on the default branch before it can be manually dispatched; no temporary push
 trigger is included.

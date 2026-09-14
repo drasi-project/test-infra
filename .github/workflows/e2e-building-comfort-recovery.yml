@@ -1,17 +1,57 @@
-name: E2E - recovery
+name: E2E - building_comfort recovery
 
 on:
   workflow_dispatch:
     inputs:
-      scenario:
-        description: "Recovery scenario (all runs three independent jobs)."
+      http_standard:
+        description: "http_standard (HTTP, REST-applied)"
+        type: boolean
+        default: true
+      http_adaptive:
+        description: "http_adaptive (HTTP, dispatcher + egress batching)"
+        type: boolean
+        default: false
+      grpc_standard:
+        description: "grpc_standard (gRPC, REST-applied)"
+        type: boolean
+        default: true
+      grpc_adaptive:
+        description: "grpc_adaptive (gRPC adaptive dispatcher)"
+        type: boolean
+        default: false
+      query_building_comfort:
+        description: "Run the per-room 'building-comfort' query"
+        type: boolean
+        default: true
+      query_floor_agg:
+        description: "Run the 'building-comfort-floor-agg' aggregate query"
+        type: boolean
+        default: true
+      batching_speed:
+        description: "Adaptive batch size (max records per batch; affects adaptive variants only)."
         type: choice
         options:
-          - all
-          - sigkill-drain
-          - restart-caught-up
-          - restart-immediate
-        default: all
+          - "5000"
+          - "10000"
+          - "50000"
+        default: "10000"
+      persist_index:
+        description: "Use the built-in RocksDB persistent index. Required for recovery; disabling fails validation."
+        type: boolean
+        default: true
+      state_store:
+        description: "Use the redb plugin state store. Required for recovery; disabling fails validation."
+        type: boolean
+        default: true
+      bootstrap_size:
+        description: "Large-bootstrap preset (rooms). Scales the initial graph so bootstrap load is measured separately from steady-state."
+        type: choice
+        options:
+          - "off"
+          - 10k
+          - 100k
+          - 1m
+        default: "off"
       drasi_server_version:
         description: "drasi-server release tag. Used only when repo/ref are empty. Empty = latest."
         type: string
@@ -37,17 +77,13 @@ on:
         type: string
         default: ""
       query_tuning:
-        description: "Building-comfort SIGKILL query capacity. Pause scenarios use their fixed configuration."
+        description: "Query capacity: priorityQueueCapacity (drives priority/dispatch/bootstrap buffers)."
         type: choice
         options:
           - "1000"
           - "10000"
           - "100000"
         default: "10000"
-      pause_seconds:
-        description: "Pause hold duration. Positive integer up to 60."
-        type: string
-        default: "5"
 
 permissions:
   contents: read
@@ -58,27 +94,51 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
-      scenarios: ${{ steps.settings.outputs.scenarios }}
       timeout_seconds: ${{ steps.settings.outputs.timeout_seconds }}
+      variants: ${{ steps.settings.outputs.variants }}
+      queries: ${{ steps.settings.outputs.queries }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Validate settings
         id: settings
         env:
-          SCENARIO: ${{ inputs.scenario }}
           MINUTES: ${{ inputs.timeout_minutes }}
-          PAUSE_SECONDS: ${{ inputs.pause_seconds }}
+          V_HTTP_STD: ${{ inputs.http_standard }}
+          V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
+          V_GRPC_STD: ${{ inputs.grpc_standard }}
+          V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
+          V_Q_MAIN: ${{ inputs.query_building_comfort }}
+          V_Q_AGG: ${{ inputs.query_floor_agg }}
+          PERSIST_INDEX: ${{ inputs.persist_index }}
+          STATE_STORE: ${{ inputs.state_store }}
         run: |
-          [[ "$MINUTES" =~ ^[1-9][0-9]?$ ]] && (( MINUTES <= 60 ))
-          [[ "$PAUSE_SECONDS" =~ ^[1-9][0-9]?$ ]] && (( PAUSE_SECONDS <= 60 ))
-          case "$SCENARIO" in
-            all) scenarios='["sigkill-drain","restart-caught-up","restart-immediate"]' ;;
-            sigkill-drain|restart-caught-up|restart-immediate)
-              scenarios="$(jq -cn --arg scenario "$SCENARIO" '[$scenario]')" ;;
-            *) exit 1 ;;
-          esac
-          echo "scenarios=$scenarios" >> "$GITHUB_OUTPUT"
+          [[ "$MINUTES" =~ ^[1-9][0-9]?$ ]] && (( MINUTES <= 60 )) || {
+            echo "ERROR: timeout_minutes must be an integer from 1 to 60." >&2
+            exit 1
+          }
+          [[ "$PERSIST_INDEX" == true && "$STATE_STORE" == true ]] || {
+            echo "ERROR: recovery requires persist_index and state_store enabled." >&2
+            exit 1
+          }
+          variants=()
+          if [[ "$V_HTTP_STD" == true ]]; then variants+=(http_standard); fi
+          if [[ "$V_HTTP_ADAPTIVE" == true ]]; then variants+=(http_adaptive); fi
+          if [[ "$V_GRPC_STD" == true ]]; then variants+=(grpc_standard); fi
+          if [[ "$V_GRPC_ADAPTIVE" == true ]]; then variants+=(grpc_adaptive); fi
+          (( ${#variants[@]} > 0 )) || {
+            echo "ERROR: select at least one HTTP/gRPC variant." >&2
+            exit 1
+          }
+          queries=()
+          if [[ "$V_Q_MAIN" == true ]]; then queries+=(building-comfort); fi
+          if [[ "$V_Q_AGG" == true ]]; then queries+=(building-comfort-floor-agg); fi
+          (( ${#queries[@]} > 0 )) || {
+            echo "ERROR: select at least one query." >&2
+            exit 1
+          }
+          echo "variants=$(printf '%s\n' "${variants[@]}" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          echo "queries=${queries[*]}" >> "$GITHUB_OUTPUT"
           echo "timeout_seconds=$((MINUTES * 60))" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
@@ -130,15 +190,16 @@ jobs:
           retention-days: 14
 
   recovery:
-    name: Recovery / ${{ matrix.scenario }}
+    name: Building-comfort recovery / ${{ matrix.variant }}
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        scenario: ${{ fromJSON(needs.prepare.outputs.scenarios) }}
+        variant: ${{ fromJSON(needs.prepare.outputs.variants) }}
     env:
+      VARIANT: ${{ matrix.variant }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
       DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
@@ -166,11 +227,13 @@ jobs:
           echo "TEST_SERVICE_BIN=$RUNNER_TEMP/bin/test-service" >> "$GITHUB_ENV"
           cp "$RUNNER_TEMP/bin/sha256.txt" "$RUNNER_TEMP/bin/server-build.json" "$RUNNER_TEMP/results/"
 
-      - name: SIGKILL after ingress
-        if: matrix.scenario == 'sigkill-drain'
+      - name: Clean control and SIGKILL after ingress
         env:
-          PERSIST_INDEX: "true"
-          STATE_STORE: "true"
+          PERSIST_INDEX: ${{ inputs.persist_index }}
+          STATE_STORE: ${{ inputs.state_store }}
+          BATCHING_SPEED: ${{ inputs.batching_speed }}
+          QUERIES: ${{ needs.prepare.outputs.queries }}
+          BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size == 'off' && '' || inputs.bootstrap_size }}
           CRASH_DELAY_MS: "0"
           CRASH_REAPPLY_COMPONENTS: "no"
           CRASH_SETTLE_SECS: "120"
@@ -182,34 +245,23 @@ jobs:
             CRASH_INJECT="$mode" \
             WORK_DIR="$RUNNER_TEMP/results/sigkill-$mode/work" \
             ARTIFACTS_DIR="$RUNNER_TEMP/results/sigkill-$mode/artifacts" \
-              bash e2e-test-framework/examples/building_comfort/dynamic/run_dynamic.sh
+              bash e2e-test-framework/examples/building_comfort/run_variant.sh
           done
-
-      - name: Scripted pause and restart
-        if: matrix.scenario != 'sigkill-drain'
-        env:
-          SCENARIO: ${{ matrix.scenario }}
-          AUTO_INSTALL_PLUGINS: "true"
-          PAUSE_SECS: ${{ inputs.pause_seconds }}
-          TMPDIR: ${{ runner.temp }}/results
-        run: bash e2e-test-framework/examples/scripted_recovery/run_compare.sh --variant "$SCENARIO"
 
       - name: Recovery summary
         if: always()
         env:
-          SCENARIO: ${{ matrix.scenario }}
           JOB_STATUS: ${{ job.status }}
         run: |
           {
-            printf '## Recovery: %s\n\nJob status: %s\n\n' "$SCENARIO" "$JOB_STATUS"
-            printf 'Inspect uploaded verdicts, snapshots, logs, and binary provenance.\n\n'
-            printf 'Immediate restart timing alone does not establish pending-query replay coverage.\n'
+            printf '## Building-comfort recovery: %s\n\nJob status: %s\n\n' "$VARIANT" "$JOB_STATUS"
+            printf 'Inspect uploaded verdicts, snapshots, logs, and binary provenance.\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload recovery artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recovery-${{ matrix.scenario }}
+          name: recovery-sigkill-drain-${{ matrix.variant }}
           path: ${{ runner.temp }}/results
           retention-days: 14

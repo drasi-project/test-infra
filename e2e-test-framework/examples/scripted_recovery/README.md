@@ -182,6 +182,14 @@ and no component reapplication. `persist_index` and `state_store` default to tru
 and must remain enabled. Embedded `drasi_lib` is omitted because this recovery
 runner kills an external server. Empty variant/query selections fail validation.
 
+The recovery-only `outbox_capacity` input defaults to `1000` and accepts a
+positive integer. It sets `outboxCapacity` on every selected query in both the
+clean and crash runs, independently of `query_tuning`. Use `20000` for the
+larger-outbox comparison after a Strict reaction outbox-gap failure; a passing
+comparison is retention evidence, not proof that startup ordering is fixed.
+The runner logs the applied capacity. Local runs can set `OUTBOX_CAPACITY`;
+when it is unset, existing query configuration and server defaults are preserved.
+
 HTTP standard and gRPC standard are selected by default, matching the standard
 workflow's external variants. Select only gRPC when using a registry/tag with
 only gRPC plugins published. Each variant requires compatible source/reaction

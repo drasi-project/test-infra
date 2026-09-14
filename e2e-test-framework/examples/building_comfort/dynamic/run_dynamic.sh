@@ -699,6 +699,10 @@ clamp_batch_for_bootstrap() {
 # 1000, bootstrapBufferSize 10000), so it is effectively a no-op made explicit.
 # Legacy named presets (low|medium|high) are still accepted for back-compat.
 resolve_query_tuning() {
+    if [[ -n "${OUTBOX_CAPACITY:-}" && ! "$OUTBOX_CAPACITY" =~ ^[1-9][0-9]*$ ]]; then
+        log "ERROR: OUTBOX_CAPACITY must be a positive integer when set"
+        return 1
+    fi
     case "$QUERY_TUNING" in
         low|1000)      PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
         medium|10000)  PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
@@ -1593,11 +1597,14 @@ apply_server_components() {
         q_body="$(printf '%s' "$q" | jq \
             --argjson pq "$PRIORITY_QUEUE_CAP" \
             --argjson db "$DISPATCH_BUFFER_CAP" \
+            --arg outbox "${OUTBOX_CAPACITY:-}" \
             --argjson bb "$BOOTSTRAP_BUFFER_SIZE" '
             .priorityQueueCapacity = $pq
             | .dispatchBufferCapacity = $db
-            | .bootstrapBufferSize = $bb')"
+            | .bootstrapBufferSize = $bb
+            | if $outbox != "" then .outboxCapacity = ($outbox | tonumber) else . end')"
         log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
+        log "  -> query $qid outboxCapacity=$(printf '%s' "$q_body" | jq -r '.outboxCapacity // "server default"')"
         drasi_apply "/queries" "$q_body"
     done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$q_select" "$qry_file")
 

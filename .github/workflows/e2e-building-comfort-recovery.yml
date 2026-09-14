@@ -76,6 +76,10 @@ on:
         description: "OCI tag to pin every plugin ref. Empty = latest-compatible."
         type: string
         default: ""
+      outbox_capacity:
+        description: "Retained query outputs per query, for both clean and crash runs. Positive integer; use 20000 for the retention experiment."
+        type: string
+        default: "1000"
       query_tuning:
         description: "Query capacity: priorityQueueCapacity (drives priority/dispatch/bootstrap buffers)."
         type: choice
@@ -104,6 +108,7 @@ jobs:
         id: settings
         env:
           MINUTES: ${{ inputs.timeout_minutes }}
+          OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
           V_HTTP_STD: ${{ inputs.http_standard }}
           V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
           V_GRPC_STD: ${{ inputs.grpc_standard }}
@@ -113,6 +118,10 @@ jobs:
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
         run: |
+          [[ "$OUTBOX_CAPACITY" =~ ^[1-9][0-9]*$ ]] || {
+            echo "ERROR: outbox_capacity must be a positive integer." >&2
+            exit 1
+          }
           [[ "$MINUTES" =~ ^[1-9][0-9]?$ ]] && (( MINUTES <= 60 )) || {
             echo "ERROR: timeout_minutes must be an integer from 1 to 60." >&2
             exit 1
@@ -229,6 +238,7 @@ jobs:
 
       - name: Clean control and SIGKILL after ingress
         env:
+          OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
           BATCHING_SPEED: ${{ inputs.batching_speed }}

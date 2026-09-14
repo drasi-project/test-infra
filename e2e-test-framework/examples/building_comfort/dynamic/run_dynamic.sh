@@ -2039,6 +2039,11 @@ write_step_summary() {
 }
 
 download_drasi_server
+if [[ "${1:-}" == "--prepare-server" ]]; then
+    jq -n --arg binary "$DRASI_SERVER_BIN" --arg source "$DRASI_BUILD_SOURCE" \
+        '{binary:$binary, source:$source}' > "$ARTIFACTS_DIR/server-build.json"
+    exit 0
+fi
 resolve_batching_preset
 resolve_query_tuning
 resolve_selected_queries

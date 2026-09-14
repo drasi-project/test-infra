@@ -1,0 +1,215 @@
+name: E2E - recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Recovery scenario (all runs three independent jobs)."
+        type: choice
+        options:
+          - all
+          - sigkill-drain
+          - restart-caught-up
+          - restart-immediate
+        default: all
+      drasi_server_version:
+        description: "drasi-server release tag. Used only when repo/ref are empty. Empty = latest."
+        type: string
+        default: ""
+      drasi_server_repo:
+        description: "drasi-server repo (owner/name) to BUILD from source. Empty = drasi-project/drasi-server."
+        type: string
+        default: ""
+      drasi_server_ref:
+        description: "drasi-server branch/tag/SHA to BUILD. Empty with repo set = that repo's default branch."
+        type: string
+        default: ""
+      timeout_minutes:
+        description: "Max minutes per test wait, excluding builds. Positive integer up to 60."
+        type: string
+        default: "30"
+      plugin_registry:
+        description: "OCI registry for plugins. Empty = server default (ghcr.io/drasi-project)."
+        type: string
+        default: ""
+      plugin_tag:
+        description: "OCI tag to pin every plugin ref. Empty = latest-compatible."
+        type: string
+        default: ""
+      query_tuning:
+        description: "Building-comfort SIGKILL query capacity. Pause scenarios use their fixed configuration."
+        type: choice
+        options:
+          - "1000"
+          - "10000"
+          - "100000"
+        default: "10000"
+      pause_seconds:
+        description: "Pause hold duration. Positive integer up to 60."
+        type: string
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Build test binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      scenarios: ${{ steps.settings.outputs.scenarios }}
+      timeout_seconds: ${{ steps.settings.outputs.timeout_seconds }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate settings
+        id: settings
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          MINUTES: ${{ inputs.timeout_minutes }}
+          PAUSE_SECONDS: ${{ inputs.pause_seconds }}
+        run: |
+          [[ "$MINUTES" =~ ^[1-9][0-9]?$ ]] && (( MINUTES <= 60 ))
+          [[ "$PAUSE_SECONDS" =~ ^[1-9][0-9]?$ ]] && (( PAUSE_SECONDS <= 60 ))
+          case "$SCENARIO" in
+            all) scenarios='["sigkill-drain","restart-caught-up","restart-immediate"]' ;;
+            sigkill-drain|restart-caught-up|restart-immediate)
+              scenarios="$(jq -cn --arg scenario "$SCENARIO" '[$scenario]')" ;;
+            *) exit 1 ;;
+          esac
+          echo "scenarios=$scenarios" >> "$GITHUB_OUTPUT"
+          echo "timeout_seconds=$((MINUTES * 60))" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: e2e-test-framework
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            jq curl lsof build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+            libprotobuf-dev protobuf-compiler cmake clang libclang-dev
+          echo "JQ_LIB_DIR=$(dirname "$(find /usr/lib -name libjq.so -print -quit)")" >> "$GITHUB_ENV"
+
+      - name: Build test-service
+        working-directory: e2e-test-framework
+        run: cargo build --release --locked --manifest-path test-service/Cargo.toml
+
+      - name: Build or download Drasi Server
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRASI_REPO: ${{ inputs.drasi_server_repo }}
+          DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
+          DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
+          WORK_DIR: ${{ runner.temp }}/server-build
+          ARTIFACTS_DIR: ${{ runner.temp }}/build-artifacts
+        run: |
+          bash e2e-test-framework/examples/building_comfort/dynamic/run_dynamic.sh --prepare-server
+          mkdir -p "$RUNNER_TEMP/bundle"
+          server_bin="$(jq -er .binary "$ARTIFACTS_DIR/server-build.json")"
+          cp "$server_bin" "$RUNNER_TEMP/bundle/drasi-server"
+          cp e2e-test-framework/target/release/test-service "$RUNNER_TEMP/bundle/test-service"
+          cp "$ARTIFACTS_DIR/server-build.json" "$RUNNER_TEMP/bundle/"
+          if [[ -d "$WORK_DIR/drasi-server-src/.git" ]]; then
+            git -C "$WORK_DIR/drasi-server-src" rev-parse HEAD > "$RUNNER_TEMP/bundle/server-commit.txt"
+            cp "$WORK_DIR/drasi-server-src/Cargo.lock" "$RUNNER_TEMP/bundle/server-Cargo.lock"
+          fi
+          sha256sum "$RUNNER_TEMP/bundle/drasi-server" "$RUNNER_TEMP/bundle/test-service" > "$RUNNER_TEMP/bundle/sha256.txt"
+          tar -czf "$RUNNER_TEMP/build-artifacts/recovery-binaries.tar.gz" -C "$RUNNER_TEMP/bundle" .
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-build
+          path: ${{ runner.temp }}/build-artifacts
+          retention-days: 14
+
+  recovery:
+    name: Recovery / ${{ matrix.scenario }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(needs.prepare.outputs.scenarios) }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
+      DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
+      TIMEOUT_SECS: ${{ needs.prepare.outputs.timeout_seconds }}
+      DRASI_RUST_LOG: info,drasi_lib::queries=debug,drasi_lib::reactions=debug
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq curl lsof libjq1 libonig5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: recovery-build
+          path: ${{ runner.temp }}/build-artifacts
+
+      - name: Unpack binaries
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/results"
+          tar -xzf "$RUNNER_TEMP/build-artifacts/recovery-binaries.tar.gz" -C "$RUNNER_TEMP/bin"
+          chmod +x "$RUNNER_TEMP/bin/drasi-server" "$RUNNER_TEMP/bin/test-service"
+          echo "DRASI_SERVER_BIN=$RUNNER_TEMP/bin/drasi-server" >> "$GITHUB_ENV"
+          echo "TEST_SERVICE_BIN=$RUNNER_TEMP/bin/test-service" >> "$GITHUB_ENV"
+          cp "$RUNNER_TEMP/bin/sha256.txt" "$RUNNER_TEMP/bin/server-build.json" "$RUNNER_TEMP/results/"
+
+      - name: SIGKILL after ingress
+        if: matrix.scenario == 'sigkill-drain'
+        env:
+          PERSIST_INDEX: "true"
+          STATE_STORE: "true"
+          CRASH_DELAY_MS: "0"
+          CRASH_REAPPLY_COMPONENTS: "no"
+          CRASH_SETTLE_SECS: "120"
+          POLL_INTERVAL_SECS: "1"
+          LOG_JSONL: "1"
+          QUERY_TUNING: ${{ inputs.query_tuning }}
+        run: |
+          for mode in off drain; do
+            CRASH_INJECT="$mode" \
+            WORK_DIR="$RUNNER_TEMP/results/sigkill-$mode/work" \
+            ARTIFACTS_DIR="$RUNNER_TEMP/results/sigkill-$mode/artifacts" \
+              bash e2e-test-framework/examples/building_comfort/dynamic/run_dynamic.sh
+          done
+
+      - name: Scripted pause and restart
+        if: matrix.scenario != 'sigkill-drain'
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+          AUTO_INSTALL_PLUGINS: "true"
+          PAUSE_SECS: ${{ inputs.pause_seconds }}
+          TMPDIR: ${{ runner.temp }}/results
+        run: bash e2e-test-framework/examples/scripted_recovery/run_compare.sh --variant "$SCENARIO"
+
+      - name: Recovery summary
+        if: always()
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            printf '## Recovery: %s\n\nJob status: %s\n\n' "$SCENARIO" "$JOB_STATUS"
+            printf 'Inspect uploaded verdicts, snapshots, logs, and binary provenance.\n\n'
+            printf 'Immediate restart timing alone does not establish pending-query replay coverage.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload recovery artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/results
+          retention-days: 14

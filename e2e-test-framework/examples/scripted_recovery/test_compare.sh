@@ -5,6 +5,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/run_compare.sh"
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/scripted-compare-tests.XXXXXX")"
 WORK="$TEST_DIR"
+prepare_config false
+jq -e '.autoInstallPlugins == false and .verifyPlugins == true and
+    .plugins[0].ref == "source/grpc" and (has("pluginRegistry") | not)' "$WORK/server.yaml" >/dev/null
+AUTO_INSTALL_PLUGINS=true DRASI_PLUGIN_REGISTRY=ghcr.io/example DRASI_PLUGIN_TAG=testing prepare_config false
+jq -e '.autoInstallPlugins == true and .verifyPlugins == true and
+    .pluginRegistry == "ghcr.io/example" and .plugins[0].ref == "source/grpc:testing" and
+    .plugins[1].ref == "reaction/grpc:testing"' "$WORK/server.yaml" >/dev/null
 bash "$HERE/generate_scripts.sh" "$TEST_DIR/scripts"
 files=("$HERE"/dev_repo/pause_comparison/sources/script-db/source_change_scripts/*.jsonl)
 [[ ${#files[@]} == 3 ]]

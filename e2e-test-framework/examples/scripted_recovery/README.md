@@ -133,11 +133,61 @@ Server logs are appended across restart with a clear boundary. Default query and
 reaction debug logging helps diagnose sequence/checkpoint behavior; override with
 `DRASI_RUST_LOG` as needed.
 
-Status: Bash syntax and mocked routing/process-lifecycle/cursor tests pass.
-**Neither restart variant has been run against Drasi yet.** Per the team decision,
-real recovery validation waits for the recovery PR stack to merge and compatible
-server/plugins to be rebuilt. The known output-restoration bug may fail these
-scenarios on the old build.
+Validation on 2026-09-14: **both restart variants passed against the local
+codec-fixed Drasi Server build**, each with a fresh uninterrupted baseline.
+All four runs produced exactly 12,000 inputs, deliveries, and query rows, with
+matching final rows and delivered identities. Both restarts restored output
+sequence 4,000 and 4,000 live rows before continuing at input 4,001.
+
+Both runs replayed zero source events, including `restart-immediate`: the query
+had already checkpointed all pre-pause inputs. This validates saved-state
+restoration and continuation, not pending-query replay coverage. The insert-only
+scenario does not directly exercise the Update codec regression. See the
+[progress log](../../../docs/recovery-testing-progress.md) for binary provenance,
+artifact paths, and coverage limits. Bash syntax and mocked
+routing/process-lifecycle/cursor tests also passed previously.
+
+## GitHub Recovery Workflow
+
+The manual [E2E - recovery workflow](../../../.github/workflows/e2e-recovery.yml)
+is separate from the building-comfort throughput workflow. It supports `all`,
+`sigkill-drain`, `restart-caught-up`, and `restart-immediate`. Each scenario runs
+on its own runner using the same binaries from one preparation job.
+
+Server inputs match building-comfort:
+
+- `drasi_server_repo`: GitHub `owner/name` to build from source.
+- `drasi_server_ref`: branch, tag, or SHA. A ref alone uses
+  `drasi-project/drasi-server`; a repo alone uses its default branch.
+- `drasi_server_version`: release tag, used only when repo and ref are empty;
+  leaving all three empty downloads the latest release.
+- `plugin_registry` and `plugin_tag`: optional OCI plugin overrides. Plugins
+  are automatically installed in CI with verification enabled.
+- `timeout_minutes`: maximum per test wait, excluding builds.
+
+The server checkout determines its core dependencies; this workflow does not
+inject the locally tested core revision or build plugins from core source.
+Select a server branch containing the required recovery dependencies and a
+compatible published plugin registry/tag. A successful build alone does not
+establish that the recovery fixes are present. The build artifact records the
+server commit and resolved Cargo lockfile for source builds, plus binary hashes.
+
+`sigkill-drain` uses standard gRPC with persistence enabled, both building-comfort
+queries, a clean run followed by the crash run, zero extra crash delay, and no
+component reapplication. Both runs must pass the committed count/hash baselines.
+`query_tuning` controls that scenario's queue capacity. The pause variants use
+the fixed 12,000-change configuration and their own fresh uninterrupted baseline;
+`pause_seconds` controls their hold duration. Both numeric time inputs accept
+positive integers up to 60.
+
+Artifacts are uploaded on success or failure and retained for 14 days, including
+logs, verdicts, saved state, and snapshots. Immediate-restart pending-work coverage
+remains unverified unless checkpoint/replay evidence establishes it.
+
+Status: files prepared and locally validated; not published or run on GitHub.
+Only `workflow_dispatch` is configured. GitHub normally requires this workflow
+on the default branch before it can be manually dispatched; no temporary push
+trigger is included.
 
 ## Earlier Four-Change Prototype
 

@@ -182,9 +182,14 @@ prepare_config() {
             output_loggers:[{kind:"JsonlFile",max_lines_per_file:4000}]}]
     ' "$HERE/config.json" > "$WORK/config.json"
     jq --argjson admin "$ADMIN_PORT" --argjson source "$SOURCE_PORT" \
-        --arg endpoint "grpc://127.0.0.1:$REACTION_PORT" --argjson verify "$VERIFY_PLUGINS" '
+        --arg endpoint "grpc://127.0.0.1:$REACTION_PORT" --argjson verify "$VERIFY_PLUGINS" \
+        --argjson install "${AUTO_INSTALL_PLUGINS:-false}" \
+        --arg registry "${DRASI_PLUGIN_REGISTRY:-}" --arg tag "${DRASI_PLUGIN_TAG:-}" '
         .port=$admin | .sources[0].port=$source | .reactions[0].endpoint=$endpoint |
-        .verifyPlugins=$verify' "$HERE/server.json" > "$WORK/server.yaml"
+        .verifyPlugins=$verify | .autoInstallPlugins=$install |
+        if $registry != "" then .pluginRegistry=$registry else . end |
+        if $tag != "" then .plugins |= map(.ref += ":" + $tag) else . end
+        ' "$HERE/server.json" > "$WORK/server.yaml"
 }
 
 collect_records() {

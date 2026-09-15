@@ -1,0 +1,78 @@
+# Producer-Aware Building-Comfort Golden
+
+Fresh uninterrupted standard-gRPC capture completed on 2026-09-15. The default
+100,000-change building-comfort workload used seed 123456789, both queries,
+persistent index/state store, and outbox capacity 20,000.
+
+| Query | Captured results | Missing producer keys | Repeated producer keys | Snapshot rows |
+|-------|-----------------:|----------------------:|-----------------------:|--------------:|
+| building-comfort | 99,981 | 0 | 0 | 12 |
+| building-comfort-floor-agg | 49,860 | 0 | 0 | 12 |
+
+Both existing ordered SHA-256 expectations passed. The new capture preserves
+producer query ID, sequence, row signature, and operation using identity contract
+`grpc-query-sequence-row-operation-v1`. The tuple is unique within each query in
+this capture. This does not yet establish stable identity mapping across separate
+runs or transports.
+
+## Files
+
+- [Golden room snapshot](query_results__building-comfort.json)
+- [Golden aggregate snapshot](query_results__building-comfort-floor-agg.json)
+- [Producer-key checks](identity-validation.json)
+- [Strict hash checks](determinism_verdict.json)
+- [Workload](workload.json) and [provenance](provenance.json)
+- [Comparison policy](policy.json) and [self-comparison](self-comparison.json)
+- `golden-actual.json.gz`: normalized artifact containing producer identities,
+  semantic event payloads, and both snapshots. Decompress before using as the
+  comparator's baseline; the comparator does not directly read gzip.
+
+The policy requires exactly-once, ordered output. A self-comparison passed both
+delivery and state checks; it is only an artifact sanity check, not a recovery
+test. The overall verdict remains inconclusive under the existing completion
+policy because the terminal output boundary was not independently established.
+The snapshots record state at the existing record-count stop point. No new
+completion evidence was asserted.
+
+The aggregate snapshot preserves 12 rows, including repeated floor IDs. Its
+equivalence to another capture is not independent proof of aggregation correctness.
+
+Raw logs and saved data: `/tmp/recovery-golden-producer-84.I1FGSs`.
+The old `local-20260914-LGboor` golden is unchanged. This new capture is available
+as a workflow option in the prepared files but has not yet been compared against
+a fresh recovery run.
+It is not certified as an interchangeable event-level baseline for HTTP or
+adaptive variants. The logical final-state expectation is the same across modes;
+transport normalization and producer identity compatibility must be checked.
+
+## Select in GitHub
+
+After committing and pushing the workflow, capture code, helper scripts, and
+golden files together, open **E2E - building_comfort recovery**, choose **Run
+workflow**, and select the branch containing those changes. Set:
+
+```text
+golden_snapshot: local-20260915-I1FGSs
+http_standard: false
+http_adaptive: false
+grpc_standard: true
+grpc_adaptive: false
+query_building_comfort: true
+query_floor_agg: true
+bootstrap_size: off
+outbox_capacity: 20000
+persist_index: true
+state_store: true
+drasi_server_repo: ruokun-niu/drasi-server
+drasi_server_ref: 6ffbfc0
+plugin_registry: ghcr.io/ruokun-niu
+plugin_tag: composite-key
+```
+
+Leave the release version empty, batching/query tuning at 10000, and timeout at
+30 minutes. The helper automatically selects the producer-key identity pointer
+from this golden's contract. Exactly-once and ordered delivery are required by
+the comparison policy, with advisory enforcement retained and SHA-256 enforced.
+Snapshot and delivery verdicts are shown separately; the overall verdict still
+reflects the unchanged completion-evidence limitation. Selecting the older golden
+retains its null identity contract and cannot diagnose delivery by producer ID.

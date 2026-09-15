@@ -31,11 +31,14 @@ while IFS= read -r query; do
     query_fingerprint="$(printf '%s\n' "$query" | jq -cS . | shasum -a 256 | awk '{print $1}')"
     jq -e --arg id "$id" --arg fingerprint "$query_fingerprint" '
         [.queries[] | select(.query_id == $id)] | length == 1 and
-        .[0].config_fingerprint == $fingerprint and .[0].identity_contract == null
+                .[0].config_fingerprint == $fingerprint and
+                (.[0].identity_contract == null or .[0].identity_contract == "grpc-query-sequence-row-operation-v1")
     ' "$baseline" >/dev/null
-    handler_queries="$(printf '%s' "$handler_queries" | jq --arg id "$id" --arg fingerprint "$query_fingerprint" --arg api "$api" '
+        contract="$(jq -c --arg id "$id" '.queries[] | select(.query_id == $id) | .identity_contract' "$baseline")"
+        handler_queries="$(printf '%s' "$handler_queries" | jq --arg id "$id" --arg fingerprint "$query_fingerprint" --arg api "$api" --argjson contract "$contract" '
         . + [{query_id:$id, test_reaction_id:$id, config_fingerprint:$fingerprint,
-          identity_contract:null, identity_pointer:null,
+                    identity_contract:$contract,
+                    identity_pointer:(if $contract == null then null else "/payload/headers/x-drasi-producer-key" end),
           query_id_pointer:"/payload/request_body/query_id", payload_pointer:"/payload/request_body/result",
           snapshot_url:($api + "/queries/" + ($id | @uri) + "/results")}]
     ')"

@@ -21,4 +21,23 @@ if bash "$here/configure_golden.sh" "$directory/changed.json" "$queries" '["buil
     printf 'FAIL: accepted changed workload seed\n' >&2
     exit 1
 fi
-printf 'PASS: strict policy, advisory mode, handler ordering, and workload guards. Artifacts: %s\n' "$directory"
+jq -e '.data_store.test_repos[0].local_tests[0].completion_handlers[1].queries |
+    all(.[]; .identity_contract == null and .identity_pointer == null)' "$config" >/dev/null
+golden="$here/goldens/local-20260915-I1FGSs"
+jq '.queries' "$golden/workload.json" > "$queries"
+jq '{data_store:{test_repos:[{local_tests:[{sources:.sources, completion_handlers:[{kind:"Sha256Determinism"},{kind:"Log"}]}]}]}}' "$golden/workload.json" > "$config"
+bash "$here/configure_golden.sh" "$config" "$queries" '["building-comfort","building-comfort-floor-agg"]' "$golden" http://localhost:8090/api/v1
+jq -e '.data_store.test_repos[0].local_tests[0].completion_handlers[1] |
+    .policy.delivery == "exactly_once" and .policy.allow_reordering == false and .enforce == false and
+    (.queries | all(.[]; .identity_contract == "grpc-query-sequence-row-operation-v1" and
+       .identity_pointer == "/payload/headers/x-drasi-producer-key"))' "$config" >/dev/null
+mkdir "$directory/invalid-golden"
+cp "$golden/workload.json" "$directory/invalid-golden/"
+gzip -dc "$golden/golden-actual.json.gz" |
+    jq '.queries[].identity_contract = "unsupported-contract"' |
+    gzip > "$directory/invalid-golden/golden-actual.json.gz"
+if bash "$here/configure_golden.sh" "$config" "$queries" '["building-comfort","building-comfort-floor-agg"]' "$directory/invalid-golden" http://localhost:8090/api/v1; then
+    printf 'FAIL: accepted unsupported identity contract\n' >&2
+    exit 1
+fi
+printf 'PASS: both goldens, producer identity wiring, strict policy, and workload guards. Artifacts: %s\n' "$directory"

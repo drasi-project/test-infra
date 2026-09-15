@@ -100,11 +100,52 @@ quiet output, source ingress, health, or log flushing alone. File snapshots must
 belong to this same terminal boundary; URL snapshots require a stable/quiescent
 query at that boundary. The handler does not pause Drasi to establish consistency.
 
-The current gRPC example has null identity pointers/contracts because its logs
-do not yet capture stable producer IDs. It therefore remains inconclusive even
-with a boundary file. Capture those IDs before enabling this handler as a gate.
-The logger is reused, not replaced: no identities are invented, no new protocol
-fields are assumed, and existing hashes are not weakened.
+The legacy gRPC example retains null identity pointers/contracts for compatibility
+with the saved golden, which has no producer metadata. Fresh framework captures
+now preserve the existing wire fields as described below. A new compatible
+baseline is required before enabling event-level comparison; old captures cannot
+be repaired by substituting receiver-local sequence numbers.
+
+### gRPC Producer Metadata
+
+Rebuilt test-service captures these fields under `payload.headers` in the existing
+`JsonlFile` records (capture metadata, not newly added wire headers):
+
+- `x-drasi-producer-query-id`: query ID from the wire batch.
+- `x-drasi-producer-sequence`: query output sequence, as an exact decimal string.
+- `x-drasi-producer-row-signature`: row signature, as an exact decimal string.
+- `x-drasi-producer-item-type`: numeric wire operation enum, as a string.
+- `x-drasi-producer-key`: JSON tuple of query ID, sequence string, row signature
+  string, and numeric operation. Absent when sequence is zero (unavailable).
+
+These fields survive repeated delivery and batch regrouping; receiver invocation
+IDs remain separate. Unary and streaming gRPC paths share this capture code.
+The semantic request body is unchanged, so existing SHA-256 baselines do not
+change. No drasi-core, drasi-server, or plugin rebuild is required for the tested
+protocol; only rebuild test-service.
+
+For a workload with at most one diff per query/sequence/row/operation tuple and
+stable cross-run sequences/signatures, use the following in both capture configs:
+
+```json
+{
+  "identity_contract": "grpc-query-sequence-row-operation-v1",
+  "identity_pointer": "/payload/headers/x-drasi-producer-key"
+}
+```
+
+Use `delivery: exactly_once` and `allow_reordering: false` for these recovery
+tests. First verify tuple uniqueness in a fresh uninterrupted baseline. If the
+producer legitimately emits the same tuple twice, the comparator rejects that
+baseline; do not add a receiver counter or batch offset to hide the collision.
+That workload needs a finer producer-side diff identity. Identical payloads on
+different rows/sequences remain distinct. Payload values are never part of the
+key, so conflicting values for the same key remain detectable.
+
+The saved `local-20260914-LGboor` baseline and its workflow selection deliberately
+keep null identity contracts until recaptured. This metadata change does not
+change completion checks or turn the existing candidate golden into a complete
+capture. The payload hash gate remains independent.
 
 ## Artifact Contract
 
@@ -245,6 +286,6 @@ cargo test --locked -p test-run-host --lib recovery_
 cargo test --locked -p test-run-host --test recovery_compare_cli
 ```
 
-Remaining work: instrument stable producer identities and verified terminal
-boundaries, configure real workflows in advisory mode, and establish baseline
+Remaining work: recapture and validate producer-key uniqueness for real workloads,
+establish verified terminal boundaries, configure workflows, and establish baseline
 storage/versioning before replacing existing CI gates.

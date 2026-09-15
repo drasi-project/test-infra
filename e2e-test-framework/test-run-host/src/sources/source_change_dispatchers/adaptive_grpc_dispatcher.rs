@@ -261,7 +261,12 @@ impl SourceChangeDispatcher for AdaptiveGrpcSourceChangeDispatcher {
         self.event_tx = None;
 
         let batcher_result = if let Some(mut handle) = self.batcher_handle.take() {
-            match tokio::time::timeout(Duration::from_secs(5), &mut handle).await {
+            match tokio::time::timeout(
+                Duration::from_secs(self.timeout_seconds.max(5)),
+                &mut handle,
+            )
+            .await
+            {
                 Ok(Ok(result)) => result,
                 Ok(Err(error)) => Err(anyhow::anyhow!(
                     "Adaptive gRPC batcher task failed: {error}"

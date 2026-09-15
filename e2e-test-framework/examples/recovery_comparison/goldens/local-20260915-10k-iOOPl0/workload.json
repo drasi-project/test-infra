@@ -27,21 +27,21 @@
           500000000,
           4000000000
         ],
-        "change_count": 100000,
+        "change_count": 122100,
         "seed": 123456789,
         "spacing_mode": "none",
         "time_mode": "2025-01-03T10:03:15.4Z",
         "send_initial_inserts": true,
         "building_count": [
-          1,
+          100,
           0
         ],
         "floor_count": [
-          3,
+          10,
           0
         ],
         "room_count": [
-          4,
+          10,
           0
         ],
         "room_sensors": [

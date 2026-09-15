@@ -2,7 +2,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 directory="$(mktemp -d "${TMPDIR:-/tmp}/golden-config-test.XXXXXX")"
-golden="$here/goldens/local-20260914-LGboor"
+golden="$here/goldens/local-20260915-I1FGSs"
 config="$directory/config.json"
 queries="$directory/queries.json"
 jq '.queries' "$golden/workload.json" > "$queries"
@@ -22,7 +22,7 @@ if bash "$here/configure_golden.sh" "$directory/changed.json" "$queries" '["buil
     exit 1
 fi
 jq -e '.data_store.test_repos[0].local_tests[0].completion_handlers[1].queries |
-    all(.[]; .identity_contract == null and .identity_pointer == null)' "$config" >/dev/null
+    all(.[]; .identity_contract == "grpc-query-sequence-row-operation-v1" and .identity_pointer == "/payload/headers/x-drasi-producer-key")' "$config" >/dev/null
 golden="$here/goldens/local-20260915-I1FGSs"
 jq '.queries' "$golden/workload.json" > "$queries"
 jq '{data_store:{test_repos:[{local_tests:[{sources:.sources, reactions:[.queries[] | {test_reaction_id:.id,output_handler:{kind:"Grpc"}}], completion_handlers:[{kind:"Sha256Determinism"},{kind:"Log"}]}]}]}}' "$golden/workload.json" > "$config"
@@ -64,4 +64,4 @@ for variant in config config.grpc_adaptive config.http config.http_adaptive; do
         exit 1
     fi
 done
-printf 'PASS: both goldens, all four transports, unchanged snapshots, strict policy, and workload guards. Artifacts: %s\n' "$directory"
+printf 'PASS: current golden, all four transports, unchanged snapshots, strict policy, and workload guards. Artifacts: %s\n' "$directory"

@@ -1,0 +1,16 @@
+[
+  {
+    "query_id": "building-comfort",
+    "records": 105000,
+    "missing_identities": 0,
+    "repeated_keys": [],
+    "snapshot_rows": 10000
+  },
+  {
+    "query_id": "building-comfort-floor-agg",
+    "records": 50000,
+    "missing_identities": 0,
+    "repeated_keys": [],
+    "snapshot_rows": 10000
+  }
+]

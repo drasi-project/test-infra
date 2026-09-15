@@ -1,0 +1,22 @@
+{
+  "status": "candidate-stop-point",
+  "captured_at_utc": "2026-09-15T22:08:03Z",
+  "workload_fingerprint": "f4eea52e36009522d2226d2b617fb3abc087a1169dbb04e5d0aa6b33d54f03be",
+  "raw_artifacts": "/tmp/recovery-golden-10k-84.iOOPl0",
+  "variant": "grpc_standard",
+  "bootstrap_size": "10k",
+  "bootstrap_rooms": 10000,
+  "bootstrap_events": 22100,
+  "steady_changes": 100000,
+  "receiver_stop_counts": {
+    "building-comfort": 105000,
+    "building-comfort-floor-agg": 50000
+  },
+  "server_sha256": "ed6b4b97938231be238a479ff2d206c7376b56a8f3e440dbf85c7ded5230612e",
+  "test_service_sha256": "6a9d344f9e967b8d8f08849b1317e03093665690601ec78681556200b630a82d",
+  "test_infra_head": "791e858d78a637e167e9a26069819ce2f9465cc6",
+  "test_infra_uncommitted_changes": true,
+  "outbox_capacity": 20000,
+  "producer_identity_contract": "grpc-query-sequence-row-operation-v1",
+  "capture_complete": false
+}

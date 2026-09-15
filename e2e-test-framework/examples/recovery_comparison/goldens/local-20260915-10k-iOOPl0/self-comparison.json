@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "verdict": "inconclusive",
+  "workload_fingerprint": "f4eea52e36009522d2226d2b617fb3abc087a1169dbb04e5d0aa6b33d54f03be",
+  "policy": {
+    "delivery": "exactly_once",
+    "allow_reordering": false
+  },
+  "reasons": [
+    "baseline capture incomplete: 10k bootstrap preset, 22100 bootstrap inputs plus 100000 changes; existing sample-count stops of 105000/50000. Snapshot at test stop, not verified terminal state.",
+    "recovery capture incomplete: 10k bootstrap preset, 22100 bootstrap inputs plus 100000 changes; existing sample-count stops of 105000/50000. Snapshot at test stop, not verified terminal state."
+  ],
+  "missing_queries": [],
+  "unexpected_queries": [],
+  "queries": [
+    {
+      "query_id": "building-comfort",
+      "delivery": {
+        "verdict": "passed",
+        "reason": null,
+        "expected_observations": 105000,
+        "actual_observations": 105000,
+        "missing": [],
+        "unexpected": [],
+        "duplicates": {},
+        "conflicting": [],
+        "reordered": false
+      },
+      "state": {
+        "verdict": "passed",
+        "reason": null,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "query_id": "building-comfort-floor-agg",
+      "delivery": {
+        "verdict": "passed",
+        "reason": null,
+        "expected_observations": 50000,
+        "actual_observations": 50000,
+        "missing": [],
+        "unexpected": [],
+        "duplicates": {},
+        "conflicting": [],
+        "reordered": false
+      },
+      "state": {
+        "verdict": "passed",
+        "reason": null,
+        "missing": [],
+        "unexpected": []
+      }
+    }
+  ]
+}

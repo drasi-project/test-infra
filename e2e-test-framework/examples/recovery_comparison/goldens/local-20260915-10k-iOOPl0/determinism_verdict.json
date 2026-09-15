@@ -1,0 +1,15 @@
+{
+  "results": {
+    "building-comfort": {
+      "actual": "a5d89950f456b00b802b2659eeb8855afa09bfda222ef9a9c89becef301b4fa5",
+      "expected": "a5d89950f456b00b802b2659eeb8855afa09bfda222ef9a9c89becef301b4fa5",
+      "passed": true
+    },
+    "building-comfort-floor-agg": {
+      "actual": "aaa6e7bc9e2f8ed07014b4ded3656816ba063b45abbdd252a49d790255fef556",
+      "expected": "aaa6e7bc9e2f8ed07014b4ded3656816ba063b45abbdd252a49d790255fef556",
+      "passed": true
+    }
+  },
+  "test_run_id": "drasi_server_dev_repo.building_comfort.test_run_001"
+}

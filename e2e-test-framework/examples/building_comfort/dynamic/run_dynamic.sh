@@ -71,6 +71,7 @@
 #   SERVER_REACTIONS_FILE components/server/ file (reactions_grpc.json)
 #   TEST_CFG_SRC          test-service config ($SCRIPT_DIR/config.json)
 #   TEST_SERVICE_PORT     test-service REST port (63123)
+#   TEST_SERVICE_STARTUP_TIMEOUT_SECS  API startup wait, including auto-start bootstrap (600)
 #   TEST_RUN_ID           full run id (drasi_server_dev_repo.building_comfort.test_run_001)
 #   TEST_REACTION_IDS     reactions to snapshot ("building-comfort building-comfort-floor-agg")
 #   TIMEOUT_SECS          completion timeout (1800)
@@ -782,7 +783,7 @@ resolve_crash_inject() {
     if [[ "$LOG_JSONL" != "1" ]]; then
         log "CRASH_INJECT=drain: LOG_JSONL=0 (fast). Set LOG_JSONL=1 for a row-level forensic diff if the SHA mismatches."
     fi
-    log "CRASH_INJECT=drain: SIGKILL after source-finished (+${CRASH_DELAY_MS}ms), restart preserving ./data (reapply_components=$CRASH_REAPPLY_COMPONENTS, server RUST_LOG=$DRASI_RUST_LOG, LOG_JSONL=$LOG_JSONL)"
+    log "CRASH_INJECT=drain: SIGKILL after successful dispatcher drain (+${CRASH_DELAY_MS}ms), restart preserving ./data (reapply_components=$CRASH_REAPPLY_COMPONENTS, server RUST_LOG=$DRASI_RUST_LOG, LOG_JSONL=$LOG_JSONL)"
 }
 
 # Select the committed base server yaml from the two INDEPENDENT instance-config
@@ -1277,15 +1278,16 @@ restart_drasi_server() {
     prepare_rocksdb_index_dirs
 }
 
-# Block until the source generator reports it has dispatched every change, i.e.
-# the test-service log shows "Script Finished for TestRunSource". This marks the
+# Block until the source generator reports a successful dispatcher drain, i.e.
+# the test-service log shows "Source dispatchers drained for TestRunSource". This marks the
 # point where ingress is closed but the server may still be draining — the
 # drain-phase (Option A) injection window. Bounded by TIMEOUT_SECS.
 wait_for_source_finished() {
     local log_file="$LOG_DIR/test-service.log"
-    local marker="Script Finished for TestRunSource"
+    local marker="Source dispatchers drained for TestRunSource ${TEST_RUN_ID}."
+    local failure_marker="Source dispatcher drain failed for TestRunSource ${TEST_RUN_ID}."
     local completion="TestRun '${TEST_RUN_ID}' completed:"
-    log "Waiting for source-finished marker before crash injection"
+    log "Waiting for successful source-dispatcher drain before crash injection"
     log "  marker: $marker  (timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s)"
     local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
     local start_ts; start_ts=$(date +%s)
@@ -1298,25 +1300,29 @@ wait_for_source_finished() {
         if ! kill -0 "$DRASI_PID" 2>/dev/null; then
             log "ERROR: drasi-server exited before source finished"; return 1
         fi
+        if [[ -s "$log_file" ]] && grep -qF "$failure_marker" "$log_file"; then
+            log "ERROR: source dispatcher drain failed; refusing crash injection"
+            return 1
+        fi
         if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
-            log "Source-finished marker observed"
+            log "Successful source-dispatcher drain marker observed"
             return 0
         fi
         # If the run already completed we missed the drain window entirely.
         if [[ -s "$log_file" ]] && grep -qF "$completion" "$log_file"; then
-            log "WARNING: run completed before source-finished marker; drain window missed"
+            log "WARNING: run completed before dispatcher-drained marker; drain window missed"
             return 2
         fi
         # Progress heartbeat so a slow-but-moving dispatch is distinguishable from
         # a genuine stall. Shows per-reaction record counts (climbing = flowing).
         if (( now - last_log_ts >= 30 )); then
-            log "waiting for source-finished t=$(( now - start_ts ))s (no marker yet)$(reaction_progress)"
+            log "waiting for source-dispatcher drain t=$(( now - start_ts ))s (no marker yet)$(reaction_progress)"
             last_log_ts=$now
         fi
         sleep "$POLL_INTERVAL_SECS"
         now=$(date +%s)
     done
-    log "ERROR: source-finished marker not observed within ${TIMEOUT_SECS}s"
+    log "ERROR: dispatcher-drained marker not observed within ${TIMEOUT_SECS}s; a rebuilt test-service is required"
     log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" 2>/dev/null || true
     log "--- drasi-server.log (last 100 lines) ---"; tail -n 100 "$LOG_DIR/drasi-server.log" 2>/dev/null || true
     return 1
@@ -1632,6 +1638,11 @@ apply_server_components() {
 }
 
 start_test_service() {
+    local startup_timeout="${TEST_SERVICE_STARTUP_TIMEOUT_SECS:-600}"
+    [[ "$startup_timeout" =~ ^[1-9][0-9]*$ ]] || {
+        log "ERROR: TEST_SERVICE_STARTUP_TIMEOUT_SECS must be a positive integer"
+        return 1
+    }
     if [[ -n "${TEST_SERVICE_BIN:-}" ]]; then
         log "Starting pre-built test-service: $TEST_SERVICE_BIN"
         (
@@ -1651,7 +1662,7 @@ start_test_service() {
     fi
     SERVICE_PID=$!
     log "test-service pid=$SERVICE_PID"
-    if ! wait_for_port 127.0.0.1 "$TEST_SERVICE_PORT" "test-service API" 600; then
+    if ! wait_for_port 127.0.0.1 "$TEST_SERVICE_PORT" "test-service API" "$startup_timeout"; then
         log "--- test-service.log (last 200 lines) ---"
         tail -n 200 "$LOG_DIR/test-service.log" || true
         return 1

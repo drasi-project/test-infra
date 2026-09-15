@@ -186,14 +186,14 @@ implement separate delivery/state diagnostics. The framework supports
 producer identity and verified boundary capture are still needed. Reusable
 golden-run storage remains part of issue #84. Baselines must match
 the workload; missing baselines for custom presets are not correctness evidence.
-Select either saved `golden_snapshot` to enable candidate golden comparison in
+Select `golden_snapshot: local-20260915-I1FGSs` to enable candidate golden comparison in
 advisory mode. All four HTTP/gRPC standard/adaptive variants can be selected
 together. Both queries and bootstrap off are required for these captures.
 The workflow validates the logical workload independently of dispatcher settings, uses the stored
 capture without rerunning the golden, and reports snapshot/delivery verdicts in
 the job summary. Its policy rejects duplicates and reordering; SHA-256 remains
 enforced while missing producer/boundary evidence keeps the comparator overall
-inconclusive. See the [golden run inputs](../recovery_comparison/goldens/local-20260914-LGboor/README.md).
+inconclusive. See the [golden run inputs](../recovery_comparison/goldens/local-20260915-I1FGSs/README.md).
 Every mode compares against the same full snapshot rows. HTTP captures use their
 own payload path and report delivery identity unavailable; the new producer-aware
 golden enables gRPC delivery diagnostics. HTTP snapshot comparison does not invent
@@ -219,6 +219,36 @@ for it; standard gRPC passed on GitHub with outbox capacity 20,000, but the othe
 variants have not been validated by that run. Large bootstrap
 presets retain the existing runner's baseline policy and hosted-runner resource
 limits; the 1m preset previously exceeded CI memory capacity.
+
+For local building-comfort runs, `TEST_SERVICE_STARTUP_TIMEOUT_SECS` overrides
+the dynamic runner's 600-second API startup wait. Test-service initializes
+auto-start sources before binding its API, so large bootstraps may require a
+longer allowance (for example, 3600 seconds). This is separate from completion
+timeout and does not change result expectations; the PauseCommand runner is
+unaffected.
+
+Building-comfort SIGKILL now waits for `Source dispatchers drained for
+TestRunSource <run-id>.<source-id>`, emitted only after successful dispatcher
+closure. The older `Script Finished` message is no longer a crash trigger.
+Publish the runner and rebuilt test-service together; a binary lacking the drain
+marker cannot satisfy this gate. A drain-failure marker stops injection immediately.
+The marker establishes that dispatcher close succeeded, not that queries or
+reactions have completed processing; pending query work remains the intended
+recovery target.
+
+Adaptive HTTP now propagates conversion/send failures and remembers failure for
+later dispatch/close calls instead of silently dropping events or falling back
+after batcher failure. Both adaptive dispatchers allow their configured request
+timeout (minimum five seconds) for final drain. A timed-out task is aborted and
+reaped and the source fails; a timeout never permits crash injection. Expected
+hashes, source data, and Strict recovery policy are unchanged. Validate this path
+with:
+
+```bash
+bash examples/building_comfort/dynamic/test_drain_boundary.sh
+cargo test --locked -p test-run-host --lib building_hierarchy::drain_tests
+cargo test --locked -p test-run-host --lib adaptive_http_dispatcher
+```
 
 These building-comfort configuration inputs do not affect PauseCommand. Its variants use
 the fixed 12,000-change configuration and their own fresh uninterrupted baseline;

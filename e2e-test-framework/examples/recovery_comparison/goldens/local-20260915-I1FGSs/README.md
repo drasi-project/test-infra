@@ -38,7 +38,7 @@ The aggregate snapshot preserves 12 rows, including repeated floor IDs. Its
 equivalence to another capture is not independent proof of aggregation correctness.
 
 Raw logs and saved data: `/tmp/recovery-golden-producer-84.I1FGSs`.
-The old `local-20260914-LGboor` golden is unchanged. This new capture is available
+The older `local-20260914-LGboor` golden has been retired. This capture is available
 as a workflow option in the prepared files but has not yet been compared against
 a fresh recovery run.
 It is not certified as an interchangeable event-level baseline for HTTP or

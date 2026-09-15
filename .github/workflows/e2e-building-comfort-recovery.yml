@@ -8,7 +8,6 @@ on:
         type: choice
         options:
           - none
-          - local-20260914-LGboor
           - local-20260915-I1FGSs
         default: none
       http_standard:
@@ -129,7 +128,7 @@ jobs:
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
         run: |
           if [[ -n "$GOLDEN_SNAPSHOT" && "$GOLDEN_SNAPSHOT" != none ]]; then
-            [[ ( "$GOLDEN_SNAPSHOT" == local-20260914-LGboor || "$GOLDEN_SNAPSHOT" == local-20260915-I1FGSs ) &&
+            [[ "$GOLDEN_SNAPSHOT" == local-20260915-I1FGSs &&
                "$V_Q_MAIN" == true && "$V_Q_AGG" == true && "$BOOTSTRAP_SIZE" == off ]] || {
               echo "ERROR: this golden requires both queries and bootstrap off." >&2
               exit 1

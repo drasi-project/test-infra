@@ -58,6 +58,8 @@ pub mod drasi_lib_instances;
 pub mod grpc_converters;
 pub mod queries;
 pub mod reactions;
+pub mod recovery_capture;
+pub mod recovery_comparison;
 pub mod sources;
 pub mod test_run_completion;
 pub mod utils;

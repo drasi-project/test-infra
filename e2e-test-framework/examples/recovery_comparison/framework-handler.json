@@ -1,0 +1,21 @@
+{
+  "kind": "RecoveryComparison",
+  "baseline_path": "baselines/building-comfort.json",
+  "workload_fingerprint": "replace-with-workload-digest",
+  "policy": {
+    "delivery": "at_least_once",
+    "allow_reordering": true
+  },
+  "enforce": false,
+  "capture_evidence_path": "recovery-boundary.json",
+  "queries": [{
+    "query_id": "building-comfort",
+    "test_reaction_id": "building-comfort",
+    "config_fingerprint": "replace-with-query-config-digest",
+    "identity_contract": null,
+    "identity_pointer": null,
+    "query_id_pointer": "/payload/request_body/query_id",
+    "payload_pointer": "/payload/request_body/result",
+    "snapshot_url": "http://127.0.0.1:8090/api/v1/queries/building-comfort/results"
+  }]
+}

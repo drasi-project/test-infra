@@ -176,15 +176,30 @@ server commit and resolved Cargo lockfile for source builds, plus binary hashes.
 
 The building-comfort recovery workflow provides the standard building-comfort
 inputs for HTTP/gRPC standard/adaptive variants, query selection, `batching_speed`,
-`query_tuning`, and `bootstrap_size`. Each selected variant runs a clean control
-followed by SIGKILL after ingress with the same settings, zero extra crash delay,
-and no component reapplication. `persist_index` and `state_store` default to true
+`query_tuning`, and `bootstrap_size`. Each selected variant runs only SIGKILL
+recovery after ingress, with zero extra crash delay and no component reapplication.
+Final output is checked against the existing committed count/hash expectations;
+the workflow does not regenerate a golden run. An opt-in
+[recovery comparator and completion handler](../recovery_comparison/README.md) now
+implement separate delivery/state diagnostics. The framework supports
+`kind: RecoveryComparison`, but this workflow has not enabled it by default:
+producer identity and verified boundary capture are still needed. Reusable
+golden-run storage remains part of issue #84. Baselines must match
+the workload; missing baselines for custom presets are not correctness evidence.
+Select `golden_snapshot: local-20260914-LGboor` to enable the prepared candidate
+golden comparison in advisory mode. It requires standard gRPC only, both queries,
+and bootstrap off. The workflow validates workload compatibility, uses the stored
+capture without rerunning the golden, and reports snapshot/delivery verdicts in
+the job summary. Its policy rejects duplicates and reordering; SHA-256 remains
+enforced while missing producer/boundary evidence keeps the comparator overall
+inconclusive. See the [golden run inputs](../recovery_comparison/goldens/local-20260914-LGboor/README.md).
+`persist_index` and `state_store` default to true
 and must remain enabled. Embedded `drasi_lib` is omitted because this recovery
 runner kills an external server. Empty variant/query selections fail validation.
 
 The recovery-only `outbox_capacity` input defaults to `1000` and accepts a
-positive integer. It sets `outboxCapacity` on every selected query in both the
-clean and crash runs, independently of `query_tuning`. Use `20000` for the
+positive integer. It sets `outboxCapacity` on every selected query in the
+recovery run, independently of `query_tuning`. Use `20000` for the
 larger-outbox comparison after a Strict reaction outbox-gap failure; a passing
 comparison is retention evidence, not proof that startup ordering is fixed.
 The runner logs the applied capacity. Local runs can set `OUTBOX_CAPACITY`;
@@ -194,7 +209,8 @@ HTTP standard and gRPC standard are selected by default, matching the standard
 workflow's external variants. Select only gRPC when using a registry/tag with
 only gRPC plugins published. Each variant requires compatible source/reaction
 plugins for its protocol. Exposing an option does not establish recovery coverage
-for it; the expanded matrix has not been executed on GitHub. Large bootstrap
+for it; standard gRPC passed on GitHub with outbox capacity 20,000, but the other
+variants have not been validated by that run. Large bootstrap
 presets retain the existing runner's baseline policy and hosted-runner resource
 limits; the 1m preset previously exceeded CI memory capacity.
 

@@ -1,0 +1,12 @@
+{
+  "status": "candidate",
+  "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5",
+  "captured_at_experiment": "/tmp/recovery-golden-84.LGboor",
+  "server_sha256": "ed6b4b97938231be238a479ff2d206c7376b56a8f3e440dbf85c7ded5230612e",
+  "test_service_sha256": "6759b73174d8c4bf7c2a298d20a09c31bebfd61b38a5cfd13cb731c1daa5e4fe",
+  "test_infra_head": "c0855831b99684fd6c28d0b49a78f379e4b08d19",
+  "test_infra_uncommitted_changes": true,
+  "outbox_capacity": 20000,
+  "capture_complete": false,
+  "producer_identity_available": false
+}

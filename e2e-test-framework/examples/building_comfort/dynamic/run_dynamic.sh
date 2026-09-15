@@ -2060,6 +2060,12 @@ resolve_bootstrap_preset
 clamp_batch_for_bootstrap
 patch_configs
 patch_bootstrap_preset
+if [[ -n "${RECOVERY_GOLDEN_DIR:-}" ]]; then
+    [[ "$LOG_JSONL" == "1" ]] || { log "ERROR: golden comparison requires LOG_JSONL=1"; exit 1; }
+    bash "$REPO_ROOT/e2e-test-framework/examples/recovery_comparison/configure_golden.sh" \
+        "$TEST_CFG_CI" "$COMPONENTS_DIR/$SERVER_QUERIES_FILE" "$SELECTED_QUERIES_JSON" \
+        "$RECOVERY_GOLDEN_DIR" "$DRASI_API"
+fi
 start_drasi_server
 apply_server_components
 start_test_service

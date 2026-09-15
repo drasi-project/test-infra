@@ -3,6 +3,13 @@ name: E2E - building_comfort recovery
 on:
   workflow_dispatch:
     inputs:
+      golden_snapshot:
+        description: "Optional advisory snapshot comparison against a saved candidate golden (standard gRPC, both queries, bootstrap off)."
+        type: choice
+        options:
+          - none
+          - local-20260914-LGboor
+        default: none
       http_standard:
         description: "http_standard (HTTP, REST-applied)"
         type: boolean
@@ -77,7 +84,7 @@ on:
         type: string
         default: ""
       outbox_capacity:
-        description: "Retained query outputs per query, for both clean and crash runs. Positive integer; use 20000 for the retention experiment."
+        description: "Retained query outputs per query. Positive integer; use 20000 for the retention experiment."
         type: string
         default: "1000"
       query_tuning:
@@ -117,7 +124,17 @@ jobs:
           V_Q_AGG: ${{ inputs.query_floor_agg }}
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
+          GOLDEN_SNAPSHOT: ${{ inputs.golden_snapshot }}
+          BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
         run: |
+          if [[ -n "$GOLDEN_SNAPSHOT" && "$GOLDEN_SNAPSHOT" != none ]]; then
+            [[ "$GOLDEN_SNAPSHOT" == local-20260914-LGboor && "$V_GRPC_STD" == true &&
+               "$V_HTTP_STD" == false && "$V_HTTP_ADAPTIVE" == false && "$V_GRPC_ADAPTIVE" == false &&
+               "$V_Q_MAIN" == true && "$V_Q_AGG" == true && "$BOOTSTRAP_SIZE" == off ]] || {
+              echo "ERROR: this golden requires only standard gRPC, both queries, and bootstrap off." >&2
+              exit 1
+            }
+          fi
           [[ "$OUTBOX_CAPACITY" =~ ^[1-9][0-9]*$ ]] || {
             echo "ERROR: outbox_capacity must be a positive integer." >&2
             exit 1
@@ -236,8 +253,9 @@ jobs:
           echo "TEST_SERVICE_BIN=$RUNNER_TEMP/bin/test-service" >> "$GITHUB_ENV"
           cp "$RUNNER_TEMP/bin/sha256.txt" "$RUNNER_TEMP/bin/server-build.json" "$RUNNER_TEMP/results/"
 
-      - name: Clean control and SIGKILL after ingress
+      - name: SIGKILL recovery against stored baseline
         env:
+          CRASH_INJECT: "drain"
           OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
@@ -250,22 +268,33 @@ jobs:
           POLL_INTERVAL_SECS: "1"
           LOG_JSONL: "1"
           QUERY_TUNING: ${{ inputs.query_tuning }}
+          GOLDEN_SNAPSHOT: ${{ inputs.golden_snapshot }}
         run: |
-          for mode in off drain; do
-            CRASH_INJECT="$mode" \
-            WORK_DIR="$RUNNER_TEMP/results/sigkill-$mode/work" \
-            ARTIFACTS_DIR="$RUNNER_TEMP/results/sigkill-$mode/artifacts" \
-              bash e2e-test-framework/examples/building_comfort/run_variant.sh
-          done
+          if [[ -n "$GOLDEN_SNAPSHOT" && "$GOLDEN_SNAPSHOT" != none ]]; then
+            export RECOVERY_GOLDEN_DIR="$GITHUB_WORKSPACE/e2e-test-framework/examples/recovery_comparison/goldens/$GOLDEN_SNAPSHOT"
+          fi
+          WORK_DIR="$RUNNER_TEMP/results/sigkill-drain/work" \
+          ARTIFACTS_DIR="$RUNNER_TEMP/results/sigkill-drain/artifacts" \
+            bash e2e-test-framework/examples/building_comfort/run_variant.sh
 
       - name: Recovery summary
         if: always()
         env:
           JOB_STATUS: ${{ job.status }}
+          GOLDEN_SNAPSHOT: ${{ inputs.golden_snapshot }}
         run: |
           {
             printf '## Building-comfort recovery: %s\n\nJob status: %s\n\n' "$VARIANT" "$JOB_STATUS"
             printf 'Inspect uploaded verdicts, snapshots, logs, and binary provenance.\n'
+            if [[ -n "$GOLDEN_SNAPSHOT" && "$GOLDEN_SNAPSHOT" != none ]]; then
+              verdict="$RUNNER_TEMP/results/sigkill-drain/work/test_data_cache/test_runs/drasi_server_dev_repo.building_comfort.test_run_001/recovery_verdict.json"
+              printf '\n### Advisory Golden Comparison\n\n'
+              if [[ -f "$verdict" ]]; then
+                jq -r '"Overall: \(.verdict) (enforced=\(.enforced))", (.comparison.queries[]? | "- \(.query_id): state=\(.state.verdict), delivery=\(.delivery.verdict)"), (.error // empty)' "$verdict"
+              else
+                printf 'No comparison verdict was produced; comparison is not verified.\n'
+              fi
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload recovery artifacts

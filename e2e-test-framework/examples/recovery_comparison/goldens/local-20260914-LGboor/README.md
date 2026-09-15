@@ -55,6 +55,12 @@ timeout_minutes: 30
 The workflow runs recovery only, validates source/query compatibility, decompresses
 this stored baseline, and enables the framework handler before the completion
 log marker. Its policy is `exactly_once` with `allow_reordering: false`.
+The standard-gRPC values above are one example: any combination of HTTP/gRPC
+standard/adaptive checkboxes may now be enabled. Each compares the same golden
+snapshot. Only dispatcher configuration is excluded from workload matching;
+the input generator and queries must still match. HTTP uses its logger's nested
+payload path and unavailable identity diagnostics. Compatible HTTP plugins must
+be present in the selected registry/tag before selecting HTTP modes.
 The comparison remains advisory because of the candidate capture limitations;
 the existing strict SHA-256 gate remains enforced. No completion evidence is
 fabricated, and no new golden run is generated.

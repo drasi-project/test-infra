@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       golden_snapshot:
-        description: "Optional advisory snapshot comparison against a saved candidate golden (standard gRPC, both queries, bootstrap off)."
+        description: "Optional advisory snapshot comparison against a shared candidate golden (HTTP/gRPC, both queries, bootstrap off)."
         type: choice
         options:
           - none
@@ -129,10 +129,9 @@ jobs:
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
         run: |
           if [[ -n "$GOLDEN_SNAPSHOT" && "$GOLDEN_SNAPSHOT" != none ]]; then
-            [[ ( "$GOLDEN_SNAPSHOT" == local-20260914-LGboor || "$GOLDEN_SNAPSHOT" == local-20260915-I1FGSs ) && "$V_GRPC_STD" == true &&
-               "$V_HTTP_STD" == false && "$V_HTTP_ADAPTIVE" == false && "$V_GRPC_ADAPTIVE" == false &&
+            [[ ( "$GOLDEN_SNAPSHOT" == local-20260914-LGboor || "$GOLDEN_SNAPSHOT" == local-20260915-I1FGSs ) &&
                "$V_Q_MAIN" == true && "$V_Q_AGG" == true && "$BOOTSTRAP_SIZE" == off ]] || {
-              echo "ERROR: this golden requires only standard gRPC, both queries, and bootstrap off." >&2
+              echo "ERROR: this golden requires both queries and bootstrap off." >&2
               exit 1
             }
           fi

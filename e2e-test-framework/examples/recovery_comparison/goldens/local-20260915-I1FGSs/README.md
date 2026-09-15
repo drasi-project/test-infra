@@ -49,7 +49,8 @@ transport normalization and producer identity compatibility must be checked.
 
 After committing and pushing the workflow, capture code, helper scripts, and
 golden files together, open **E2E - building_comfort recovery**, choose **Run
-workflow**, and select the branch containing those changes. Set:
+workflow**, and select the branch containing those changes. For a standard-gRPC
+run, set:
 
 ```text
 golden_snapshot: local-20260915-I1FGSs
@@ -70,8 +71,19 @@ plugin_tag: composite-key
 ```
 
 Leave the release version empty, batching/query tuning at 10000, and timeout at
-30 minutes. The helper automatically selects the producer-key identity pointer
-from this golden's contract. Exactly-once and ordered delivery are required by
+30 minutes. To run multiple modes, enable any combination of `http_standard`,
+`http_adaptive`, `grpc_standard`, and `grpc_adaptive`; all four can be true.
+Use a plugin registry/tag containing compatible plugins for all selected modes.
+Both queries and bootstrap off remain required because they define this golden's
+workload. Dispatcher transport/batching settings are excluded from workload equality;
+the source generator, seed, event budget, timing, and query definitions still match.
+
+The helper automatically selects the producer-key identity pointer for gRPC.
+For HTTP it uses the HTTP logger's nested payload and a run-local copy of this
+baseline with identity fields unavailable. The snapshots and expected event
+payloads are unchanged; the original golden is never modified. HTTP delivery
+diagnostics remain inconclusive pending compatible producer ID capture, while
+the same golden snapshot is checked. Exactly-once and ordered delivery are required by
 the comparison policy, with advisory enforcement retained and SHA-256 enforced.
 Snapshot and delivery verdicts are shown separately; the overall verdict still
 reflects the unchanged completion-evidence limitation. Selecting the older golden

@@ -29,6 +29,18 @@ whether a report file exists. Build/run errors from Cargo have Cargo's exit code
 
 ## Framework Configuration
 
+The building-comfort recovery workflow accepts multiple HTTP/gRPC modes with
+either saved golden. Its configuration helper compares logical source definitions
+(excluding `source_change_dispatchers`) and query definitions with the golden,
+then supplies transport-specific log pointers. The stored snapshot expectations
+are identical for every mode. HTTP currently has no compatible producer key, so
+its run-local baseline view marks identities unavailable and delivery remains
+inconclusive; it still compares snapshots and retains the strict SHA-256 gate.
+This is not normalization of HTTP delivery into gRPC events or a relaxation of
+ordering/duplicate expectations. Source data, seed, timing, and query changes
+still reject an incompatible baseline. Both queries and bootstrap off are required
+for the current saved captures.
+
 Add [framework-handler.json](framework-handler.json) to the test definition's
 `completion_handlers` array alongside existing `Log`/`Sha256Determinism` handlers.
 Replace its fingerprint and baseline placeholders with values for your workload.

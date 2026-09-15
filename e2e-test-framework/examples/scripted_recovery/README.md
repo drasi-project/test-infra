@@ -186,13 +186,19 @@ implement separate delivery/state diagnostics. The framework supports
 producer identity and verified boundary capture are still needed. Reusable
 golden-run storage remains part of issue #84. Baselines must match
 the workload; missing baselines for custom presets are not correctness evidence.
-Select `golden_snapshot: local-20260914-LGboor` to enable the prepared candidate
-golden comparison in advisory mode. It requires standard gRPC only, both queries,
-and bootstrap off. The workflow validates workload compatibility, uses the stored
+Select either saved `golden_snapshot` to enable candidate golden comparison in
+advisory mode. All four HTTP/gRPC standard/adaptive variants can be selected
+together. Both queries and bootstrap off are required for these captures.
+The workflow validates the logical workload independently of dispatcher settings, uses the stored
 capture without rerunning the golden, and reports snapshot/delivery verdicts in
 the job summary. Its policy rejects duplicates and reordering; SHA-256 remains
 enforced while missing producer/boundary evidence keeps the comparator overall
 inconclusive. See the [golden run inputs](../recovery_comparison/goldens/local-20260914-LGboor/README.md).
+Every mode compares against the same full snapshot rows. HTTP captures use their
+own payload path and report delivery identity unavailable; the new producer-aware
+golden enables gRPC delivery diagnostics. HTTP snapshot comparison does not invent
+producer IDs or relax the existing strict hash gate. Cross-mode configuration and
+import tests pass; live recovery success is not implied by exposing these options.
 `persist_index` and `state_store` default to true
 and must remain enabled. Embedded `drasi_lib` is omitted because this recovery
 runner kills an external server. Empty variant/query selections fail validation.

@@ -186,14 +186,14 @@ implement separate delivery/state diagnostics. The framework supports
 producer identity and verified boundary capture are still needed. Reusable
 golden-run storage remains part of issue #84. Baselines must match
 the workload; missing baselines for custom presets are not correctness evidence.
-Select `golden_snapshot: local-20260915-I1FGSs` to enable candidate golden comparison in
+Select `golden_snapshot: building-comfort-small-v1` to enable candidate golden comparison in
 advisory mode. All four HTTP/gRPC standard/adaptive variants can be selected
 together. Both queries and bootstrap off are required for these captures.
 The workflow validates the logical workload independently of dispatcher settings, uses the stored
 capture without rerunning the golden, and reports snapshot/delivery verdicts in
 the job summary. Its policy rejects duplicates and reordering; SHA-256 remains
 enforced while missing producer/boundary evidence keeps the comparator overall
-inconclusive. See the [golden run inputs](../recovery_comparison/goldens/local-20260915-I1FGSs/README.md).
+inconclusive. See the [golden run inputs](../recovery_comparison/goldens/building-comfort-small-v1/README.md).
 Every mode compares against the same full snapshot rows. HTTP captures use their
 own payload path and report delivery identity unavailable; the new producer-aware
 golden enables gRPC delivery diagnostics. HTTP snapshot comparison does not invent

@@ -3,8 +3,15 @@ name: E2E - building_comfort recovery
 on:
   workflow_dispatch:
     inputs:
+      recovery_scenario:
+        description: "server_restart uses the selected signal; receiver_rejection requires only grpc_standard and bootstrap off."
+        type: choice
+        options:
+          - server_restart
+          - receiver_rejection
+        default: server_restart
       recovery_signal:
-        description: "Shutdown variant: SIGKILL abrupt crash or SIGTERM graceful shutdown, then restart."
+        description: "For server_restart only: SIGKILL abrupt crash or SIGTERM graceful shutdown."
         type: choice
         options:
           - SIGKILL
@@ -15,11 +22,11 @@ on:
         type: string
         default: "120"
       golden_snapshot:
-        description: "Optional advisory snapshot comparison against a shared candidate golden (HTTP/gRPC, both queries, bootstrap off)."
+        description: "Optional advisory golden comparison. Small v1: 12 rooms, 100k changes, both queries, bootstrap off."
         type: choice
         options:
           - none
-          - local-20260915-I1FGSs
+          - building-comfort-small-v1
         default: none
       http_standard:
         description: "http_standard (HTTP, REST-applied)"
@@ -126,6 +133,7 @@ jobs:
         id: settings
         env:
           MINUTES: ${{ inputs.timeout_minutes }}
+          RECOVERY_SCENARIO: ${{ inputs.recovery_scenario }}
           RECOVERY_SIGNAL: ${{ inputs.recovery_signal }}
           SHUTDOWN_TIMEOUT_SECS: ${{ inputs.shutdown_timeout_seconds }}
           OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
@@ -140,6 +148,17 @@ jobs:
           GOLDEN_SNAPSHOT: ${{ inputs.golden_snapshot }}
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
         run: |
+          [[ "$RECOVERY_SCENARIO" == server_restart || "$RECOVERY_SCENARIO" == receiver_rejection ]] || {
+            echo "ERROR: unsupported recovery_scenario." >&2
+            exit 1
+          }
+          if [[ "$RECOVERY_SCENARIO" == receiver_rejection ]]; then
+            [[ "$V_GRPC_STD" == true && "$V_GRPC_ADAPTIVE" == false &&
+               "$V_HTTP_STD" == false && "$V_HTTP_ADAPTIVE" == false && "$BOOTSTRAP_SIZE" == off ]] || {
+              echo "ERROR: receiver_rejection requires only grpc_standard selected and bootstrap off." >&2
+              exit 1
+            }
+          fi
           [[ "$RECOVERY_SIGNAL" == SIGKILL || "$RECOVERY_SIGNAL" == SIGTERM ]] || {
             echo "ERROR: recovery_signal must be SIGKILL or SIGTERM." >&2
             exit 1
@@ -149,7 +168,7 @@ jobs:
             exit 1
           }
           if [[ -n "$GOLDEN_SNAPSHOT" && "$GOLDEN_SNAPSHOT" != none ]]; then
-            [[ "$GOLDEN_SNAPSHOT" == local-20260915-I1FGSs &&
+            [[ "$GOLDEN_SNAPSHOT" == building-comfort-small-v1 &&
                "$V_Q_MAIN" == true && "$V_Q_AGG" == true && "$BOOTSTRAP_SIZE" == off ]] || {
               echo "ERROR: this golden requires both queries and bootstrap off." >&2
               exit 1
@@ -236,7 +255,7 @@ jobs:
           retention-days: 14
 
   recovery:
-    name: Building-comfort ${{ inputs.recovery_signal }} recovery / ${{ matrix.variant }}
+    name: Building-comfort ${{ inputs.recovery_scenario == 'receiver_rejection' && 'receiver rejection' || inputs.recovery_signal }} recovery / ${{ matrix.variant }}
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -248,7 +267,7 @@ jobs:
       VARIANT: ${{ matrix.variant }}
       RECOVERY_SIGNAL: ${{ inputs.recovery_signal }}
       SHUTDOWN_TIMEOUT_SECS: ${{ inputs.shutdown_timeout_seconds }}
-      RECOVERY_CASE: ${{ inputs.recovery_signal == 'SIGTERM' && 'sigterm-drain' || 'sigkill-drain' }}
+      RECOVERY_CASE: ${{ inputs.recovery_scenario == 'receiver_rejection' && 'receiver-rejection' || (inputs.recovery_signal == 'SIGTERM' && 'sigterm-drain' || 'sigkill-drain') }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
       DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
@@ -276,9 +295,9 @@ jobs:
           echo "TEST_SERVICE_BIN=$RUNNER_TEMP/bin/test-service" >> "$GITHUB_ENV"
           cp "$RUNNER_TEMP/bin/sha256.txt" "$RUNNER_TEMP/bin/server-build.json" "$RUNNER_TEMP/results/"
 
-      - name: ${{ inputs.recovery_signal }} recovery against stored baseline
+      - name: ${{ env.RECOVERY_CASE }} recovery against stored baseline
         env:
-          CRASH_INJECT: "drain"
+          CRASH_INJECT: ${{ inputs.recovery_scenario == 'receiver_rejection' && 'receiver_rejection' || 'drain' }}
           OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
@@ -307,10 +326,17 @@ jobs:
           GOLDEN_SNAPSHOT: ${{ inputs.golden_snapshot }}
         run: |
           {
-            printf '## Building-comfort recovery: %s / %s\n\nJob status: %s\n\n' "$VARIANT" "$RECOVERY_SIGNAL" "$JOB_STATUS"
+            printf '## Building-comfort recovery: %s / %s\n\nJob status: %s\n\n' "$VARIANT" "$RECOVERY_CASE" "$JOB_STATUS"
             printf 'Inspect uploaded verdicts, snapshots, logs, and binary provenance.\n'
             shutdown="$RUNNER_TEMP/results/$RECOVERY_CASE/artifacts/recovery-shutdown.json"
-            if [[ -f "$shutdown" ]]; then
+            if [[ "$RECOVERY_CASE" == receiver-rejection ]]; then
+              receiver="$RUNNER_TEMP/results/$RECOVERY_CASE/artifacts/receiver-recovery.json"
+              if [[ -f "$receiver" ]]; then
+                jq -r '"Receiver recovery: \(.outcome), server restarted=\(.server_restarted // false), reactions restarted=\(.reactions_restarted // 0)"' "$receiver"
+              else
+                printf 'No receiver recovery evidence was produced; scenario is not verified.\n'
+              fi
+            elif [[ -f "$shutdown" ]]; then
               jq -r '"Shutdown: \(.signal), outcome=\(.outcome), exit=\(.exit_code), elapsed=\(.elapsed_seconds)s, deadline=\(.timeout_seconds)s"' "$shutdown"
             else
               printf 'No shutdown evidence was produced; shutdown is not verified.\n'

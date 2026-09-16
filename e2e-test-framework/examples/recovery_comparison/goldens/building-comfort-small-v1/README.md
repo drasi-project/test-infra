@@ -1,4 +1,9 @@
-# Producer-Aware Building-Comfort Golden
+# Building-Comfort Small Golden v1
+
+Workflow selection: `building-comfort-small-v1`. The small workload has 12 rooms
+and 100,000 source changes. Version 1 identifies this saved baseline, shared by
+the recovery scenarios. Previously named `local-20260915-I1FGSs`; renaming did
+not change capture data, provenance, fingerprints, or expected results.
 
 Fresh uninterrupted standard-gRPC capture completed on 2026-09-15. The default
 100,000-change building-comfort workload used seed 123456789, both queries,
@@ -53,7 +58,7 @@ workflow**, and select the branch containing those changes. For a standard-gRPC
 run, set:
 
 ```text
-golden_snapshot: local-20260915-I1FGSs
+golden_snapshot: building-comfort-small-v1
 http_standard: false
 http_adaptive: false
 grpc_standard: true

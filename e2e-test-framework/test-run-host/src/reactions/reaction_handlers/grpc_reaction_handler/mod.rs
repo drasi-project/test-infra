@@ -20,7 +20,7 @@ use test_data_store::{
 };
 use tokio::sync::{
     mpsc::{channel, Receiver, Sender},
-    Notify, RwLock,
+    Mutex, Notify, RwLock,
 };
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, trace};
@@ -36,6 +36,9 @@ use drasi::v1::{
     ProcessResultsRequest, ProcessResultsResponse, QueryResult, ReactionHealthCheckResponse,
     StreamResultsResponse, SubscribeRequest,
 };
+
+mod receiver_rejection;
+use receiver_rejection::ReceiverRejection;
 
 #[derive(Clone, Debug)]
 pub struct GrpcReactionHandlerSettings {
@@ -77,10 +80,19 @@ struct GrpcInstanceImpl {
     tx: Sender<ReactionHandlerMessage>,
     settings: GrpcReactionHandlerSettings,
     invocation_count: Arc<RwLock<u64>>,
+    receiver_rejection: Option<Arc<Mutex<ReceiverRejection>>>,
 }
 
 impl GrpcInstanceImpl {
     async fn process_query_result(&self, result: QueryResult) -> anyhow::Result<()> {
+        let mut rejection = match &self.receiver_rejection {
+            Some(rejection) => Some(rejection.lock().await),
+            None => None,
+        };
+        if let Some(rejection) = rejection.as_mut() {
+            rejection.before_request().await?;
+        }
+        let item_count = result.results.len();
         let timestamp = chrono::Utc::now();
 
         // Convert Drasi QueryResult to internal format
@@ -145,6 +157,9 @@ impl GrpcInstanceImpl {
             }
         }
 
+        if let Some(rejection) = rejection.as_mut() {
+            rejection.accepted(item_count);
+        }
         Ok(())
     }
 }
@@ -197,6 +212,7 @@ mod producer_capture_tests {
                     include_initial_state: false,
                 },
                 invocation_count: Arc::new(RwLock::new(0)),
+                receiver_rejection: None,
             },
             rx,
         )
@@ -217,6 +233,60 @@ mod producer_capture_tests {
             }),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn receiver_rejection_preserves_capture_and_resumes_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut instance, mut receiver) = instance();
+        let mut rejection = ReceiverRejection::new(directory.path().to_owned(), 50052);
+        rejection.accepted(99);
+        instance.receiver_rejection = Some(Arc::new(Mutex::new(rejection)));
+        instance
+            .process_query_result(batch(vec![item(1, 1)]))
+            .await
+            .unwrap();
+        receiver.recv().await.unwrap();
+        for _attempt in 0..2 {
+            let response = instance
+                .process_results(Request::new(ProcessResultsRequest {
+                    results: Some(batch(vec![item(2, 2), item(3, 3)])),
+                    ..Default::default()
+                }))
+                .await
+                .unwrap()
+                .into_inner();
+            assert!(!response.success);
+            assert_eq!(response.items_processed, 0);
+            assert!(receiver.try_recv().is_err());
+            assert_eq!(*instance.invocation_count.read().await, 1);
+        }
+        let evidence: Value = serde_json::from_slice(
+            &tokio::fs::read(directory.path().join("50052.json"))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(evidence["accepted_items_before_outage"], 100);
+        assert_eq!(evidence["rejected_requests"], 2);
+        tokio::fs::write(directory.path().join("50052.restore"), b"restore")
+            .await
+            .unwrap();
+        instance
+            .process_query_result(batch(vec![item(2, 2), item(3, 3)]))
+            .await
+            .unwrap();
+        receiver.recv().await.unwrap();
+        receiver.recv().await.unwrap();
+        tokio::fs::remove_file(directory.path().join("50052.restore"))
+            .await
+            .unwrap();
+        instance
+            .process_query_result(batch(vec![item(4, 4)]))
+            .await
+            .unwrap();
+        receiver.recv().await.unwrap();
+        assert_eq!(*instance.invocation_count.read().await, 4);
     }
 
     fn batch(items: Vec<drasi::v1::QueryResultItem>) -> QueryResult {
@@ -649,6 +719,12 @@ impl ReactionOutputHandler for GrpcReactionHandler {
             tx,
             settings: self.settings.clone(),
             invocation_count: Arc::new(RwLock::new(0)),
+            receiver_rejection: std::env::var_os("RECEIVER_REJECTION_DIR").map(|directory| {
+                Arc::new(Mutex::new(ReceiverRejection::new(
+                    directory.into(),
+                    self.settings.port,
+                )))
+            }),
         };
 
         let addr = self.settings.instance_addr();

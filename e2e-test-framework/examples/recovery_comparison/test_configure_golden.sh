@@ -2,7 +2,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 directory="$(mktemp -d "${TMPDIR:-/tmp}/golden-config-test.XXXXXX")"
-golden="$here/goldens/local-20260915-I1FGSs"
+golden="$here/goldens/building-comfort-small-v1"
 config="$directory/config.json"
 queries="$directory/queries.json"
 jq '.queries' "$golden/workload.json" > "$queries"
@@ -23,7 +23,7 @@ if bash "$here/configure_golden.sh" "$directory/changed.json" "$queries" '["buil
 fi
 jq -e '.data_store.test_repos[0].local_tests[0].completion_handlers[1].queries |
     all(.[]; .identity_contract == "grpc-query-sequence-row-operation-v1" and .identity_pointer == "/payload/headers/x-drasi-producer-key")' "$config" >/dev/null
-golden="$here/goldens/local-20260915-I1FGSs"
+golden="$here/goldens/building-comfort-small-v1"
 jq '.queries' "$golden/workload.json" > "$queries"
 jq '{data_store:{test_repos:[{local_tests:[{sources:.sources, reactions:[.queries[] | {test_reaction_id:.id,output_handler:{kind:"Grpc"}}], completion_handlers:[{kind:"Sha256Determinism"},{kind:"Log"}]}]}]}}' "$golden/workload.json" > "$config"
 bash "$here/configure_golden.sh" "$config" "$queries" '["building-comfort","building-comfort-floor-agg"]' "$golden" http://localhost:8090/api/v1

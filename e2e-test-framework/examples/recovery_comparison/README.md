@@ -161,7 +161,7 @@ different rows/sequences remain distinct. Payload values are never part of the
 key, so conflicting values for the same key remain detectable.
 
 The older `local-20260914-LGboor` capture has been retired; use the producer-aware
-`local-20260915-I1FGSs` capture for the small workload. Producer metadata does not
+`building-comfort-small-v1` capture for the small workload. Producer metadata does not
 change completion checks or turn the existing candidate golden into a complete
 capture. The payload hash gate remains independent.
 

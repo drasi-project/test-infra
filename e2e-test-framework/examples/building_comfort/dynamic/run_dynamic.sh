@@ -756,9 +756,9 @@ resolve_selected_queries() {
 resolve_crash_inject() {
     case "$CRASH_INJECT" in
         off) return 0 ;;
-        drain) ;;
+        drain|receiver_rejection) ;;
         *)
-            log "ERROR: CRASH_INJECT must be 'off' or 'drain' (got '$CRASH_INJECT')"
+            log "ERROR: CRASH_INJECT must be off, drain, or receiver_rejection (got '$CRASH_INJECT')"
             return 1
             ;;
     esac
@@ -793,7 +793,11 @@ resolve_crash_inject() {
     if [[ "$LOG_JSONL" != "1" ]]; then
         log "CRASH_INJECT=drain: LOG_JSONL=0 (fast). Set LOG_JSONL=1 for a row-level forensic diff if the SHA mismatches."
     fi
-    log "CRASH_INJECT=drain: $RECOVERY_SIGNAL after successful dispatcher drain (+${CRASH_DELAY_MS}ms), restart preserving ./data (shutdown_timeout=${SHUTDOWN_TIMEOUT_SECS}s, reapply_components=$CRASH_REAPPLY_COMPONENTS, server RUST_LOG=$DRASI_RUST_LOG, LOG_JSONL=$LOG_JSONL)"
+    if [[ "$CRASH_INJECT" == receiver_rejection ]]; then
+        log "Receiver rejection: fail delivery after 100 accepted items, then recover only the reactions"
+    else
+        log "CRASH_INJECT=drain: $RECOVERY_SIGNAL after successful dispatcher drain (+${CRASH_DELAY_MS}ms), restart preserving ./data (shutdown_timeout=${SHUTDOWN_TIMEOUT_SECS}s, reapply_components=$CRASH_REAPPLY_COMPONENTS, server RUST_LOG=$DRASI_RUST_LOG, LOG_JSONL=$LOG_JSONL)"
+    fi
 }
 
 # Select the committed base server yaml from the two INDEPENDENT instance-config
@@ -1662,6 +1666,9 @@ apply_server_components() {
         [[ -z "$r" ]] && continue
         local rid; rid="$(printf '%s' "$r" | jq -r '.id')"
         log "  -> reaction $rid"
+        if [[ "$CRASH_INJECT" == receiver_rejection ]]; then
+            r="$(printf '%s' "$r" | jq '.recoveryPolicy = "strict"')"
+        fi
         drasi_apply "/reactions" "$r"
     done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$r_select" "$rxn_file")
 
@@ -2027,7 +2034,7 @@ write_step_summary() {
         echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         echo "- server config: persistIndex=\`$SERVER_PROFILE_PERSIST_INDEX\`, stateStore=\`$SERVER_PROFILE_STATE_STORE\`$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo " (source WAL durability on, max_events=$WAL_MAX_EVENTS)")"
         if [[ "$CRASH_INJECT" != "off" ]]; then
-            echo "- recovery injection: \`$CRASH_INJECT\` signal=\`$RECOVERY_SIGNAL\` -> outcome=\`$CRASH_INJECTED\`$([[ -n "$CRASH_RECOVERY_SECS" ]] && echo ", recovery=${CRASH_RECOVERY_SECS}s"), completion=\`$([[ "$CRASH_SETTLED" == "yes" ]] && echo "count-settle" || echo "marker")\`"
+            echo "- recovery injection: \`$CRASH_INJECT\` signal=\`$([[ "$CRASH_INJECT" == receiver_rejection ]] && echo none || echo "$RECOVERY_SIGNAL")\` -> outcome=\`$CRASH_INJECTED\`$([[ -n "$CRASH_RECOVERY_SECS" ]] && echo ", recovery=${CRASH_RECOVERY_SECS}s"), completion=\`$([[ "$CRASH_SETTLED" == "yes" ]] && echo "count-settle" || echo "marker")\`"
         fi
         echo
 
@@ -2119,6 +2126,10 @@ if [[ -n "${RECOVERY_GOLDEN_DIR:-}" ]]; then
         "$TEST_CFG_CI" "$COMPONENTS_DIR/$SERVER_QUERIES_FILE" "$SELECTED_QUERIES_JSON" \
         "$RECOVERY_GOLDEN_DIR" "$DRASI_API"
 fi
+if [[ "$CRASH_INJECT" == receiver_rejection ]]; then
+    source "$REPO_ROOT/e2e-test-framework/examples/building_comfort/dynamic/receiver_rejection.sh"
+    prepare_receiver_rejection
+fi
 start_drasi_server
 apply_server_components
 start_test_service
@@ -2128,10 +2139,15 @@ if [[ "$CRASH_INJECT" == "drain" ]]; then
         log "ERROR: crash injection/restart failed; continuing to capture artifacts"
         CRASH_INJECTED="failed"
     }
+elif [[ "$CRASH_INJECT" == receiver_rejection ]]; then
+    recover_rejected_receivers || {
+        log "ERROR: receiver rejection/recovery failed; continuing to capture artifacts"
+        CRASH_INJECTED=failed
+    }
 fi
 
 poll_rc=0
-if [[ "$CRASH_INJECT" == "drain" || "$USE_SETTLE" == "1" ]]; then
+if [[ "$CRASH_INJECT" != "off" || "$USE_SETTLE" == "1" ]]; then
     # Recovery (or a reduced-load run with unreachable stop triggers) can converge
     # without firing the RecordCount marker, so use the settle-aware wait (it probes
     # /results and stops the run on settle).
@@ -2151,9 +2167,12 @@ else
 fi
 print_summary
 
-if [[ "$CRASH_INJECT" == "drain" && ( "$CRASH_INJECTED" != "yes" || "$CRASH_SETTLED" == "yes" ) ]]; then
+if [[ "$CRASH_INJECT" != "off" && ( "$CRASH_INJECTED" != "yes" || "$CRASH_SETTLED" == "yes" ) ]]; then
     log "ERROR: recovery was not verified (injection=$CRASH_INJECTED, count-settle=$CRASH_SETTLED)"
     poll_rc=1
+fi
+if [[ "$CRASH_INJECT" == receiver_rejection ]]; then
+    verify_receiver_restoration || poll_rc=1
 fi
 
 determinism_rc=0

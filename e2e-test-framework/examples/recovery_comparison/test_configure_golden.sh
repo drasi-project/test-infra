@@ -9,7 +9,7 @@ jq '.queries' "$golden/workload.json" > "$queries"
 jq '{data_store:{test_repos:[{local_tests:[{sources:.sources, reactions:[.queries[] | {test_reaction_id:.id,output_handler:{kind:"Grpc"}}], completion_handlers:[{kind:"Sha256Determinism"},{kind:"Log"}]}]}]}}' "$golden/workload.json" > "$config"
 bash "$here/configure_golden.sh" "$config" "$queries" '["building-comfort","building-comfort-floor-agg"]' "$golden" http://localhost:8090/api/v1
 jq -e '.data_store.test_repos[0].local_tests[0].completion_handlers |
-    map(.kind) == ["Sha256Determinism","RecoveryComparison","Log"] and
+    map(.kind) == ["Sha256Determinism","RecoveryResultVerification","Log"] and
     .[1].enforce == false and .[1].policy.delivery == "exactly_once" and
     .[1].policy.allow_reordering == false and (.[1].queries | length == 2)' "$config" >/dev/null
 if bash "$here/configure_golden.sh" "$config" "$queries" '["building-comfort"]' "$golden" http://localhost:8090/api/v1; then
@@ -45,7 +45,7 @@ for variant in config config.grpc_adaptive config.http config.http_adaptive; do
     variant_config="$directory/$variant/config.json"
     cp "$here/../building_comfort/dynamic/$variant.json" "$variant_config"
     bash "$here/configure_golden.sh" "$variant_config" "$queries" '["building-comfort","building-comfort-floor-agg"]' "$golden" http://localhost:8090/api/v1
-    jq '[.data_store.test_repos[0].local_tests[0].completion_handlers[] | select(.kind == "RecoveryComparison")][0]' "$variant_config" > "$directory/handler.json"
+    jq '[.data_store.test_repos[0].local_tests[0].completion_handlers[] | select(.kind == "RecoveryResultVerification")][0]' "$variant_config" > "$directory/handler.json"
     jq -e '.policy.delivery == "exactly_once" and .policy.allow_reordering == false and .enforce == false' "$directory/handler.json" >/dev/null
     case "$variant" in
         config.http*)

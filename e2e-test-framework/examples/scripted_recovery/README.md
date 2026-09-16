@@ -180,9 +180,9 @@ inputs for HTTP/gRPC standard/adaptive variants, query selection, `batching_spee
 recovery after ingress, with zero extra crash delay and no component reapplication.
 Final output is checked against the existing committed count/hash expectations;
 the workflow does not regenerate a golden run. An opt-in
-[recovery comparator and completion handler](../recovery_comparison/README.md) now
+[Recovery Result Verification](../recovery_comparison/README.md) now
 implement separate delivery/state diagnostics. The framework supports
-`kind: RecoveryComparison`, but this workflow has not enabled it by default:
+`kind: RecoveryResultVerification`, but this workflow has not enabled it by default:
 producer identity and verified boundary capture are still needed. Reusable
 golden-run storage remains part of issue #84. Baselines must match
 the workload; missing baselines for custom presets are not correctness evidence.

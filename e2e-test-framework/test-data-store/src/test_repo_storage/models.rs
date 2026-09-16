@@ -212,16 +212,17 @@ pub enum CompletionHandlerDefinition {
     /// expected baseline. Used to verify that a seeded test run produces the
     /// same reaction output (and ordering) across runs.
     Sha256Determinism(Sha256DeterminismHandlerConfig),
-    RecoveryComparison(RecoveryComparisonHandlerConfig),
+    #[serde(alias = "RecoveryComparison")]
+    RecoveryResultVerification(RecoveryResultVerificationHandlerConfig),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryComparisonHandlerConfig {
+pub struct RecoveryResultVerificationHandlerConfig {
     pub baseline_path: String,
     pub workload_fingerprint: String,
-    pub policy: RecoveryComparisonPolicy,
-    pub queries: Vec<RecoveryComparisonQueryConfig>,
+    pub policy: RecoveryResultVerificationPolicy,
+    pub queries: Vec<RecoveryResultVerificationQueryConfig>,
     pub capture_evidence_path: Option<String>,
     #[serde(default = "recovery_enforce_default")]
     pub enforce: bool,
@@ -233,7 +234,7 @@ fn recovery_enforce_default() -> bool {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryComparisonPolicy {
+pub struct RecoveryResultVerificationPolicy {
     pub delivery: RecoveryDeliveryGuarantee,
     pub allow_reordering: bool,
 }
@@ -247,7 +248,7 @@ pub enum RecoveryDeliveryGuarantee {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryComparisonQueryConfig {
+pub struct RecoveryResultVerificationQueryConfig {
     pub query_id: String,
     pub test_reaction_id: String,
     pub config_fingerprint: String,

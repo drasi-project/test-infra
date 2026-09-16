@@ -196,14 +196,16 @@ WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
 # CRASH_INJECT selects a fault-injection mode:
 #   off   (default) — no injection; today's behaviour.
 #   drain — Option A: after the source finishes DISPATCHING all changes (ingress
-#           closed) but while the server is still draining/checkpointing, SIGKILL
-#           the drasi-server process and restart it WITHOUT wiping ./data, so WAL
+#           closed), signal the drasi-server process with RECOVERY_SIGNAL
+#           (default SIGKILL) and restart WITHOUT wiping ./data, so WAL
 #           replay + checkpoint recovery run against the persisted state. No
 #           source reconnect is needed because dispatch is already complete.
 # Recovery requires persistence, so `drain` forces PERSIST_INDEX + STATE_STORE on
 # and patches persistConfig: true (so the server restores component definitions
 # on restart instead of coming back bare).
 CRASH_INJECT="${CRASH_INJECT:-off}"
+RECOVERY_SIGNAL="${RECOVERY_SIGNAL:-SIGKILL}"
+SHUTDOWN_TIMEOUT_SECS="${SHUTDOWN_TIMEOUT_SECS:-120}"
 # An optional timing delay is not a durability guarantee.
 CRASH_DELAY_MS="${CRASH_DELAY_MS:-0}"
 # What to do if the restarted server comes back with no components (i.e. the
@@ -760,6 +762,14 @@ resolve_crash_inject() {
             return 1
             ;;
     esac
+    case "$RECOVERY_SIGNAL" in
+        SIGKILL|SIGTERM) ;;
+        *) log "ERROR: RECOVERY_SIGNAL must be SIGKILL or SIGTERM"; return 1 ;;
+    esac
+    [[ "$SHUTDOWN_TIMEOUT_SECS" =~ ^[1-9][0-9]*$ ]] || {
+        log "ERROR: SHUTDOWN_TIMEOUT_SECS must be a positive integer"
+        return 1
+    }
     if [[ "$SERVER_PROFILE_PERSIST_INDEX" != "true" || "$SERVER_PROFILE_STATE_STORE" != "true" ]]; then
         if [[ "$CRASH_ALLOW_NO_PERSIST" == "1" ]]; then
             log "CRASH_INJECT=drain + CRASH_ALLOW_NO_PERSIST=1: NON-PERSISTENT control run."
@@ -783,7 +793,7 @@ resolve_crash_inject() {
     if [[ "$LOG_JSONL" != "1" ]]; then
         log "CRASH_INJECT=drain: LOG_JSONL=0 (fast). Set LOG_JSONL=1 for a row-level forensic diff if the SHA mismatches."
     fi
-    log "CRASH_INJECT=drain: SIGKILL after successful dispatcher drain (+${CRASH_DELAY_MS}ms), restart preserving ./data (reapply_components=$CRASH_REAPPLY_COMPONENTS, server RUST_LOG=$DRASI_RUST_LOG, LOG_JSONL=$LOG_JSONL)"
+    log "CRASH_INJECT=drain: $RECOVERY_SIGNAL after successful dispatcher drain (+${CRASH_DELAY_MS}ms), restart preserving ./data (shutdown_timeout=${SHUTDOWN_TIMEOUT_SECS}s, reapply_components=$CRASH_REAPPLY_COMPONENTS, server RUST_LOG=$DRASI_RUST_LOG, LOG_JSONL=$LOG_JSONL)"
 }
 
 # Select the committed base server yaml from the two INDEPENDENT instance-config
@@ -1328,10 +1338,48 @@ wait_for_source_finished() {
     return 1
 }
 
-# Option A crash injection: wait for the drain window, SIGKILL the server, then
-# restart it against the persisted state. Returns non-zero only on a setup error
-# (a missed window is downgraded to a skip so the run still completes cleanly and
-# we can see whether the ordinary path passes).
+stop_drasi_for_recovery() {
+    local stopped_pid="$DRASI_PID" exit_code=null outcome=stopped
+    local started; started=$(date +%s)
+    local deadline=$((started + SHUTDOWN_TIMEOUT_SECS))
+    log "INJECT: $RECOVERY_SIGNAL drasi-server pid=$stopped_pid"
+    printf '[dyn] ===== %s (drain-phase recovery) pid=%s %s =====\n' \
+        "$RECOVERY_SIGNAL" "$stopped_pid" "$(date -u +%FT%TZ)" >> "$LOG_DIR/drasi-server.log"
+    if ! kill -"${RECOVERY_SIGNAL#SIG}" "$stopped_pid" 2>/dev/null; then
+        outcome=signal_failed
+    else
+        if [[ "$RECOVERY_SIGNAL" == SIGTERM ]]; then
+            while kill -0 "$stopped_pid" 2>/dev/null; do
+                if (( $(date +%s) >= deadline )); then
+                    outcome=timed_out
+                    log "ERROR: graceful shutdown timed out; SIGKILL is cleanup only, recovery fails"
+                    kill -KILL "$stopped_pid" 2>/dev/null || true
+                    break
+                fi
+                sleep 0.1
+            done
+        fi
+        exit_code=0
+        wait "$stopped_pid" 2>/dev/null || exit_code=$?
+        DRASI_PID=""
+        if [[ "$outcome" == stopped ]]; then
+            if [[ "$RECOVERY_SIGNAL" == SIGTERM && "$exit_code" != 0 ]]; then
+                outcome=abnormal_exit
+            elif [[ "$RECOVERY_SIGNAL" == SIGKILL && "$exit_code" != 137 ]]; then
+                outcome=unexpected_exit
+            fi
+        fi
+    fi
+    jq -n --arg signal "$RECOVERY_SIGNAL" --arg outcome "$outcome" \
+        --argjson exit_code "$exit_code" --argjson timeout_seconds "$SHUTDOWN_TIMEOUT_SECS" \
+        --argjson elapsed_seconds "$(( $(date +%s) - started ))" \
+        '{signal: $signal, outcome: $outcome, exit_code: $exit_code,
+          timeout_seconds: $timeout_seconds, elapsed_seconds: $elapsed_seconds}' \
+        > "$ARTIFACTS_DIR/recovery-shutdown.json"
+    log "Shutdown: signal=$RECOVERY_SIGNAL outcome=$outcome exit_code=$exit_code"
+    [[ "$outcome" == stopped ]]
+}
+
 inject_crash_and_restart() {
     local rc=0
     wait_for_source_finished || rc=$?
@@ -1345,7 +1393,7 @@ inject_crash_and_restart() {
 
     local grace_s
     grace_s="$(awk -v ms="$CRASH_DELAY_MS" 'BEGIN { printf "%.3f", ms/1000 }')"
-    log "Grace ${CRASH_DELAY_MS}ms before SIGKILL"
+    log "Delay ${CRASH_DELAY_MS}ms before $RECOVERY_SIGNAL"
     sleep "$grace_s"
 
     if ! kill -0 "$DRASI_PID" 2>/dev/null; then
@@ -1363,14 +1411,8 @@ inject_crash_and_restart() {
         return 0
     fi
 
-    local killed_pid="$DRASI_PID"
     local crash_start; crash_start=$(date +%s)
-    log "INJECT: SIGKILL drasi-server pid=$killed_pid (drain-phase hard crash)"
-    printf '[dyn] ===== SIGKILL (drain-phase crash) pid=%s %s =====\n' \
-        "$killed_pid" "$(date -u +%FT%TZ)" >> "$LOG_DIR/drasi-server.log"
-    kill -KILL "$killed_pid" 2>/dev/null || true
-    # Reap the killed background job so it doesn't linger as a zombie.
-    wait "$killed_pid" 2>/dev/null || true
+    stop_drasi_for_recovery || return 1
 
     if ! restart_drasi_server; then
         log "ERROR: drasi-server failed to restart after crash"
@@ -1378,7 +1420,7 @@ inject_crash_and_restart() {
     fi
 
     local recovery_s=$(( $(date +%s) - crash_start ))
-    log "RECOVERY: server healthy again ${recovery_s}s after SIGKILL"
+    log "RECOVERY: server healthy again ${recovery_s}s after $RECOVERY_SIGNAL"
     CRASH_INJECTED="yes"
     CRASH_RECOVERY_SECS="$recovery_s"
     # Reaction record counts at the moment of recovery. Compare against the
@@ -1985,7 +2027,7 @@ write_step_summary() {
         echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         echo "- server config: persistIndex=\`$SERVER_PROFILE_PERSIST_INDEX\`, stateStore=\`$SERVER_PROFILE_STATE_STORE\`$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo " (source WAL durability on, max_events=$WAL_MAX_EVENTS)")"
         if [[ "$CRASH_INJECT" != "off" ]]; then
-            echo "- crash injection: \`$CRASH_INJECT\` -> outcome=\`$CRASH_INJECTED\`$([[ -n "$CRASH_RECOVERY_SECS" ]] && echo ", recovery=${CRASH_RECOVERY_SECS}s"), completion=\`$([[ "$CRASH_SETTLED" == "yes" ]] && echo "count-settle" || echo "marker")\`"
+            echo "- recovery injection: \`$CRASH_INJECT\` signal=\`$RECOVERY_SIGNAL\` -> outcome=\`$CRASH_INJECTED\`$([[ -n "$CRASH_RECOVERY_SECS" ]] && echo ", recovery=${CRASH_RECOVERY_SECS}s"), completion=\`$([[ "$CRASH_SETTLED" == "yes" ]] && echo "count-settle" || echo "marker")\`"
         fi
         echo
 

@@ -1,9 +1,15 @@
-# Recovery Artifact Comparison
+# Recovery Result Verification
 
 An opt-in framework completion handler and standalone Rust artifact comparator
 for test-infra #84. Both share the same comparison engine. Baseline storage and
 producer-side completion/identity instrumentation are separate work; existing
 ordered SHA-256 checks remain available and unchanged.
+
+Configure the feature with `kind: RecoveryResultVerification`. The previous
+`kind: RecoveryComparison` remains accepted as a compatibility alias. The CLI
+command `recovery-compare`, existing module paths, and artifact filenames such as
+`recovery_verdict.json` remain unchanged. This is a naming change, not a change
+to result checks, policies, or saved golden data.
 
 ## Run the Example
 

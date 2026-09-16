@@ -68,10 +68,10 @@ fi
 
 jq --arg baseline "$baseline" --arg fingerprint "$fingerprint" --argjson queries "$handler_queries" '
     .data_store.test_repos[0].local_tests[0].completion_handlers |=
-      (map(select(.kind != "Log" and .kind != "RecoveryComparison")) +
-       [{kind:"RecoveryComparison", baseline_path:$baseline, workload_fingerprint:$fingerprint,
+    (map(select(.kind != "Log" and .kind != "RecoveryResultVerification" and .kind != "RecoveryComparison")) +
+       [{kind:"RecoveryResultVerification", baseline_path:$baseline, workload_fingerprint:$fingerprint,
          policy:{delivery:"exactly_once",allow_reordering:false}, enforce:false, queries:$queries}] +
        map(select(.kind == "Log")))
 ' "$config" > "$work/recovery-config.tmp"
 mv "$work/recovery-config.tmp" "$config"
-printf 'Enabled advisory RecoveryComparison against %s (candidate golden).\n' "$golden"
+printf 'Enabled advisory RecoveryResultVerification against %s (candidate golden).\n' "$golden"

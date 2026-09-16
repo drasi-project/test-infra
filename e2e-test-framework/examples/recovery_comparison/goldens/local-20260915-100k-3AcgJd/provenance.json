@@ -1,0 +1,28 @@
+{
+  "status": "candidate-stop-point",
+  "finalized_at_utc": "2026-09-15T23:04:44Z",
+  "workload_fingerprint": "d04c1668a999126305ae37a3296fd2e1b11e59dbfbe5cede90459b6f1a3bff63",
+  "raw_artifacts": "/tmp/recovery-golden-100k-retry-84.3AcgJd",
+  "variant": "grpc_standard",
+  "bootstrap_size": "100k",
+  "bootstrap_rooms": 100000,
+  "bootstrap_events": 221000,
+  "steady_changes": 100000,
+  "receiver_stop_counts": {
+    "building-comfort": 195000,
+    "building-comfort-floor-agg": 140000
+  },
+  "server_sha256": "ed6b4b97938231be238a479ff2d206c7376b56a8f3e440dbf85c7ded5230612e",
+  "test_service_sha256": "6a9d344f9e967b8d8f08849b1317e03093665690601ec78681556200b630a82d",
+  "test_infra_head_at_finalization": "7bedf808b57cbadd838b106bbdc8066bfb814d51",
+  "test_infra_uncommitted_changes": true,
+  "outbox_capacity": 20000,
+  "startup_timeout_seconds": 3600,
+  "producer_identity_contract": "grpc-query-sequence-row-operation-v1",
+  "capture_complete": false,
+  "framework_hash_checks_passed": true,
+  "runner_reporting_completed": false,
+  "capture_script_exit": 2,
+  "finalization": "Existing framework artifacts validated independently after runner parse error; workload not rerun",
+  "caveat": "Runner source was edited during execution; preserved console records parse failure. Do not claim clean end-to-end driver success."
+}

@@ -1,5 +1,5 @@
 {
-  "kind": "RecoveryComparison",
+  "kind": "RecoveryResultVerification",
   "baseline_path": "baselines/building-comfort.json",
   "workload_fingerprint": "replace-with-workload-digest",
   "policy": {

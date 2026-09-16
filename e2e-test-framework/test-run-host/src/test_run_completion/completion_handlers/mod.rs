@@ -73,8 +73,8 @@ pub fn create_completion_handler(
         CompletionHandlerDefinition::Sha256Determinism(cfg) => Ok(Box::new(
             Sha256DeterminismCompletionHandler::new(cfg, data_store, test_run_id),
         )),
-        CompletionHandlerDefinition::RecoveryComparison(cfg) => Ok(Box::new(
-            recovery_comparison::RecoveryComparisonCompletionHandler::new(
+        CompletionHandlerDefinition::RecoveryResultVerification(cfg) => Ok(Box::new(
+            recovery_comparison::RecoveryResultVerificationCompletionHandler::new(
                 cfg,
                 data_store,
                 test_run_id,

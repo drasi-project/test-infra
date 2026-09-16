@@ -10,7 +10,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use test_data_store::{
-    test_repo_storage::models::{RecoveryComparisonHandlerConfig, RecoveryDeliveryGuarantee},
+    test_repo_storage::models::{
+        RecoveryDeliveryGuarantee, RecoveryResultVerificationHandlerConfig,
+    },
     test_run_storage::{TestRunId, TestRunReactionId},
     TestDataStore,
 };
@@ -21,8 +23,8 @@ use crate::{
     test_run_completion::types::ComponentCompletionSummary,
 };
 
-pub struct RecoveryComparisonCompletionHandler {
-    config: RecoveryComparisonHandlerConfig,
+pub struct RecoveryResultVerificationCompletionHandler {
+    config: RecoveryResultVerificationHandlerConfig,
     data_store: Arc<TestDataStore>,
     test_run_id: TestRunId,
     created_at_ns: u128,
@@ -37,35 +39,35 @@ struct CompletionEvidence {
     evidence: String,
 }
 
-impl RecoveryComparisonCompletionHandler {
+impl RecoveryResultVerificationCompletionHandler {
     pub fn new(
-        config: &RecoveryComparisonHandlerConfig,
+        config: &RecoveryResultVerificationHandlerConfig,
         data_store: Arc<TestDataStore>,
         test_run_id: TestRunId,
     ) -> Result<Self> {
         ensure!(
             !config.baseline_path.trim().is_empty(),
-            "RecoveryComparison baseline_path is required"
+            "RecoveryResultVerification baseline_path is required"
         );
         ensure!(
             !config.workload_fingerprint.trim().is_empty(),
-            "RecoveryComparison workload_fingerprint is required"
+            "RecoveryResultVerification workload_fingerprint is required"
         );
         ensure!(
             !config.queries.is_empty(),
-            "RecoveryComparison requires queries"
+            "RecoveryResultVerification requires queries"
         );
         let mut queries = BTreeSet::new();
         let mut reactions = BTreeSet::new();
         for query in &config.queries {
             ensure!(
                 !query.query_id.trim().is_empty() && queries.insert(&query.query_id),
-                "RecoveryComparison requires unique nonempty query IDs"
+                "RecoveryResultVerification requires unique nonempty query IDs"
             );
             ensure!(
                 !query.test_reaction_id.trim().is_empty()
                     && reactions.insert(&query.test_reaction_id),
-                "RecoveryComparison requires one distinct reaction per query"
+                "RecoveryResultVerification requires one distinct reaction per query"
             );
             ensure!(
                 !query.config_fingerprint.trim().is_empty(),
@@ -225,7 +227,7 @@ impl RecoveryComparisonCompletionHandler {
 }
 
 #[async_trait]
-impl CompletionHandler for RecoveryComparisonCompletionHandler {
+impl CompletionHandler for RecoveryResultVerificationCompletionHandler {
     async fn handle_completion(
         &self,
         test_run_id: &str,
@@ -233,7 +235,7 @@ impl CompletionHandler for RecoveryComparisonCompletionHandler {
     ) -> Result<()> {
         ensure!(
             test_run_id == self.test_run_id.to_string(),
-            "RecoveryComparison invoked for the wrong run"
+            "RecoveryResultVerification invoked for the wrong run"
         );
         let storage = self
             .data_store
@@ -259,10 +261,10 @@ impl CompletionHandler for RecoveryComparisonCompletionHandler {
             result => {
                 let message = match result {
                     Ok(report) => format!(
-                        "RecoveryComparison verdict: {:?}; see recovery_verdict.json",
+                        "RecoveryResultVerification verdict: {:?}; see recovery_verdict.json",
                         report.verdict
                     ),
-                    Err(error) => format!("RecoveryComparison invalid: {error:#}"),
+                    Err(error) => format!("RecoveryResultVerification invalid: {error:#}"),
                 };
                 if self.config.enforce {
                     anyhow::bail!(message);
@@ -387,7 +389,7 @@ mod tests {
         .await
         .unwrap();
         let config = json!({
-            "kind": "RecoveryComparison", "baseline_path": baseline,
+            "kind": "RecoveryResultVerification", "baseline_path": baseline,
             "workload_fingerprint": "fixture-v1", "policy": {"delivery": "at_least_once", "allow_reordering": true},
             "capture_evidence_path": "boundary.json",
             "queries": [{"query_id": "items", "test_reaction_id": "receiver", "config_fingerprint": "items-v1",
@@ -433,6 +435,21 @@ mod tests {
 
     fn evidence() -> Value {
         json!({"test_run_id":"repo.test.run", "complete":true, "evidence":"Synthetic producer finished; all delivery boundary events and final snapshot captured"})
+    }
+
+    #[tokio::test]
+    async fn recovery_result_verification_accepts_legacy_config_name() {
+        let mut fixture = fixture().await;
+        fixture.config["kind"] = json!("RecoveryComparison");
+        let definition: CompletionHandlerDefinition =
+            serde_json::from_value(fixture.config.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&definition).unwrap()["kind"],
+            "RecoveryResultVerification"
+        );
+        let (result, verdict) = execute(&fixture, Some(evidence())).await;
+        result.unwrap();
+        assert_eq!(verdict["verdict"], "passed");
     }
 
     #[tokio::test]

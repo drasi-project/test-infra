@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "verdict": "inconclusive",
+  "workload_fingerprint": "d04c1668a999126305ae37a3296fd2e1b11e59dbfbe5cede90459b6f1a3bff63",
+  "policy": {
+    "delivery": "exactly_once",
+    "allow_reordering": false
+  },
+  "reasons": [
+    "baseline capture incomplete: 100k bootstrap, 321000 inputs; preset sample stops 195000/140000. Framework hashes and snapshots verified; runner reporting tail had a parse error. Snapshot at test stop, not verified terminal state.",
+    "recovery capture incomplete: 100k bootstrap, 321000 inputs; preset sample stops 195000/140000. Framework hashes and snapshots verified; runner reporting tail had a parse error. Snapshot at test stop, not verified terminal state."
+  ],
+  "missing_queries": [],
+  "unexpected_queries": [],
+  "queries": [
+    {
+      "query_id": "building-comfort",
+      "delivery": {
+        "verdict": "passed",
+        "reason": null,
+        "expected_observations": 195000,
+        "actual_observations": 195000,
+        "missing": [],
+        "unexpected": [],
+        "duplicates": {},
+        "conflicting": [],
+        "reordered": false
+      },
+      "state": {
+        "verdict": "passed",
+        "reason": null,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "query_id": "building-comfort-floor-agg",
+      "delivery": {
+        "verdict": "passed",
+        "reason": null,
+        "expected_observations": 140000,
+        "actual_observations": 140000,
+        "missing": [],
+        "unexpected": [],
+        "duplicates": {},
+        "conflicting": [],
+        "reordered": false
+      },
+      "state": {
+        "verdict": "passed",
+        "reason": null,
+        "missing": [],
+        "unexpected": []
+      }
+    }
+  ]
+}

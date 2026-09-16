@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-pub(super) struct ReceiverRejection {
+pub(in crate::reactions::reaction_handlers) struct ReceiverRejection {
     directory: PathBuf,
     port: u16,
     accepted_items: usize,
@@ -9,7 +9,7 @@ pub(super) struct ReceiverRejection {
 }
 
 impl ReceiverRejection {
-    pub(super) fn new(directory: PathBuf, port: u16) -> Self {
+    pub(in crate::reactions::reaction_handlers) fn new(directory: PathBuf, port: u16) -> Self {
         Self {
             directory,
             port,
@@ -19,7 +19,9 @@ impl ReceiverRejection {
         }
     }
 
-    pub(super) async fn before_request(&mut self) -> anyhow::Result<()> {
+    pub(in crate::reactions::reaction_handlers) async fn before_request(
+        &mut self,
+    ) -> anyhow::Result<()> {
         if self.restored || self.accepted_items < 100 {
             return Ok(());
         }
@@ -33,7 +35,7 @@ impl ReceiverRejection {
         anyhow::bail!("Injected receiver rejection before capture")
     }
 
-    pub(super) fn accepted(&mut self, count: usize) {
+    pub(in crate::reactions::reaction_handlers) fn accepted(&mut self, count: usize) {
         self.accepted_items += count;
     }
 

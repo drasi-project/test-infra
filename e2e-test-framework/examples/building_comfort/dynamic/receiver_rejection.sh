@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 
 prepare_receiver_rejection() {
-    [[ "${VARIANT:-}" == grpc_standard && "${BOOTSTRAP_ENABLED:-false}" == false ]] || {
-        log "ERROR: receiver rejection supports grpc_standard with bootstrap off only"
+    case "${VARIANT:-}" in
+        http_standard|http_adaptive|grpc_standard|grpc_adaptive) ;;
+        *) log "ERROR: receiver rejection requires an HTTP/gRPC variant"; return 1 ;;
+    esac
+    [[ "${BOOTSTRAP_ENABLED:-false}" == false ]] || {
+        log "ERROR: receiver rejection requires bootstrap off"
         return 1
     }
     [[ "$SERVER_PROFILE_PERSIST_INDEX" == true && "$SERVER_PROFILE_STATE_STORE" == true ]] || return 1
@@ -14,7 +18,7 @@ prepare_receiver_rejection() {
     mkdir "$RECEIVER_REJECTION_DIR" || return 1
     jq -e --argjson selected "$SELECTED_QUERIES_JSON" '
         [.[] | select(((.queries // []) - $selected | length) == 0)
-          | {id, port: (.endpoint | capture(":(?<port>[0-9]+)$").port | tonumber)}]
+          | {id, port: ((.endpoint // .baseUrl) | capture(":(?<port>[0-9]+)(/.*)?$").port | tonumber)}]
         | select(length > 0)' "$COMPONENTS_DIR/$SERVER_REACTIONS_FILE" \
         > "$RECEIVER_REJECTION_DIR/targets.json" || return 1
     jq -n '{outcome:"not_completed", scenario:"receiver_rejection"}' \

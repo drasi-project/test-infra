@@ -18,8 +18,9 @@ cases = [
   [{'RECOVERY_SIGNAL' => 'SIGTERM'}, true],
   [{'RECOVERY_SCENARIO' => 'receiver_rejection'}, true],
   [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'RECOVERY_SIGNAL' => 'SIGTERM'}, true],
-  [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'V_HTTP_STD' => 'true'}, false],
-  [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'V_GRPC_ADAPTIVE' => 'true'}, false],
+  [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'V_HTTP_STD' => 'true'}, true],
+  [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'V_GRPC_ADAPTIVE' => 'true'}, true],
+  [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'V_HTTP_STD' => 'true', 'V_HTTP_ADAPTIVE' => 'true', 'V_GRPC_ADAPTIVE' => 'true'}, true],
   [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'BOOTSTRAP_SIZE' => '10k'}, false],
   [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'STATE_STORE' => 'false'}, false],
   [{'RECOVERY_SCENARIO' => 'invalid'}, false],
@@ -27,6 +28,10 @@ cases = [
   [{'SHUTDOWN_TIMEOUT_SECS' => '0'}, false],
   [{'SHUTDOWN_TIMEOUT_SECS' => '601'}, false]
 ]
+%w[V_HTTP_STD V_HTTP_ADAPTIVE V_GRPC_STD V_GRPC_ADAPTIVE].each do |variant|
+  cases << [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'V_GRPC_STD' => 'false', variant => 'true'}, true]
+end
+cases << [{'RECOVERY_SCENARIO' => 'receiver_rejection', 'V_GRPC_STD' => 'false'}, false]
 cases.each do |overrides, expected|
   output, error, result = Open3.capture3(base.merge(overrides), 'bash', '-s', stdin_data: script)
   abort "Validation mismatch #{overrides}: #{output} #{error}" unless result.success? == expected

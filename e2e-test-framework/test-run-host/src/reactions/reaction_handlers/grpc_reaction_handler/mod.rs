@@ -37,7 +37,7 @@ use drasi::v1::{
     StreamResultsResponse, SubscribeRequest,
 };
 
-mod receiver_rejection;
+pub(super) mod receiver_rejection;
 use receiver_rejection::ReceiverRejection;
 
 #[derive(Clone, Debug)]

@@ -75,3 +75,27 @@ check query_failed 1
 check start_failed 1
 check server_dead 1
 printf 'PASS: reaction-only recovery requires rejection, delivery Error, successful restart, and live server.\n'
+
+for variant in http_standard http_adaptive grpc_standard grpc_adaptive; do
+    (
+        VARIANT="$variant"
+        BOOTSTRAP_ENABLED=false
+        SERVER_PROFILE_PERSIST_INDEX=true
+        SERVER_PROFILE_STATE_STORE=true
+        COMPONENTS_DIR="$here/components/server"
+        SELECTED_QUERIES_JSON='["building-comfort","building-comfort-floor-agg"]'
+        case "$variant" in
+            http_standard) SERVER_REACTIONS_FILE=reactions_http.json; ports='[9001,9002]' ;;
+            http_adaptive) SERVER_REACTIONS_FILE=reactions_http_adaptive.json; ports='[9001,9002]' ;;
+            *) SERVER_REACTIONS_FILE=reactions_grpc.json; ports='[50052,50053]' ;;
+        esac
+        ARTIFACTS_DIR="$directory/$variant"
+        mkdir "$ARTIFACTS_DIR"
+        unset RECEIVER_REJECTION_DIR
+        prepare_receiver_rejection
+        jq -e --argjson ports "$ports" '
+            [.[].port] == $ports and [.[].id] == ["building-comfort-out","building-comfort-floor-agg-out"]' \
+            "$RECEIVER_REJECTION_DIR/targets.json" >/dev/null
+    )
+done
+printf 'PASS: all four variants resolve the selected reaction IDs and HTTP/gRPC receiver ports.\n'

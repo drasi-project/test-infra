@@ -1,7 +1,7 @@
 # Receiver Rejection and Reaction Recovery
 
 This scenario keeps Drasi Server, its source and queries, and the test-service
-running. It rejects gRPC result deliveries before capture, waits for the affected
+running. It rejects HTTP/gRPC result deliveries before capture, waits for the affected
 Drasi reaction to report a delivery failure under `Strict`, then stops/starts
 only that reaction. The endpoint is restored before the start request. Existing
 checkpoints, configuration, query indexes, and recorded outputs are retained.
@@ -14,8 +14,7 @@ after publishing the updated workflow, runner, and test-service code:
 | Input | Selection |
 |-------|-----------|
 | `recovery_scenario` | `receiver_rejection` |
-| `grpc_standard` | `true` |
-| `http_standard`, `http_adaptive`, `grpc_adaptive` | All `false` |
+| `http_standard`, `http_adaptive`, `grpc_standard`, `grpc_adaptive` | Select any combination; at least one is required |
 | `bootstrap_size` | `off` |
 | `persist_index`, `state_store` | Both `true` |
 | `golden_snapshot` | `building-comfort-small-v1` for the shared advisory comparison |
@@ -31,13 +30,14 @@ runs remain the default and retain their signal-specific artifacts.
 
 ## Fault Boundary and Checks
 
-Each selected gRPC receiver accepts at least 100 result items before arming its
+Each selected HTTP/gRPC receiver accepts at least 100 result items before arming its
 one-time rejection. Whole requests are accepted or rejected at this boundary;
 a request can cross the threshold without being split. Subsequent requests
-receive `success=false`, `items_processed=0` before conversion, invocation
-counting, producer metadata capture, or logger delivery. The same guard also
-protects the streaming processing path, although this workflow initially tests
-only standard unary gRPC delivery.
+receive HTTP 503 or gRPC `success=false`, `items_processed=0` before conversion,
+invocation counting, producer metadata capture, or logger delivery. HTTP single
+requests and adaptive batch envelopes share the guard; a rejected batch produces
+no captured items. Both gRPC source variants use the same protected gRPC receiver.
+The guard also protects the gRPC streaming processing path.
 
 The runner requires all of the following for each selected receiver/reaction:
 
@@ -59,6 +59,9 @@ The optional golden is the same as for SIGKILL/SIGTERM. Its comparison remains
 advisory, with unchanged per-query ordered exactly-once policy and existing
 capture-completeness limitations. A passing runner is not a general proof of
 exactly-once delivery or absence of arbitrarily late extra output.
+HTTP state comparison uses the same golden snapshots, while HTTP delivery-identity
+diagnostics remain inconclusive without compatible producer metadata. This change
+does not add HTTP producer identities or change comparison policy.
 
 This is application-level receiver rejection, not a physical listener shutdown,
 network partition, lost acknowledgment after acceptance, or storage fault.
@@ -68,7 +71,7 @@ has been verified for this new scenario yet.
 
 ## Artifacts and Local Controls
 
-The artifact is named `recovery-receiver-rejection-grpc_standard`.
+The artifact is named `recovery-receiver-rejection-<variant>` for each selected variant.
 Under its `receiver-rejection/artifacts` directory:
 
 - `receiver-recovery.json`: orchestration outcome, original server PID, and
@@ -80,7 +83,7 @@ Under its `receiver-rejection/artifacts` directory:
 - Existing test/server logs, final result states, determinism verdicts, and
   optional golden comparison artifacts.
 
-For local runs, set `VARIANT=grpc_standard`, `CRASH_INJECT=receiver_rejection`,
+For local runs, set `VARIANT` to any of the four HTTP/gRPC variants, `CRASH_INJECT=receiver_rejection`,
 and `OUTBOX_CAPACITY=20000`, then invoke the existing variant runner with normal
 server/plugin settings. The runner creates a fresh `RECEIVER_REJECTION_DIR` and
 exports it only to its child processes. Do not set it for ordinary runs. The

@@ -27,8 +27,10 @@ use test_data_store::{
 };
 use tokio::sync::{
     mpsc::{Receiver, Sender},
-    Notify, RwLock,
+    Mutex, Notify, RwLock,
 };
+
+use super::grpc_reaction_handler::receiver_rejection::ReceiverRejection;
 
 use crate::reactions::reaction_output_handler::{
     ReactionControlSignal, ReactionHandlerError, ReactionHandlerMessage, ReactionHandlerPayload,
@@ -69,6 +71,7 @@ impl HttpReactionHandlerSettings {
 struct HttpInstanceState {
     tx: Sender<ReactionHandlerMessage>,
     settings: HttpReactionHandlerSettings,
+    receiver_rejection: Option<Arc<Mutex<ReceiverRejection>>>,
 }
 
 pub struct HttpReactionHandler {
@@ -262,6 +265,12 @@ async fn http_instance_thread(
     let state = HttpInstanceState {
         tx: result_handler_tx_channel.clone(),
         settings: settings.clone(),
+        receiver_rejection: std::env::var_os("RECEIVER_REJECTION_DIR").map(|directory| {
+            Arc::new(Mutex::new(ReceiverRejection::new(
+                directory.into(),
+                settings.port,
+            )))
+        }),
     };
 
     let app = Router::new()
@@ -329,6 +338,19 @@ async fn handle_reaction(
     uri: axum::http::Uri,
     body: String,
 ) -> impl IntoResponse {
+    let mut rejection = match &state.receiver_rejection {
+        Some(rejection) => Some(rejection.lock().await),
+        None => None,
+    };
+    if let Some(rejection) = rejection.as_mut() {
+        if let Err(error) = rejection.before_request().await {
+            log::warn!("Receiver rejection before HTTP capture: {error}");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Receiver unavailable before capture",
+            );
+        }
+    }
     let invocation_time_ns = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
@@ -485,6 +507,10 @@ async fn handle_reaction(
                     .await
                 {
                     log::error!("Failed to send batch reaction message: {e}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Instance Error");
+                }
+                if let Some(rejection) = rejection.as_mut() {
+                    rejection.accepted(1);
                 }
             }
         }
@@ -561,11 +587,114 @@ async fn handle_reaction(
             .send(ReactionHandlerMessage::Invocation(invocation))
             .await
         {
-            Ok(_) => (StatusCode::OK, "OK"),
+            Ok(_) => {
+                if let Some(rejection) = rejection.as_mut() {
+                    rejection.accepted(1);
+                }
+                (StatusCode::OK, "OK")
+            }
             Err(e) => {
                 log::error!("Failed to send reaction message: {e}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal Instance Error")
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod receiver_rejection_tests {
+    use super::*;
+    use serde_json::json;
+    use test_data_store::test_run_storage::TestRunId;
+
+    #[tokio::test]
+    async fn receiver_rejection_http_single_and_batch_preserve_capture() {
+        for (path, body, count) in [
+            ("/reaction", json!({"after":{"value":1}}), 1),
+            (
+                "/reaction/batch",
+                json!({"batch":[{"after":{"value":1}}, {"after":{"value":2}}]}),
+                2,
+            ),
+            (
+                "/batch",
+                json!({"results":[{"after":{"value":1}}, {"after":{"value":2}}]}),
+                2,
+            ),
+            ("/batch", json!([{"results":[{"after":{"value":1}}]}]), 1),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let (sender, mut receiver) = tokio::sync::mpsc::channel(200);
+            let state = HttpInstanceState {
+                tx: sender,
+                settings: HttpReactionHandlerSettings {
+                    host: "127.0.0.1".to_owned(),
+                    port: 9001,
+                    path: "/reaction".to_owned(),
+                    correlation_header: None,
+                    test_run_query_id: TestRunQueryId::new(
+                        &TestRunId::new("repo", "test", "run"),
+                        "items",
+                    ),
+                },
+                receiver_rejection: Some(Arc::new(Mutex::new(ReceiverRejection::new(
+                    directory.path().to_owned(),
+                    9001,
+                )))),
+            };
+            for _request in 0..(100 / count) {
+                let response = handle_reaction(
+                    State(state.clone()),
+                    Method::POST,
+                    HeaderMap::new(),
+                    path.parse().unwrap(),
+                    body.to_string(),
+                )
+                .await
+                .into_response();
+                assert_eq!(response.status(), StatusCode::OK);
+                for _item in 0..count {
+                    receiver.recv().await.unwrap();
+                }
+            }
+            for _attempt in 0..2 {
+                let response = handle_reaction(
+                    State(state.clone()),
+                    Method::POST,
+                    HeaderMap::new(),
+                    path.parse().unwrap(),
+                    body.to_string(),
+                )
+                .await
+                .into_response();
+                assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+                assert!(receiver.try_recv().is_err());
+            }
+            let evidence: serde_json::Value = serde_json::from_slice(
+                &tokio::fs::read(directory.path().join("9001.json"))
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(evidence["accepted_items_before_outage"], 100);
+            assert_eq!(evidence["rejected_requests"], 2);
+            tokio::fs::write(directory.path().join("9001.restore"), b"restore")
+                .await
+                .unwrap();
+            let response = handle_reaction(
+                State(state.clone()),
+                Method::POST,
+                HeaderMap::new(),
+                path.parse().unwrap(),
+                body.to_string(),
+            )
+            .await
+            .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            for _item in 0..count {
+                receiver.recv().await.unwrap();
+            }
+            assert!(receiver.try_recv().is_err());
         }
     }
 }

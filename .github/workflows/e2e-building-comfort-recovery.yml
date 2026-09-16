@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       recovery_scenario:
-        description: "server_restart uses the selected signal; receiver_rejection requires only grpc_standard and bootstrap off."
+        description: "server_restart uses the selected signal; receiver_rejection supports all HTTP/gRPC variants with bootstrap off."
         type: choice
         options:
           - server_restart
@@ -153,9 +153,8 @@ jobs:
             exit 1
           }
           if [[ "$RECOVERY_SCENARIO" == receiver_rejection ]]; then
-            [[ "$V_GRPC_STD" == true && "$V_GRPC_ADAPTIVE" == false &&
-               "$V_HTTP_STD" == false && "$V_HTTP_ADAPTIVE" == false && "$BOOTSTRAP_SIZE" == off ]] || {
-              echo "ERROR: receiver_rejection requires only grpc_standard selected and bootstrap off." >&2
+            [[ "$BOOTSTRAP_SIZE" == off ]] || {
+              echo "ERROR: receiver_rejection requires bootstrap off." >&2
               exit 1
             }
           fi

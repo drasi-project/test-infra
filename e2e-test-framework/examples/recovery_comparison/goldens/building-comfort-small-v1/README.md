@@ -55,8 +55,10 @@ transport normalization and producer identity compatibility must be checked.
 The SIGKILL building-comfort recovery workflow always runs golden comparison.
 `building-comfort-small-v1` is used automatically; there is no golden input.
 Both queries and bootstrap off are required until other workload goldens are
-enabled. Missing comparison reports fail the workflow. The comparison verdict
-remains advisory under the existing completeness/identity limitations; mandatory
+enabled. Missing, malformed, invalid, or structurally incomplete comparison
+reports fail the workflow. Evaluation errors and missing expected query results
+cannot satisfy the required comparison check. Valid passed, failed, and
+inconclusive verdicts remain advisory under the existing completeness/identity limitations; mandatory
 execution does not change `enforce: false` or the enforced count/hash checks.
 
 After committing and pushing the workflow, capture code, helper scripts, and

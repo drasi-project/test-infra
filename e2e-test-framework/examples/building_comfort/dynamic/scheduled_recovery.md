@@ -45,8 +45,10 @@ fall back to another tag. Compare recorded provenance when investigating failure
 Manual dispatch retains its existing transport, server, and plugin settings;
 scheduled defaults do not override manual `false` selections or force a core-main
 override on manual builds. Both modes require persistence, both queries, bootstrap
-off, and the fixed golden. Missing comparison reports fail; the comparison verdict
-remains advisory with existing completeness/identity limitations. Counts/hashes
+off, and the fixed golden. Missing, malformed, invalid, or structurally incomplete
+comparison reports fail, including evaluation errors or missing expected query
+results. Valid passed, failed, and inconclusive comparison verdicts remain
+advisory with existing completeness/identity limitations. Counts/hashes
 and the strict SIGKILL recovery gates remain enforced.
 
 No SIGTERM or receiver-rejection scenario is scheduled. Those remain on the

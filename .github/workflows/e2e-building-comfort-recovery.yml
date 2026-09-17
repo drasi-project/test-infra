@@ -278,6 +278,27 @@ jobs:
             verdict="$RUNNER_TEMP/results/$RECOVERY_CASE/work/test_data_cache/test_runs/drasi_server_dev_repo.building_comfort.test_run_001/recovery_verdict.json"
             printf '\n### Required Golden Comparison (Advisory Verdict)\n\n'
             if [[ -s "$verdict" ]]; then
+              if ! jq -e -s '
+                def valid_verdict: . == "passed" or . == "failed" or . == "inconclusive";
+                length == 1 and (.[0] |
+                  type == "object" and
+                  .test_run_id == "drasi_server_dev_repo.building_comfort.test_run_001" and
+                  (.enforced | type == "boolean") and
+                  .error == null and
+                  (.verdict | valid_verdict) and
+                  (.comparison | type == "object") and
+                  .comparison.schema_version == 1 and
+                  .comparison.verdict == .verdict and
+                  (.comparison.queries | type == "array") and
+                  ([.comparison.queries[].query_id] | sort) ==
+                    ["building-comfort", "building-comfort-floor-agg"] and
+                  all(.comparison.queries[];
+                    (.state.verdict | valid_verdict) and
+                    (.delivery.verdict | valid_verdict)))
+              ' "$verdict" >/dev/null; then
+                printf 'ERROR: required golden comparison report is invalid or incomplete; comparison execution is not verified. Inspect recovery_verdict.json.\n'
+                exit 1
+              fi
               jq -r '"Overall: \(.verdict) (enforced=\(.enforced))", (.comparison.queries[]? | "- \(.query_id): state=\(.state.verdict), delivery=\(.delivery.verdict)"), (.error // empty)' "$verdict"
             else
               printf 'ERROR: required comparison report was not produced; comparison is not verified.\n'

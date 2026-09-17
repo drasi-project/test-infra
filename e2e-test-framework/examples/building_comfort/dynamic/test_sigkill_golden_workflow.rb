@@ -42,11 +42,54 @@ Dir.mktmpdir('required-golden-') do |directory|
   abort 'Missing report passed' if result.success?
   report = File.join(directory, 'results/sigkill-drain/work/test_data_cache/test_runs/drasi_server_dev_repo.building_comfort.test_run_001/recovery_verdict.json')
   FileUtils.mkdir_p(File.dirname(report))
-  File.write(report, JSON.generate({verdict: 'inconclusive', enforced: false, comparison: {queries: []}}))
-  _, error, result = Open3.capture3(environment, 'bash', '-e', '-s', stdin_data: summary)
-  abort "Advisory verdict policy changed: #{error}" unless result.success?
+  comparison = JSON.parse(File.read(File.expand_path('../../recovery_comparison/goldens/building-comfort-small-v1/self-comparison.json', __dir__)))
+  valid = {
+    'test_run_id' => 'drasi_server_dev_repo.building_comfort.test_run_001',
+    'enforced' => false, 'verdict' => comparison.fetch('verdict'), 'comparison' => comparison
+  }
+  check_report = lambda do |label, content, expected|
+    File.write(report, content)
+    File.write(environment.fetch('GITHUB_STEP_SUMMARY'), '')
+    _, error, result = Open3.capture3(environment, 'bash', '-e', '-s', stdin_data: summary)
+    abort "Unexpected summary result for #{label}: #{result.exitstatus}: #{error}" unless result.success? == expected
+    unless expected
+      abort "Missing diagnostic for #{label}" unless File.read(environment.fetch('GITHUB_STEP_SUMMARY')).include?('ERROR: required')
+    end
+  end
+  %w[passed failed inconclusive].each do |verdict|
+    body = Marshal.load(Marshal.dump(valid))
+    body['verdict'] = body['comparison']['verdict'] = verdict
+    body['comparison']['queries'].each do |query|
+      query['state']['verdict'] = query['delivery']['verdict'] = verdict
+    end
+    check_report.call("advisory #{verdict}", JSON.generate(body), true)
+  end
+  {
+    'invalid evaluation' => ->(body) { body['verdict'] = 'invalid'; body['error'] = 'snapshot fetch failed'; body.delete('comparison') },
+    'evaluation error with comparison' => ->(body) { body['error'] = 'capture import failed' },
+    'missing comparison' => ->(body) { body.delete('comparison') },
+    'null comparison' => ->(body) { body['comparison'] = nil },
+    'missing queries' => ->(body) { body['comparison'].delete('queries') },
+    'empty queries' => ->(body) { body['comparison']['queries'] = [] },
+    'missing expected query' => ->(body) { body['comparison']['queries'].pop },
+    'duplicate query' => ->(body) { body['comparison']['queries'][1] = body['comparison']['queries'][0] },
+    'unexpected query' => ->(body) { body['comparison']['queries'][1]['query_id'] = 'other' },
+    'missing state' => ->(body) { body['comparison']['queries'][0].delete('state') },
+    'missing delivery' => ->(body) { body['comparison']['queries'][0].delete('delivery') },
+    'invalid query verdict' => ->(body) { body['comparison']['queries'][0]['state']['verdict'] = 'invalid' },
+    'wrong run' => ->(body) { body['test_run_id'] = 'another.run' },
+    'wrong schema' => ->(body) { body['comparison']['schema_version'] = 2 },
+    'inconsistent verdict' => ->(body) { body['comparison']['verdict'] = 'passed' }
+  }.each do |label, mutate|
+    body = Marshal.load(Marshal.dump(valid))
+    mutate.call(body)
+    check_report.call(label, JSON.generate(body), false)
+  end
+  ['', '{broken', 'null', '{}', '[]', "#{JSON.generate(valid)}\n#{JSON.generate(valid)}"].each do |content|
+    check_report.call('malformed or incomplete document', content, false)
+  end
 end
-puts 'PASS: fixed golden used without a selector; incompatible workloads and missing reports fail; verdict remains advisory.'
+puts 'PASS: fixed golden required; malformed, invalid, and incomplete reports fail; valid passed/failed/inconclusive verdicts remain advisory.'
 
 abort 'Unexpected daily schedule' unless trigger.fetch('schedule') == [{'cron' => '0 22 * * *'}]
 defaults = trigger.fetch('workflow_dispatch').fetch('inputs').transform_values { |input| input.fetch('default', '') }

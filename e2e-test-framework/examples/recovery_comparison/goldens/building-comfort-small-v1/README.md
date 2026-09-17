@@ -52,6 +52,13 @@ transport normalization and producer identity compatibility must be checked.
 
 ## Select in GitHub
 
+The SIGKILL building-comfort recovery workflow always runs golden comparison.
+`building-comfort-small-v1` is the required default; there is no `none` option.
+Both queries and bootstrap off are required until other workload goldens are
+enabled. Missing comparison reports fail the workflow. The comparison verdict
+remains advisory under the existing completeness/identity limitations; mandatory
+execution does not change `enforce: false` or the enforced count/hash checks.
+
 After committing and pushing the workflow, capture code, helper scripts, and
 golden files together, open **E2E - building_comfort recovery**, choose **Run
 workflow**, and select the branch containing those changes. For a standard-gRPC

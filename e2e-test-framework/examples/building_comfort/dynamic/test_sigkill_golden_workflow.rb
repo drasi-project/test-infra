@@ -47,3 +47,52 @@ Dir.mktmpdir('required-golden-') do |directory|
   abort "Advisory verdict policy changed: #{error}" unless result.success?
 end
 puts 'PASS: fixed golden used without a selector; incompatible workloads and missing reports fail; verdict remains advisory.'
+
+abort 'Unexpected daily schedule' unless trigger.fetch('schedule') == [{'cron' => '0 22 * * *'}]
+defaults = trigger.fetch('workflow_dispatch').fetch('inputs').transform_values { |input| input.fetch('default', '') }
+resolve = lambda do |value, event, inputs|
+  expression = value.to_s.match(/\A\$\{\{ github.event_name == 'schedule' && '([^']*)' \|\| (inputs\.([a-z_]+)|'') \}\}\z/)
+  if expression
+    event == 'schedule' ? expression[1] : inputs.fetch(expression[3], '').to_s
+  elsif (direct = value.to_s.match(/\A\$\{\{ inputs\.([a-z_]+) \}\}\z/))
+    inputs.fetch(direct[1], '').to_s
+  else
+    value.to_s
+  end
+end
+prepare_steps = workflow.fetch('jobs').fetch('prepare').fetch('steps')
+settings = prepare_steps.find { |step| step['id'] == 'settings' }
+scheduled = settings.fetch('env').transform_values { |value| resolve.call(value, 'schedule', {}) }
+expected_scheduled = base.reject { |key, _| key == 'GITHUB_OUTPUT' }.merge('MINUTES' => '45')
+abort "Wrong scheduled settings: #{scheduled}" unless scheduled == expected_scheduled
+Dir.mktmpdir('scheduled-recovery-') do |directory|
+  output_file = File.join(directory, 'outputs')
+  _, error, result = Open3.capture3(scheduled.merge('GITHUB_OUTPUT' => output_file), 'bash', '-e', '-s', stdin_data: validation)
+  abort "Schedule failed validation: #{error}" unless result.success?
+  outputs = File.readlines(output_file).to_h { |line| line.strip.split('=', 2) }
+  abort 'Scheduled matrix incomplete' unless JSON.parse(outputs.fetch('variants')) == %w[http_standard http_adaptive grpc_standard grpc_adaptive]
+  abort 'Wrong scheduled timeout' unless outputs['timeout_seconds'] == '2700'
+end
+manual = settings.fetch('env').transform_values { |value| resolve.call(value, 'workflow_dispatch', defaults.merge('http_standard' => false)) }
+abort 'Manual false selection was overridden' unless manual['V_HTTP_STD'] == 'false' && manual['V_GRPC_ADAPTIVE'] == 'false'
+build_env = prepare_steps.find { |step| step['name'] == 'Build or download Drasi Server' }.fetch('env')
+{
+  'DRASI_REPO' => 'drasi-project/drasi-server', 'DRASI_SERVER_REF' => 'main',
+  'DRASI_CORE_REPO' => 'drasi-project/drasi-core', 'DRASI_CORE_REF' => 'main'
+}.each do |key, expected|
+  abort "Wrong scheduled build input: #{key}" unless resolve.call(build_env.fetch(key), 'schedule', {}) == expected
+end
+abort 'Manual builds unexpectedly override core' unless resolve.call(build_env.fetch('DRASI_CORE_REF'), 'workflow_dispatch', defaults) == ''
+recovery_env = workflow.fetch('jobs').fetch('recovery').fetch('env')
+{'DRASI_PLUGIN_REGISTRY' => 'ghcr.io/drasi-project', 'DRASI_PLUGIN_TAG' => 'drasi-nightly-test'}.each do |key, expected|
+  abort "Wrong scheduled plugin input: #{key}" unless resolve.call(recovery_env.fetch(key), 'schedule', {}) == expected
+end
+injection_env = steps.find { |step| step.fetch('env', {}).key?('CRASH_INJECT') }.fetch('env')
+{
+  'CRASH_INJECT' => 'drain', 'OUTBOX_CAPACITY' => '20000', 'PERSIST_INDEX' => 'true',
+  'STATE_STORE' => 'true', 'BATCHING_SPEED' => '10000', 'QUERY_TUNING' => '10000',
+  'BOOTSTRAP_SIZE' => 'off', 'LOG_JSONL' => '1'
+}.each do |key, expected|
+  abort "Wrong scheduled runtime input: #{key}" unless resolve.call(injection_env.fetch(key), 'schedule', {}) == expected
+end
+puts 'PASS: schedule resolves all variants, upstream server/core main, nightly plugins, and persisted recovery defaults; manual selections remain independent.'

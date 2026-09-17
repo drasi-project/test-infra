@@ -1,6 +1,8 @@
 name: E2E - building_comfort recovery
 
 on:
+  schedule:
+    - cron: "0 22 * * *"
   workflow_dispatch:
     inputs:
       http_standard:
@@ -107,17 +109,17 @@ jobs:
       - name: Validate settings
         id: settings
         env:
-          MINUTES: ${{ inputs.timeout_minutes }}
-          OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
-          V_HTTP_STD: ${{ inputs.http_standard }}
-          V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
-          V_GRPC_STD: ${{ inputs.grpc_standard }}
-          V_GRPC_ADAPTIVE: ${{ inputs.grpc_adaptive }}
-          V_Q_MAIN: ${{ inputs.query_building_comfort }}
-          V_Q_AGG: ${{ inputs.query_floor_agg }}
-          PERSIST_INDEX: ${{ inputs.persist_index }}
-          STATE_STORE: ${{ inputs.state_store }}
-          BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
+          MINUTES: ${{ github.event_name == 'schedule' && '45' || inputs.timeout_minutes }}
+          OUTBOX_CAPACITY: ${{ github.event_name == 'schedule' && '20000' || inputs.outbox_capacity }}
+          V_HTTP_STD: ${{ github.event_name == 'schedule' && 'true' || inputs.http_standard }}
+          V_HTTP_ADAPTIVE: ${{ github.event_name == 'schedule' && 'true' || inputs.http_adaptive }}
+          V_GRPC_STD: ${{ github.event_name == 'schedule' && 'true' || inputs.grpc_standard }}
+          V_GRPC_ADAPTIVE: ${{ github.event_name == 'schedule' && 'true' || inputs.grpc_adaptive }}
+          V_Q_MAIN: ${{ github.event_name == 'schedule' && 'true' || inputs.query_building_comfort }}
+          V_Q_AGG: ${{ github.event_name == 'schedule' && 'true' || inputs.query_floor_agg }}
+          PERSIST_INDEX: ${{ github.event_name == 'schedule' && 'true' || inputs.persist_index }}
+          STATE_STORE: ${{ github.event_name == 'schedule' && 'true' || inputs.state_store }}
+          BOOTSTRAP_SIZE: ${{ github.event_name == 'schedule' && 'off' || inputs.bootstrap_size }}
         run: |
           [[ "$V_Q_MAIN" == true && "$V_Q_AGG" == true && "$BOOTSTRAP_SIZE" == off ]] || {
             echo "ERROR: this golden requires both queries and bootstrap off." >&2
@@ -176,8 +178,10 @@ jobs:
       - name: Build or download Drasi Server
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DRASI_REPO: ${{ inputs.drasi_server_repo }}
-          DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
+          DRASI_REPO: ${{ github.event_name == 'schedule' && 'drasi-project/drasi-server' || inputs.drasi_server_repo }}
+          DRASI_SERVER_REF: ${{ github.event_name == 'schedule' && 'main' || inputs.drasi_server_ref }}
+          DRASI_CORE_REPO: drasi-project/drasi-core
+          DRASI_CORE_REF: ${{ github.event_name == 'schedule' && 'main' || '' }}
           DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
           WORK_DIR: ${{ runner.temp }}/server-build
           ARTIFACTS_DIR: ${{ runner.temp }}/build-artifacts
@@ -216,8 +220,8 @@ jobs:
       VARIANT: ${{ matrix.variant }}
       RECOVERY_CASE: sigkill-drain
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
-      DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
+      DRASI_PLUGIN_REGISTRY: ${{ github.event_name == 'schedule' && 'ghcr.io/drasi-project' || inputs.plugin_registry }}
+      DRASI_PLUGIN_TAG: ${{ github.event_name == 'schedule' && 'drasi-nightly-test' || inputs.plugin_tag }}
       TIMEOUT_SECS: ${{ needs.prepare.outputs.timeout_seconds }}
       DRASI_RUST_LOG: info,drasi_lib::queries=debug,drasi_lib::reactions=debug
     steps:
@@ -245,18 +249,18 @@ jobs:
       - name: ${{ env.RECOVERY_CASE }} recovery against stored baseline
         env:
           CRASH_INJECT: "drain"
-          OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
-          PERSIST_INDEX: ${{ inputs.persist_index }}
-          STATE_STORE: ${{ inputs.state_store }}
-          BATCHING_SPEED: ${{ inputs.batching_speed }}
+          OUTBOX_CAPACITY: ${{ github.event_name == 'schedule' && '20000' || inputs.outbox_capacity }}
+          PERSIST_INDEX: ${{ github.event_name == 'schedule' && 'true' || inputs.persist_index }}
+          STATE_STORE: ${{ github.event_name == 'schedule' && 'true' || inputs.state_store }}
+          BATCHING_SPEED: ${{ github.event_name == 'schedule' && '10000' || inputs.batching_speed }}
           QUERIES: ${{ needs.prepare.outputs.queries }}
-          BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size == 'off' && '' || inputs.bootstrap_size }}
+          BOOTSTRAP_SIZE: ${{ github.event_name == 'schedule' && 'off' || inputs.bootstrap_size }}
           CRASH_DELAY_MS: "0"
           CRASH_REAPPLY_COMPONENTS: "no"
           CRASH_SETTLE_SECS: "120"
           POLL_INTERVAL_SECS: "1"
           LOG_JSONL: "1"
-          QUERY_TUNING: ${{ inputs.query_tuning }}
+          QUERY_TUNING: ${{ github.event_name == 'schedule' && '10000' || inputs.query_tuning }}
         run: |
           export RECOVERY_GOLDEN_DIR="$GITHUB_WORKSPACE/e2e-test-framework/examples/recovery_comparison/goldens/building-comfort-small-v1"
           WORK_DIR="$RUNNER_TEMP/results/$RECOVERY_CASE/work" \

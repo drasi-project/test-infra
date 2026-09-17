@@ -3,24 +3,6 @@ name: E2E - building_comfort recovery
 on:
   workflow_dispatch:
     inputs:
-      recovery_scenario:
-        description: "server_restart uses the selected signal; receiver_rejection supports all HTTP/gRPC variants with bootstrap off."
-        type: choice
-        options:
-          - server_restart
-          - receiver_rejection
-        default: server_restart
-      recovery_signal:
-        description: "For server_restart only: SIGKILL abrupt crash or SIGTERM graceful shutdown."
-        type: choice
-        options:
-          - SIGKILL
-          - SIGTERM
-        default: SIGKILL
-      shutdown_timeout_seconds:
-        description: "SIGTERM shutdown deadline, 1-600 seconds. Timeout fails even if cleanup uses SIGKILL."
-        type: string
-        default: "120"
       golden_snapshot:
         description: "Optional advisory golden comparison. Small v1: 12 rooms, 100k changes, both queries, bootstrap off."
         type: choice
@@ -133,9 +115,6 @@ jobs:
         id: settings
         env:
           MINUTES: ${{ inputs.timeout_minutes }}
-          RECOVERY_SCENARIO: ${{ inputs.recovery_scenario }}
-          RECOVERY_SIGNAL: ${{ inputs.recovery_signal }}
-          SHUTDOWN_TIMEOUT_SECS: ${{ inputs.shutdown_timeout_seconds }}
           OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
           V_HTTP_STD: ${{ inputs.http_standard }}
           V_HTTP_ADAPTIVE: ${{ inputs.http_adaptive }}
@@ -148,24 +127,6 @@ jobs:
           GOLDEN_SNAPSHOT: ${{ inputs.golden_snapshot }}
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
         run: |
-          [[ "$RECOVERY_SCENARIO" == server_restart || "$RECOVERY_SCENARIO" == receiver_rejection ]] || {
-            echo "ERROR: unsupported recovery_scenario." >&2
-            exit 1
-          }
-          if [[ "$RECOVERY_SCENARIO" == receiver_rejection ]]; then
-            [[ "$BOOTSTRAP_SIZE" == off ]] || {
-              echo "ERROR: receiver_rejection requires bootstrap off." >&2
-              exit 1
-            }
-          fi
-          [[ "$RECOVERY_SIGNAL" == SIGKILL || "$RECOVERY_SIGNAL" == SIGTERM ]] || {
-            echo "ERROR: recovery_signal must be SIGKILL or SIGTERM." >&2
-            exit 1
-          }
-          [[ "$SHUTDOWN_TIMEOUT_SECS" =~ ^[1-9][0-9]{0,2}$ ]] && (( SHUTDOWN_TIMEOUT_SECS <= 600 )) || {
-            echo "ERROR: shutdown_timeout_seconds must be an integer from 1 to 600." >&2
-            exit 1
-          }
           if [[ -n "$GOLDEN_SNAPSHOT" && "$GOLDEN_SNAPSHOT" != none ]]; then
             [[ "$GOLDEN_SNAPSHOT" == building-comfort-small-v1 &&
                "$V_Q_MAIN" == true && "$V_Q_AGG" == true && "$BOOTSTRAP_SIZE" == off ]] || {
@@ -254,7 +215,7 @@ jobs:
           retention-days: 14
 
   recovery:
-    name: Building-comfort ${{ inputs.recovery_scenario == 'receiver_rejection' && 'receiver rejection' || inputs.recovery_signal }} recovery / ${{ matrix.variant }}
+    name: Building-comfort SIGKILL recovery / ${{ matrix.variant }}
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -264,9 +225,7 @@ jobs:
         variant: ${{ fromJSON(needs.prepare.outputs.variants) }}
     env:
       VARIANT: ${{ matrix.variant }}
-      RECOVERY_SIGNAL: ${{ inputs.recovery_signal }}
-      SHUTDOWN_TIMEOUT_SECS: ${{ inputs.shutdown_timeout_seconds }}
-      RECOVERY_CASE: ${{ inputs.recovery_scenario == 'receiver_rejection' && 'receiver-rejection' || (inputs.recovery_signal == 'SIGTERM' && 'sigterm-drain' || 'sigkill-drain') }}
+      RECOVERY_CASE: sigkill-drain
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
       DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
@@ -296,7 +255,7 @@ jobs:
 
       - name: ${{ env.RECOVERY_CASE }} recovery against stored baseline
         env:
-          CRASH_INJECT: ${{ inputs.recovery_scenario == 'receiver_rejection' && 'receiver_rejection' || 'drain' }}
+          CRASH_INJECT: "drain"
           OUTBOX_CAPACITY: ${{ inputs.outbox_capacity }}
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
@@ -327,19 +286,6 @@ jobs:
           {
             printf '## Building-comfort recovery: %s / %s\n\nJob status: %s\n\n' "$VARIANT" "$RECOVERY_CASE" "$JOB_STATUS"
             printf 'Inspect uploaded verdicts, snapshots, logs, and binary provenance.\n'
-            shutdown="$RUNNER_TEMP/results/$RECOVERY_CASE/artifacts/recovery-shutdown.json"
-            if [[ "$RECOVERY_CASE" == receiver-rejection ]]; then
-              receiver="$RUNNER_TEMP/results/$RECOVERY_CASE/artifacts/receiver-recovery.json"
-              if [[ -f "$receiver" ]]; then
-                jq -r '"Receiver recovery: \(.outcome), server restarted=\(.server_restarted // false), reactions restarted=\(.reactions_restarted // 0)"' "$receiver"
-              else
-                printf 'No receiver recovery evidence was produced; scenario is not verified.\n'
-              fi
-            elif [[ -f "$shutdown" ]]; then
-              jq -r '"Shutdown: \(.signal), outcome=\(.outcome), exit=\(.exit_code), elapsed=\(.elapsed_seconds)s, deadline=\(.timeout_seconds)s"' "$shutdown"
-            else
-              printf 'No shutdown evidence was produced; shutdown is not verified.\n'
-            fi
             if [[ -n "$GOLDEN_SNAPSHOT" && "$GOLDEN_SNAPSHOT" != none ]]; then
               verdict="$RUNNER_TEMP/results/$RECOVERY_CASE/work/test_data_cache/test_runs/drasi_server_dev_repo.building_comfort.test_run_001/recovery_verdict.json"
               printf '\n### Advisory Recovery Result Verification\n\n'

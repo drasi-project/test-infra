@@ -3,13 +3,6 @@ name: E2E - building_comfort recovery
 on:
   workflow_dispatch:
     inputs:
-      golden_snapshot:
-        description: "Required golden comparison (verdict advisory). Small v1: 12 rooms, 100k changes, both queries, bootstrap off."
-        type: choice
-        required: true
-        options:
-          - building-comfort-small-v1
-        default: building-comfort-small-v1
       http_standard:
         description: "http_standard (HTTP, REST-applied)"
         type: boolean
@@ -124,13 +117,8 @@ jobs:
           V_Q_AGG: ${{ inputs.query_floor_agg }}
           PERSIST_INDEX: ${{ inputs.persist_index }}
           STATE_STORE: ${{ inputs.state_store }}
-          GOLDEN_SNAPSHOT: ${{ inputs.golden_snapshot }}
           BOOTSTRAP_SIZE: ${{ inputs.bootstrap_size }}
         run: |
-          [[ "$GOLDEN_SNAPSHOT" == building-comfort-small-v1 ]] || {
-            echo "ERROR: golden comparison is required; select building-comfort-small-v1." >&2
-            exit 1
-          }
           [[ "$V_Q_MAIN" == true && "$V_Q_AGG" == true && "$BOOTSTRAP_SIZE" == off ]] || {
             echo "ERROR: this golden requires both queries and bootstrap off." >&2
             exit 1
@@ -269,9 +257,8 @@ jobs:
           POLL_INTERVAL_SECS: "1"
           LOG_JSONL: "1"
           QUERY_TUNING: ${{ inputs.query_tuning }}
-          GOLDEN_SNAPSHOT: ${{ inputs.golden_snapshot }}
         run: |
-          export RECOVERY_GOLDEN_DIR="$GITHUB_WORKSPACE/e2e-test-framework/examples/recovery_comparison/goldens/$GOLDEN_SNAPSHOT"
+          export RECOVERY_GOLDEN_DIR="$GITHUB_WORKSPACE/e2e-test-framework/examples/recovery_comparison/goldens/building-comfort-small-v1"
           WORK_DIR="$RUNNER_TEMP/results/$RECOVERY_CASE/work" \
           ARTIFACTS_DIR="$RUNNER_TEMP/results/$RECOVERY_CASE/artifacts" \
             bash e2e-test-framework/examples/building_comfort/run_variant.sh

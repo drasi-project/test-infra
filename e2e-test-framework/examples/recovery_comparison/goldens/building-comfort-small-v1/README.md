@@ -53,7 +53,7 @@ transport normalization and producer identity compatibility must be checked.
 ## Select in GitHub
 
 The SIGKILL building-comfort recovery workflow always runs golden comparison.
-`building-comfort-small-v1` is the required default; there is no `none` option.
+`building-comfort-small-v1` is used automatically; there is no golden input.
 Both queries and bootstrap off are required until other workload goldens are
 enabled. Missing comparison reports fail the workflow. The comparison verdict
 remains advisory under the existing completeness/identity limitations; mandatory
@@ -65,7 +65,6 @@ workflow**, and select the branch containing those changes. For a standard-gRPC
 run, set:
 
 ```text
-golden_snapshot: building-comfort-small-v1
 http_standard: false
 http_adaptive: false
 grpc_standard: true

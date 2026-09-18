@@ -18,7 +18,9 @@ fn run() -> Result<i32> {
         println!("Usage: recovery-compare BASELINE.json RECOVERY.json");
         println!("       recovery-compare --import CAPTURE.json");
         println!("Writes a JSON report to stdout. Exit: 0 pass, 1 fail, 2 invalid/inconclusive.");
-        println!("Requires exactly-once delivery in per-query order; duplicates and reordering fail.");
+        println!(
+            "Requires exactly-once delivery in per-query order; duplicates and reordering fail."
+        );
         return Ok(0);
     }
     if args.len() == 2 && args[0] == "--import" {

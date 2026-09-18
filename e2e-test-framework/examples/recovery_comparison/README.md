@@ -8,8 +8,13 @@ ordered SHA-256 checks remain available and unchanged.
 Configure the feature with `kind: RecoveryResultVerification`. The previous
 `kind: RecoveryComparison` remains accepted as a compatibility alias. The CLI
 command `recovery-compare`, existing module paths, and artifact filenames such as
-`recovery_verdict.json` remain unchanged. This is a naming change, not a change
-to result checks, policies, or saved golden data.
+`recovery_verdict.json` remain unchanged.
+
+Verification always requires exactly-once delivery in per-query order. There is
+no configurable delivery policy: duplicates and reordering fail delivery checks.
+Remove the former `policy` field from handler configuration and omit the former
+policy-file CLI argument; both are now rejected. Reports no longer contain a
+configurable policy field. Golden capture data and snapshot expectations are unchanged.
 
 ## Run the Example
 
@@ -18,15 +23,13 @@ From `e2e-test-framework`:
 ```bash
 cargo run --locked -p test-run-host --bin recovery-compare -- \
   examples/recovery_comparison/baseline.json \
-  examples/recovery_comparison/recovered.json \
-  examples/recovery_comparison/policy.json
+  examples/recovery_comparison/recovered.json
 ```
 
-The synthetic recovery fixture has one duplicate and reordered delivery. Its
-explicit at-least-once, reorder-permitting policy passes while still reporting
-both conditions. Changing the policy to `exactly_once` or disallowing reordering
-makes that fixture fail. Policy describes required behavior for this comparison;
-choosing it does not establish the transport's actual delivery guarantee.
+The synthetic recovery fixture has one duplicate and reordered delivery, so this
+example deliberately exits with code 1 and reports both violations. Comparing
+the baseline against itself passes. These checks describe the required behavior;
+they do not establish a transport's actual delivery guarantee.
 
 Exit codes: `0` passed, `1` failed comparison, `2` inconclusive or invalid input.
 Valid comparisons write a JSON report to stdout. Invalid input writes a diagnostic
@@ -35,8 +38,8 @@ whether a report file exists. Build/run errors from Cargo have Cargo's exit code
 
 ## Framework Configuration
 
-The building-comfort recovery workflow accepts multiple HTTP/gRPC modes with
-either saved golden. Its configuration helper compares logical source definitions
+The building-comfort recovery workflow accepts multiple HTTP/gRPC modes and always
+uses `building-comfort-small-v1`. Its configuration helper compares logical source definitions
 (excluding `source_change_dispatchers`) and query definitions with the golden,
 then supplies transport-specific log pointers. The stored snapshot expectations
 are identical for every mode. HTTP currently has no compatible producer key, so
@@ -70,7 +73,7 @@ test completion the handler:
   contain `success: true` and an array in `data`. Missing snapshot configuration
   leaves state inconclusive; network/API errors are invalid comparisons.
 3. Writes `recovery_capture.json` and `recovery_actual.json`, then compares the
-  actual artifact to `baseline_path` with the configured policy.
+  actual artifact to `baseline_path` with exactly-once, per-query ordered delivery checks.
 4. Writes `recovery_verdict.json`, including the run ID, enforcement mode, and full
   comparison report (or an explicit `invalid` verdict and diagnostic).
 
@@ -152,7 +155,7 @@ stable cross-run sequences/signatures, use the following in both capture configs
 }
 ```
 
-Use `delivery: exactly_once` and `allow_reordering: false` for these recovery
+Exactly-once delivery and per-query ordering are mandatory for these recovery
 tests. First verify tuple uniqueness in a fresh uninterrupted baseline. If the
 producer legitimately emits the same tuple twice, the comparator rejects that
 baseline; do not add a receiver counter or batch offset to hide the collision.
@@ -190,7 +193,8 @@ schema version 1. Unknown fields are rejected. Each artifact declares:
 - `identity_contract`: the declared cross-run producer identity scheme, or null
   when unavailable. Different contracts are rejected, not guessed compatible.
 - `events`: observed order, each with `identity` and the exact semantic `payload`.
-  The baseline must have one event per identity. Recovery may repeat identities.
+  The baseline must have one event per identity. Repeated recovery identities
+  are recorded as duplicate-delivery failures.
 - `snapshot`: complete final rows, or null when unavailable. An empty array is a
   known empty state, not a substitute for a failed/missing snapshot request.
 
@@ -222,11 +226,11 @@ Delivery and state have separate verdicts:
 | `reordered` | Order of first occurrences of shared identities differs; null if identity unavailable |
 | State `missing` / `unexpected` | Full row values and multiplicity differences |
 
-Identical redelivery is permitted only by `at_least_once`. Conflicts and unexpected
-IDs always fail. Reordering is governed independently by `allow_reordering`.
-Repeated delivery positions are not separately order-checked: first-occurrence
-order is the documented criterion. Missing IDs remain failures regardless of
-duplicate counts or reordering policy.
+Identical redelivery, conflicts, unexpected IDs, and reordering always fail
+delivery checks. Ordering is checked within each query, not across independent
+queries. The `reordered` diagnostic compares first occurrences of shared IDs;
+every duplicate fails independently regardless of its position. Missing IDs
+cannot be compensated for by duplicates.
 
 Snapshots are multisets of complete canonical JSON rows. Row order is irrelevant,
 but multiplicity is not: two equal rows remain two rows. No last-row-wins map by
@@ -276,8 +280,7 @@ Example manifest for existing per-query gRPC logger files:
 ```bash
 target/debug/recovery-compare --import baseline-capture.json > baseline.json
 target/debug/recovery-compare --import recovery-capture.json > recovery.json
-target/debug/recovery-compare baseline.json recovery.json \
-  examples/recovery_comparison/policy.json > report.json
+target/debug/recovery-compare baseline.json recovery.json > report.json
 ```
 
 The importer does not split raw batches or infer event IDs. One JSONL record must

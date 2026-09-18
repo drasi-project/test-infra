@@ -27,12 +27,12 @@ runs or transports.
 - [Producer-key checks](identity-validation.json)
 - [Strict hash checks](determinism_verdict.json)
 - [Workload](workload.json) and [provenance](provenance.json)
-- [Comparison policy](policy.json) and [self-comparison](self-comparison.json)
+- [Self-comparison](self-comparison.json)
 - `golden-actual.json.gz`: normalized artifact containing producer identities,
   semantic event payloads, and both snapshots. Decompress before using as the
   comparator's baseline; the comparator does not directly read gzip.
 
-The policy requires exactly-once, ordered output. A self-comparison passed both
+The comparator always requires exactly-once, ordered output. A self-comparison passed both
 delivery and state checks; it is only an artifact sanity check, not a recovery
 test. The overall verdict remains inconclusive under the existing completion
 policy because the terminal output boundary was not independently established.
@@ -97,7 +97,7 @@ baseline with identity fields unavailable. The snapshots and expected event
 payloads are unchanged; the original golden is never modified. HTTP delivery
 diagnostics remain inconclusive pending compatible producer ID capture, while
 the same golden snapshot is checked. Exactly-once and ordered delivery are required by
-the comparison policy, with advisory enforcement retained and SHA-256 enforced.
+the comparator, with advisory enforcement retained and SHA-256 enforced.
 Snapshot and delivery verdicts are shown separately; the overall verdict still
 reflects the unchanged completion-evidence limitation. Selecting the older golden
 retains its null identity contract and cannot diagnose delivery by producer ID.

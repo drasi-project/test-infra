@@ -70,7 +70,7 @@ jq --arg baseline "$baseline" --arg fingerprint "$fingerprint" --argjson queries
     .data_store.test_repos[0].local_tests[0].completion_handlers |=
     (map(select(.kind != "Log" and .kind != "RecoveryResultVerification" and .kind != "RecoveryComparison")) +
        [{kind:"RecoveryResultVerification", baseline_path:$baseline, workload_fingerprint:$fingerprint,
-         policy:{delivery:"exactly_once",allow_reordering:false}, enforce:false, queries:$queries}] +
+         enforce:false, queries:$queries}] +
        map(select(.kind == "Log")))
 ' "$config" > "$work/recovery-config.tmp"
 mv "$work/recovery-config.tmp" "$config"

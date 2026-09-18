@@ -10,9 +10,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use test_data_store::{
-    test_repo_storage::models::{
-        RecoveryResultVerificationHandlerConfig,
-    },
+    test_repo_storage::models::RecoveryResultVerificationHandlerConfig,
     test_run_storage::{TestRunId, TestRunReactionId},
     TestDataStore,
 };
@@ -456,7 +454,10 @@ mod tests {
         result.unwrap();
         assert_eq!(verdict["verdict"], "passed");
         assert_eq!(verdict["enforced"], true);
-        assert_eq!(verdict["comparison"]["queries"][0]["delivery"]["duplicates"], json!({}));
+        assert_eq!(
+            verdict["comparison"]["queries"][0]["delivery"]["duplicates"],
+            json!({})
+        );
         assert_eq!(
             verdict["comparison"]["queries"][0]["delivery"]["reordered"],
             false

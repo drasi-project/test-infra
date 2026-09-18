@@ -1,4 +1,0 @@
-{
-  "delivery": "at_least_once",
-  "allow_reordering": true
-}

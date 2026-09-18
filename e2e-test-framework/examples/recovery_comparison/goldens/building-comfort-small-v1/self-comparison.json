@@ -2,10 +2,6 @@
   "schema_version": 1,
   "verdict": "inconclusive",
   "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5",
-  "policy": {
-    "delivery": "exactly_once",
-    "allow_reordering": false
-  },
   "reasons": [
     "baseline capture incomplete: Fresh standard-gRPC 100k uninterrupted capture passed strict hashes. Observed snapshots captured at record-count stop; terminal output boundary not independently established.",
     "recovery capture incomplete: Fresh standard-gRPC 100k uninterrupted capture passed strict hashes. Observed snapshots captured at record-count stop; terminal output boundary not independently established."

@@ -12,10 +12,7 @@ fn fixture(name: &str) -> Value {
 fn run(baseline: &Value, recovered: &Value) -> Output {
     let directory = tempfile::tempdir().unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_recovery-compare"));
-    for (filename, value) in [
-        ("baseline.json", baseline),
-        ("recovered.json", recovered),
-    ] {
+    for (filename, value) in [("baseline.json", baseline), ("recovered.json", recovered)] {
         let path = directory.path().join(filename);
         std::fs::write(&path, serde_json::to_vec(value).unwrap()).unwrap();
         command.arg(path);
@@ -25,10 +22,7 @@ fn run(baseline: &Value, recovered: &Value) -> Output {
 
 #[test]
 fn example_rejects_duplicates_and_reordering() {
-    let output = run(
-        &fixture("baseline.json"),
-        &fixture("recovered.json"),
-    );
+    let output = run(&fixture("baseline.json"), &fixture("recovered.json"));
     assert_eq!(
         output.status.code(),
         Some(1),
@@ -53,10 +47,16 @@ fn identical_ordered_delivery_passes() {
 fn duplicate_and_reorder_each_fail_independently() {
     let baseline = fixture("baseline.json");
     let mut recovered = baseline.clone();
-    recovered["queries"][0]["events"].as_array_mut().unwrap().push(baseline["queries"][0]["events"][0].clone());
+    recovered["queries"][0]["events"]
+        .as_array_mut()
+        .unwrap()
+        .push(baseline["queries"][0]["events"][0].clone());
     assert_eq!(run(&baseline, &recovered).status.code(), Some(1));
     recovered = baseline.clone();
-    recovered["queries"][0]["events"].as_array_mut().unwrap().reverse();
+    recovered["queries"][0]["events"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
     assert_eq!(run(&baseline, &recovered).status.code(), Some(1));
 }
 
@@ -64,7 +64,8 @@ fn duplicate_and_reorder_each_fail_independently() {
 fn policy_argument_is_rejected() {
     let output = Command::new(env!("CARGO_BIN_EXE_recovery-compare"))
         .args(["baseline.json", "recovered.json", "policy.json"])
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Usage:"));
@@ -74,20 +75,14 @@ fn policy_argument_is_rejected() {
 fn incomplete_and_unknown_identity_exit_two() {
     let mut recovered = fixture("recovered.json");
     recovered["capture"]["complete"] = json!(false);
-    let output = run(
-        &fixture("baseline.json"),
-        &recovered,
-    );
+    let output = run(&fixture("baseline.json"), &recovered);
     assert_eq!(output.status.code(), Some(2));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["verdict"], "inconclusive");
 
     recovered = fixture("recovered.json");
     recovered["queries"][0]["events"][0]["identity"] = Value::Null;
-    let output = run(
-        &fixture("baseline.json"),
-        &recovered,
-    );
+    let output = run(&fixture("baseline.json"), &recovered);
     assert_eq!(output.status.code(), Some(2));
 }
 
@@ -95,20 +90,14 @@ fn incomplete_and_unknown_identity_exit_two() {
 fn incompatible_baseline_and_invalid_schema_do_not_emit_success_report() {
     let mut recovered = fixture("recovered.json");
     recovered["workload_fingerprint"] = json!("different-input-script");
-    let output = run(
-        &fixture("baseline.json"),
-        &recovered,
-    );
+    let output = run(&fixture("baseline.json"), &recovered);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("workload fingerprints differ"));
 
     recovered = fixture("recovered.json");
     recovered["typo"] = json!(true);
-    let output = run(
-        &fixture("baseline.json"),
-        &recovered,
-    );
+    let output = run(&fixture("baseline.json"), &recovered);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
 }

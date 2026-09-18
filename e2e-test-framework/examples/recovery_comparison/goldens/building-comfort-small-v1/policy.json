@@ -1,4 +1,0 @@
-{
-  "delivery": "exactly_once",
-  "allow_reordering": false
-}

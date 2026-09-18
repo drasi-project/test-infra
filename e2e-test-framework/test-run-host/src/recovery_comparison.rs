@@ -223,10 +223,7 @@ fn query_map(artifact: &Artifact) -> BTreeMap<&str, &QueryArtifact> {
         .collect()
 }
 
-fn compare_delivery(
-    expected: &QueryArtifact,
-    actual: &QueryArtifact,
-) -> Result<DeliveryReport> {
+fn compare_delivery(expected: &QueryArtifact, actual: &QueryArtifact) -> Result<DeliveryReport> {
     let mut report = DeliveryReport {
         verdict: Verdict::Inconclusive,
         reason: None,
@@ -403,9 +400,7 @@ mod tests {
     #[test]
     fn unchanged_passes() {
         assert_eq!(
-            compare(&artifact(), &artifact())
-                .unwrap()
-                .verdict,
+            compare(&artifact(), &artifact()).unwrap().verdict,
             Verdict::Passed
         );
     }

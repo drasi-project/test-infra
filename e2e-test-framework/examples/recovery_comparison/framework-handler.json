@@ -2,10 +2,6 @@
   "kind": "RecoveryResultVerification",
   "baseline_path": "baselines/building-comfort.json",
   "workload_fingerprint": "replace-with-workload-digest",
-  "policy": {
-    "delivery": "exactly_once",
-    "allow_reordering": false
-  },
   "enforce": false,
   "capture_evidence_path": "recovery-boundary.json",
   "queries": [{

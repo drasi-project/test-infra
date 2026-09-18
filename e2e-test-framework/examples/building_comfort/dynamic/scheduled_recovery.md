@@ -47,9 +47,30 @@ scheduled defaults do not override manual `false` selections or force a core-mai
 override on manual builds. Both modes require persistence, both queries, bootstrap
 off, and the fixed golden. Missing, malformed, invalid, or structurally incomplete
 comparison reports fail, including evaluation errors or missing expected query
-results. Valid passed, failed, and inconclusive comparison verdicts remain
-advisory with existing completeness/identity limitations. Counts/hashes
-and the strict SIGKILL recovery gates remain enforced.
+results. Every expected query must have `state.verdict: passed` and empty state
+difference arrays. Failed or inconclusive state verdicts fail the job, regardless
+of the overall verdict. Delivery and overall verdicts remain advisory with
+existing completeness/identity limitations. Counts/hashes and the strict SIGKILL
+recovery gates remain enforced; the shared handler still uses `enforce: false`.
+
+## Unfinished Terminal-Boundary Verification (#70)
+
+The workflow enforces equality of captured snapshots, not proof that those
+snapshots represent the fully processed terminal state. The stored golden has
+`capture.complete: false`, and the generated handler has no terminal-boundary
+evidence path. Issue #70 must not be considered complete on the strength of this
+snapshot gate alone.
+
+Remaining work:
+
+- Establish a verifiable boundary for query processing and output delivery;
+	receiver counts, quiet output, and dispatcher drain alone are insufficient.
+- Capture snapshots and genuine completion evidence at that boundary in both
+	the uninterrupted baseline and recovered run.
+- Recapture/version the golden with that evidence and configure run evidence
+	before claiming terminal-state verification. Do not simply flip `complete`.
+
+No capture completeness flags or golden snapshot values are changed by this gate.
 
 No SIGTERM or receiver-rejection scenario is scheduled. Those remain on the
 separate follow-up branch. This schedule does not add results publication or

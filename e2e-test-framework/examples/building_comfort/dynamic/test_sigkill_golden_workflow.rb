@@ -60,9 +60,29 @@ Dir.mktmpdir('required-golden-') do |directory|
     body = Marshal.load(Marshal.dump(valid))
     body['verdict'] = body['comparison']['verdict'] = verdict
     body['comparison']['queries'].each do |query|
-      query['state']['verdict'] = query['delivery']['verdict'] = verdict
+      query['delivery']['verdict'] = verdict
     end
-    check_report.call("advisory #{verdict}", JSON.generate(body), true)
+    check_report.call("advisory #{verdict} with matching snapshots", JSON.generate(body), true)
+  end
+  [0, 1].each do |index|
+    %w[failed inconclusive].each do |state_verdict|
+      %w[passed failed inconclusive].each do |overall|
+        body = Marshal.load(Marshal.dump(valid))
+        body['verdict'] = body['comparison']['verdict'] = overall
+        body['comparison']['queries'][index]['state']['verdict'] = state_verdict
+        check_report.call("query #{index} state #{state_verdict}, overall #{overall}", JSON.generate(body), false)
+      end
+    end
+    %w[missing unexpected].each do |field|
+      body = Marshal.load(Marshal.dump(valid))
+      body['comparison']['queries'][index]['state'][field] = [{'row' => {'value' => 1}, 'count' => 1}]
+      check_report.call("query #{index} passed state with #{field} rows", JSON.generate(body), false)
+    end
+  end
+  %w[missing_queries unexpected_queries].each do |field|
+    body = Marshal.load(Marshal.dump(valid))
+    body['comparison'][field] = ['other-query']
+    check_report.call("nonempty #{field}", JSON.generate(body), false)
   end
   {
     'invalid evaluation' => ->(body) { body['verdict'] = 'invalid'; body['error'] = 'snapshot fetch failed'; body.delete('comparison') },
@@ -88,8 +108,78 @@ Dir.mktmpdir('required-golden-') do |directory|
   ['', '{broken', 'null', '{}', '[]', "#{JSON.generate(valid)}\n#{JSON.generate(valid)}"].each do |content|
     check_report.call('malformed or incomplete document', content, false)
   end
+
+  schema_cases = {
+    ['comparison', 'workload_fingerprint'] => [nil, '', 42, []],
+    ['comparison', 'reasons'] => [nil, {}, 'reason', [false]],
+    ['comparison', 'missing_queries'] => [nil, {}, [1]],
+    ['comparison', 'unexpected_queries'] => [nil, 'items', [nil]]
+  }
+  [0, 1].each do |index|
+    prefix = ['comparison', 'queries', index]
+    %w[state delivery].each do |section|
+      schema_cases[prefix + [section, 'reason']] = [false, 1, [], {}]
+    end
+    %w[expected_observations actual_observations].each do |field|
+      schema_cases[prefix + ['delivery', field]] = [nil, '1', -1, 0.5, true, {}]
+    end
+    %w[missing unexpected conflicting].each do |field|
+      schema_cases[prefix + ['delivery', field]] = [nil, {}, 'identity', [1]]
+    end
+    schema_cases[prefix + ['delivery', 'duplicates']] = [nil, [], 'duplicates', {'id' => nil}, {'id' => -1}, {'id' => 0.5}, {'id' => '1'}, {'id' => true}]
+    schema_cases[prefix + ['delivery', 'reordered']] = ['false', 0, [], {}]
+    %w[missing unexpected].each do |field|
+      schema_cases[prefix + ['state', field]] = [nil, {}, 'rows', [nil], [{}], [{'row' => nil}], [{'count' => 1}]]
+      [nil, -1, 0.5, '1', false].each do |count|
+        schema_cases[prefix + ['state', field]] << [{'row' => {'value' => 1}, 'count' => count}]
+      end
+    end
+  end
+  schema_cases.each do |path, bad_values|
+    body = Marshal.load(Marshal.dump(valid))
+    body.dig(*path[0...-1]).delete(path.last)
+    check_report.call("missing #{path.join('.')}", JSON.generate(body), false)
+    bad_values.each do |value|
+      body = Marshal.load(Marshal.dump(valid))
+      body.dig(*path[0...-1])[path.last] = value
+      check_report.call("invalid #{path.join('.')}: #{value.inspect}", JSON.generate(body), false)
+    end
+  end
+
+  body = Marshal.load(Marshal.dump(valid))
+  body['comparison']['queries'].each do |query|
+    query['delivery']['verdict'] = 'inconclusive'
+    query['delivery']['reason'] = 'Producer identities unavailable'
+    query['delivery']['reordered'] = nil
+  end
+  check_report.call('valid nullable diagnostics', JSON.generate(body), true)
+
+  body = Marshal.load(Marshal.dump(valid))
+  body['verdict'] = body['comparison']['verdict'] = 'failed'
+  body['comparison']['reasons'] = ['Observed differences']
+  body['comparison']['queries'].each do |query|
+    query['delivery'].merge!('verdict' => 'failed', 'reason' => 'Delivery differs',
+      'missing' => ['missing-id'], 'unexpected' => ['extra-id'],
+      'duplicates' => {'duplicate-id' => 2}, 'conflicting' => ['conflict-id'], 'reordered' => true)
+    query['state'].merge!('verdict' => 'failed', 'reason' => 'Snapshot differs',
+      'missing' => [{'row' => {'value' => 1}, 'count' => 2}],
+      'unexpected' => [{'row' => nil, 'count' => 1}, {'row' => [1, 2], 'count' => 1}])
+  end
+  check_report.call('valid nonempty snapshot differences fail', JSON.generate(body), false)
+  body['comparison']['queries'].each do |query|
+    query['state'] = {'verdict' => 'passed', 'reason' => nil, 'missing' => [], 'unexpected' => []}
+  end
+  check_report.call('delivery differences remain advisory with matching snapshots', JSON.generate(body), true)
+
+  minimal = {
+    test_run_id: valid.fetch('test_run_id'), enforced: false, verdict: 'passed',
+    comparison: {schema_version: 1, verdict: 'passed', queries: %w[building-comfort building-comfort-floor-agg].map do |query|
+      {query_id: query, state: {verdict: 'passed'}, delivery: {verdict: 'passed'}}
+    end}
+  }
+  check_report.call('verdict-only report from PR review', JSON.generate(minimal), false)
 end
-puts 'PASS: fixed golden required; malformed, invalid, and incomplete reports fail; valid passed/failed/inconclusive verdicts remain advisory.'
+puts 'PASS: complete reports and matching snapshots required for both queries; delivery/overall verdicts remain advisory.'
 
 abort 'Unexpected daily schedule' unless trigger.fetch('schedule') == [{'cron' => '0 22 * * *'}]
 defaults = trigger.fetch('workflow_dispatch').fetch('inputs').transform_values { |input| input.fetch('default', '') }

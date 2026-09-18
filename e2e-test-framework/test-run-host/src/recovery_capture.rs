@@ -73,12 +73,14 @@ pub fn load(path: &Path) -> Result<Artifact> {
                 if line.trim().is_empty() {
                     continue;
                 }
-                let event = (|| -> Result<Event> {
+                let event = (|| -> Result<Option<Event>> {
                     let record: Value = serde_json::from_str(&line)?;
                     parse_event(&record, &query)
                 })()
                 .with_context(|| format!("{}:{}", filename.display(), line_number + 1))?;
-                events.push(event);
+                if let Some(event) = event {
+                    events.push(event);
+                }
             }
         }
         let snapshot = query
@@ -110,7 +112,7 @@ pub fn load(path: &Path) -> Result<Artifact> {
     Ok(artifact)
 }
 
-fn parse_event(record: &Value, query: &QueryFiles) -> Result<Event> {
+fn parse_event(record: &Value, query: &QueryFiles) -> Result<Option<Event>> {
     ensure!(
         record
             .pointer(&query.query_id_pointer)
@@ -119,6 +121,21 @@ fn parse_event(record: &Value, query: &QueryFiles) -> Result<Event> {
         "query ID missing or different from {}",
         query.query_id
     );
+    if query.query_id_pointer == "/payload/request_body/query_id"
+        && query.payload_pointer == "/payload/request_body/result"
+        && record
+            .pointer("/payload/request_body")
+            .and_then(Value::as_object)
+            .is_some_and(|body| {
+                body.len() == 2
+                    && body
+                        .get("results")
+                        .and_then(Value::as_array)
+                        .is_some_and(Vec::is_empty)
+            })
+    {
+        return Ok(None);
+    }
     let payload = record
         .pointer(&query.payload_pointer)
         .context("result payload pointer not found")?
@@ -137,7 +154,7 @@ fn parse_event(record: &Value, query: &QueryFiles) -> Result<Event> {
         }
         Some(_) => bail!("identity must be a nonempty string or unsigned integer"),
     };
-    Ok(Event { identity, payload })
+    Ok(Some(Event { identity, payload }))
 }
 
 fn snapshot_rows(response: &Value) -> Result<Vec<Value>> {
@@ -171,7 +188,7 @@ mod tests {
     #[test]
     fn legacy_receiver_sequence_is_not_producer_identity() {
         let event = parse_event(&json!({"sequence": 42, "payload": {"query_id": "unknown",
-            "request_body": {"query_id": "items", "result": {"type": "ADD", "after": {"ordinal": 1}}}}}), &query()).unwrap();
+            "request_body": {"query_id": "items", "result": {"type": "ADD", "after": {"ordinal": 1}}}}}), &query()).unwrap().unwrap();
         assert_eq!(event.identity, None);
         assert_eq!(event.payload["after"]["ordinal"], 1);
     }
@@ -196,7 +213,11 @@ mod tests {
         query.identity_contract = Some("fixture-producer-id".to_owned());
         query.identity_pointer = Some("/producer_id".to_owned());
         let mut record = json!({"payload": {"request_body": {"query_id": "items", "result": {}}}});
-        assert!(parse_event(&record, &query).unwrap().identity.is_none());
+        assert!(parse_event(&record, &query)
+            .unwrap()
+            .unwrap()
+            .identity
+            .is_none());
         record["producer_id"] = json!([]);
         assert!(parse_event(&record, &query).is_err());
     }
@@ -208,6 +229,35 @@ mod tests {
         assert!(snapshot_rows(&json!({"success": true, "data": []}))
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn only_known_empty_grpc_envelopes_are_skipped() {
+        let heartbeat = json!({"payload":{"request_body":{"query_id":"items","results":[]}}});
+        assert!(parse_event(&heartbeat, &query()).unwrap().is_none());
+        for body in [
+            json!({"query_id":"other","results":[]}),
+            json!({"results":[]}),
+            json!({"query_id":"items"}),
+            json!({"query_id":"items","results":[{"value":1}]}),
+            json!({"query_id":"items","results":null}),
+            json!({"query_id":"items","results":[],"unexpected":true}),
+        ] {
+            assert!(parse_event(&json!({"payload":{"request_body":body}}), &query()).is_err());
+        }
+        let mut custom = query();
+        custom.payload_pointer = "/payload/request_body/request_body".to_owned();
+        assert!(parse_event(&heartbeat, &custom).is_err());
+        let real = json!({"payload":{"request_body":{"query_id":"items","result":{"results":[]}}}});
+        assert_eq!(
+            parse_event(&real, &query()).unwrap().unwrap().payload,
+            json!({"results":[]})
+        );
+        let mixed = json!({"payload":{"request_body":{"query_id":"items","result":{"value":1},"results":[]}}});
+        assert_eq!(
+            parse_event(&mixed, &query()).unwrap().unwrap().payload,
+            json!({"value":1})
+        );
     }
 
     #[test]
@@ -239,5 +289,53 @@ mod tests {
             Some("\"first\"")
         );
         assert!(!artifact.capture.complete);
+    }
+
+    #[test]
+    fn import_skips_interleaved_heartbeats_without_changing_real_events() {
+        let directory = tempfile::tempdir().unwrap();
+        let heartbeat = json!({"payload":{"request_body":{"query_id":"items","results":[]}}});
+        let first = json!({"producer_id":"first","payload":{"request_body":{"query_id":"items","result":{"value":1}}}});
+        let second = json!({"producer_id":"second","payload":{"request_body":{"query_id":"items","result":{"value":2}}}});
+        let records = directory.path().join("events.jsonl");
+        let manifest = json!({"schema_version":1,"workload_fingerprint":"fixture",
+            "capture":{"complete":false,"evidence":"Synthetic fixture without terminal evidence"},
+            "queries":[{"query_id":"items","config_fingerprint":"items-v1",
+                "identity_contract":"fixture-v1","identity_pointer":"/producer_id",
+                "query_id_pointer":"/payload/request_body/query_id",
+                "payload_pointer":"/payload/request_body/result",
+                "event_files":["events.jsonl"],"snapshot_file":null}]});
+        let path = directory.path().join("capture.json");
+        std::fs::write(&path, manifest.to_string()).unwrap();
+        std::fs::write(&records, format!("{first}\n{second}\n")).unwrap();
+        let baseline = load(&path).unwrap();
+        std::fs::write(
+            &records,
+            format!("{heartbeat}\n{first}\n{heartbeat}\n{second}\n{heartbeat}\n"),
+        )
+        .unwrap();
+        let recovered = load(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(&baseline).unwrap(),
+            serde_json::to_value(&recovered).unwrap()
+        );
+        let report = crate::recovery_comparison::compare(&baseline, &recovered).unwrap();
+        assert_eq!(
+            report.queries[0].delivery.verdict,
+            crate::recovery_comparison::Verdict::Passed
+        );
+        assert_eq!(report.queries[0].delivery.actual_observations, 2);
+        assert!(!recovered.capture.complete);
+
+        std::fs::write(&records, format!("{heartbeat}\n{heartbeat}\n")).unwrap();
+        assert!(load(&path).unwrap().queries[0].events.is_empty());
+        for malformed in [
+            "{truncated".to_owned(),
+            json!({"payload":{"request_body":{"query_id":"items"}}}).to_string(),
+        ] {
+            std::fs::write(&records, format!("{heartbeat}\n{malformed}\n")).unwrap();
+            let error = load(&path).unwrap_err();
+            assert!(format!("{error:#}").contains("events.jsonl:2"));
+        }
     }
 }

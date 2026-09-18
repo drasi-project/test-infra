@@ -63,13 +63,18 @@ pub struct GrpcSourceChangeDispatcher {
     channel: Option<Channel>,
 }
 
-struct BatchAcknowledgments {
-    expected: u64,
-    processed: u64,
+pub(super) struct BatchAcknowledgments {
+    pub(super) expected: u64,
+    pub(super) processed: u64,
 }
 
 impl BatchAcknowledgments {
-    fn observe(&mut self, success: bool, processed: u64, error: &str) -> anyhow::Result<()> {
+    pub(super) fn observe(
+        &mut self,
+        success: bool,
+        processed: u64,
+        error: &str,
+    ) -> anyhow::Result<()> {
         anyhow::ensure!(success, "Batch dispatch failed: {error}");
         anyhow::ensure!(
             processed >= self.processed && processed <= self.expected,
@@ -82,7 +87,7 @@ impl BatchAcknowledgments {
         Ok(())
     }
 
-    fn finish(&self) -> anyhow::Result<()> {
+    pub(super) fn finish(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.processed == self.expected,
             "Batch acknowledgment mismatch: sent {}, acknowledged {}",

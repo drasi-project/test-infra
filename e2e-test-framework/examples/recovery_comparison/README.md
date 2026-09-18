@@ -50,6 +50,12 @@ ordering/duplicate expectations. Source data, seed, timing, and query changes
 still reject an incompatible baseline. Both queries and bootstrap off are required
 for the current saved captures.
 
+The workflow requires both state verdicts to pass with no snapshot differences,
+even when the overall verdict is inconclusive. Delivery and overall verdicts
+remain advisory; this workflow-specific gate does not change the shared handler's
+`enforce` semantics. Captured-snapshot equality does not establish a terminal
+boundary: see the [unfinished #70 work](../building_comfort/dynamic/scheduled_recovery.md#unfinished-terminal-boundary-verification-70).
+
 Add [framework-handler.json](framework-handler.json) to the test definition's
 `completion_handlers` array alongside existing `Log`/`Sha256Determinism` handlers.
 Replace its fingerprint and baseline placeholders with values for your workload.
@@ -253,6 +259,15 @@ explicit listed order; glob expansion and numeric chunk sorting belong to the
 caller. Duplicate file paths are rejected. Missing files, malformed JSONL,
 missing payloads, wrong query IDs, and unsuccessful snapshot responses are errors.
 Snapshot files must contain the API shape `{"success":true,"data":[...]}`.
+
+For the gRPC pointers `/payload/request_body/query_id` and
+`/payload/request_body/result`, the importer skips the known empty-result
+heartbeat: a request-body object containing exactly `query_id` and `results: []`.
+The query ID must still match. This happens before payload/identity extraction,
+so heartbeats add no comparison events and do not affect real event order.
+Nonempty result batches, malformed envelopes, and other missing payloads remain
+errors; a real singular `result` is never discarded because it contains an empty
+array. This normalization does not establish a terminal capture boundary.
 
 Example manifest for existing per-query gRPC logger files:
 

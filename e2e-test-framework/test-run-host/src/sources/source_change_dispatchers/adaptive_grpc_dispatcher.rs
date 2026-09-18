@@ -12,6 +12,7 @@ use test_data_store::{
     test_run_storage::TestRunSourceStorage,
 };
 
+use super::grpc_dispatcher::BatchAcknowledgments;
 use super::SourceChangeDispatcher;
 use crate::grpc_converters::{convert_to_drasi_source_change, drasi};
 use crate::utils::{AdaptiveBatchConfig, AdaptiveBatcher};
@@ -124,6 +125,10 @@ impl AdaptiveGrpcSourceChangeDispatcher {
             .collect();
 
         let source_changes = source_changes?;
+        let mut acknowledgments = BatchAcknowledgments {
+            expected: source_changes.len() as u64,
+            processed: 0,
+        };
 
         debug!(
             "Sending adaptive batch of {} events via StreamEvents",
@@ -136,15 +141,19 @@ impl AdaptiveGrpcSourceChangeDispatcher {
 
         let mut response_stream = client.stream_events(request).await?.into_inner();
 
-        let mut total_processed = 0u64;
         while let Some(response) = response_stream.message().await? {
-            if !response.success && !response.error.is_empty() {
-                anyhow::bail!("Batch dispatch failed: {}", response.error);
-            }
-            total_processed += response.events_processed;
+            acknowledgments.observe(
+                response.success,
+                response.events_processed,
+                &response.error,
+            )?;
         }
+        acknowledgments.finish()?;
 
-        trace!("Successfully dispatched {} events", total_processed);
+        trace!(
+            "Successfully dispatched {} events",
+            acknowledgments.processed
+        );
         Ok(())
     }
 
@@ -340,6 +349,10 @@ impl SourceChangeDispatcher for AdaptiveGrpcSourceChangeDispatcher {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "adaptive_grpc_ack_tests.rs"]
+mod ack_tests;
 
 #[cfg(test)]
 mod tests {

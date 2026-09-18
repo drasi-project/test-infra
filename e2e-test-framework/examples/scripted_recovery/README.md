@@ -69,7 +69,9 @@ SIGKILL during the test.
 
 Validation on 2026-09-09: uninterrupted and paused runs both passed with 12,000
 results against the existing local Drasi build. This does not validate the pending
-recovery PRs. No new GitHub workflow is added yet.
+recovery PRs. This is a historical local result; the repository now includes
+the recovery workflows described below, whose presence alone does not establish
+successful end-to-end coverage.
 
 ```bash
 bash examples/scripted_recovery/test_compare.sh
@@ -122,8 +124,10 @@ shortfall alone could be pending delivery rather than pending query processing.
 The variants retain the existing strict counts and one-ADD-per-ordinal checks.
 Duplicates therefore fail this comparison; that is a diagnostic mismatch, not by
 itself proof of data loss or a violation of an at-least-once delivery contract.
-The snapshot and delivery paths remain separate checks. General duplicate-aware
-recovery validation is still future work.
+The snapshot and delivery paths remain separate checks. The separate
+[Recovery Result Verification](../recovery_comparison/README.md) comparator now
+provides duplicate/order diagnostics for compatible captures; the PauseCommand
+runner retains its own checks described here.
 
 Artifacts are stored under `uninterrupted` and `restart-caught-up` or
 `restart-immediate` (the default remains `paused`). The variant directory also
@@ -179,21 +183,19 @@ inputs for HTTP/gRPC standard/adaptive variants, query selection, `batching_spee
 `query_tuning`, and `bootstrap_size`. Each selected variant runs only SIGKILL
 recovery after ingress, with zero extra crash delay and no component reapplication.
 Final output is checked against the existing committed count/hash expectations;
-the workflow does not regenerate a golden run. An opt-in
-[Recovery Result Verification](../recovery_comparison/README.md) now
-implement separate delivery/state diagnostics. The framework supports
-`kind: RecoveryResultVerification`, but this workflow has not enabled it by default:
-producer identity and verified boundary capture are still needed. Reusable
-golden-run storage remains part of issue #84. Baselines must match
-the workload; missing baselines for custom presets are not correctness evidence.
-Select `golden_snapshot: building-comfort-small-v1` to enable candidate golden comparison in
-advisory mode. All four HTTP/gRPC standard/adaptive variants can be selected
-together. Both queries and bootstrap off are required for these captures.
-The workflow validates the logical workload independently of dispatcher settings, uses the stored
-capture without rerunning the golden, and reports snapshot/delivery verdicts in
-the job summary. Its policy rejects duplicates and reordering; SHA-256 remains
-enforced while missing producer/boundary evidence keeps the comparator overall
-inconclusive. See the [golden run inputs](../recovery_comparison/goldens/building-comfort-small-v1/README.md).
+the workflow does not regenerate a golden run.
+[Recovery Result Verification](../recovery_comparison/README.md) is always enabled
+against `building-comfort-small-v1`; there is no golden-selection input. All four
+HTTP/gRPC standard/adaptive variants can be selected together. Both queries and
+bootstrap off are required. The workflow validates the logical workload
+independently of dispatcher settings and reports separate snapshot/delivery
+verdicts. Invalid or incomplete reports fail the job, and both queries must have
+passed state verdicts with no snapshot differences. The comparator always rejects
+duplicates and reordering in delivery checks, but delivery and overall verdicts
+remain advisory; SHA-256 remains enforced. Missing producer/boundary evidence can
+keep the overall comparison inconclusive. Captured-snapshot equality does not
+prove a terminal boundary; that work remains unfinished for #70. See the
+[golden run inputs](../recovery_comparison/goldens/building-comfort-small-v1/README.md).
 Every mode compares against the same full snapshot rows. HTTP captures use their
 own payload path and report delivery identity unavailable; the new producer-aware
 golden enables gRPC delivery diagnostics. HTTP snapshot comparison does not invent
@@ -203,21 +205,23 @@ import tests pass; live recovery success is not implied by exposing these option
 and must remain enabled. Embedded `drasi_lib` is omitted because this recovery
 runner kills an external server. Empty variant/query selections fail validation.
 
-The recovery-only `outbox_capacity` input defaults to `1000` and accepts a
+The recovery-only `outbox_capacity` input defaults to `20000` and accepts a
 positive integer. It sets `outboxCapacity` on every selected query in the
-recovery run, independently of `query_tuning`. Use `20000` for the
-larger-outbox comparison after a Strict reaction outbox-gap failure; a passing
-comparison is retention evidence, not proof that startup ordering is fixed.
+recovery run, independently of `query_tuning`. Scheduled recovery also uses
+20,000 entries. A passing comparison provides retention evidence, not proof that
+startup ordering is fixed or that this capacity is sufficient for every workload.
 The runner logs the applied capacity. Local runs can set `OUTBOX_CAPACITY`;
 when it is unset, existing query configuration and server defaults are preserved.
 
-HTTP standard and gRPC standard are selected by default, matching the standard
-workflow's external variants. Select only gRPC when using a registry/tag with
+HTTP standard and gRPC standard are selected by default for manual runs, matching
+the standard workflow's external variants. Scheduled runs select all four modes.
+Select only gRPC when using a registry/tag with
 only gRPC plugins published. Each variant requires compatible source/reaction
 plugins for its protocol. Exposing an option does not establish recovery coverage
 for it; standard gRPC passed on GitHub with outbox capacity 20,000, but the other
-variants have not been validated by that run. Large bootstrap
-presets retain the existing runner's baseline policy and hosted-runner resource
+variants have not been validated by that run. The recovery workflow currently
+rejects large-bootstrap presets because its fixed golden requires bootstrap off.
+Other local/dynamic runs remain subject to their own baselines and resource
 limits; the 1m preset previously exceeded CI memory capacity.
 
 For local building-comfort runs, `TEST_SERVICE_STARTUP_TIMEOUT_SECS` overrides
@@ -259,10 +263,15 @@ Artifacts are uploaded on success or failure and retained for 14 days, including
 logs, verdicts, saved state, and snapshots. Immediate-restart pending-work coverage
 remains unverified unless checkpoint/replay evidence establishes it.
 
-Status: split workflow files prepared and locally validated; not published or run on GitHub.
-Only `workflow_dispatch` is configured. GitHub normally requires this workflow
-on the default branch before it can be manually dispatched; no temporary push
-trigger is included.
+Both workflow files are present. PauseCommand is manual (`workflow_dispatch`)
+only. Building-comfort recovery supports manual dispatch and a daily 22:00 UTC
+schedule using upstream server/core main and `drasi-nightly-test` plugins; see
+[scheduled recovery](../building_comfort/dynamic/scheduled_recovery.md) for settings
+and provenance limitations. Building-comfort GitHub results are referenced above;
+the dated local PauseCommand results are not evidence of a GitHub PauseCommand run.
+Schedules execute on the default branch. GitHub normally requires a workflow on
+the default branch before manual dispatch is available. Neither workflow includes
+a temporary push trigger.
 
 ## Earlier Four-Change Prototype
 

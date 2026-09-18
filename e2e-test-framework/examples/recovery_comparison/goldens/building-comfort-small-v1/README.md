@@ -57,9 +57,15 @@ The SIGKILL building-comfort recovery workflow always runs golden comparison.
 Both queries and bootstrap off are required until other workload goldens are
 enabled. Missing, malformed, invalid, or structurally incomplete comparison
 reports fail the workflow. Evaluation errors and missing expected query results
-cannot satisfy the required comparison check. Valid passed, failed, and
-inconclusive verdicts remain advisory under the existing completeness/identity limitations; mandatory
-execution does not change `enforce: false` or the enforced count/hash checks.
+cannot satisfy the required comparison check. Both queries must have a passed
+state verdict and no missing or unexpected snapshot rows. A failed or inconclusive
+state verdict fails the workflow. Delivery and overall verdicts remain advisory;
+the shared handler keeps `enforce: false` and count/hash checks remain enforced.
+
+This asserts captured-snapshot equality, not a verified terminal state. The
+golden remains incomplete and run boundary evidence is not configured. The
+[unfinished terminal-boundary work for #70](../../../building_comfort/dynamic/scheduled_recovery.md#unfinished-terminal-boundary-verification-70)
+must be completed before claiming final-state recovery verification.
 
 After committing and pushing the workflow, capture code, helper scripts, and
 golden files together, open **E2E - building_comfort recovery**, choose **Run
@@ -97,7 +103,8 @@ baseline with identity fields unavailable. The snapshots and expected event
 payloads are unchanged; the original golden is never modified. HTTP delivery
 diagnostics remain inconclusive pending compatible producer ID capture, while
 the same golden snapshot is checked. Exactly-once and ordered delivery are required by
-the comparator, with advisory enforcement retained and SHA-256 enforced.
+the comparator, with delivery verdicts advisory, snapshot equality mandatory,
+and SHA-256 enforced by the workflow.
 Snapshot and delivery verdicts are shown separately; the overall verdict still
 reflects the unchanged completion-evidence limitation. Selecting the older golden
 retains its null identity contract and cannot diagnose delivery by producer ID.

@@ -276,10 +276,30 @@ jobs:
             printf '## Building-comfort recovery: %s / %s\n\nJob status: %s\n\n' "$VARIANT" "$RECOVERY_CASE" "$JOB_STATUS"
             printf 'Inspect uploaded verdicts, snapshots, logs, and binary provenance.\n'
             verdict="$RUNNER_TEMP/results/$RECOVERY_CASE/work/test_data_cache/test_runs/drasi_server_dev_repo.building_comfort.test_run_001/recovery_verdict.json"
-            printf '\n### Required Golden Comparison (Advisory Verdict)\n\n'
+            printf '\n### Required Golden Snapshot Equality\n\n'
+            printf 'Snapshot equality is enforced. Delivery/overall verdicts remain advisory; terminal-boundary verification for #70 is unfinished.\n'
             if [[ -s "$verdict" ]]; then
               if ! jq -e -s '
                 def valid_verdict: . == "passed" or . == "failed" or . == "inconclusive";
+                def unsigned_integer: type == "number" and . >= 0 and . == floor;
+                def strings: type == "array" and all(.[]; type == "string");
+                def nullable_string: . == null or type == "string";
+                def differences:
+                  type == "array" and all(.[];
+                    type == "object" and has("row") and (.count | unsigned_integer));
+                def state_report:
+                  type == "object" and (.verdict | valid_verdict) and
+                  has("reason") and (.reason | nullable_string) and
+                  (.missing | differences) and (.unexpected | differences);
+                def delivery_report:
+                  type == "object" and (.verdict | valid_verdict) and
+                  has("reason") and (.reason | nullable_string) and
+                  (.expected_observations | unsigned_integer) and
+                  (.actual_observations | unsigned_integer) and
+                  (.missing | strings) and (.unexpected | strings) and
+                  (.duplicates | type == "object" and all(.[]; unsigned_integer)) and
+                  (.conflicting | strings) and has("reordered") and
+                  (.reordered == null or (.reordered | type == "boolean"));
                 length == 1 and (.[0] |
                   type == "object" and
                   .test_run_id == "drasi_server_dev_repo.building_comfort.test_run_001" and
@@ -289,17 +309,33 @@ jobs:
                   (.comparison | type == "object") and
                   .comparison.schema_version == 1 and
                   .comparison.verdict == .verdict and
+                  (.comparison.workload_fingerprint | type == "string" and length > 0) and
+                  (.comparison.reasons | strings) and
+                  (.comparison.missing_queries | strings) and
+                  (.comparison.unexpected_queries | strings) and
                   (.comparison.queries | type == "array") and
                   ([.comparison.queries[].query_id] | sort) ==
                     ["building-comfort", "building-comfort-floor-agg"] and
                   all(.comparison.queries[];
-                    (.state.verdict | valid_verdict) and
-                    (.delivery.verdict | valid_verdict)))
+                    type == "object" and
+                    (.state | state_report) and
+                    (.delivery | delivery_report)))
               ' "$verdict" >/dev/null; then
                 printf 'ERROR: required golden comparison report is invalid or incomplete; comparison execution is not verified. Inspect recovery_verdict.json.\n'
                 exit 1
               fi
               jq -r '"Overall: \(.verdict) (enforced=\(.enforced))", (.comparison.queries[]? | "- \(.query_id): state=\(.state.verdict), delivery=\(.delivery.verdict)"), (.error // empty)' "$verdict"
+              if ! jq -e '
+                (.comparison.missing_queries | length) == 0 and
+                (.comparison.unexpected_queries | length) == 0 and
+                all(.comparison.queries[];
+                  .state.verdict == "passed" and
+                  (.state.missing | length) == 0 and
+                  (.state.unexpected | length) == 0)
+              ' "$verdict" >/dev/null; then
+                printf 'ERROR: required golden snapshot equality failed or is inconclusive for an expected query. Inspect per-query state differences in recovery_verdict.json.\n'
+                exit 1
+              fi
             else
               printf 'ERROR: required comparison report was not produced; comparison is not verified.\n'
               exit 1

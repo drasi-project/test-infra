@@ -221,7 +221,6 @@ pub enum CompletionHandlerDefinition {
 pub struct RecoveryResultVerificationHandlerConfig {
     pub baseline_path: String,
     pub workload_fingerprint: String,
-    pub policy: RecoveryResultVerificationPolicy,
     pub queries: Vec<RecoveryResultVerificationQueryConfig>,
     pub capture_evidence_path: Option<String>,
     #[serde(default = "recovery_enforce_default")]
@@ -230,20 +229,6 @@ pub struct RecoveryResultVerificationHandlerConfig {
 
 fn recovery_enforce_default() -> bool {
     true
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecoveryResultVerificationPolicy {
-    pub delivery: RecoveryDeliveryGuarantee,
-    pub allow_reordering: bool,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecoveryDeliveryGuarantee {
-    ExactlyOnce,
-    AtLeastOnce,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

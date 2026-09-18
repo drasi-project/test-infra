@@ -36,20 +36,6 @@ pub struct Event {
     pub payload: Value,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeliveryGuarantee {
-    ExactlyOnce,
-    AtLeastOnce,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct Policy {
-    pub delivery: DeliveryGuarantee,
-    pub allow_reordering: bool,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
@@ -63,7 +49,6 @@ pub struct Report {
     pub schema_version: u32,
     pub verdict: Verdict,
     pub workload_fingerprint: String,
-    pub policy: Policy,
     pub reasons: Vec<String>,
     pub missing_queries: Vec<String>,
     pub unexpected_queries: Vec<String>,
@@ -104,7 +89,7 @@ pub struct RowDifference {
     pub count: usize,
 }
 
-pub fn compare(baseline: &Artifact, recovery: &Artifact, policy: &Policy) -> Result<Report> {
+pub fn compare(baseline: &Artifact, recovery: &Artifact) -> Result<Report> {
     validate(baseline)?;
     validate(recovery)?;
     ensure!(
@@ -138,7 +123,7 @@ pub fn compare(baseline: &Artifact, recovery: &Artifact, policy: &Policy) -> Res
         );
         queries.push(QueryReport {
             query_id: (*query_id).to_owned(),
-            delivery: compare_delivery(reference, observed, policy)?,
+            delivery: compare_delivery(reference, observed)?,
             state: compare_state(reference.snapshot.as_deref(), observed.snapshot.as_deref()),
         });
     }
@@ -172,10 +157,6 @@ pub fn compare(baseline: &Artifact, recovery: &Artifact, policy: &Policy) -> Res
         schema_version: 1,
         verdict,
         workload_fingerprint: baseline.workload_fingerprint.clone(),
-        policy: Policy {
-            delivery: policy.delivery,
-            allow_reordering: policy.allow_reordering,
-        },
         reasons,
         missing_queries,
         unexpected_queries,
@@ -245,7 +226,6 @@ fn query_map(artifact: &Artifact) -> BTreeMap<&str, &QueryArtifact> {
 fn compare_delivery(
     expected: &QueryArtifact,
     actual: &QueryArtifact,
-    policy: &Policy,
 ) -> Result<DeliveryReport> {
     let mut report = DeliveryReport {
         verdict: Verdict::Inconclusive,
@@ -321,9 +301,8 @@ fn compare_delivery(
     report.verdict = if !report.missing.is_empty()
         || !report.unexpected.is_empty()
         || !report.conflicting.is_empty()
-        || (reordered && !policy.allow_reordering)
-        || (!report.duplicates.is_empty()
-            && matches!(policy.delivery, DeliveryGuarantee::ExactlyOnce))
+        || reordered
+        || !report.duplicates.is_empty()
     {
         Verdict::Failed
     } else {
@@ -414,13 +393,6 @@ mod tests {
         })).unwrap()
     }
 
-    fn policy() -> Policy {
-        Policy {
-            delivery: DeliveryGuarantee::AtLeastOnce,
-            allow_reordering: true,
-        }
-    }
-
     fn duplicate(artifact: &mut Artifact, payload: Value) {
         artifact.queries[0].events.push(Event {
             identity: Some("1:0".to_owned()),
@@ -431,7 +403,7 @@ mod tests {
     #[test]
     fn unchanged_passes() {
         assert_eq!(
-            compare(&artifact(), &artifact(), &policy())
+            compare(&artifact(), &artifact())
                 .unwrap()
                 .verdict,
             Verdict::Passed
@@ -444,7 +416,7 @@ mod tests {
         let mut additional = artifact().queries.remove(0);
         additional.query_id = "missing".to_owned();
         baseline.queries.push(additional);
-        let report = compare(&baseline, &artifact(), &policy()).unwrap();
+        let report = compare(&baseline, &artifact()).unwrap();
         assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.missing_queries, ["missing"]);
     }
@@ -453,23 +425,23 @@ mod tests {
     fn baseline_metadata_must_be_explicit_and_queries_unique() {
         let mut baseline = artifact();
         baseline.schema_version = 2;
-        assert!(compare(&baseline, &artifact(), &policy()).is_err());
+        assert!(compare(&baseline, &artifact()).is_err());
         baseline = artifact();
         baseline.capture.evidence.clear();
-        assert!(compare(&baseline, &artifact(), &policy()).is_err());
+        assert!(compare(&baseline, &artifact()).is_err());
         baseline = artifact();
         baseline.queries.push(artifact().queries.remove(0));
-        assert!(compare(&baseline, &artifact(), &policy()).is_err());
+        assert!(compare(&baseline, &artifact()).is_err());
         baseline = artifact();
         baseline.queries[0].identity_contract = Some("different-contract".to_owned());
-        assert!(compare(&baseline, &artifact(), &policy()).is_err());
+        assert!(compare(&baseline, &artifact()).is_err());
     }
 
     #[test]
     fn changed_payload_is_not_reordering() {
         let mut recovery = artifact();
         recovery.queries[0].events[0].payload = json!({"value": 3});
-        let report = compare(&artifact(), &recovery, &policy()).unwrap();
+        let report = compare(&artifact(), &recovery).unwrap();
         assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.queries[0].delivery.conflicting, ["1:0"]);
         assert_eq!(report.queries[0].delivery.reordered, Some(false));
@@ -480,35 +452,27 @@ mod tests {
         let mut recovery = artifact();
         recovery.queries[0].events.pop();
         duplicate(&mut recovery, json!({"value": 1}));
-        let report = compare(&artifact(), &recovery, &policy()).unwrap();
+        let report = compare(&artifact(), &recovery).unwrap();
         assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.queries[0].delivery.missing, ["2:0"]);
         assert_eq!(report.queries[0].delivery.duplicates["1:0"], 1);
     }
 
     #[test]
-    fn duplicate_policy_is_explicit() {
+    fn duplicates_always_fail() {
         let mut recovery = artifact();
         duplicate(&mut recovery, json!({"value": 1}));
         assert_eq!(
-            compare(&artifact(), &recovery, &policy()).unwrap().verdict,
-            Verdict::Passed
-        );
-        let strict = Policy {
-            delivery: DeliveryGuarantee::ExactlyOnce,
-            ..policy()
-        };
-        assert_eq!(
-            compare(&artifact(), &recovery, &strict).unwrap().verdict,
+            compare(&artifact(), &recovery).unwrap().verdict,
             Verdict::Failed
         );
     }
 
     #[test]
-    fn conflicts_fail_even_when_duplicates_allowed() {
+    fn conflicting_duplicates_fail() {
         let mut recovery = artifact();
         duplicate(&mut recovery, json!({"value": 999}));
-        let report = compare(&artifact(), &recovery, &policy()).unwrap();
+        let report = compare(&artifact(), &recovery).unwrap();
         assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.queries[0].delivery.conflicting, ["1:0"]);
     }
@@ -517,17 +481,9 @@ mod tests {
     fn reordering_is_reported_separately() {
         let mut recovery = artifact();
         recovery.queries[0].events.reverse();
-        let report = compare(&artifact(), &recovery, &policy()).unwrap();
-        assert_eq!(report.verdict, Verdict::Passed);
+        let report = compare(&artifact(), &recovery).unwrap();
+        assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.queries[0].delivery.reordered, Some(true));
-        let ordered = Policy {
-            allow_reordering: false,
-            ..policy()
-        };
-        assert_eq!(
-            compare(&artifact(), &recovery, &ordered).unwrap().verdict,
-            Verdict::Failed
-        );
     }
 
     #[test]
@@ -539,7 +495,7 @@ mod tests {
         ]);
         let mut recovery = artifact();
         recovery.queries[0].snapshot = Some(vec![json!({"floor": "A", "value": 2}); 2]);
-        let report = compare(&baseline, &recovery, &policy()).unwrap();
+        let report = compare(&baseline, &recovery).unwrap();
         assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.queries[0].delivery.verdict, Verdict::Passed);
         assert_eq!(
@@ -571,7 +527,7 @@ mod tests {
         let mut recovery = artifact();
         baseline.queries[0].identity_contract = None;
         recovery.queries[0].identity_contract = None;
-        let report = compare(&baseline, &recovery, &policy()).unwrap();
+        let report = compare(&baseline, &recovery).unwrap();
         assert_eq!(report.verdict, Verdict::Inconclusive);
         assert_eq!(report.queries[0].state.verdict, Verdict::Passed);
         assert_eq!(report.queries[0].delivery.reordered, None);
@@ -583,7 +539,7 @@ mod tests {
         recovery.capture.complete = false;
         recovery.capture.evidence = "timed out".to_owned();
         assert_eq!(
-            compare(&artifact(), &recovery, &policy()).unwrap().verdict,
+            compare(&artifact(), &recovery).unwrap().verdict,
             Verdict::Inconclusive
         );
     }
@@ -593,7 +549,7 @@ mod tests {
         let mut recovery = artifact();
         recovery.queries[0].snapshot = None;
         assert_eq!(
-            compare(&artifact(), &recovery, &policy()).unwrap().verdict,
+            compare(&artifact(), &recovery).unwrap().verdict,
             Verdict::Inconclusive
         );
         assert_eq!(compare_state(Some(&[]), Some(&[])).verdict, Verdict::Passed);
@@ -603,17 +559,17 @@ mod tests {
     fn different_workload_or_epoch_is_invalid() {
         let mut recovery = artifact();
         recovery.workload_fingerprint = "different".to_owned();
-        assert!(compare(&artifact(), &recovery, &policy()).is_err());
+        assert!(compare(&artifact(), &recovery).is_err());
         recovery = artifact();
         recovery.queries[0].config_fingerprint = "different".to_owned();
-        assert!(compare(&artifact(), &recovery, &policy()).is_err());
+        assert!(compare(&artifact(), &recovery).is_err());
     }
 
     #[test]
     fn repeated_baseline_identity_is_invalid() {
         let mut baseline = artifact();
         duplicate(&mut baseline, json!({"value": 1}));
-        assert!(compare(&baseline, &artifact(), &policy()).is_err());
+        assert!(compare(&baseline, &artifact()).is_err());
     }
 
     #[test]
@@ -626,7 +582,7 @@ mod tests {
         let mut extra = artifact().queries.remove(0);
         extra.query_id = "unexpected".to_owned();
         recovery.queries.push(extra);
-        let report = compare(&artifact(), &recovery, &policy()).unwrap();
+        let report = compare(&artifact(), &recovery).unwrap();
         assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.unexpected_queries, ["unexpected"]);
         assert_eq!(report.queries[0].delivery.unexpected, ["3:0"]);
@@ -636,7 +592,7 @@ mod tests {
     fn identical_payloads_with_distinct_ids_are_not_duplicates() {
         let mut baseline = artifact();
         baseline.queries[0].events[1].payload = json!({"value": 1});
-        let report = compare(&baseline, &baseline, &policy()).unwrap();
+        let report = compare(&baseline, &baseline).unwrap();
         assert_eq!(report.verdict, Verdict::Passed);
         assert!(report.queries[0].delivery.duplicates.is_empty());
     }

@@ -9,13 +9,12 @@ fn fixture(name: &str) -> Value {
     serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap()
 }
 
-fn run(baseline: &Value, recovered: &Value, policy: &Value) -> Output {
+fn run(baseline: &Value, recovered: &Value) -> Output {
     let directory = tempfile::tempdir().unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_recovery-compare"));
     for (filename, value) in [
         ("baseline.json", baseline),
         ("recovered.json", recovered),
-        ("policy.json", policy),
     ] {
         let path = directory.path().join(filename);
         std::fs::write(&path, serde_json::to_vec(value).unwrap()).unwrap();
@@ -25,33 +24,50 @@ fn run(baseline: &Value, recovered: &Value, policy: &Value) -> Output {
 }
 
 #[test]
-fn example_reports_permitted_duplicates_and_reordering() {
+fn example_rejects_duplicates_and_reordering() {
     let output = run(
         &fixture("baseline.json"),
         &fixture("recovered.json"),
-        &fixture("policy.json"),
     );
     assert_eq!(
         output.status.code(),
-        Some(0),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["verdict"], "passed");
+    assert_eq!(report["verdict"], "failed");
     assert_eq!(report["queries"][0]["delivery"]["duplicates"]["1:0"], 1);
     assert_eq!(report["queries"][0]["delivery"]["reordered"], true);
     assert_eq!(report["queries"][0]["state"]["verdict"], "passed");
 }
 
 #[test]
-fn forbidden_redelivery_exits_one() {
-    let output = run(
-        &fixture("baseline.json"),
-        &fixture("recovered.json"),
-        &json!({"delivery": "exactly_once", "allow_reordering": true}),
-    );
-    assert_eq!(output.status.code(), Some(1));
+fn identical_ordered_delivery_passes() {
+    let baseline = fixture("baseline.json");
+    let output = run(&baseline, &baseline);
+    assert_eq!(output.status.code(), Some(0));
+}
+
+#[test]
+fn duplicate_and_reorder_each_fail_independently() {
+    let baseline = fixture("baseline.json");
+    let mut recovered = baseline.clone();
+    recovered["queries"][0]["events"].as_array_mut().unwrap().push(baseline["queries"][0]["events"][0].clone());
+    assert_eq!(run(&baseline, &recovered).status.code(), Some(1));
+    recovered = baseline.clone();
+    recovered["queries"][0]["events"].as_array_mut().unwrap().reverse();
+    assert_eq!(run(&baseline, &recovered).status.code(), Some(1));
+}
+
+#[test]
+fn policy_argument_is_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_recovery-compare"))
+        .args(["baseline.json", "recovered.json", "policy.json"])
+        .output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Usage:"));
 }
 
 #[test]
@@ -61,7 +77,6 @@ fn incomplete_and_unknown_identity_exit_two() {
     let output = run(
         &fixture("baseline.json"),
         &recovered,
-        &fixture("policy.json"),
     );
     assert_eq!(output.status.code(), Some(2));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -72,7 +87,6 @@ fn incomplete_and_unknown_identity_exit_two() {
     let output = run(
         &fixture("baseline.json"),
         &recovered,
-        &fixture("policy.json"),
     );
     assert_eq!(output.status.code(), Some(2));
 }
@@ -84,7 +98,6 @@ fn incompatible_baseline_and_invalid_schema_do_not_emit_success_report() {
     let output = run(
         &fixture("baseline.json"),
         &recovered,
-        &fixture("policy.json"),
     );
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
@@ -95,7 +108,6 @@ fn incompatible_baseline_and_invalid_schema_do_not_emit_success_report() {
     let output = run(
         &fixture("baseline.json"),
         &recovered,
-        &fixture("policy.json"),
     );
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());

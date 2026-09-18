@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use test_run_host::recovery_capture;
-use test_run_host::recovery_comparison::{compare, Artifact, Policy, Verdict};
+use test_run_host::recovery_comparison::{compare, Artifact, Verdict};
 
 fn main() {
     match run() {
@@ -15,9 +15,10 @@ fn main() {
 fn run() -> Result<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() == 1 && args[0] == "--help" {
-        println!("Usage: recovery-compare BASELINE.json RECOVERY.json POLICY.json");
+        println!("Usage: recovery-compare BASELINE.json RECOVERY.json");
         println!("       recovery-compare --import CAPTURE.json");
         println!("Writes a JSON report to stdout. Exit: 0 pass, 1 fail, 2 invalid/inconclusive.");
+        println!("Requires exactly-once delivery in per-query order; duplicates and reordering fail.");
         return Ok(0);
     }
     if args.len() == 2 && args[0] == "--import" {
@@ -26,13 +27,12 @@ fn run() -> Result<i32> {
         println!();
         return Ok(0);
     }
-    if args.len() != 3 {
-        bail!("Usage: recovery-compare BASELINE.json RECOVERY.json POLICY.json");
+    if args.len() != 2 {
+        bail!("Usage: recovery-compare BASELINE.json RECOVERY.json");
     }
     let baseline: Artifact = read_json(&args[0])?;
     let recovery: Artifact = read_json(&args[1])?;
-    let policy: Policy = read_json(&args[2])?;
-    let report = compare(&baseline, &recovery, &policy)?;
+    let report = compare(&baseline, &recovery)?;
     serde_json::to_writer_pretty(std::io::stdout(), &report)?;
     println!();
     Ok(match report.verdict {

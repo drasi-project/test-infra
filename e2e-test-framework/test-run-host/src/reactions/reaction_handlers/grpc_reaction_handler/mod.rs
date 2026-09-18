@@ -310,7 +310,7 @@ mod producer_capture_tests {
 
     #[tokio::test]
     async fn captured_keys_enable_comparator_delivery_diagnostics() {
-        use crate::recovery_comparison::{compare, Artifact, Policy, Verdict};
+        use crate::recovery_comparison::{compare, Artifact, Verdict};
         let (instance, mut rx) = instance();
         instance
             .process_query_result(batch(vec![item(44, 100), item(44, 101)]))
@@ -329,14 +329,11 @@ mod producer_capture_tests {
                 "identity_contract":"grpc-query-sequence-row-operation-v1",
                 "events":[event(&first),event(&second)],"snapshot":[]}]});
         let baseline: Artifact = serde_json::from_value(baseline_json.clone()).unwrap();
-        let policy: Policy =
-            serde_json::from_value(json!({"delivery":"exactly_once","allow_reordering":false}))
-                .unwrap();
         let mut recovery_json = baseline_json;
         recovery_json["queries"][0]["events"] =
             json!([event(&second), event(&first), event(&first)]);
         let recovery: Artifact = serde_json::from_value(recovery_json.clone()).unwrap();
-        let report = compare(&baseline, &recovery, &policy).unwrap();
+        let report = compare(&baseline, &recovery).unwrap();
         assert_eq!(report.verdict, Verdict::Failed);
         assert_eq!(report.queries[0].delivery.reordered, Some(true));
         assert_eq!(
@@ -349,7 +346,7 @@ mod producer_capture_tests {
         );
         recovery_json["queries"][0]["events"] = json!([event(&first)]);
         let recovery: Artifact = serde_json::from_value(recovery_json).unwrap();
-        let report = compare(&baseline, &recovery, &policy).unwrap();
+        let report = compare(&baseline, &recovery).unwrap();
         assert_eq!(
             report.queries[0].delivery.missing,
             [key(&second).to_string()]

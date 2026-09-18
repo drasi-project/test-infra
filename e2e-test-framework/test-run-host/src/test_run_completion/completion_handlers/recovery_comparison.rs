@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use test_data_store::{
     test_repo_storage::models::{
-        RecoveryDeliveryGuarantee, RecoveryResultVerificationHandlerConfig,
+        RecoveryResultVerificationHandlerConfig,
     },
     test_run_storage::{TestRunId, TestRunReactionId},
     TestDataStore,
@@ -19,7 +19,7 @@ use test_data_store::{
 
 use super::CompletionHandler;
 use crate::{
-    recovery_comparison::{compare, Artifact, Capture, DeliveryGuarantee, Policy, Report, Verdict},
+    recovery_comparison::{compare, Artifact, Capture, Report, Verdict},
     test_run_completion::types::ComponentCompletionSummary,
 };
 
@@ -166,16 +166,9 @@ impl RecoveryResultVerificationCompletionHandler {
         let bytes = tokio::fs::read(&baseline_path)
             .await
             .with_context(|| format!("reading baseline {}", baseline_path.display()))?;
-        let policy = Policy {
-            delivery: match self.config.policy.delivery {
-                RecoveryDeliveryGuarantee::ExactlyOnce => DeliveryGuarantee::ExactlyOnce,
-                RecoveryDeliveryGuarantee::AtLeastOnce => DeliveryGuarantee::AtLeastOnce,
-            },
-            allow_reordering: self.config.policy.allow_reordering,
-        };
         tokio::task::spawn_blocking(move || {
             let baseline: Artifact = serde_json::from_slice(&bytes)?;
-            compare(&baseline, &artifact, &policy)
+            compare(&baseline, &artifact)
         })
         .await?
     }
@@ -328,6 +321,10 @@ mod tests {
     }
 
     async fn fixture() -> Fixture {
+        fixture_with_events(&[1, 2]).await
+    }
+
+    async fn fixture_with_events(identities: &[u64]) -> Fixture {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
             TestDataStore::new(TestDataStoreConfig {
@@ -351,7 +348,7 @@ mod tests {
         let mut logger = create_output_logger(reaction.clone(), &logger_config, &storage)
             .await
             .unwrap();
-        for identity in [2, 1, 1] {
+        for identity in identities {
             logger.log_handler_record(&HandlerRecord {
                 id: format!("received-{identity}"), sequence: 99,
                 created_time_ns: 0, processed_time_ns: 0, traceparent: None, tracestate: None,
@@ -390,7 +387,7 @@ mod tests {
         .unwrap();
         let config = json!({
             "kind": "RecoveryResultVerification", "baseline_path": baseline,
-            "workload_fingerprint": "fixture-v1", "policy": {"delivery": "at_least_once", "allow_reordering": true},
+            "workload_fingerprint": "fixture-v1",
             "capture_evidence_path": "boundary.json",
             "queries": [{"query_id": "items", "test_reaction_id": "receiver", "config_fingerprint": "items-v1",
                 "identity_contract": "fixture-producer-v1", "identity_pointer": "/payload/reaction_output/producer_id",
@@ -459,13 +456,10 @@ mod tests {
         result.unwrap();
         assert_eq!(verdict["verdict"], "passed");
         assert_eq!(verdict["enforced"], true);
-        assert_eq!(
-            verdict["comparison"]["queries"][0]["delivery"]["duplicates"]["1"],
-            1
-        );
+        assert_eq!(verdict["comparison"]["queries"][0]["delivery"]["duplicates"], json!({}));
         assert_eq!(
             verdict["comparison"]["queries"][0]["delivery"]["reordered"],
-            true
+            false
         );
         assert!(fixture.root.join("recovery_actual.json").exists());
         assert!(fixture.root.join("recovery_capture.json").exists());
@@ -473,11 +467,17 @@ mod tests {
 
     #[tokio::test]
     async fn recovery_comparison_mismatch_is_a_handler_error() {
-        let mut fixture = fixture().await;
-        fixture.config["policy"]["delivery"] = json!("exactly_once");
+        let fixture = fixture_with_events(&[2, 1, 1]).await;
         let (result, verdict) = execute(&fixture, Some(evidence())).await;
         assert!(result.is_err());
         assert_eq!(verdict["verdict"], "failed");
+    }
+
+    #[tokio::test]
+    async fn recovery_comparison_rejects_policy_configuration() {
+        let mut fixture = fixture().await;
+        fixture.config["policy"] = json!({"delivery":"at_least_once","allow_reordering":true});
+        assert!(serde_json::from_value::<CompletionHandlerDefinition>(fixture.config).is_err());
     }
 
     #[tokio::test]

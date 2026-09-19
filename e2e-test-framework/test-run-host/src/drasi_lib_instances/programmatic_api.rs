@@ -1,8 +1,8 @@
 // Copyright 2025 The Drasi Authors.
 // Licensed under the Apache License, Version 2.0.
 
-use anyhow::{anyhow, Result};
-use drasi_lib::{ComponentStatus, QueryConfig, QueryLanguage};
+use anyhow::{anyhow, Context, Result};
+use drasi_lib::{ComponentStatus, QueryConfig};
 use drasi_reaction_application::ApplicationReaction;
 use drasi_source_application::{ApplicationSource, ApplicationSourceConfig};
 
@@ -58,9 +58,15 @@ impl TestRunDrasiLibInstance {
                 request.source_type
             ));
         }
-        let properties = serde_json::from_value(request.properties.clone()).unwrap_or_default();
-        let (source, handle) =
-            ApplicationSource::new(request.name.clone(), ApplicationSourceConfig { properties })?;
+        let properties = serde_json::from_value(request.properties.clone())
+            .context("Application source properties must be an object")?;
+        let (source, handle) = ApplicationSource::new(
+            request.name.clone(),
+            ApplicationSourceConfig {
+                properties,
+                durability: None,
+            },
+        )?;
         self.with_core(|core| async move { core.add_source(source).await.map_err(Into::into) })
             .await?;
         self.source_handles
@@ -338,36 +344,19 @@ impl TestRunDrasiLibInstance {
     }
 }
 
-fn query_config_from_request(
+pub(super) fn query_config_from_request(
     id: &str,
     query: String,
     sources: Vec<String>,
     auto_start: bool,
 ) -> QueryConfig {
-    QueryConfig {
-        id: id.to_string(),
-        query,
-        query_language: QueryLanguage::Cypher,
-        middleware: Vec::new(),
-        sources: sources
-            .into_iter()
-            .map(|source_id| drasi_lib::config::SourceSubscriptionConfig {
-                source_id,
-                nodes: Vec::new(),
-                relations: Vec::new(),
-                pipeline: Vec::new(),
-            })
-            .collect(),
-        auto_start,
-        joins: None,
-        enable_bootstrap: true,
-        bootstrap_buffer_size: 10_000,
-        priority_queue_capacity: None,
-        dispatch_buffer_capacity: None,
-        dispatch_mode: None,
-        storage_backend: None,
-        recovery_policy: None,
+    let mut builder = drasi_lib::Query::cypher(id)
+        .query(query)
+        .auto_start(auto_start);
+    for source in sources {
+        builder = builder.from_source(source);
     }
+    builder.build()
 }
 
 fn convert_component_status(status: ComponentStatus) -> ApiComponentStatus {

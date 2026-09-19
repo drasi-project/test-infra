@@ -148,6 +148,10 @@ pub fn get_test_runs_routes() -> Router {
             "/api/test_runs/:run_id/drasi_lib_instances/:instance_id",
             get(get_test_run_drasi_lib_instance).delete(delete_test_run_drasi_lib_instance),
         )
+        .route(
+            "/api/test_runs/:run_id/drasi_lib_instances/:instance_id/runtime",
+            get(get_test_run_drasi_lib_instance_runtime),
+        )
 }
 
 /// Create a new test run
@@ -1050,6 +1054,40 @@ async fn get_test_run_drasi_lib_instance(
         .await?
     {
         Some(state) => Ok(Json(state)),
+        None => Err(TestServiceWebApiError::NotFound(
+            "DrasiLibInstance".to_string(),
+            full_id,
+        )),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/test_runs/{run_id}/drasi_lib_instances/{instance_id}/runtime",
+    params(
+        ("run_id" = String, Path, description = "Test run ID"),
+        ("instance_id" = String, Path, description = "drasi-lib instance ID")
+    ),
+    responses(
+        (status = 200, description = "Live embedded execution mode", body = test_run_host::drasi_lib_instances::DrasiLibRuntimeInfo),
+        (status = 404, description = "drasi-lib instance not found"),
+        (status = 500, description = "drasi-lib instance is not running")
+    ),
+    tag = "test-runs"
+)]
+async fn get_test_run_drasi_lib_instance_runtime(
+    Extension(test_run_host): Extension<Arc<test_run_host::TestRunHost>>,
+    Path((run_id, instance_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, TestServiceWebApiError> {
+    let full_id = format!("{run_id}.{instance_id}");
+    let instance_id =
+        test_data_store::test_run_storage::TestRunDrasiLibInstanceId::try_from(full_id.as_str())
+            .map_err(|error| TestServiceWebApiError::AnyhowError(error.into()))?;
+    match test_run_host
+        .get_test_drasi_lib_instance_runtime(&instance_id)
+        .await?
+    {
+        Some(runtime) => Ok(Json(runtime)),
         None => Err(TestServiceWebApiError::NotFound(
             "DrasiLibInstance".to_string(),
             full_id,

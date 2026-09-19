@@ -179,7 +179,7 @@ The framework deploys as a Drasi SourceProvider:
 - Dispatcher/handler kinds: `DrasiServerChannel` → `DrasiLibInstanceChannel`, `DrasiServerCallback` → `DrasiLibInstanceCallback`.
 - Removed `DrasiServerApi` source dispatcher; embedded drasi-lib instances do not expose an HTTP endpoint.
 
-Instance config uses published crates: `drasi-lib`, `drasi-core`, `drasi-bootstrap-noop`, `drasi-bootstrap-application`, `drasi-source-application`, and `drasi-reaction-application`. The workspace `Cargo.toml` includes a commented `[patch.crates-io]` block for local Drasi core development, following the drasi-server pattern.
+In this development workspace, the embedded instance uses `drasi-lib`, `drasi-core`, and the application/bootstrap crates from the sibling `drasi-core` checkout through direct path dependencies in `test-run-host/Cargo.toml`. The same binary includes both engines. Select the engine with the instance's runtime `test_run_overrides.execution_mode` (`componentGraph` or `computationGraph`); omission preserves ComponentGraph. Inspect `/api/test_runs/<run-id>/drasi_lib_instances/<instance-id>/runtime` for the actual running engine rather than relying on configuration.
 
 Schema shape:
 

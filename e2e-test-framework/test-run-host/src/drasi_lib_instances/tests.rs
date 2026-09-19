@@ -103,6 +103,7 @@ fn effective_config_log_level_override_takes_precedence() {
     let mut config = run_config("instance1");
     config.test_run_overrides = Some(TestRunDrasiLibInstanceOverrides {
         log_level: Some("trace".to_string()),
+        execution_mode: None,
     });
 
     let definition = TestRunDrasiLibInstanceDefinition::new(
@@ -126,4 +127,62 @@ fn effective_config_log_level_none_when_unset() {
     .unwrap();
 
     assert!(definition.effective_config().log_level.is_none());
+}
+
+#[test]
+fn execution_mode_defaults_to_component_graph_and_rejects_unknown_modes() {
+    use super::DrasiLibExecutionMode;
+
+    let definition = TestRunDrasiLibInstanceDefinition::new(
+        run_config("instance1"),
+        empty_instance_def("instance1", None),
+    )
+    .unwrap();
+    assert_eq!(
+        definition.execution_mode(),
+        DrasiLibExecutionMode::ComponentGraph
+    );
+    assert!(serde_json::from_value::<TestRunDrasiLibInstanceOverrides>(serde_json::json!({
+        "execution_mode": "invalid"
+    }))
+    .is_err());
+}
+
+#[tokio::test]
+async fn embedded_instances_select_and_report_the_actual_runtime() {
+    use super::{DrasiLibExecutionMode, TestRunDrasiLibInstance};
+    use test_data_store::test_run_storage::TestRunDrasiLibInstanceStorage;
+
+    for mode in [
+        DrasiLibExecutionMode::ComponentGraph,
+        DrasiLibExecutionMode::ComputationGraph,
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = run_config("instance1");
+        config.test_run_overrides = Some(TestRunDrasiLibInstanceOverrides {
+            execution_mode: Some(mode),
+            ..Default::default()
+        });
+        let definition = TestRunDrasiLibInstanceDefinition::new(
+            config,
+            empty_instance_def("instance1", None),
+        )
+        .unwrap();
+        let storage = TestRunDrasiLibInstanceStorage {
+            id: definition.id.clone(),
+            path: directory.path().to_path_buf(),
+        };
+        let instance = TestRunDrasiLibInstance::new(
+            definition,
+            storage,
+            crate::test_run_completion::LifecycleTx::disabled(),
+        )
+        .await
+        .unwrap();
+        let runtime = instance.get_runtime_info().await.unwrap();
+        assert_eq!(runtime.execution_mode, mode);
+        assert!(runtime.running);
+        instance.stop().await.unwrap();
+        assert!(instance.get_runtime_info().await.is_err());
+    }
 }

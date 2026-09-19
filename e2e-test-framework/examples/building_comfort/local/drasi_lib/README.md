@@ -11,13 +11,14 @@ service. No external Drasi Server is required.
 2. Events are delivered via an **in-process channel** directly to a
    drasi-lib instance hosted by the test service (`source_change_dispatchers
    .kind = "DrasiLibInstanceChannel"`).
-3. The drasi-lib instance evaluates a continuous Cypher query
-   (`all-rooms`: `MATCH (r:Room) RETURN ...`) and pushes results back to
+3. The drasi-lib instance evaluates the `all-rooms` projection and `floor-agg`
+   traversal/aggregation queries, and pushes results back to
    the test service over the same in-process channel
    (`output_handler.kind = "DrasiLibInstanceChannel"`).
-4. Results are written through the configured loggers (JSONL file +
-   performance metrics) and the test stops after **100,000** events
-   (`stop_triggers.RecordCount`).
+4. The generator is configured for **100,000** changes. Results are written
+   through JSONL and performance loggers. The example's reaction stop thresholds
+   are **95,000** room records and **45,000** floor records; these are output
+   thresholds, not proof that every input has finished processing.
 
 ```
 test-service ── in-process channel ──> drasi-lib ── in-process channel ──> test-service
@@ -31,16 +32,50 @@ no network hop, no separate process to start, and no plugin install step.
 
 - `data_store.test_repos[0].local_tests[0].drasi_lib_instances[0]`: the
   embedded drasi-lib instance, with one source (`facilities-db`,
-  `kind: application`), one query (`all-rooms`), and one reaction
-  (`building-comfort-alerts`).
+  `kind: application`), two queries, and two application reactions.
 - `data_store_path: "./test_data_cache"` and `source_path: "./dev_repo"`
   are resolved relative to this folder, so paths stay valid when the test
   is launched from inside the folder.
 
 ## Prerequisites
 
-- This repository buildable via `cargo build --release`.
+- The sibling `drasi-core` checkout; `test-run-host` uses its local path
+  dependencies with the `computation` feature enabled.
+- This repository buildable via `cargo build --locked --release`.
 - No external services.
+
+## Select the embedded engine
+
+The default is ComponentGraph. To use ComputationGraph without changing the
+test definition, set the embedded instance's runtime override:
+
+```json
+{
+  "test_drasi_lib_instance_id": "internal-drasi-lib",
+  "start_immediately": true,
+  "test_run_overrides": {
+    "execution_mode": "computationGraph"
+  }
+}
+```
+
+This object belongs in `test_run_host.test_runs[0].drasi_lib_instances`.
+Use `componentGraph` for the control run. Both modes use the same application
+source/reaction implementations; no Drasi Server or dynamic plugins are loaded.
+Unknown mode values are rejected.
+
+Confirm the live engine with:
+
+```bash
+curl http://localhost:63123/api/test_runs/drasi_lib_dev_repo.building_comfort.test_run_001/drasi_lib_instances/internal-drasi-lib/runtime
+```
+
+The response reads `execution_mode` and `running` from the actual embedded
+DrasiLib instance. For performance comparisons, finish builds first, warm up
+both modes, alternate repeated runs, and use identical logging and workload
+settings. The supplied local example and the gRPC example have different
+generator intervals, query aliases, and stop thresholds; align those explicitly
+when comparing the same workload across hosting modes.
 
 ## Run the test
 
@@ -78,7 +113,7 @@ The script is just a wrapper around `cargo run` against the workspace's
 
 ```bash
 cargo run --release \
-  --manifest-path ../../../test-service/Cargo.toml \
+  --manifest-path ../../../../test-service/Cargo.toml \
   -- --config config.json
 ```
 
@@ -87,13 +122,13 @@ Tune `RUST_LOG` to control log verbosity, e.g.:
 ```bash
 RUST_LOG="off,test_run_host=info,test_run_service=info,test_data_store=info" \
   cargo run --release \
-    --manifest-path ../../../test-service/Cargo.toml \
+    --manifest-path ../../../../test-service/Cargo.toml \
     -- --config config.json
 ```
 
 ## Inspect / control while running
 
-The test service exposes a REST API on `http://localhost:8080`. The
+The test service exposes a REST API on `http://localhost:63123` by default. The
 `web_api_drasi_lib_instance.http`, `web_api_source.http`,
 `web_api_query.http`, and `web_api_reaction.http` files in this folder
 contain ready-to-run requests for VS Code's REST Client extension (or

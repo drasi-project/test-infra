@@ -8,7 +8,8 @@ tonic-prost-build = "0.14"
 
 [dependencies]
 # Drasi core library (all middleware, using system libjq instead of bundled-jq)
-drasi-lib = { version = "0.6.0", features = [
+drasi-lib = { path = "../../../drasi-core/lib", features = [
+  "computation",
   "middleware-jq",
   "middleware-decoder",
   "middleware-map",
@@ -19,17 +20,17 @@ drasi-lib = { version = "0.6.0", features = [
 ] }
 
 # Core models (for SourceMiddlewareConfig and other shared types)
-drasi-core = "0.4.2"
+drasi-core = { path = "../../../drasi-core/core" }
 
 # Core bootstrap providers (used by the application API)
-drasi-bootstrap-noop = "0.1.12"
-drasi-bootstrap-application = "0.1.13"
+drasi-bootstrap-noop = { path = "../../../drasi-core/components/bootstrappers/noop" }
+drasi-bootstrap-application = { path = "../../../drasi-core/components/bootstrappers/application" }
 
 # Core reaction (used by the application API)
-drasi-reaction-application = "0.2.11"
+drasi-reaction-application = { path = "../../../drasi-core/components/reactions/application" }
 
 # Application source (programmatic event injection into a hosted drasi-lib instance)
-drasi-source-application = "0.1.13"
+drasi-source-application = { path = "../../../drasi-core/components/sources/application" }
 
 drasi-comms-abstractions = { path = "../infrastructure/comms-abstractions" }
 drasi-comms-dapr = { path = "../infrastructure/comms-dapr" }

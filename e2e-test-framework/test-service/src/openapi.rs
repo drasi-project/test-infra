@@ -85,6 +85,7 @@ pub struct ErrorResponse {
         test_runs::list_test_run_drasi_lib_instances,
         test_runs::create_test_run_drasi_lib_instance,
         test_runs::get_test_run_drasi_lib_instance,
+        test_runs::get_test_run_drasi_lib_instance_runtime,
         test_runs::delete_test_run_drasi_lib_instance,
     ),
     components(
@@ -106,6 +107,8 @@ pub struct ErrorResponse {
             // Test Run schemas
             test_runs::TestRunCreatedResponse,
             test_runs::TestRunInfo,
+            test_run_host::drasi_lib_instances::DrasiLibRuntimeInfo,
+            test_run_host::drasi_lib_instances::DrasiLibExecutionMode,
         )
     ),
     tags(

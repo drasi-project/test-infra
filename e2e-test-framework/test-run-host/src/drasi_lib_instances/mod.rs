@@ -14,9 +14,10 @@
 
 use std::{collections::HashMap, fmt, sync::Arc};
 
+use anyhow::Context;
 use derive_more::Debug;
 use drasi_bootstrap_noop::NoOpBootstrapProvider;
-use drasi_lib::{config::SourceSubscriptionConfig, DrasiLib, QueryConfig, QueryLanguage, Source};
+use drasi_lib::{DrasiLib, QueryConfig, Source};
 use drasi_reaction_application::{ApplicationReaction, ApplicationReactionHandle};
 use drasi_source_application::{
     ApplicationSource, ApplicationSourceConfig, ApplicationSourceHandle,
@@ -61,10 +62,46 @@ fn default_start_immediately() -> bool {
 }
 
 /// Overrides for drasi-lib instance configuration at runtime.
-#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, ToSchema)]
 pub struct TestRunDrasiLibInstanceOverrides {
     /// Override log level (trace, debug, info, warn, error).
     pub log_level: Option<String>,
+    /// Select the engine without changing the test definition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<DrasiLibExecutionMode>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum DrasiLibExecutionMode {
+    #[default]
+    ComponentGraph,
+    ComputationGraph,
+}
+
+impl From<DrasiLibExecutionMode> for drasi_lib::ExecutionMode {
+    fn from(mode: DrasiLibExecutionMode) -> Self {
+        match mode {
+            DrasiLibExecutionMode::ComponentGraph => Self::ComponentGraph,
+            DrasiLibExecutionMode::ComputationGraph => Self::ComputationGraph,
+        }
+    }
+}
+
+impl From<drasi_lib::ExecutionMode> for DrasiLibExecutionMode {
+    fn from(mode: drasi_lib::ExecutionMode) -> Self {
+        match mode {
+            drasi_lib::ExecutionMode::ComponentGraph => Self::ComponentGraph,
+            drasi_lib::ExecutionMode::ComputationGraph => Self::ComputationGraph,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+pub struct DrasiLibRuntimeInfo {
+    pub instance_id: String,
+    pub execution_mode: DrasiLibExecutionMode,
+    pub running: bool,
 }
 
 impl TryFrom<&TestRunDrasiLibInstanceConfig> for TestRunId {
@@ -121,6 +158,13 @@ pub struct TestRunDrasiLibInstanceDefinition {
 }
 
 impl TestRunDrasiLibInstanceDefinition {
+    pub fn execution_mode(&self) -> DrasiLibExecutionMode {
+        self.test_run_overrides
+            .as_ref()
+            .and_then(|overrides| overrides.execution_mode)
+            .unwrap_or_default()
+    }
+
     /// Create a test run drasi-lib instance definition.
     pub fn new(
         config: TestRunDrasiLibInstanceConfig,
@@ -215,7 +259,9 @@ impl TestRunDrasiLibInstance {
         }
 
         let config = self.definition.effective_config();
-        let mut builder = DrasiLib::builder().with_id(self.id.to_string());
+        let mut builder = DrasiLib::builder()
+            .with_id(self.id.to_string())
+            .with_execution_mode(self.definition.execution_mode().into());
         let mut source_handles = HashMap::new();
         let mut reaction_handles = HashMap::new();
 
@@ -227,13 +273,17 @@ impl TestRunDrasiLibInstance {
                     source_config.id
                 );
             }
-            let source_properties = serde_json::from_value(source_config.config.clone())
-                .unwrap_or_else(|_| HashMap::new());
+            let source_options: ApplicationSourceConfig = serde_json::from_value(
+                if source_config.config.is_null() {
+                    serde_json::json!({})
+                } else {
+                    source_config.config.clone()
+                },
+            )
+            .with_context(|| format!("Invalid application source config: {}", source_config.id))?;
             let (source, handle) = ApplicationSource::new(
                 source_config.id.clone(),
-                ApplicationSourceConfig {
-                    properties: source_properties,
-                },
+                source_options,
             )?;
             source
                 .set_bootstrap_provider(Box::new(NoOpBootstrapProvider::new()))
@@ -243,36 +293,27 @@ impl TestRunDrasiLibInstance {
         }
 
         for query_config in &config.queries {
-            let mut query: QueryConfig = serde_json::from_value(query_config.config.clone())
-                .unwrap_or_else(|_| QueryConfig {
-                    id: query_config.id.clone(),
-                    query: query_config.query.clone(),
-                    query_language: QueryLanguage::Cypher,
-                    middleware: Vec::new(),
-                    sources: Vec::new(),
-                    auto_start: query_config.auto_start,
-                    joins: None,
-                    enable_bootstrap: true,
-                    bootstrap_buffer_size: 10_000,
-                    priority_queue_capacity: None,
-                    dispatch_buffer_capacity: None,
-                    dispatch_mode: None,
-                    storage_backend: None,
-                    recovery_policy: None,
-                });
-            query.id = query_config.id.clone();
-            query.query = query_config.query.clone();
-            query.auto_start = query_config.auto_start;
-            query.sources = query_config
-                .sources
-                .iter()
-                .map(|source_id| SourceSubscriptionConfig {
-                    source_id: source_id.clone(),
-                    nodes: Vec::new(),
-                    relations: Vec::new(),
-                    pipeline: Vec::new(),
-                })
-                .collect();
+            let defaults = programmatic_api::query_config_from_request(
+                &query_config.id,
+                query_config.query.clone(),
+                query_config.sources.clone(),
+                query_config.auto_start,
+            );
+            let mut options = serde_json::to_value(&defaults)?;
+            if let Some(overrides) = query_config.config.as_object() {
+                options
+                    .as_object_mut()
+                    .context("QueryConfig must serialize as an object")?
+                    .extend(overrides.clone());
+            } else if !query_config.config.is_null() {
+                anyhow::bail!("Query options must be an object: {}", query_config.id);
+            }
+            let mut query: QueryConfig = serde_json::from_value(options)
+                .with_context(|| format!("Invalid query config: {}", query_config.id))?;
+            query.id = defaults.id;
+            query.query = defaults.query;
+            query.auto_start = defaults.auto_start;
+            query.sources = defaults.sources;
             builder = builder.with_query(query);
         }
 
@@ -327,6 +368,18 @@ impl TestRunDrasiLibInstance {
     /// Get the underlying DrasiLib instance.
     pub async fn get_drasi_lib(&self) -> Option<Arc<DrasiLib>> {
         self.core.read().await.clone()
+    }
+
+    pub async fn get_runtime_info(&self) -> anyhow::Result<DrasiLibRuntimeInfo> {
+        let core = self
+            .get_drasi_lib()
+            .await
+            .context("drasi-lib instance is not running")?;
+        Ok(DrasiLibRuntimeInfo {
+            instance_id: self.id.to_string(),
+            execution_mode: core.execution_mode().into(),
+            running: core.is_running().await,
+        })
     }
 
     /// Get an application source handle by source name.

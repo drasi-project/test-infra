@@ -1354,6 +1354,20 @@ impl TestRunHost {
         }
     }
 
+    pub async fn get_test_drasi_lib_instance_runtime(
+        &self,
+        id: &TestRunDrasiLibInstanceId,
+    ) -> anyhow::Result<Option<drasi_lib_instances::DrasiLibRuntimeInfo>> {
+        let test_runs = self.test_runs.read().await;
+        match test_runs
+            .get(&id.test_run_id)
+            .and_then(|run| run.drasi_lib_instances.get(&id.test_drasi_lib_instance_id))
+        {
+            Some(instance) => Ok(Some(instance.get_runtime_info().await?)),
+            None => Ok(None),
+        }
+    }
+
     pub async fn remove_test_drasi_lib_instance(
         &self,
         test_run_drasi_lib_instance_id: &TestRunDrasiLibInstanceId,

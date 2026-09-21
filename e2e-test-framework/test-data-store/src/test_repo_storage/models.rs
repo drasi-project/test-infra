@@ -610,6 +610,8 @@ pub struct DrasiLibInstanceChannelReactionHandlerDefinition {
     pub drasi_lib_instance_id: String,
     pub reaction_id: String,
     pub buffer_size: Option<usize>,
+    #[serde(default)]
+    pub include_profiling: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -604,6 +604,7 @@ impl QueryResultObserverInternalState {
                 .unwrap_or(0),
             traceparent: None,
             tracestate: None,
+            profiling: None,
             payload: crate::common::HandlerPayload::ResultStream {
                 query_result: serde_json::from_value(record.payload.value.clone()).unwrap_or(
                     QueryResultRecord::Control(ControlEvent {

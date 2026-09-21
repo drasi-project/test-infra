@@ -791,6 +791,12 @@ async fn handle_reaction_invocation(
         processed_time_ns: now_ns,
         traceparent: None, // TODO: Extract from headers if available
         tracestate: None,
+        profiling: invocation
+            .payload
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("profiling"))
+            .cloned(),
         payload: HandlerPayload::ReactionInvocation {
             reaction_type: match invocation.handler_type {
                 ReactionHandlerType::Http => "Http".to_string(),

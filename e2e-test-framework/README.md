@@ -984,7 +984,20 @@ reactions:
       drasi_lib_instance_id: embedded-server
       reaction_id: drasi-reaction-id
       buffer_size: 1024              # Optional
+      include_profiling: false       # Optional; enable for diagnostic runs
 ```
+
+With `include_profiling: true`, the embedded channel preserves the query result's
+profiling timestamps, query ID, result sequence and handler-receive time in the
+`HandlerRecord.profiling` field. A `JsonlFile` output logger retains that metadata.
+The result payload is unchanged, so `DeterminismHash` still checks the same ordered
+output. Multiple rows from one query result share a query sequence; count that
+timing sample once when attributing query work.
+
+Capture is off by default. Measure throughput without JSONL logging, then use a
+separate diagnostic run for timing attribution so serialization/file overhead is
+not mistaken for processing overhead. Missing timestamps remain missing rather
+than being reported as zero-duration stages.
 
 ### Output Loggers
 

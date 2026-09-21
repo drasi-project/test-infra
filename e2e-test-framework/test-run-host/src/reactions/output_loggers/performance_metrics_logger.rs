@@ -407,6 +407,7 @@ mod tests {
             processed_time_ns: 2000,
             traceparent: None,
             tracestate: None,
+            profiling: None,
             payload: HandlerPayload::ReactionOutput {
                 reaction_output: serde_json::json!({"test": "data"}),
             },
@@ -429,6 +430,7 @@ mod tests {
             processed_time_ns: 2000,
             traceparent: None,
             tracestate: None,
+            profiling: None,
             payload: HandlerPayload::ReactionOutput {
                 reaction_output: serde_json::json!({"test": "data"}),
             },
@@ -456,6 +458,7 @@ mod tests {
             processed_time_ns: 2000,
             traceparent: None,
             tracestate: None,
+            profiling: None,
             payload: HandlerPayload::ReactionOutput {
                 reaction_output: serde_json::json!({"test": "data"}),
             },
@@ -522,6 +525,7 @@ mod tests {
             processed_time_ns: 2000,
             traceparent: None,
             tracestate: None,
+            profiling: None,
             payload: HandlerPayload::ReactionOutput {
                 reaction_output: serde_json::json!({"test": "data"}),
             },
@@ -573,6 +577,7 @@ mod tests {
             processed_time_ns: 2000,
             traceparent: None,
             tracestate: None,
+            profiling: None,
             payload: HandlerPayload::ReactionOutput {
                 reaction_output: serde_json::json!({"test": "data"}),
             },

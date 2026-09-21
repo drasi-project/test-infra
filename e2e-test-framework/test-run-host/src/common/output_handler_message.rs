@@ -88,6 +88,10 @@ pub struct HandlerRecord {
     pub traceparent: Option<String>,
     pub tracestate: Option<String>,
 
+    /// Framework timing metadata, separate from the result payload and its hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profiling: Option<serde_json::Value>,
+
     // Handler-specific payload
     pub payload: HandlerPayload,
 }
@@ -145,5 +149,26 @@ impl std::fmt::Display for HandlerRecord {
             }
             Err(e) => write!(f, "Error serializing HandlerRecord: {self:?}. Error: {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn records_without_profiling_remain_compatible() {
+        let value = serde_json::json!({
+            "id": "old-record",
+            "sequence": 1,
+            "created_time_ns": 1,
+            "processed_time_ns": 2,
+            "traceparent": null,
+            "tracestate": null,
+            "payload": {"type": "ReactionOutput", "reaction_output": {"value": 42}}
+        });
+        let record: HandlerRecord = serde_json::from_value(value.clone()).unwrap();
+        assert!(record.profiling.is_none());
+        assert_eq!(serde_json::to_value(record).unwrap(), value);
     }
 }

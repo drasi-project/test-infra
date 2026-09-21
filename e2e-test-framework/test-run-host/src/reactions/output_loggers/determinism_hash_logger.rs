@@ -209,6 +209,7 @@ mod tests {
             processed_time_ns: seq * 1_000_000 + 500,
             traceparent: None,
             tracestate: None,
+            profiling: None,
             payload,
         }
     }
@@ -245,6 +246,24 @@ mod tests {
             std::str::from_utf8(&bytes).unwrap(),
             r#"{"a":{"x":2,"y":1},"z":[3,2,1]}"#
         );
+    }
+
+    #[test]
+    fn profiling_metadata_does_not_change_the_result_hash() {
+        let mut record = make_record(
+            1,
+            HandlerPayload::ReactionOutput {
+                reaction_output: json!({"query_id": "query", "result": {"value": 42}}),
+            },
+        );
+        let expected = canonical_payload_bytes(&record).unwrap();
+        record.profiling = Some(json!({
+            "query_id": "query",
+            "query_sequence": 99,
+            "timestamps": {"query_core_call_ns": 100, "query_core_return_ns": 140}
+        }));
+        assert_eq!(canonical_payload_bytes(&record).unwrap(), expected);
+        assert!(serde_json::to_value(&record).unwrap()["profiling"].is_object());
     }
 
     #[test]

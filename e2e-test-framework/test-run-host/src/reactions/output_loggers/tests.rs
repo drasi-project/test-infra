@@ -37,6 +37,7 @@ async fn test_console_logger_output() {
         processed_time_ns: 2000000,
         traceparent: None,
         tracestate: None,
+        profiling: None,
         payload: HandlerPayload::ReactionOutput {
             reaction_output: serde_json::json!({"status": "completed", "data": {"value": 42}}),
         },
@@ -80,6 +81,7 @@ async fn test_jsonl_file_logger_rotation() {
             processed_time_ns: (i + 1) as u64 * 1000000,
             traceparent: None,
             tracestate: None,
+            profiling: Some(serde_json::json!({"timestamps": {"query_core_call_ns": i}})),
             payload: HandlerPayload::ReactionOutput {
                 reaction_output: serde_json::json!({"iteration": i, "data": format!("test data {}", i)}),
             },
@@ -112,6 +114,8 @@ async fn test_jsonl_file_logger_rotation() {
         .unwrap();
     let lines: Vec<&str> = first_file_content.trim().split('\n').collect();
     assert_eq!(lines.len(), 2); // max_lines_per_file = 2
+    let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(first["profiling"]["timestamps"]["query_core_call_ns"], 0);
 }
 
 #[tokio::test]
@@ -177,6 +181,7 @@ async fn test_performance_metrics_logger() {
             processed_time_ns: 2000 + i,
             traceparent: None,
             tracestate: None,
+            profiling: None,
             payload: HandlerPayload::ReactionOutput {
                 reaction_output: serde_json::json!({"count": i}),
             },

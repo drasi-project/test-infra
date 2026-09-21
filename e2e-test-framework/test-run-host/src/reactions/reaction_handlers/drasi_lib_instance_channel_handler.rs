@@ -35,6 +35,7 @@ pub struct DrasiLibInstanceChannelHandlerSettings {
     pub reaction_id: String,
     pub buffer_size: usize,
     pub test_run_query_id: TestRunQueryId,
+    pub include_profiling: bool,
 }
 
 impl DrasiLibInstanceChannelHandlerSettings {
@@ -51,8 +52,31 @@ impl DrasiLibInstanceChannelHandlerSettings {
             reaction_id: definition.reaction_id.clone(),
             buffer_size: definition.buffer_size.unwrap_or(1024),
             test_run_query_id: id,
+            include_profiling: definition.include_profiling,
         })
     }
+}
+
+struct ChannelOutput {
+    value: serde_json::Value,
+    profiling: Option<serde_json::Value>,
+}
+
+fn result_profiling(
+    result: &drasi_lib::channels::QueryResult,
+    enabled: bool,
+) -> Option<serde_json::Value> {
+    enabled.then(|| {
+        serde_json::json!({
+            "query_id": result.query_id,
+            "query_sequence": result.sequence,
+            "timestamps": result.profiling,
+            "handler_received_ns": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after epoch")
+                .as_nanos() as u64,
+        })
+    })
 }
 
 pub struct DrasiLibInstanceChannelHandler {
@@ -92,7 +116,7 @@ impl DrasiLibInstanceChannelHandler {
     async fn create_channel_connection_static(
         test_run_host: &Arc<Mutex<Option<Arc<crate::TestRunHost>>>>,
         settings: &DrasiLibInstanceChannelHandlerSettings,
-    ) -> anyhow::Result<Receiver<serde_json::Value>> {
+    ) -> anyhow::Result<Receiver<ChannelOutput>> {
         // Get the test run host
         let test_run_host_lock = test_run_host.lock().await;
         let test_run_host = test_run_host_lock
@@ -146,12 +170,23 @@ impl DrasiLibInstanceChannelHandler {
                             {
                                 Ok(mut subscription) => {
                                     while let Some(query_result) = subscription.recv().await {
+                                        let profiling = result_profiling(
+                                            &query_result,
+                                            settings_clone.include_profiling,
+                                        );
                                         if query_result.results.is_empty() {
                                             let result_json = serde_json::json!({
                                                 "query_id": query_result.query_id,
                                                 "results": [],
                                             });
-                                            if tx.send(result_json).await.is_err() {
+                                            if tx
+                                                .send(ChannelOutput {
+                                                    value: result_json,
+                                                    profiling,
+                                                })
+                                                .await
+                                                .is_err()
+                                            {
                                                 break;
                                             }
                                         } else {
@@ -160,7 +195,14 @@ impl DrasiLibInstanceChannelHandler {
                                                     "query_id": query_result.query_id.clone(),
                                                     "result": result_item,
                                                 });
-                                                if tx.send(result_json).await.is_err() {
+                                                if tx
+                                                    .send(ChannelOutput {
+                                                        value: result_json,
+                                                        profiling: profiling.clone(),
+                                                    })
+                                                    .await
+                                                    .is_err()
+                                                {
                                                     break;
                                                 }
                                             }
@@ -268,17 +310,20 @@ impl ReactionOutputHandler for DrasiLibInstanceChannelHandler {
                             continue;
                         }
 
-                        // Convert to ReactionHandlerMessage
+                        let mut metadata = serde_json::json!({
+                            "drasi_lib_instance_id": settings.drasi_lib_instance_id.to_string(),
+                            "reaction_id": settings.reaction_id,
+                        });
+                        if let Some(profiling) = reaction_data.profiling {
+                            metadata["profiling"] = profiling;
+                        }
                         let message = ReactionHandlerMessage::Invocation(ReactionInvocation {
                             handler_type: ReactionHandlerType::Http, // TODO: Add DrasiLibInstanceChannel type
                             payload: ReactionHandlerPayload {
-                                value: reaction_data,
+                                value: reaction_data.value,
                                 timestamp: chrono::Utc::now(),
                                 invocation_id: Some(uuid::Uuid::new_v4().to_string()),
-                                metadata: Some(serde_json::json!({
-                                    "drasi_lib_instance_id": settings.drasi_lib_instance_id.to_string(),
-                                    "reaction_id": settings.reaction_id,
-                                })),
+                                metadata: Some(metadata),
                             },
                         });
 
@@ -375,5 +420,44 @@ impl ReactionOutputHandler for DrasiLibInstanceChannelHandler {
 
     async fn set_test_run_host(&self, test_run_host: std::sync::Arc<crate::TestRunHost>) {
         self.set_test_run_host(test_run_host).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use drasi_lib::{channels::QueryResult, profiling::ProfilingMetadata};
+
+    #[test]
+    fn profiling_capture_is_opt_in_and_preserves_query_identity_and_timestamps() {
+        let definition: DrasiLibInstanceChannelReactionHandlerDefinition =
+            serde_json::from_value(serde_json::json!({
+                "drasi_lib_instance_id": "instance", "reaction_id": "reaction"
+            }))
+            .unwrap();
+        assert!(!definition.include_profiling);
+        let mut result = QueryResult::with_profiling(
+            "query".into(),
+            7,
+            chrono::Utc::now(),
+            Vec::new(),
+            Default::default(),
+            ProfilingMetadata {
+                query_core_call_ns: Some(100),
+                query_core_return_ns: Some(140),
+                ..Default::default()
+            },
+        );
+        assert!(result_profiling(&result, false).is_none());
+        let profile = result_profiling(&result, true).unwrap();
+        assert_eq!(profile["query_id"], "query");
+        assert_eq!(profile["query_sequence"], 7);
+        assert_eq!(
+            profile["timestamps"],
+            serde_json::to_value(result.profiling.as_ref().unwrap()).unwrap()
+        );
+        assert!(profile["handler_received_ns"].as_u64().unwrap() > 0);
+        result.profiling = None;
+        assert!(result_profiling(&result, true).unwrap()["timestamps"].is_null());
     }
 }

@@ -117,7 +117,7 @@ impl GrpcInstanceImpl {
                 .map_err(|e| anyhow::anyhow!("Failed to send message to output handler: {e}"))?;
         } else {
             // Send each item as a separate invocation
-            for json_result in json_results {
+            for (json_result, producer_item) in json_results.into_iter().zip(&result.results) {
                 let mut count = self.invocation_count.write().await;
                 *count += 1;
                 let invocation_id = format!("grpc-invocation-{}", *count);
@@ -130,7 +130,7 @@ impl GrpcInstanceImpl {
                     }),
                     timestamp,
                     invocation_id: Some(invocation_id),
-                    metadata: None,
+                    metadata: Some(producer_metadata(&result.query_id, producer_item)),
                 };
 
                 let invocation = ReactionInvocation {
@@ -146,6 +146,284 @@ impl GrpcInstanceImpl {
         }
 
         Ok(())
+    }
+}
+
+fn producer_metadata(query_id: &str, item: &drasi::v1::QueryResultItem) -> serde_json::Value {
+    let mut metadata = serde_json::json!({
+        "headers": {
+            "x-drasi-producer-query-id": query_id,
+            "x-drasi-producer-sequence": item.sequence.to_string(),
+            "x-drasi-producer-row-signature": item.row_signature.to_string(),
+            "x-drasi-producer-item-type": item.item_type.to_string()
+        }
+    });
+    if item.sequence > 0 {
+        metadata["headers"]["x-drasi-producer-key"] = serde_json::Value::String(
+            serde_json::json!([
+                query_id,
+                item.sequence.to_string(),
+                item.row_signature.to_string(),
+                item.item_type
+            ])
+            .to_string(),
+        );
+    }
+    metadata
+}
+
+#[cfg(test)]
+mod producer_capture_tests {
+    use super::*;
+    use crate::common::{HandlerPayload, HandlerRecord};
+    use crate::reactions::output_loggers::determinism_hash_logger::canonical_payload_bytes;
+    use serde_json::{json, Value};
+    use test_data_store::test_run_storage::TestRunId;
+
+    fn instance() -> (GrpcInstanceImpl, Receiver<ReactionHandlerMessage>) {
+        let (tx, rx) = channel(20);
+        (
+            GrpcInstanceImpl {
+                tx,
+                settings: GrpcReactionHandlerSettings {
+                    host: "127.0.0.1".to_owned(),
+                    port: 50052,
+                    correlation_metadata_key: None,
+                    test_run_query_id: TestRunQueryId::new(
+                        &TestRunId::new("repo", "test", "run"),
+                        "items",
+                    ),
+                    query_ids: vec!["items".to_owned()],
+                    include_initial_state: false,
+                },
+                invocation_count: Arc::new(RwLock::new(0)),
+            },
+            rx,
+        )
+    }
+
+    fn item(sequence: u64, row_signature: u64) -> drasi::v1::QueryResultItem {
+        drasi::v1::QueryResultItem {
+            sequence,
+            row_signature,
+            item_type: drasi::v1::QueryResultItemType::Update as i32,
+            after: Some(prost_types::Struct {
+                fields: std::collections::BTreeMap::from([(
+                    "value".to_owned(),
+                    prost_types::Value {
+                        kind: Some(prost_types::value::Kind::NumberValue(2.0)),
+                    },
+                )]),
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn batch(items: Vec<drasi::v1::QueryResultItem>) -> QueryResult {
+        QueryResult {
+            query_id: "items".to_owned(),
+            results: items,
+            timestamp: None,
+        }
+    }
+
+    async fn receive(rx: &mut Receiver<ReactionHandlerMessage>) -> ReactionInvocation {
+        match rx.recv().await.unwrap() {
+            ReactionHandlerMessage::Invocation(invocation) => invocation,
+            _ => panic!("Expected invocation"),
+        }
+    }
+
+    fn key(invocation: &ReactionInvocation) -> &Value {
+        &invocation.payload.metadata.as_ref().unwrap()["headers"]["x-drasi-producer-key"]
+    }
+
+    #[tokio::test]
+    async fn redelivery_retains_producer_key_but_not_receiver_id() {
+        let (instance, mut rx) = instance();
+        let result = batch(vec![item(44, u64::MAX)]);
+        instance.process_query_result(result.clone()).await.unwrap();
+        instance.process_query_result(result).await.unwrap();
+        let first = receive(&mut rx).await;
+        let second = receive(&mut rx).await;
+        assert_eq!(key(&first), key(&second));
+        assert_ne!(first.payload.invocation_id, second.payload.invocation_id);
+        let metadata = first.payload.metadata.as_ref().unwrap();
+        assert_eq!(metadata["headers"]["x-drasi-producer-sequence"], "44");
+        assert_eq!(
+            metadata["headers"]["x-drasi-producer-row-signature"],
+            u64::MAX.to_string()
+        );
+        assert_eq!(
+            first.payload.value,
+            json!({"query_id":"items", "result":{"type":"UPDATE","after":{"value":2.0}}})
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_splitting_does_not_change_keys() {
+        let (instance, mut rx) = instance();
+        let first_item = item(44, 100);
+        let second_item = item(44, 101);
+        instance
+            .process_query_result(batch(vec![first_item.clone(), second_item.clone()]))
+            .await
+            .unwrap();
+        let first = receive(&mut rx).await;
+        let second = receive(&mut rx).await;
+        assert_ne!(key(&first), key(&second));
+        instance
+            .process_query_result(batch(vec![second_item]))
+            .await
+            .unwrap();
+        instance
+            .process_query_result(batch(vec![first_item]))
+            .await
+            .unwrap();
+        let repeated_second = receive(&mut rx).await;
+        let repeated_first = receive(&mut rx).await;
+        assert_eq!(key(&first), key(&repeated_first));
+        assert_eq!(key(&second), key(&repeated_second));
+    }
+
+    #[tokio::test]
+    async fn unsequenced_and_empty_batches_do_not_get_identity() {
+        let (instance, mut rx) = instance();
+        instance
+            .process_query_result(batch(vec![item(0, 123)]))
+            .await
+            .unwrap();
+        let unsequenced = receive(&mut rx).await;
+        assert!(key(&unsequenced).is_null());
+        assert_eq!(
+            unsequenced.payload.metadata.unwrap()["headers"]["x-drasi-producer-sequence"],
+            "0"
+        );
+        instance.process_query_result(batch(vec![])).await.unwrap();
+        let empty = receive(&mut rx).await;
+        assert!(empty.payload.metadata.is_none());
+        assert_eq!(
+            empty.payload.value,
+            json!({"query_id":"items","results":[]})
+        );
+    }
+
+    #[tokio::test]
+    async fn captured_keys_enable_comparator_delivery_diagnostics() {
+        use crate::recovery_comparison::{compare, Artifact, Verdict};
+        let (instance, mut rx) = instance();
+        instance
+            .process_query_result(batch(vec![item(44, 100), item(44, 101)]))
+            .await
+            .unwrap();
+        let first = receive(&mut rx).await;
+        let second = receive(&mut rx).await;
+        let event = |invocation: &ReactionInvocation| {
+            json!({
+                "identity": key(invocation).to_string(), "payload": invocation.payload.value["result"]
+            })
+        };
+        let baseline_json = json!({"schema_version":1,"workload_fingerprint":"synthetic-wire-fixture",
+            "capture":{"complete":true,"evidence":"Synthetic finite fixture, both results captured"},
+            "queries":[{"query_id":"items","config_fingerprint":"fixture-v1",
+                "identity_contract":"grpc-query-sequence-row-operation-v1",
+                "events":[event(&first),event(&second)],"snapshot":[]}]});
+        let baseline: Artifact = serde_json::from_value(baseline_json.clone()).unwrap();
+        let mut recovery_json = baseline_json;
+        recovery_json["queries"][0]["events"] =
+            json!([event(&second), event(&first), event(&first)]);
+        let recovery: Artifact = serde_json::from_value(recovery_json.clone()).unwrap();
+        let report = compare(&baseline, &recovery).unwrap();
+        assert_eq!(report.verdict, Verdict::Failed);
+        assert_eq!(report.queries[0].delivery.reordered, Some(true));
+        assert_eq!(
+            report.queries[0]
+                .delivery
+                .duplicates
+                .values()
+                .sum::<usize>(),
+            1
+        );
+        recovery_json["queries"][0]["events"] = json!([event(&first)]);
+        let recovery: Artifact = serde_json::from_value(recovery_json).unwrap();
+        let report = compare(&baseline, &recovery).unwrap();
+        assert_eq!(
+            report.queries[0].delivery.missing,
+            [key(&second).to_string()]
+        );
+    }
+
+    #[test]
+    fn producer_tuple_includes_query_sequence_row_and_operation() {
+        let original = item(44, 100);
+        let base = producer_metadata("items", &original);
+        let variants = [
+            producer_metadata("other", &original),
+            producer_metadata("items", &item(45, 100)),
+            producer_metadata("items", &item(44, 101)),
+            producer_metadata(
+                "items",
+                &drasi::v1::QueryResultItem {
+                    item_type: drasi::v1::QueryResultItemType::Delete as i32,
+                    ..original.clone()
+                },
+            ),
+        ];
+        for variant in variants {
+            assert_ne!(
+                base["headers"]["x-drasi-producer-key"],
+                variant["headers"]["x-drasi-producer-key"]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unary_rpc_preserves_hash_payload_and_capture_headers() {
+        let (instance, mut rx) = instance();
+        let result = batch(vec![item(44, 100)]);
+        let expected = json!({"query_id":"items", "result":convert_from_drasi_query_result(result.clone()).unwrap()[0]});
+        let response = instance
+            .process_results(Request::new(ProcessResultsRequest {
+                results: Some(result),
+                metadata: Default::default(),
+            }))
+            .await
+            .unwrap();
+        assert!(response.into_inner().success);
+        let invocation = receive(&mut rx).await;
+        let headers = invocation.payload.metadata.as_ref().unwrap()["headers"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned()))
+            .collect();
+        let mut record = HandlerRecord {
+            id: "receiver-1".to_owned(),
+            sequence: 1,
+            created_time_ns: 0,
+            processed_time_ns: 0,
+            traceparent: None,
+            tracestate: None,
+            payload: HandlerPayload::ReactionInvocation {
+                reaction_type: "Grpc".to_owned(),
+                query_id: "unknown".to_owned(),
+                request_method: "POST".to_owned(),
+                request_path: "/".to_owned(),
+                request_body: invocation.payload.value,
+                headers,
+            },
+        };
+        let saved = serde_json::to_value(&record).unwrap();
+        assert!(saved
+            .pointer("/payload/headers/x-drasi-producer-key")
+            .unwrap()
+            .is_string());
+        assert_eq!(saved.pointer("/payload/request_body").unwrap(), &expected);
+        let with_metadata = canonical_payload_bytes(&record).unwrap();
+        if let HandlerPayload::ReactionInvocation { headers, .. } = &mut record.payload {
+            headers.clear();
+        }
+        assert_eq!(with_metadata, canonical_payload_bytes(&record).unwrap());
     }
 }
 

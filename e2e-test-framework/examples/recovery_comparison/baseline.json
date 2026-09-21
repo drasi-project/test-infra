@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "workload_fingerprint": "synthetic-two-items-v1",
+  "capture": {
+    "complete": true,
+    "evidence": "Synthetic fixture: both known producer events captured; final snapshot supplied."
+  },
+  "queries": [{
+    "query_id": "items",
+    "config_fingerprint": "synthetic-items-query-v1",
+    "identity_contract": "synthetic-producer-sequence-and-result-index-v1",
+    "events": [
+      {"identity": "1:0", "payload": {"type": "ADD", "after": {"Ordinal": 1}}},
+      {"identity": "2:0", "payload": {"type": "ADD", "after": {"Ordinal": 2}}}
+    ],
+    "snapshot": [{"Ordinal": 1}, {"Ordinal": 2}]
+  }]
+}

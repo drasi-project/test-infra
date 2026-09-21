@@ -5,8 +5,8 @@ A comprehensive testing framework for validating Drasi, a Change Processing Plat
 ## Table of Contents
 
 - [Overview](#overview)
-- [Architecture](#architecture)
-- [Getting Started](#getting-started)
+- [Organization](#organization)
+- [Prerequisites](#prerequisites)
 - [Deployment Modes](#deployment-modes)
   - [Standalone Process (Testing drasi-lib instance)](#standalone-process-testing-drasi-lib-instance)
   - [Kubernetes Deployment (Testing Drasi Platform)](#kubernetes-deployment-testing-drasi-platform)
@@ -19,7 +19,7 @@ A comprehensive testing framework for validating Drasi, a Change Processing Plat
   - [Local Storage](#local-storage)
   - [Azure Blob Storage](#azure-blob-storage)
   - [GitHub Repository](#github-repository)
-- [Test Definitions](#test-definitions)
+- [Test Definitions vs Test Runs](#test-definitions-vs-test-runs)
 - [Sources](#sources)
   - [Model Sources (Synthetic Data)](#model-sources-synthetic-data)
   - [Script Sources (Recorded Data)](#script-sources-recorded-data)
@@ -30,10 +30,13 @@ A comprehensive testing framework for validating Drasi, a Change Processing Plat
   - [Stop Triggers](#stop-triggers)
 - [Reactions](#reactions)
   - [Reaction Output Handlers](#reaction-output-handlers)
+  - [Profiling Embedded Results](#profiling-embedded-results)
   - [Output Loggers](#output-loggers)
 - [drasi-lib instances](#drasi-lib-instances)
+  - [Choose the Execution Mode](#choose-the-execution-mode)
+  - [Run a Complete Example](#run-a-complete-example)
+  - [Check the Running Mode](#check-the-running-mode)
 - [REST API](#rest-api)
-- [Examples](#examples)
 - [Development](#development)
 
 ---
@@ -48,7 +51,7 @@ The Drasi E2E Test Framework provides:
 - **Performance Testing**: Measure throughput, latency, and resource utilization
 
 The framework supports multiple deployment scenarios:
-1. **Standalone Process**: Test drasi-lib instance directly via HTTP/gRPC APIs
+1. **Standalone Process**: Host embedded drasi-lib instances, or test an external Drasi Server over HTTP/gRPC
 2. **Kubernetes Deployment**: Test the full Drasi Platform in a cluster
 3. **Library Integration**: Embed the test engine in custom test applications
 
@@ -74,7 +77,7 @@ e2e-test-framework/
 
 - Rust toolchain (1.95+)
 - Docker (for container builds)
-- Redis (for query result streaming)
+- Redis (only for Redis-based query result streaming; not needed for embedded examples)
 - Kind/K3D (for Kubernetes testing)
 
 ---
@@ -83,14 +86,20 @@ e2e-test-framework/
 
 ### Standalone Process (Testing drasi-lib instance)
 
-Use the Test Service as a standalone process to test drasi-lib instance directly:
+The Test Service can host drasi-lib instances in the same process. Sources and
+reactions connect through `DrasiLibInstanceChannel`; the embedded instance does
+not expose an HTTP/gRPC server. See [drasi-lib instances](#drasi-lib-instances)
+for engine selection and a complete runnable example.
+
+To test an **external Drasi Server** instead, use HTTP/gRPC dispatchers and
+reaction handlers.
 
 ```bash
 # Run with a configuration file
 cargo run -p test-service -- \
   --config config.yaml \
   --port 8080 \
-  --data /tmp/test-data
+  --data ./test-data
 
 # Run in release mode for performance testing
 cargo run --release -p test-service -- --config config.yaml
@@ -98,11 +107,11 @@ cargo run --release -p test-service -- --config config.yaml
 
 The Test Service will:
 1. Load test definitions from configured repositories
-2. Initialize sources that dispatch changes via HTTP/gRPC to drasi-lib instance
-3. Monitor query results via Redis streams or reaction endpoints
+2. Start configured embedded instances or connect dispatchers to external services
+3. Monitor query results and reaction output through the configured handlers
 4. Collect profiling metrics and logs
 
-**Example configuration for HTTP dispatcher:**
+**Source-definition excerpt for an external Drasi Server's HTTP source:**
 
 ```yaml
 sources:
@@ -205,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
         sources: vec![/* source configs */],
         queries: vec![/* query configs */],
         reactions: vec![/* reaction configs */],
-        drasi_lib_instances: vec![/* server configs */],
+        drasi_lib_instances: vec![/* embedded instance configs */],
     };
 
     let test_run_id = test_run_host.add_test_run(test_run_config).await?;
@@ -759,22 +768,9 @@ source_change_dispatchers:
     pubsub_topic: source-changes     # Required
 ```
 
-#### DrasiLibInstanceApi Dispatcher
-
-Sends changes to an embedded Drasi server via API:
-
-```yaml
-source_change_dispatchers:
-  - kind: DrasiLibInstanceApi
-    drasi_lib_instance_id: embedded-server
-    source_id: facilities-source
-    timeout_seconds: 30              # Optional
-    batch_events: false              # Optional
-```
-
 #### DrasiLibInstanceChannel Dispatcher
 
-Sends changes to an embedded Drasi server via internal channel:
+Sends changes to an embedded drasi-lib instance through an in-process channel:
 
 ```yaml
 source_change_dispatchers:
@@ -976,28 +972,64 @@ reactions:
 
 #### DrasiLibInstanceChannel Handler
 
+**Test-definition excerpt**, not a test-run override. For inline definitions,
+this `reactions` array belongs under
+`data_store.test_repos[].local_tests[]`.
+
 ```yaml
 reactions:
-  - test_reaction_id: comfort-alerts
+  - test_reaction_id: building-comfort
     output_handler:
       kind: DrasiLibInstanceChannel
-      drasi_lib_instance_id: embedded-server
-      reaction_id: drasi-reaction-id
-      buffer_size: 1024              # Optional
-      include_profiling: false       # Optional; enable for diagnostic runs
+      drasi_lib_instance_id: internal-drasi-lib
+      reaction_id: building-comfort-alerts
+      buffer_size: 1024              # Default
+      include_profiling: false       # Default; set true for a diagnostic run
 ```
 
-With `include_profiling: true`, the embedded channel preserves the query result's
-profiling timestamps, query ID, result sequence and handler-receive time in the
-`HandlerRecord.profiling` field. A `JsonlFile` output logger retains that metadata.
-The result payload is unchanged, so `DeterminismHash` still checks the same ordered
-output. Multiple rows from one query result share a query sequence; count that
-timing sample once when attributing query work.
+### Profiling Embedded Results
 
-Capture is off by default. Measure throughput without JSONL logging, then use a
-separate diagnostic run for timing attribution so serialization/file overhead is
-not mistaken for processing overhead. Missing timestamps remain missing rather
-than being reported as zero-duration stages.
+`include_profiling` defaults to `false`. When enabled on the
+`DrasiLibInstanceChannel` output handler, it fills the optional
+`HandlerRecord.profiling` field with:
+
+- `query_id` and `query_sequence`: the emitting query and its result sequence.
+- `timestamps`: the query result's available profiling timestamps, in nanoseconds
+  since the Unix epoch.
+- `handler_received_ns`: when the harness receives the result from the application
+  reaction, before splitting it into output rows and logging it.
+
+A `JsonlFile` output logger retains this metadata. The result payload and the
+ordered payload bytes used by `DeterminismHash` are unchanged.
+
+One query result can produce several output records with the same query sequence.
+Deduplicate query timing samples by full test-run ID, `profiling.query_id`, and
+`profiling.query_sequence` (also keep the instance ID if a run uses multiple
+instances). Do not use `HandlerRecord.sequence`, which counts output records.
+
+Interpret the timestamps as follows:
+
+| Field | Meaning |
+|-------|---------|
+| `timestamps.query_core_return_ns` | After the actual core call has completed and committed its changes, not when output is prepared earlier in that call. |
+| `timestamps.query_send_ns` | Before live output publication, not after delivery or subscriber processing finishes. |
+| `timestamps.reaction_receive_ns` | For `ApplicationReaction`, after removing a result from its input queue. |
+| `timestamps.reaction_complete_ns` | For `ApplicationReaction`, after waiting for space in the application channel, immediately before handing over the result. It does not include the application's processing. |
+
+Results replayed from disk can lack completion timestamps because they were saved
+before the core call completed. Other reactions may not supply every timestamp;
+capture preserves what is available rather than filling missing fields.
+
+These intervals measure **elapsed wall-clock time, not CPU time**. They can include
+queue waits, scheduling delays, and I/O. Query receive-to-send time already includes
+the core call: do not add inclusive intervals together or sum concurrent samples
+and call the result CPU time. Treat missing or backwards timestamps as unavailable
+or invalid samples, not zero-duration stages.
+
+For **throughput runs**, leave capture off and remove `JsonlFile` output loggers.
+Use a separate diagnostic run with `include_profiling: true` and a `JsonlFile`
+logger under `test_run_host.test_runs[].reactions[].output_loggers`. This keeps
+profiling serialization and file I/O out of throughput measurements.
 
 ### Output Loggers
 
@@ -1053,86 +1085,113 @@ reactions:
 
 ## drasi-lib instances
 
-Embed Drasi server functionality for in-process testing:
+An embedded `DrasiLib` instance runs inside `test-service`, not as a separate Drasi
+Server. Its test definition contains `test_drasi_lib_instance_id` and `config`
+with `sources`, `queries`, and `reactions`. For inline definitions, the location is
+`data_store.test_repos[].local_tests[].drasi_lib_instances[]`.
+The host currently supports `kind: application` sources and reactions; component
+entries use `id` and `config`, not `source_type`, `reaction_type`, or `properties`.
+See the [complete example configuration](examples/building_comfort/local/drasi_lib/config.json)
+for the component definitions and their channel connections.
 
-```yaml
-local_tests:
-  - test_id: embedded-test
-    drasi_lib_instances:
-      - id: embedded-server
-        name: Test Server
-        description: In-process Drasi server for testing
+### Choose the Execution Mode
 
-        config:
-          # Runtime configuration
-          runtime:
-            worker_threads: 4
-            max_blocking_threads: 512
-            thread_name_prefix: drasi-worker
-            enable_metrics: true
+Both engines are included in this workspace's test-service build. Select one per
+embedded instance using
+`test_run_host.test_runs[].drasi_lib_instances[].test_run_overrides.execution_mode`.
 
-          # Storage backend
-          storage:
-            type: memory             # memory | file | redis
-            max_size: 1000000        # For memory type
-            # path: /tmp/storage     # For file type
-            # persist: true          # For file type
-            # url: redis://localhost # For redis type
-            # key_prefix: drasi:     # For redis type
+| Value | Engine | Default? |
+|-------|--------|----------|
+| `componentGraph` | ComponentGraph | Yes, when the override is omitted |
+| `computationGraph` | ComputationGraph | No, opt in explicitly |
 
-          # Authentication
-          auth:
-            type: none               # none | basic | token | oauth2
-            # username: admin        # For basic
-            # password: secret       # For basic
-            # token: api-token       # For token
+Values are case-sensitive; unknown mode values are rejected. The instance's
+`start_immediately` also defaults to `true`.
 
-          # Drasi components
-          sources:
-            - id: facilities-source
-              source_type: application
-              auto_start: true
-              properties: {}
-
-          queries:
-            - id: room-comfort
-              query: |
-                MATCH (r:Room)-[:HAS_SENSOR]->(s:Sensor)
-                WHERE s.temperature > 75
-                RETURN r.name, s.temperature
-              sources:
-                - facilities-source
-              auto_start: true
-
-          reactions:
-            - id: comfort-alerts
-              reaction_type: application
-              queries:
-                - room-comfort
-              auto_start: true
-
-          log_level: info
-```
-
-**Runtime configuration in test runs:**
+**Runtime configuration excerpt — not a complete configuration file.** In the
+complete example, add `test_run_overrides` to the existing instance entry; keep
+the source and reaction settings:
 
 ```yaml
 test_run_host:
   test_runs:
-    - test_id: embedded-test
-      test_repo_id: local_repo
-      test_run_id: run-001
-
+    - test_repo_id: drasi_lib_dev_repo
+      test_id: building_comfort
+      test_run_id: test_run_001
       drasi_lib_instances:
-        - test_drasi_lib_instance_id: embedded-server
+        - test_drasi_lib_instance_id: internal-drasi-lib
           start_immediately: true
-
           test_run_overrides:
-            log_level: debug
-            storage:
-              type: memory
-              max_size: 2000000
+            execution_mode: computationGraph
 ```
+
+This is **test-service configuration for an embedded instance**. Drasi Server's
+`executionMode` YAML field and Server command-line flags do not select the engine
+here. This harness schema has no `runtime`, `storage`, or `auth` blocks.
+When testing an external Drasi Server, configure its engine separately in that
+Server; the harness only connects to it.
+
+### Run a Complete Example
+
+Use the checked-in [Building Comfort configuration](examples/building_comfort/local/drasi_lib/config.json).
+It omits the engine override, so it runs ComponentGraph unchanged. For
+ComputationGraph, add the override shown above to that configuration (using JSON
+syntax in `config.json`).
+
+From `e2e-test-framework/`:
+
+```bash
+cd examples/building_comfort/local/drasi_lib
+cargo run --locked --release \
+  --manifest-path ../../../../test-service/Cargo.toml \
+  -- --config config.json --port 63123
+```
+
+The build uses the sibling `drasi-core` checkout through local dependencies; no
+external Drasi Server or Redis service is needed. Launch from the example folder
+because its data paths are relative to the working directory. The example clears
+its `./test_data_cache` on start and stop.
+
+This is a functional example, **not a throughput baseline**: it writes JSONL, and
+its reaction stop thresholds count output records rather than proving every
+input has finished processing. Use the separate
+[throughput and diagnostic settings](#profiling-embedded-results) when measuring.
+
+### Check the Running Mode
+
+From another terminal, while the instance is running:
+
+```bash
+curl --fail --silent --show-error \
+  http://localhost:63123/api/test_runs/drasi_lib_dev_repo.building_comfort.test_run_001/drasi_lib_instances/internal-drasi-lib/runtime
+```
+
+The route is
+`GET /api/test_runs/<run-id>/drasi_lib_instances/<instance-id>/runtime`.
+`<run-id>` is the composite `test_repo_id.test_id.test_run_id`, not just
+`test_run_id`. `<instance-id>` is the configured `test_drasi_lib_instance_id`.
+
+For the unmodified example, expect:
+
+```json
+{
+  "instance_id": "drasi_lib_dev_repo.building_comfort.test_run_001.internal-drasi-lib",
+  "execution_mode": "componentGraph",
+  "running": true
+}
+```
+
+With the override, `execution_mode` should be `computationGraph`.
+`execution_mode` and `running` come from the live `DrasiLib`, not from
+configuration. The route requires a running instance; a stopped or
+not-yet-started instance currently returns an error, not a configuration-only
+mode report.
+
+For the engines themselves, see the core
+[design](https://github.com/drasi-project/drasi-core/blob/agentofreality-parallel-computation-graph/lib/docs/computation-graph-design.md),
+[usage](https://github.com/drasi-project/drasi-core/blob/agentofreality-parallel-computation-graph/lib/docs/computation-graph-usage.md),
+and [configuration](https://github.com/drasi-project/drasi-core/blob/agentofreality-parallel-computation-graph/lib/docs/computation-graph-configuration.md)
+guides. This README covers the harness-specific configuration.
 
 ---
 
@@ -1181,6 +1240,8 @@ The Test Service provides a comprehensive REST API. Interactive documentation is
 | DELETE | `/api/test_runs/{id}/reactions/{rid}` | Delete reaction |
 | POST | `/api/test_runs/{id}/reactions/{rid}/start` | Start reaction observer |
 | POST | `/api/test_runs/{id}/reactions/{rid}/stop` | Stop reaction observer |
+| **Embedded drasi-lib instances** |||
+| GET | `/api/test_runs/{run_id}/drasi_lib_instances/{instance_id}/runtime` | Get the live execution mode and running status |
 | **Repositories** |||
 | GET | `/api/repos` | List repositories |
 | POST | `/api/repos` | Create repository |

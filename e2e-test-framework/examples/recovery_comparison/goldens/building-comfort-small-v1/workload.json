@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "test_source_id": "facilities-db",
+      "kind": "Model",
+      "source_change_dispatchers": [
+        {
+          "kind": "Grpc",
+          "host": "localhost",
+          "port": 50051,
+          "timeout_seconds": 60,
+          "batch_events": true,
+          "tls": false,
+          "source_id": "facilities-db"
+        },
+        {
+          "kind": "JsonlFile",
+          "max_lines_per_file": 15000
+        }
+      ],
+      "model_data_generator": {
+        "kind": "BuildingHierarchy",
+        "change_interval": [
+          2000000000,
+          500000000,
+          500000000,
+          4000000000
+        ],
+        "change_count": 100000,
+        "seed": 123456789,
+        "spacing_mode": "none",
+        "time_mode": "2025-01-03T10:03:15.4Z",
+        "send_initial_inserts": true,
+        "building_count": [
+          1,
+          0
+        ],
+        "floor_count": [
+          3,
+          0
+        ],
+        "room_count": [
+          4,
+          0
+        ],
+        "room_sensors": [
+          {
+            "kind": "NormalFloat",
+            "id": "temperature",
+            "momentum_init": [
+              5,
+              1,
+              0.5
+            ],
+            "value_change": [
+              1,
+              0
+            ],
+            "value_init": [
+              5000,
+              0
+            ],
+            "value_range": [
+              0,
+              10000
+            ]
+          },
+          {
+            "kind": "NormalFloat",
+            "id": "co2",
+            "momentum_init": [
+              10,
+              1,
+              0.5
+            ],
+            "value_change": [
+              1,
+              0
+            ],
+            "value_init": [
+              5000,
+              0
+            ],
+            "value_range": [
+              0,
+              10000
+            ]
+          },
+          {
+            "kind": "NormalFloat",
+            "id": "humidity",
+            "momentum_init": [
+              5,
+              1,
+              0.5
+            ],
+            "value_change": [
+              1,
+              0
+            ],
+            "value_init": [
+              5000,
+              0
+            ],
+            "value_range": [
+              0,
+              10000
+            ]
+          }
+        ]
+      },
+      "subscribers": [
+        {
+          "node_id": "default",
+          "query_id": "building-comfort"
+        },
+        {
+          "node_id": "default",
+          "query_id": "building-comfort-floor-agg"
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "id": "building-comfort",
+      "autoStart": true,
+      "queryLanguage": "Cypher",
+      "sources": [
+        {
+          "sourceId": "facilities-db"
+        }
+      ],
+      "query": "MATCH (r:Room)\nRETURN elementId(r) AS RoomId,\n       r.temperature AS Temperature,\n       r.humidity AS Humidity,\n       r.co2 AS Co2"
+    },
+    {
+      "id": "building-comfort-floor-agg",
+      "autoStart": true,
+      "queryLanguage": "Cypher",
+      "sources": [
+        {
+          "sourceId": "facilities-db"
+        }
+      ],
+      "query": "MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room)\nWITH f,\n     avg(r.temperature) AS AvgTemperature,\n     max(r.co2)         AS MaxCo2,\n     min(r.humidity)    AS MinHumidity,\n     count(r)           AS RoomCount\nRETURN elementId(f)     AS FloorId,\n       AvgTemperature,\n       MaxCo2,\n       MinHumidity,\n       RoomCount"
+    }
+  ],
+  "normalization": "full-row-multiset-v1"
+}

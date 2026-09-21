@@ -1,0 +1,14 @@
+{
+  "status": "candidate",
+  "captured_at_utc": "2026-09-15T21:20:48Z",
+  "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5",
+  "raw_artifacts": "/tmp/recovery-golden-producer-84.I1FGSs",
+  "variant": "grpc_standard",
+  "server_sha256": "ed6b4b97938231be238a479ff2d206c7376b56a8f3e440dbf85c7ded5230612e",
+  "test_service_sha256": "6a9d344f9e967b8d8f08849b1317e03093665690601ec78681556200b630a82d",
+  "test_infra_head": "2538874a4dbd6832ce5b2d52254c66d941d200a5",
+  "test_infra_uncommitted_changes": true,
+  "outbox_capacity": 20000,
+  "producer_identity_contract": "grpc-query-sequence-row-operation-v1",
+  "capture_complete": false
+}

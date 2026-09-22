@@ -137,6 +137,9 @@ jobs:
   publish-results:
     needs: [stock-market-drasi-server-http-grpc-join]
     if: always() && github.event_name == 'schedule'
+    permissions:
+      contents: read
+      issues: write
     uses: ./.github/workflows/publish-test-results.yml
     secrets:
       TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

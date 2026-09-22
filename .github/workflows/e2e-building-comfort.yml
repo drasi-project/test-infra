@@ -356,6 +356,9 @@ jobs:
   publish-results:
     needs: [building-comfort]
     if: always() && github.event_name == 'schedule'
+    permissions:
+      contents: read
+      issues: write
     uses: ./.github/workflows/publish-test-results.yml
     secrets:
       TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

@@ -59,6 +59,12 @@ jobs:
     name: publish summaries
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: publish-test-results-${{ github.workflow }}
+      cancel-in-progress: false
     # A publishing problem must not turn the E2E run red. Failures still show
     # as an annotation on the job, but the workflow's own result reflects the
     # tests, not the reporting.
@@ -77,6 +83,13 @@ jobs:
           count=$(find summaries -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')
           echo "count=$count" >> "$GITHUB_OUTPUT"
           echo "Found $count summary file(s)."
+
+      - name: Checkout reporting scripts
+        if: steps.check.outputs.count != '0'
+        uses: actions/checkout@v5
+        with:
+          path: automation
+          persist-credentials: false
 
       - name: Mint a token for test-results
         if: steps.check.outputs.count != '0'
@@ -144,6 +157,29 @@ jobs:
           # can see it, instead of landing on main and turning that repo red.
           python3 validate-results.py
 
+      - name: Check performance regressions
+        if: steps.check.outputs.count != '0'
+        id: regressions
+        continue-on-error: true
+        run: |
+          python3 automation/.github/scripts/check_performance.py \
+            --current summaries \
+            --history test-results/results \
+            --config automation/.github/performance-regression.json \
+            --output performance-report.json \
+            --markdown performance-report.md
+          cat performance-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload performance comparison
+        if: always() && steps.regressions.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: performance-regression-report
+          path: |
+            performance-report.json
+            performance-report.md
+
       - name: Commit and push
         if: steps.check.outputs.count != '0'
         working-directory: test-results
@@ -184,3 +220,15 @@ jobs:
 
           echo "::error::Could not push results after 5 attempts."
           exit 1
+
+      - name: Open or update performance regression issues
+        if: always() && steps.regressions.outcome == 'success'
+        continue-on-error: true
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('node:fs');
+            const report = JSON.parse(fs.readFileSync('performance-report.json', 'utf8'));
+            const reportPerformance = require('./automation/.github/scripts/report_performance.cjs');
+            await reportPerformance({ github, context, core, report });

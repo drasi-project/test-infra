@@ -110,6 +110,7 @@ jobs:
             variant=$(jq -r '.dimensions.variant' "$file")
             run_id=$(jq -r '.run.run_id' "$file")
             started=$(jq -r '.run.started_at' "$file")
+            runner=$(jq -r '.run.runner // ""' "$file")
 
             if [[ -z "$scenario" || -z "$variant" || -z "$run_id" || "$started" == "null" || -z "$started" ]]; then
               echo "::warning::skipping $file - missing scenario/variant/run_id/started_at"
@@ -121,8 +122,17 @@ jobs:
             # adding a duplicate datapoint.
             dir="test-results/results/${started:0:4}/${started:5:2}/${started:8:2}"
             mkdir -p "$dir"
-            cp "$file" "${dir}/${scenario}__${variant}__${run_id}.json"
-            echo "placed ${dir}/${scenario}__${variant}__${run_id}.json"
+            hardware_suffix=""
+            if [[ "$runner" == azure-ephemeral-* ]]; then
+              [[ "$runner" =~ ^[A-Za-z0-9_-]+$ ]] || {
+                echo "::warning::skipping $file - invalid Azure hardware profile"
+                continue
+              }
+              hardware_suffix="__${runner}"
+            fi
+            destination="${dir}/${scenario}__${variant}${hardware_suffix}__${run_id}.json"
+            cp "$file" "$destination"
+            echo "placed $destination"
           done
 
       - name: Validate against the published schema

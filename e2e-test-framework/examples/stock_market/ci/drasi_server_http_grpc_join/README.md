@@ -65,6 +65,11 @@ test-service --gRPC source--+
   the tail at different points), so no SHA baseline is stable. The
   count-based stop trigger is the meaningful assertion; performance
   metrics are reported in the workflow summary for visibility.
+- `render_server_config.rb` &mdash; renders the selected query-capacity,
+  RocksDB index, redb state-store, source-WAL, and plugin settings into the
+  scratch server config without changing the committed scenario definition.
+- `test_render_server_config.rb` and `test_render_configs.sh` &mdash; cover the
+  structured server renderer and the runner's complete scratch-config path.
 
 ## Why the watchlist seed is in `source_change_scripts`, not `bootstrap_scripts`
 
@@ -98,9 +103,8 @@ its query state from them.
 The CI script will:
 
 1. Download the latest `drasi-server` binary (or reuse `DRASI_SERVER_BIN`).
-2. Patch port `8080` &rarr; `8090` (avoid colliding with the test service),
-   make `data_store_path` and `source_path` absolute, and disable
-   `delete_on_start/stop` so artifacts are preserved.
+2. Render the selected server profile, patch the workload and CI paths, and
+  disable `delete_on_start/stop` so artifacts are preserved.
 3. Start `drasi-server` (waiting for both port `9000` and port `50051`)
    and `test-service`.
 4. Poll the `watchlist-prices` reaction until it reaches `Stopped`.
@@ -109,6 +113,27 @@ The CI script will:
 
 Artifacts (logs, captured JSONL, reaction state) land in
 `./ci_artifacts/`.
+
+## Configuration controls
+
+The manual workflow exposes the Phase I controls that preserve this scenario's
+cross-source join contract:
+
+| Input | Values | Effect |
+| --- | --- | --- |
+| `workload_size` | `100000`, `250000`, `500000` | Number of stock changes; the reaction stop target remains 75% of the workload. |
+| `query_tuning` | `1000`, `10000`, `100000` | Sets query priority, dispatch, and bootstrap buffer capacities. |
+| `persist_index` | boolean | Enables the RocksDB index and replay-capable WAL durability on both sources. |
+| `state_store` | boolean | Enables the redb plugin state store under the run's scratch directory. |
+| `drasi_server_version` | release tag or empty | Selects a release; empty uses latest. |
+| `drasi_server_repo` / `drasi_server_ref` | repo and optional ref | Builds an arbitrary server repo/ref from source. |
+| `plugin_registry` / `plugin_tag` | OCI registry/tag or empty | Overrides the source/reaction plugin packages. |
+
+`stock_market` intentionally has no source/reaction variant matrix or query
+checkboxes: its HTTP stock source, gRPC watchlist source, and sole join query
+are the behavior under test. It also has no large-bootstrap preset. External
+server plugins consume dispatched events rather than pulling framework
+bootstrap data, so `workload_size` is the scenario's data-volume control.
 
 ## Running in CI against a drasi-server branch or fork
 
@@ -119,10 +144,13 @@ workflow. By default (scheduled or a plain manual run) it downloads the latest
 source**, trigger it via *Actions → E2E - stock_market join → Run workflow* and
 set:
 
+- `drasi_server_version` &mdash; a release tag to download. Empty downloads the
+  latest release when no source repo/ref is selected.
 - `drasi_server_ref` &mdash; a branch, tag, or commit SHA to build. Empty keeps
-  the default release-download behavior.
+  the default release-download behavior unless `drasi_server_repo` is set.
 - `drasi_server_repo` &mdash; the repo to build from (`owner/name`). Point it at
-  a fork to test a fork branch. Empty defaults to `drasi-project/drasi-server`.
+  a fork to test its default branch or the selected ref. Empty defaults to
+  `drasi-project/drasi-server`.
 
 The runner clones that repo/ref and runs `cargo build --release`, then uses the
 freshly built binary. The step summary labels the run with the resolved source

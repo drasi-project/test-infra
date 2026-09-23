@@ -12,18 +12,54 @@ name: E2E - stock_market join
 on:
   workflow_dispatch:
     inputs:
+      workload_size:
+        description: "Stock-trade changes to generate. The watchlist script and join topology stay fixed."
+        type: choice
+        options:
+          - "100000"
+          - "250000"
+          - "500000"
+        default: "100000"
+      query_tuning:
+        description: "Query capacity: priorityQueueCapacity (drives priority/dispatch/bootstrap buffers)."
+        type: choice
+        options:
+          - "1000"
+          - "10000"
+          - "100000"
+        default: "10000"
+      persist_index:
+        description: "Use the built-in RocksDB persistent index (persistIndex)."
+        type: boolean
+        default: false
+      state_store:
+        description: "Use the redb plugin state store (stateStore)."
+        type: boolean
+        default: false
+      drasi_server_version:
+        description: "drasi-server release tag (e.g. v0.1.5). Only used when repo/ref below are both empty. Empty = latest."
+        required: false
+        default: ""
       drasi_server_repo:
-        description: "drasi-server repo (owner/name) to build from. Empty defaults to drasi-project/drasi-server."
+        description: "drasi-server repo (owner/name) to BUILD from source. Empty = drasi-project/drasi-server."
         required: false
         default: ""
       drasi_server_ref:
-        description: "drasi-server branch/tag/SHA to BUILD from source. Empty = download the latest release binary."
+        description: "drasi-server branch/tag/SHA to BUILD from source. Empty with a repo set = that repo's default branch."
         required: false
         default: ""
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false
         default: "30"
+      plugin_registry:
+        description: "OCI registry for short plugin refs. Empty = server default (ghcr.io/drasi-project)."
+        required: false
+        default: ""
+      plugin_tag:
+        description: "OCI tag to pin every plugin ref to. Empty = untagged (latest-compatible)."
+        required: false
+        default: ""
   schedule:
     # 07:15 UTC daily (offset from building_comfort).
     - cron: "15 7 * * *"
@@ -41,6 +77,7 @@ jobs:
       # When drasi_server_ref is set, the runner builds drasi-server from that
       # branch/tag/SHA of DRASI_REPO (a fork if drasi_server_repo points at one)
       # instead of downloading the latest release.
+      DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
       DRASI_REPO: ${{ inputs.drasi_server_repo }}
       DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
     steps:
@@ -55,8 +92,8 @@ jobs:
         with:
           workspaces: e2e-test-framework
 
-      - name: Install runtime deps (jq, curl)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl
+      - name: Install runtime deps (jq, curl, ruby)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl ruby
 
       # test-run-host enables drasi-core's `middleware-jq` feature, which
       # pulls in jq-sys; jq-sys links against the system libjq + libonig.
@@ -78,7 +115,9 @@ jobs:
 
       - name: Build test-service
         working-directory: e2e-test-framework
-        run: cargo build --release --manifest-path test-service/Cargo.toml
+        run: |
+          cargo build --release --locked --manifest-path test-service/Cargo.toml
+          echo "TEST_SERVICE_BIN=$GITHUB_WORKSPACE/e2e-test-framework/target/release/test-service" >> "$GITHUB_ENV"
 
       - name: Record start time
         run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
@@ -89,6 +128,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
           WORK_DIR: ${{ runner.temp }}/ci_work
+          WORKLOAD_SIZE: ${{ inputs.workload_size }}
+          QUERY_TUNING: ${{ inputs.query_tuning }}
+          PERSIST_INDEX: ${{ inputs.persist_index }}
+          STATE_STORE: ${{ inputs.state_store }}
+          DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
+          DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
         run: bash "${WORKDIR}/run_test_ci.sh"
 
       - name: Upload artifacts

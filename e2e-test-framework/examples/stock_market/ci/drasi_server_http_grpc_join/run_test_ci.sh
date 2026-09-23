@@ -31,9 +31,10 @@
 #                         fork branch.
 #   DRASI_SERVER_VERSION  Release tag to download. Default: latest (release mode).
 #   DRASI_SERVER_REF      Branch/tag/SHA to BUILD drasi-server from source with
-#                         cargo. When set, overrides the release download.
-#                         Empty = download the release binary (default).
+#                         cargo. An explicit DRASI_REPO also selects a source
+#                         build; an empty ref then uses that repo's default branch.
 #   DRASI_SERVER_BIN      Pre-built binary; skips both download and source build.
+#   TEST_SERVICE_BIN      Pre-built test-service binary; otherwise uses cargo run.
 #   DRASI_ADMIN_PORT      Admin port to patch into drasi_server_config.yaml. Default: 8090
 #   DRASI_HTTP_PORT       HTTP source port. Default: 9000
 #   DRASI_GRPC_PORT       gRPC source port. Default: 50051
@@ -46,6 +47,16 @@
 #   TIMEOUT_SECS          Max seconds to wait for the completion signal.
 #                         Default: 1800
 #   POLL_INTERVAL_SECS    Seconds between status polls. Default: 10
+#   WORKLOAD_SIZE         Stock-trade changes to generate. Must be at least 100000.
+#                         Default: 100000
+#   QUERY_TUNING          Query capacity: 1000, 10000, or 100000. Default: 10000
+#   PERSIST_INDEX         Enable the built-in RocksDB index and source WALs.
+#                         Default: false
+#   STATE_STORE           Enable the redb plugin state store. Default: false
+#   WAL_MAX_EVENTS        Source WAL retention when PERSIST_INDEX=true. Default: 500000
+#   DRASI_PLUGIN_REGISTRY OCI registry for short plugin refs. Empty = server default
+#   DRASI_PLUGIN_TAG      OCI tag appended to untagged plugin refs. Empty = untagged
+#   RENDER_CONFIG_ONLY    Render and validate scratch configs, then exit. Default: false
 #   ARTIFACTS_DIR         Where to copy outputs. Default: ./ci_artifacts
 #   WORK_DIR              Scratch dir. Default: ./.ci_work
 
@@ -56,6 +67,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # five levels below the repo root.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
+DRASI_REPO_EXPLICIT="${DRASI_REPO:-}"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
 DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
@@ -67,6 +79,14 @@ TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.stock_market.test_run_001}"
 TEST_REACTION_IDS="${TEST_REACTION_IDS:-watchlist-prices}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
+WORKLOAD_SIZE="${WORKLOAD_SIZE:-100000}"
+QUERY_TUNING="${QUERY_TUNING:-10000}"
+PERSIST_INDEX="${PERSIST_INDEX:-false}"
+STATE_STORE="${STATE_STORE:-false}"
+WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-}"
+DRASI_PLUGIN_REGISTRY="${DRASI_PLUGIN_REGISTRY:-}"
+DRASI_PLUGIN_TAG="${DRASI_PLUGIN_TAG:-}"
+RENDER_CONFIG_ONLY="${RENDER_CONFIG_ONLY:-false}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$SCRIPT_DIR/ci_artifacts}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.ci_work}"
 
@@ -88,6 +108,27 @@ SERVICE_PID=""
 DRASI_BUILD_SOURCE=""
 
 log() { echo "[ci] $*"; }
+
+resolve_workload() {
+    if [[ ! "$WORKLOAD_SIZE" =~ ^[1-9][0-9]*$ ]] || (( WORKLOAD_SIZE < 100000 )); then
+        log "ERROR: WORKLOAD_SIZE must be an integer of at least 100000"
+        return 1
+    fi
+
+    REACTION_RECORD_COUNT=$(( WORKLOAD_SIZE * 3 / 4 ))
+    local minimum_wal_events=$(( WORKLOAD_SIZE + 1000 ))
+    if [[ -z "$WAL_MAX_EVENTS" ]]; then
+        WAL_MAX_EVENTS=500000
+    elif [[ ! "$WAL_MAX_EVENTS" =~ ^[1-9][0-9]*$ ]]; then
+        log "ERROR: WAL_MAX_EVENTS must be a positive integer"
+        return 1
+    fi
+    if (( WAL_MAX_EVENTS < minimum_wal_events )); then
+        WAL_MAX_EVENTS=$minimum_wal_events
+    fi
+
+    log "Workload: changes=$WORKLOAD_SIZE reaction_stop=$REACTION_RECORD_COUNT wal_max_events=$WAL_MAX_EVENTS"
+}
 
 cleanup() {
     local exit_code=$?
@@ -133,7 +174,7 @@ download_drasi_server() {
         return 0
     fi
 
-    if [[ -n "$DRASI_SERVER_REF" ]]; then
+    if [[ -n "$DRASI_REPO_EXPLICIT" || -n "$DRASI_SERVER_REF" ]]; then
         build_drasi_server_from_source
         return 0
     fi
@@ -147,12 +188,15 @@ download_drasi_server() {
 build_drasi_server_from_source() {
     local ref="$DRASI_SERVER_REF"
     local repo_url="https://github.com/${DRASI_REPO}.git"
-    log "Building drasi-server from source: repo=$DRASI_REPO ref=$ref"
+    local display_ref="${ref:-default branch}"
+    log "Building drasi-server from source: repo=$DRASI_REPO ref=$display_ref"
 
     rm -rf "$SRC_BUILD_DIR"
     # Shallow branch/tag clone is fastest; fall back to a full clone + checkout
     # when $ref is a commit SHA (which --branch does not accept).
-    if ! git clone --depth 1 --branch "$ref" "$repo_url" "$SRC_BUILD_DIR" 2>/dev/null; then
+    if [[ -z "$ref" ]]; then
+        git clone --depth 1 "$repo_url" "$SRC_BUILD_DIR"
+    elif ! git clone --depth 1 --branch "$ref" "$repo_url" "$SRC_BUILD_DIR" 2>/dev/null; then
         log "Shallow clone of ref '$ref' failed; retrying with full clone + checkout"
         rm -rf "$SRC_BUILD_DIR"
         git clone "$repo_url" "$SRC_BUILD_DIR"
@@ -161,7 +205,7 @@ build_drasi_server_from_source() {
 
     local built_sha
     built_sha="$(git -C "$SRC_BUILD_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    log "Checked out $DRASI_REPO @ $ref ($built_sha); running cargo build --release"
+    log "Checked out $DRASI_REPO @ $display_ref ($built_sha); running cargo build --release"
 
     if ! ( cd "$SRC_BUILD_DIR" && cargo build --release --bin drasi-server ); then
         log "cargo build --bin drasi-server failed; retrying default release build"
@@ -177,7 +221,7 @@ build_drasi_server_from_source() {
 
     DRASI_SERVER_BIN="$built_bin"
     export DRASI_SERVER_BIN
-    DRASI_BUILD_SOURCE="source ${DRASI_REPO}@${ref} (${built_sha})"
+    DRASI_BUILD_SOURCE="source ${DRASI_REPO}@${display_ref} (${built_sha})"
     log "DRASI_SERVER_BIN=$DRASI_SERVER_BIN"
     "$DRASI_SERVER_BIN" --version || true
 }
@@ -222,16 +266,33 @@ download_drasi_server_release() {
 }
 
 patch_configs() {
-    log "Patching drasi_server_config.yaml admin port -> $DRASI_ADMIN_PORT"
-    sed -E "s/^port:[[:space:]]*8080\$/port: ${DRASI_ADMIN_PORT}/" "$DRASI_CFG_SRC" > "$DRASI_CFG_CI"
-    grep -E '^(host|port):' "$DRASI_CFG_CI"
+    log "Rendering drasi_server_config.yaml (query=$QUERY_TUNING persist_index=$PERSIST_INDEX state_store=$STATE_STORE)"
+    DRASI_ADMIN_PORT="$DRASI_ADMIN_PORT" \
+    QUERY_TUNING="$QUERY_TUNING" \
+    PERSIST_INDEX="$PERSIST_INDEX" \
+    STATE_STORE="$STATE_STORE" \
+    WAL_MAX_EVENTS="$WAL_MAX_EVENTS" \
+    DRASI_PLUGIN_REGISTRY="$DRASI_PLUGIN_REGISTRY" \
+    DRASI_PLUGIN_TAG="$DRASI_PLUGIN_TAG" \
+        ruby "$SCRIPT_DIR/render_server_config.rb" "$DRASI_CFG_SRC" "$DRASI_CFG_CI"
 
-    log "Patching config.json: delete_on_start/stop=false, data_store_path=$DATA_CACHE, source_path=$SCRIPT_DIR/dev_repo"
-    jq --arg cache "$DATA_CACHE" --arg srcroot "$SCRIPT_DIR/dev_repo" \
+    log "Patching config.json: workload=$WORKLOAD_SIZE, reaction_stop=$REACTION_RECORD_COUNT, data_store_path=$DATA_CACHE"
+    jq --arg cache "$DATA_CACHE" \
+        --arg srcroot "$SCRIPT_DIR/dev_repo" \
+        --argjson workload "$WORKLOAD_SIZE" \
+        --argjson reaction_stop "$REACTION_RECORD_COUNT" \
         '.data_store.data_store_path = $cache
          | .data_store.delete_on_start = false
          | .data_store.delete_on_stop = false
-         | (.data_store.test_repos[]? | select(.kind == "LocalStorage") | .source_path) |= $srcroot' \
+            | (.data_store.test_repos[]? | select(.kind == "LocalStorage") | .source_path) |= $srcroot
+            | (.data_store.test_repos[]?.local_tests[]?.sources[]?
+             | select(.test_source_id == "stock-trades-db")
+             | .model_data_generator.change_count) = $workload
+         | (.data_store.test_repos[]?.local_tests[]?.reactions[]?
+             | select(.test_reaction_id == "watchlist-prices")
+             | .stop_triggers[]?
+             | select(.kind == "RecordCount")
+             | .record_count) = $reaction_stop' \
         "$TEST_CFG_SRC" > "$TEST_CFG_CI"
 
     # Enforce deterministic inputs by requiring explicit seed(s) for model sources.
@@ -246,7 +307,8 @@ patch_configs() {
 start_drasi_server() {
     log "Starting drasi-server"
     (
-        cd "$SCRIPT_DIR"
+        cd "$WORK_DIR"
+        mkdir -p data
         "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
             > "$LOG_DIR/drasi-server.log" 2>&1
     ) &
@@ -267,13 +329,20 @@ start_drasi_server() {
 }
 
 start_test_service() {
-    log "Building & starting test-service"
-    (
-        cd "$REPO_ROOT/e2e-test-framework"
+    if [[ -n "${TEST_SERVICE_BIN:-}" ]]; then
+        log "Starting pre-built test-service: $TEST_SERVICE_BIN"
         RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
-        cargo run --release --manifest-path "test-service/Cargo.toml" -- --config "$TEST_CFG_CI" \
-            > "$LOG_DIR/test-service.log" 2>&1
-    ) &
+            "$TEST_SERVICE_BIN" --config "$TEST_CFG_CI" \
+            > "$LOG_DIR/test-service.log" 2>&1 &
+    else
+        log "Building & starting test-service"
+        (
+            cd "$REPO_ROOT/e2e-test-framework"
+            RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
+            cargo run --release --manifest-path "test-service/Cargo.toml" -- --config "$TEST_CFG_CI" \
+                > "$LOG_DIR/test-service.log" 2>&1
+        ) &
+    fi
     SERVICE_PID=$!
     log "test-service pid=$SERVICE_PID"
     if ! wait_for_port 127.0.0.1 "$TEST_SERVICE_PORT" "test-service API" 600; then
@@ -431,6 +500,11 @@ write_step_summary() {
         echo
         echo "- drasi-server source: \`$drasi_source\`"
         echo "- drasi-server binary: \`$server_version\`"
+        echo "- workload: \`$WORKLOAD_SIZE\` stock-trade changes (reaction stop=$REACTION_RECORD_COUNT)"
+        echo "- query tuning: \`$QUERY_TUNING\`"
+        echo "- server config: persistIndex=\`$PERSIST_INDEX\`, stateStore=\`$STATE_STORE\`"
+        echo "- plugin registry: \`${DRASI_PLUGIN_REGISTRY:-server default}\`"
+        echo "- plugin tag: \`${DRASI_PLUGIN_TAG:-latest-compatible}\`"
         echo
 
         echo "### Reactions"
@@ -468,8 +542,13 @@ write_step_summary() {
     } >> "$out"
 }
 
-download_drasi_server
+resolve_workload
 patch_configs
+if [[ "$RENDER_CONFIG_ONLY" == "true" ]]; then
+    log "Rendered configs under $WORK_DIR"
+    exit 0
+fi
+download_drasi_server
 start_drasi_server
 start_test_service
 

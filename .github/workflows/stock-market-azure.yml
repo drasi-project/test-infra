@@ -74,6 +74,8 @@ on:
       plugin_tag:
         description: "OCI tag for all plugin refs. Empty = latest-compatible."
         default: ""
+  schedule:
+    - cron: "30 7 * * *"
 
 permissions:
   contents: read
@@ -84,7 +86,7 @@ jobs:
     uses: ./.github/workflows/building-comfort-azure.yml
     with:
       scenario: stock_market
-      variant: ${{ inputs.variant }}
+      variant: ${{ github.event_name == 'schedule' && 'both' || inputs.variant }}
       batching_speed: ${{ inputs.batching_speed }}
       location: ${{ inputs.location }}
       vm_size: ${{ inputs.vm_size }}
@@ -92,8 +94,8 @@ jobs:
       os_disk_size_gb: ${{ inputs.os_disk_size_gb }}
       workload_size: ${{ inputs.workload_size }}
       query_tuning: ${{ inputs.query_tuning }}
-      persist_index: ${{ inputs.persist_index }}
-      state_store: ${{ inputs.state_store }}
+      persist_index: ${{ inputs.persist_index || false }}
+      state_store: ${{ inputs.state_store || false }}
       drasi_server_version: ${{ inputs.drasi_server_version }}
       drasi_server_repo: ${{ inputs.drasi_server_repo }}
       drasi_server_ref: ${{ inputs.drasi_server_ref }}
@@ -104,3 +106,4 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

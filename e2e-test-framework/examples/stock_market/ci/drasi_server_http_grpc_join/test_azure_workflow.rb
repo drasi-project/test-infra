@@ -68,22 +68,100 @@ class StockMarketAzureWorkflowTest < Minitest::Test
 
   def test_manual_entry_forwards_all_settings_and_azure_secrets
     assert_equal "Stock market Azure", @workflow["name"]
-    assert_equal ["workflow_dispatch"], triggers(@workflow).keys
+    assert_equal %w[schedule workflow_dispatch], triggers(@workflow).keys.sort
     dispatch = triggers(@workflow).fetch("workflow_dispatch").fetch("inputs")
     assert_operator dispatch.length, :<=, 25
     job = @workflow.fetch("jobs").fetch("test")
     assert_equal "./.github/workflows/building-comfort-azure.yml", job["uses"]
     assert_equal "stock_market", job.dig("with", "scenario")
+    scheduled_defaults = {
+      "variant" => "${{ github.event_name == 'schedule' && 'both' || inputs.variant }}",
+      "persist_index" => "${{ inputs.persist_index || false }}",
+      "state_store" => "${{ inputs.state_store || false }}"
+    }
     dispatch.each_key do |input_name|
-      assert_equal "${{ inputs.#{input_name} }}", job.fetch("with").fetch(input_name)
+      assert_equal scheduled_defaults.fetch(input_name, "${{ inputs.#{input_name} }}"), job.fetch("with").fetch(input_name)
       assert triggers(@shared).fetch("workflow_call").fetch("inputs").key?(input_name)
     end
     assert_equal "write", @workflow.dig("permissions", "id-token")
-    assert_equal %w[AZURE_CLIENT_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID], job.fetch("secrets").keys.sort
+    assert_equal %w[AZURE_CLIENT_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID TEST_RESULTS_APP_PRIVATE_KEY], job.fetch("secrets").keys.sort
     refute @workflow.key?("concurrency")
     assert_equal "azure-resource-group-drasi-e2e-test-infra", @shared.dig("concurrency", "group")
     cleanup = @shared.fetch("jobs").fetch("test").fetch("steps").find { |entry| entry["name"] == "Delete per-run Azure resources" }
     assert_equal "always()", cleanup["if"]
+  end
+
+  def test_daily_schedule_reuses_three_vm_matrix_and_publishes_both_variants
+    assert_equal [{ "cron" => "30 7 * * *" }], triggers(@workflow).fetch("schedule")
+    job = @shared.fetch("jobs").fetch("test")
+    strategy = job.fetch("strategy")
+    vm_sizes = %w[Standard_D4s_v3 Standard_D4s_v6 Standard_F4as_v7]
+    assert_equal false, strategy["fail-fast"]
+    assert_equal 1, strategy["max-parallel"]
+    assert_equal "${{ fromJSON(github.event_name == 'schedule' && '#{JSON.dump(vm_sizes)}' || format('[\"{0}\"]', inputs.vm_size || 'Standard_D4s_v6')) }}", strategy.dig("matrix", "vm_size")
+    assert_equal "${{ github.event_name == 'schedule' && 'both' || inputs.variant }}", @workflow.dig("jobs", "test", "with", "variant")
+
+    profiles = vm_sizes.map do |vm_size|
+      output, result = resolve("stock_market", "IN_VARIANT" => "both", "IN_VM_SIZE" => vm_size)
+      assert result.success?, output
+      values = resolved_env
+      assert_equal "drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive", values["VARIANTS"]
+      assert_equal "100000", values["WORKLOAD_SIZE"]
+      assert_equal "10000", values["BATCHING_SPEED"]
+      assert_equal "10000", values["QUERY_TUNING"]
+      assert_equal "false", values["PERSIST_INDEX"]
+      assert_equal "false", values["STATE_STORE"]
+      assert_equal "westus3", values["LOCATION"]
+      assert_equal "Premium_LRS", values["OS_DISK_TYPE"]
+      assert_equal "128", values["OS_DISK_SIZE_GB"]
+      %w[DRASI_SERVER_VERSION DRASI_SERVER_REPO DRASI_SERVER_REF DRASI_PLUGIN_REGISTRY DRASI_PLUGIN_TAG].each do |name|
+        assert_equal "", values[name]
+      end
+      assert_equal "azure-ephemeral-#{vm_size}-Premium_LRS-128gb", values["PERF_PROFILE_ID"]
+      values["PERF_PROFILE_ID"]
+    end
+    assert_equal 3, profiles.uniq.length
+
+    publish = @shared.fetch("jobs").fetch("publish-results")
+    assert_equal ["test"], publish["needs"]
+    assert_equal "always() && github.event_name == 'schedule'", publish["if"]
+    assert_equal "./.github/workflows/publish-test-results.yml", publish["uses"]
+    [@workflow.fetch("jobs").fetch("test"), publish].each do |caller|
+      assert_equal "${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}", caller.dig("secrets", "TEST_RESULTS_APP_PRIVATE_KEY")
+    end
+    steps = job.fetch("steps")
+    upload = steps.find { |entry| entry["name"] == "Upload result summary" }
+    assert_equal "summary-${{ env.SCENARIO }}-azure-${{ matrix.vm_size }}", upload.dig("with", "name")
+    assert_includes step("Build result summaries"), '--output "$summary_dir/${SCENARIO}__${variant}__${VM_SIZE}.json"'
+  end
+
+  def test_publisher_preserves_all_six_stock_market_results
+    publisher = YAML.load_file(File.join(ROOT, ".github/workflows/publish-test-results.yml"))
+    steps = publisher.fetch("jobs").fetch("publish").fetch("steps")
+    assert_equal "drasi-project/test-results", steps.find { |entry| entry["name"] == "Checkout test-results" }.dig("with", "repository")
+    assert_equal "${{ vars.TEST_RESULTS_APP_ID }}", steps.find { |entry| entry["name"] == "Mint a token for test-results" }.dig("with", "app-id")
+    assert_equal "summary-", triggers(publisher).dig("workflow_call", "inputs", "artifact_prefix", "default")
+    summaries_dir = File.join(@directory, "summaries")
+    FileUtils.mkdir_p(summaries_dir)
+    vm_sizes = %w[Standard_D4s_v3 Standard_D4s_v6 Standard_F4as_v7]
+    variants = %w[drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive]
+    expected = vm_sizes.product(variants).map do |vm_size, variant|
+      profile = "azure-ephemeral-#{vm_size}-Premium_LRS-128gb"
+      summary = {
+        "dimensions" => { "scenario" => "stock_market", "variant" => variant },
+        "run" => { "run_id" => "1234", "started_at" => "2026-09-23T07:30:00Z", "runner" => profile }
+      }
+      File.write(File.join(summaries_dir, "stock_market__#{variant}__#{vm_size}.json"), JSON.dump(summary))
+      "stock_market__#{variant}__#{profile}__1234.json"
+    end
+    place = steps.find { |entry| entry["name"] == "Place summaries" }.fetch("run")
+    output, errors, result = Open3.capture3("bash", chdir: @directory, stdin_data: place)
+    assert result.success?, output + errors
+    published = Dir.glob(File.join(@directory, "test-results/results/2026/09/23/*.json"))
+    assert_equal expected.sort, published.map { |file_name| File.basename(file_name) }.sort
+    output, errors, result = Open3.capture3("bash", chdir: @directory, stdin_data: place)
+    assert result.success?, output + errors
+    assert_equal 6, Dir.glob(File.join(@directory, "test-results/results/2026/09/23/*.json")).length
   end
 
   def test_cleanup_pins_network_api_for_delete_and_wait

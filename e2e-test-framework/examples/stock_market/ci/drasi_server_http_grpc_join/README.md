@@ -160,7 +160,8 @@ Both **E2E - stock_market join** and **Stock market Azure** expose `variant` and
 `batching_speed`. Selecting `both` creates separate jobs on GitHub-hosted
 runners and sequential runs on one Azure VM. Artifacts and summary records use
 the full variant names so adaptive results remain separate from the existing
-standard history. Scheduled GitHub runs continue to run only `standard`.
+standard history. Scheduled GitHub-hosted runs continue to run only `standard`;
+scheduled Azure runs cover both variants on all three hardware tiers.
 
 ## Running in CI against a drasi-server branch or fork
 
@@ -189,7 +190,7 @@ be pushed and public (the clone is anonymous). Locally, export `DRASI_SERVER_REF
 
 Use **Actions > Stock market Azure > Run workflow** via
 [stock-market-azure.yml](../../../../../.github/workflows/stock-market-azure.yml).
-This is a separate manual workflow from the GitHub-hosted join test. The new
+This is a separate workflow from the GitHub-hosted join test. The new
 workflow must be committed, pushed, and present on the repository's default
 branch for the **Run workflow** button to appear; after that, select the branch
 containing the version you want to test.
@@ -212,9 +213,34 @@ the calling workflow identity must also allow this workflow.
 The workflow uploads throughput summaries, logs, Azure hardware metadata, and
 binary/plugin fingerprints. It deletes the per-run VM and network resources
 on completion, including test failures, and verifies cleanup. Runs share the
-existing Azure resource-group concurrency lock. No stock-market Azure schedule
-is added, and manual results are not published to the scheduled performance
-history. Azure VM and disk charges apply while the resources exist.
+existing Azure resource-group concurrency lock. Manual results are not published
+to the scheduled performance history. Azure VM and disk charges apply while the
+resources exist.
+
+### Daily performance schedule
+
+**Stock market Azure** runs daily at **07:30 UTC** from the default branch,
+offset from building comfort's 07:00 UTC schedule. It reuses the same hardware
+matrix: `Standard_D4s_v3`, `Standard_D4s_v6`, and `Standard_F4as_v7`. VM jobs run
+sequentially, and each VM runs both `standard` and `adaptive`, producing six
+performance records. The shared concurrency lock queues this workflow while
+another Azure test is running, so the actual start may be later.
+
+Scheduled defaults are `westus3`, a 128 GB Premium SSD, 100,000 stock changes,
+query capacity 10,000, adaptive max batch size 10,000 (50 ms max wait), and both
+persistence options off. Like building comfort, scheduled runs download the
+latest Drasi Server release and use its default plugin registry and compatible
+plugin versions; branch and plugin overrides remain manual-run options.
+
+After all VM jobs finish, the shared publisher posts the available summaries to
+`drasi-project/test-results`, including failed-test records. Results are keyed by
+scenario, variant, Azure hardware profile, and run ID to prevent overwrites.
+Publishing requires the same `TEST_RESULTS_APP_PRIVATE_KEY` secret and
+`TEST_RESULTS_APP_ID` repository variable as building comfort, with the GitHub
+App authorized to write to `drasi-project/test-results`. The stock-market caller
+forwards that secret through the reusable Azure workflow. Enable the schedule
+by merging these changes into the repository's default branch; scheduled
+workflows must also be enabled in forks.
 
 ## Default ports
 

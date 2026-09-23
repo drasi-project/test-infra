@@ -25,6 +25,9 @@
 # is used to fetch the release.
 #
 # Environment variables (with defaults):
+#   VARIANT               drasi_server_http_grpc_join (default) or
+#                         drasi_server_http_grpc_join_adaptive (both source dispatchers).
+#   BATCHING_SPEED        Adaptive max batch size: 5000, 10000, or 50000 (10000).
 #   DRASI_REPO            GitHub repo (owner/name) for the release download or
 #                         the source build. Default: drasi-project/drasi-server.
 #                         Point at a fork (e.g. myuser/drasi-server) to build a
@@ -67,6 +70,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # five levels below the repo root.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 
+VARIANT="${VARIANT:-drasi_server_http_grpc_join}"
+BATCHING_SPEED="${BATCHING_SPEED:-10000}"
 DRASI_REPO_EXPLICIT="${DRASI_REPO:-}"
 DRASI_REPO="${DRASI_REPO:-drasi-project/drasi-server}"
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
@@ -108,6 +113,25 @@ SERVICE_PID=""
 DRASI_BUILD_SOURCE=""
 
 log() { echo "[ci] $*"; }
+
+resolve_variant() {
+    case "$VARIANT" in
+        drasi_server_http_grpc_join) ADAPTIVE_ENABLED=false ;;
+        drasi_server_http_grpc_join_adaptive) ADAPTIVE_ENABLED=true ;;
+        *)
+            log "ERROR: unsupported stock-market variant: $VARIANT"
+            return 1
+            ;;
+    esac
+    case "$BATCHING_SPEED" in
+        5000|10000|50000) ;;
+        *)
+            log "ERROR: BATCHING_SPEED must be 5000, 10000, or 50000"
+            return 1
+            ;;
+    esac
+    log "Variant: $VARIANT (adaptive_dispatchers=$ADAPTIVE_ENABLED)"
+}
 
 resolve_workload() {
     if [[ ! "$WORKLOAD_SIZE" =~ ^[1-9][0-9]*$ ]] || (( WORKLOAD_SIZE < 100000 )); then
@@ -281,6 +305,8 @@ patch_configs() {
         --arg srcroot "$SCRIPT_DIR/dev_repo" \
         --argjson workload "$WORKLOAD_SIZE" \
         --argjson reaction_stop "$REACTION_RECORD_COUNT" \
+        --argjson adaptive "$ADAPTIVE_ENABLED" \
+        --argjson batch_size "$BATCHING_SPEED" \
         '.data_store.data_store_path = $cache
          | .data_store.delete_on_start = false
          | .data_store.delete_on_stop = false
@@ -292,7 +318,19 @@ patch_configs() {
              | select(.test_reaction_id == "watchlist-prices")
              | .stop_triggers[]?
              | select(.kind == "RecordCount")
-             | .record_count) = $reaction_stop' \
+             | .record_count) = $reaction_stop
+         | if $adaptive then
+             (.data_store.test_repos[]?.local_tests[]?.sources[]?) |= (
+                 .test_source_id as $source_id
+                 | (.source_change_dispatchers[]? | select(.kind == "Http" or .kind == "Grpc")) |= (
+                     .adaptive_enabled = true
+                     | .batch_events = true
+                     | .source_id = $source_id
+                     | .batch_size = $batch_size
+                     | .batch_timeout_ms = 50
+                 )
+             )
+           else . end' \
         "$TEST_CFG_SRC" > "$TEST_CFG_CI"
 
     # Enforce deterministic inputs by requiring explicit seed(s) for model sources.
@@ -494,6 +532,10 @@ write_step_summary() {
         echo
         echo "- drasi-server source: \`$drasi_source\`"
         echo "- drasi-server binary: \`$server_version\`"
+        echo "- variant: \`${VARIANT:-drasi_server_http_grpc_join}\`"
+        if [[ "${ADAPTIVE_ENABLED:-false}" == "true" ]]; then
+            echo "- adaptive HTTP + gRPC dispatch: max batch size=\`$BATCHING_SPEED\`, max wait=\`50 ms\`"
+        fi
         echo "- workload: \`$WORKLOAD_SIZE\` stock-trade changes (reaction stop=$REACTION_RECORD_COUNT)"
         echo "- query tuning: \`$QUERY_TUNING\`"
         echo "- server config: persistIndex=\`$PERSIST_INDEX\`, stateStore=\`$STATE_STORE\`"
@@ -539,6 +581,7 @@ write_step_summary() {
     fi
 }
 
+resolve_variant
 resolve_workload
 patch_configs
 if [[ "$RENDER_CONFIG_ONLY" == "true" ]]; then

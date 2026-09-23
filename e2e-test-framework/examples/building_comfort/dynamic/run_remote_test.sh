@@ -27,7 +27,7 @@ case "$SCENARIO" in
         ;;
     stock_market)
         export RUN_SCRIPT="$WORKSPACE/e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join/run_test_ci.sh"
-        VARIANTS="drasi_server_http_grpc_join"
+        VARIANTS="${VARIANTS:-drasi_server_http_grpc_join}"
         ;;
     *)
         echo "Unsupported scenario: $SCENARIO" >&2
@@ -48,10 +48,19 @@ DRASI_REPO="${DRASI_SERVER_REPO:-drasi-project/drasi-server}"
 
 needs_drasi_server=false
 read -r -a variant_list <<< "${VARIANTS//,/ }"
+if (( ${#variant_list[@]} == 0 )); then
+    echo "At least one test variant is required" >&2
+    exit 1
+fi
 for variant in "${variant_list[@]}"; do
+    if [[ "$SCENARIO" == "stock_market" ]]; then
+        case "$variant" in
+            drasi_server_http_grpc_join|drasi_server_http_grpc_join_adaptive) ;;
+            *) echo "Unsupported stock-market variant: $variant" >&2; exit 1 ;;
+        esac
+    fi
     if [[ -n "$variant" && "$variant" != "drasi_lib" ]]; then
         needs_drasi_server=true
-        break
     fi
 done
 

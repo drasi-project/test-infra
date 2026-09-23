@@ -1,17 +1,25 @@
 # Scheduled E2E test: stock_market stocks-watchlist join (HTTP + gRPC sources)
 # against an external drasi-server.
 #
-# Each test pattern lives in its own example folder and exposes a
-# `run_test_ci.sh` that downloads the drasi-server release binary,
-# orchestrates the run, and writes artifacts to $ARTIFACTS_DIR. This workflow
-# just sets env vars and invokes that script. To add another pattern, copy
-# this job and point WORKDIR at the new example folder.
+# Both variants share run_test_ci.sh and the same join workload. Manual runs
+# select standard, adaptive, or both; scheduled runs retain the standard
+# baseline. Each matrix entry has its own artifacts and result summary.
 
 name: E2E - stock_market join
 
 on:
   workflow_dispatch:
     inputs:
+      variant:
+        description: "standard, adaptive HTTP + gRPC source dispatchers, or both."
+        type: choice
+        options: [standard, adaptive, both]
+        default: standard
+      batching_speed:
+        description: "Adaptive max batch size for both source dispatchers (50 ms max wait)."
+        type: choice
+        options: ["5000", "10000", "50000"]
+        default: "10000"
       workload_size:
         description: "Stock-trade changes to generate. The watchlist script and join topology stay fixed."
         type: choice
@@ -68,11 +76,37 @@ permissions:
   contents: read
 
 jobs:
+  select-variants:
+    runs-on: ubuntu-latest
+    outputs:
+      variants: ${{ steps.compute.outputs.variants }}
+    steps:
+      - name: Compute variant matrix
+        id: compute
+        env:
+          IN_VARIANT: ${{ inputs.variant }}
+        run: |
+          set -euo pipefail
+          case "${IN_VARIANT:-standard}" in
+            standard) variants=(drasi_server_http_grpc_join) ;;
+            adaptive) variants=(drasi_server_http_grpc_join_adaptive) ;;
+            both) variants=(drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive) ;;
+            *) echo "Unsupported stock-market variant: $IN_VARIANT" >&2; exit 1 ;;
+          esac
+          json="$(printf '%s\n' "${variants[@]}" | jq -R . | jq -sc .)"
+          echo "variants=$json" >> "$GITHUB_OUTPUT"
+
   stock-market-drasi-server-http-grpc-join:
-    name: stock_market / drasi_server_http_grpc_join
+    name: stock_market / ${{ matrix.variant }}
+    needs: select-variants
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.select-variants.outputs.variants) }}
     env:
+      VARIANT: ${{ matrix.variant }}
       WORKDIR: e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join
       # When drasi_server_ref is set, the runner builds drasi-server from that
       # branch/tag/SHA of DRASI_REPO (a fork if drasi_server_repo points at one)
@@ -122,12 +156,13 @@ jobs:
       - name: Record start time
         run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
-      - name: Run scheduled test
+      - name: Run test
         id: test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
           WORK_DIR: ${{ runner.temp }}/ci_work
+          BATCHING_SPEED: ${{ inputs.batching_speed }}
           WORKLOAD_SIZE: ${{ inputs.workload_size }}
           QUERY_TUNING: ${{ inputs.query_tuning }}
           PERSIST_INDEX: ${{ inputs.persist_index }}
@@ -140,7 +175,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: stock_market-drasi_server_http_grpc_join
+          name: stock_market-${{ matrix.variant }}
           path: ${{ runner.temp }}/artifacts
           if-no-files-found: warn
 
@@ -155,15 +190,15 @@ jobs:
           python3 .github/scripts/emit_summary.py \
             --artifacts "${{ runner.temp }}/artifacts" \
             --scenario stock_market \
-            --variant drasi_server_http_grpc_join \
+            --variant "$VARIANT" \
             --job-status "${{ steps.test.outcome }}" \
-            --output "${{ runner.temp }}/summary/stock_market__drasi_server_http_grpc_join.json"
+            --output "${{ runner.temp }}/summary/stock_market__${VARIANT}.json"
 
       - name: Upload result summary
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: summary-stock_market-drasi_server_http_grpc_join
+          name: summary-stock_market-${{ matrix.variant }}
           path: ${{ runner.temp }}/summary
           if-no-files-found: warn
 

@@ -4,6 +4,13 @@ The stock market example provides multiple configuration options to demonstrate 
 
 ## Available Configurations
 
+### CI Cross-Source Join
+
+The [HTTP + gRPC join](ci/drasi_server_http_grpc_join/README.md) runs on both
+GitHub-hosted runners and ephemeral Azure VMs. Select `variant: adaptive` to
+enable adaptive batching on both source dispatchers, or `both` to compare it
+with the original standard variant. The query and HTTP reaction stay fixed.
+
 ### 1. Basic Local Configuration (`/local/`)
 - **Purpose**: Simple standalone testing without Drasi integration
 - **Use Case**: Testing the StockTradeDataGenerator in isolation

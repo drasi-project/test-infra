@@ -8,6 +8,12 @@ on:
       scenario:
         type: string
         default: building_comfort
+      variant:
+        type: string
+        default: standard
+      batching_speed:
+        type: string
+        default: "10000"
       location:
         type: string
         default: westus3
@@ -246,6 +252,7 @@ jobs:
 
       - name: Resolve test inputs
         env:
+          IN_VARIANT: ${{ inputs.variant }}
           IN_WORKLOAD_SIZE: ${{ inputs.workload_size }}
           IN_LOCATION: ${{ inputs.location }}
           IN_VM_SIZE: ${{ matrix.vm_size }}
@@ -278,7 +285,16 @@ jobs:
 
           variant_arr=()
           if [[ "$SCENARIO" == "stock_market" ]]; then
-            variant_arr=(drasi_server_http_grpc_join)
+            case "${IN_VARIANT:-standard}" in
+              standard) variant_arr=(drasi_server_http_grpc_join) ;;
+              adaptive) variant_arr=(drasi_server_http_grpc_join_adaptive) ;;
+              both) variant_arr=(drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive) ;;
+              *) echo "Unsupported stock-market variant: $IN_VARIANT" >&2; exit 1 ;;
+            esac
+            case "${IN_BATCHING_SPEED:-10000}" in
+              5000|10000|50000) ;;
+              *) echo "Unsupported stock-market batch size: $IN_BATCHING_SPEED" >&2; exit 1 ;;
+            esac
           elif [[ "$SCENARIO" != "building_comfort" ]]; then
             echo "Unsupported scenario: $SCENARIO" >&2
             exit 1

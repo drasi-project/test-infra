@@ -3,6 +3,16 @@ name: Stock market Azure
 on:
   workflow_dispatch:
     inputs:
+      variant:
+        description: "standard, adaptive HTTP + gRPC source dispatchers, or both sequentially on one VM."
+        type: choice
+        options: [standard, adaptive, both]
+        default: standard
+      batching_speed:
+        description: "Adaptive max batch size for both source dispatchers (50 ms max wait)."
+        type: choice
+        options: ["5000", "10000", "50000"]
+        default: "10000"
       location:
         description: "Azure region for the test VM."
         required: true
@@ -74,6 +84,8 @@ jobs:
     uses: ./.github/workflows/building-comfort-azure.yml
     with:
       scenario: stock_market
+      variant: ${{ inputs.variant }}
+      batching_speed: ${{ inputs.batching_speed }}
       location: ${{ inputs.location }}
       vm_size: ${{ inputs.vm_size }}
       os_disk_type: ${{ inputs.os_disk_type }}

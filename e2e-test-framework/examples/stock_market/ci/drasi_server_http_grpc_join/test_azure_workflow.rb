@@ -87,7 +87,7 @@ class StockMarketAzureWorkflowTest < Minitest::Test
   end
 
   def test_stock_market_inputs_are_packaged_for_the_vm
-    output, result = resolve("stock_market", "IN_WORKLOAD_SIZE" => "250000", "IN_QUERY_TUNING" => "100000", "IN_STATE_STORE" => "true")
+    output, result = resolve("stock_market", "IN_WORKLOAD_SIZE" => "250000", "IN_QUERY_TUNING" => "100000", "IN_STATE_STORE" => "true", "IN_BATCHING_SPEED" => "5000")
     assert result.success?, output
     values = resolved_env
     assert_equal "drasi_server_http_grpc_join", values["VARIANTS"]
@@ -108,7 +108,46 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     assert_equal "stock_market", packaged["SCENARIO"]
     assert_equal "250000", packaged["WORKLOAD_SIZE"]
     assert_equal "true", packaged["STATE_STORE"]
+    assert_equal "5000", packaged["BATCHING_SPEED"]
+    assert_equal values["VARIANTS"], packaged["VARIANTS"]
     assert_equal "/opt/drasi-test/work", packaged["SUITE_WORK_DIR"]
+  end
+
+  def test_both_workflows_select_the_same_variants
+    github = YAML.load_file(File.join(ROOT, ".github/workflows/e2e-stock-market-join.yml"))
+    compute = github.fetch("jobs").fetch("select-variants").fetch("steps").first
+    assert_equal "${{ inputs.variant }}", compute.dig("env", "IN_VARIANT")
+    [github, @workflow].each do |workflow|
+      assert_equal %w[standard adaptive both], triggers(workflow).dig("workflow_dispatch", "inputs", "variant", "options")
+      assert_equal "standard", triggers(workflow).dig("workflow_dispatch", "inputs", "variant", "default")
+    end
+    {
+      "" => %w[drasi_server_http_grpc_join],
+      "standard" => %w[drasi_server_http_grpc_join],
+      "adaptive" => %w[drasi_server_http_grpc_join_adaptive],
+      "both" => %w[drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive]
+    }.each do |selection, expected|
+      output_file = File.join(@directory, "github-output")
+      File.write(output_file, "")
+      output, errors, result = Open3.capture3(
+        { "IN_VARIANT" => selection, "GITHUB_OUTPUT" => output_file }, "bash", stdin_data: compute.fetch("run")
+      )
+      assert result.success?, output + errors
+      assert_equal expected, JSON.parse(File.read(output_file).strip.split("=", 2).last)
+      output, result = resolve("stock_market", "IN_VARIANT" => selection)
+      assert result.success?, output
+      assert_equal expected, resolved_env.fetch("VARIANTS").split
+    end
+    run_job = github.fetch("jobs").fetch("stock-market-drasi-server-http-grpc-join")
+    assert_equal "${{ matrix.variant }}", run_job.dig("env", "VARIANT")
+    assert_equal false, run_job.dig("strategy", "fail-fast")
+    steps = run_job.fetch("steps")
+    assert_equal "stock_market-${{ matrix.variant }}", steps.find { |entry| entry["name"] == "Upload artifacts" }.dig("with", "name")
+    assert_includes steps.find { |entry| entry["name"] == "Build result summary" }.fetch("run"), '--variant "$VARIANT"'
+    output, errors, result = Open3.capture3(
+      { "IN_VARIANT" => "unknown", "GITHUB_OUTPUT" => File.join(@directory, "github-output") }, "bash", stdin_data: compute.fetch("run")
+    )
+    refute result.success?, output + errors
   end
 
   def test_building_comfort_defaults_are_preserved
@@ -125,16 +164,24 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     output, result = resolve("stock_market", "IN_WORKLOAD_SIZE" => "nonsense")
     refute result.success?
     assert_includes output, "Unsupported stock-market workload size"
+    output, result = resolve("stock_market", "IN_VARIANT" => "unknown")
+    refute result.success?
+    assert_includes output, "Unsupported stock-market variant"
+    output, result = resolve("stock_market", "IN_BATCHING_SPEED" => "zero")
+    refute result.success?
+    assert_includes output, "Unsupported stock-market batch size"
   end
 
   def test_remote_runner_selects_each_scenario_before_provisioning
     executable("sudo", "#!/usr/bin/env bash\nenv > \"$CAPTURE_ENV\"\nexit 73\n")
-    {
-      "stock_market" => ["drasi_server_http_grpc_join", "stock_market/ci/drasi_server_http_grpc_join/run_test_ci.sh"],
-      "building_comfort" => ["http_standard", "building_comfort/run_variant.sh"]
-    }.each do |scenario, (variants, runner)|
+    [
+      ["stock_market", "drasi_server_http_grpc_join", "stock_market/ci/drasi_server_http_grpc_join/run_test_ci.sh"],
+      ["stock_market", "drasi_server_http_grpc_join_adaptive", "stock_market/ci/drasi_server_http_grpc_join/run_test_ci.sh"],
+      ["stock_market", "drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive", "stock_market/ci/drasi_server_http_grpc_join/run_test_ci.sh"],
+      ["building_comfort", "http_standard", "building_comfort/run_variant.sh"]
+    ].each do |scenario, variants, runner|
       env_file = File.join(@directory, "remote.env")
-      File.write(env_file, "SCENARIO=#{scenario}\nVARIANTS=http_standard\nWORKLOAD_SIZE=250000\n")
+      File.write(env_file, "SCENARIO=#{scenario}\nVARIANTS='#{variants}'\nWORKLOAD_SIZE=250000\nBATCHING_SPEED=5000\n")
       capture = File.join(@directory, "remote-capture.env")
       env = {
         "PATH" => "#{@bin}:#{ENV.fetch('PATH')}", "CAPTURE_ENV" => capture,
@@ -146,6 +193,7 @@ class StockMarketAzureWorkflowTest < Minitest::Test
       assert_equal variants, captured["VARIANTS"]
       assert_equal File.join(ROOT, "e2e-test-framework/examples", runner), captured["RUN_SCRIPT"]
       assert_equal "250000", captured["WORKLOAD_SIZE"]
+      assert_equal "5000", captured["BATCHING_SPEED"]
     end
   end
 
@@ -172,5 +220,21 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     summary = File.read(File.join(artifacts, "summary.md"))
     assert_includes summary, "Throughput"
     assert_includes summary, "75000 | 10 | 7500"
+  end
+
+  def test_remote_runner_rejects_unknown_or_empty_stock_variants_before_setup
+    executable("sudo", "#!/usr/bin/env bash\nexit 73\n")
+    ["drasi_server_http_grpc_join unknown", " , "].each do |variants|
+      env_file = File.join(@directory, "remote.env")
+      File.write(env_file, "SCENARIO=stock_market\nVARIANTS='#{variants}'\n")
+      output, errors, result = Open3.capture3(
+        {
+          "PATH" => "#{@bin}:#{ENV.fetch('PATH')}",
+          "SUITE_WORK_DIR" => File.join(@directory, "work"), "PERF_PROFILE_ID" => "test-profile"
+        }, "bash", REMOTE_RUNNER, ROOT, env_file, File.join(@directory, "artifacts")
+      )
+      assert_equal 1, result.exitstatus, output + errors
+      assert_match(/Unsupported stock-market variant|At least one test variant/, output + errors)
+    end
   end
 end

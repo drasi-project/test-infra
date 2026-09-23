@@ -35,8 +35,8 @@ returns only the stock prices for symbols currently in the watchlist.
 3. Query results are POSTed as an HTTP reaction to
    `http://localhost:9002/reaction`.
 
-4. The test service stops the reaction after **400** records via
-   `stop_triggers.RecordCount`.
+4. Both variants stop the reaction at **75% of the stock workload** via
+  `stop_triggers.RecordCount`: 75,000 records for the default 100,000 changes.
 
 ```
 test-service --HTTP source--> Drasi Server --HTTP reaction--> test-service
@@ -82,6 +82,7 @@ its query state from them.
 
 ## Prerequisites
 
+- Bash, Ruby, jq, curl, and a Rust toolchain (unless using prebuilt binaries).
 - One of:
   - a prebuilt `drasi-server` binary (see the
     [official download instructions](https://drasi.io/drasi-server/how-to-guides/installation/download-binary/));
@@ -98,6 +99,9 @@ its query state from them.
 
 ```bash
 ./run_test_ci.sh
+
+# Adaptive dispatchers for BOTH sources; the HTTP reaction stays unchanged.
+VARIANT=drasi_server_http_grpc_join_adaptive BATCHING_SPEED=10000 ./run_test_ci.sh
 ```
 
 The CI script will:
@@ -108,8 +112,8 @@ The CI script will:
 3. Start `drasi-server` (waiting for both port `9000` and port `50051`)
    and `test-service`.
 4. Poll the `watchlist-prices` reaction until it reaches `Stopped`.
-5. Write a markdown report (reaction status + throughput) to
-   `$GITHUB_STEP_SUMMARY` (or skip the report when run locally).
+5. Write a markdown report (variant, reaction status, throughput) to
+  `ci_artifacts/summary.md` and append it to `$GITHUB_STEP_SUMMARY` when set.
 
 Artifacts (logs, captured JSONL, reaction state) land in
 `./ci_artifacts/`.
@@ -121,6 +125,8 @@ cross-source join contract:
 
 | Input | Values | Effect |
 | --- | --- | --- |
+| `variant` | `standard` (default), `adaptive`, `both` | Selects the original join, adaptive dispatch on both sources, or both variants. |
+| `batching_speed` | `5000`, `10000` (default), `50000` | Maximum events per adaptive batch for both dispatchers; maximum wait is 50 ms. Standard dispatchers are unchanged. |
 | `workload_size` | `100000`, `250000`, `500000` | Number of stock changes; the reaction stop target remains 75% of the workload. |
 | `query_tuning` | `1000`, `10000`, `100000` | Sets query priority, dispatch, and bootstrap buffer capacities. |
 | `persist_index` | boolean | Enables the RocksDB index and replay-capable WAL durability on both sources. |
@@ -129,15 +135,36 @@ cross-source join contract:
 | `drasi_server_repo` / `drasi_server_ref` | repo and optional ref | Builds an arbitrary server repo/ref from source. |
 | `plugin_registry` / `plugin_tag` | OCI registry/tag or empty | Overrides the source/reaction plugin packages. |
 
-`stock_market` intentionally has no source/reaction variant matrix or query
-checkboxes: its HTTP stock source, gRPC watchlist source, and sole join query
-are the behavior under test. It also has no large-bootstrap preset. External
+Both variants keep the HTTP stock source, gRPC watchlist source, sole join query,
+and HTTP reaction. There are no query checkboxes or large-bootstrap presets. External
 server plugins consume dispatched events rather than pulling framework
 bootstrap data, so `workload_size` is the scenario's data-volume control.
 
+### Adaptive join
+
+`drasi_server_http_grpc_join` retains the committed standard dispatchers.
+`drasi_server_http_grpc_join_adaptive` enables the framework's adaptive
+dispatchers for **both** `stock-trades-db` (HTTP) and `watchlist-db` (gRPC).
+HTTP sends to the stock source's `/events/batch` endpoint; gRPC uses its
+streaming batch dispatcher. The runner sets each dispatcher's `source_id`
+explicitly. The batch limit is a maximum, not a required batch size: the
+slow-changing watchlist will normally flush smaller batches at the time limit.
+
+This does not enable server-side HTTP source batching or HTTP reaction batching.
+The seed, watchlist script, queries, output handler, and completion targets stay
+the same. Cross-source timing can still change the emitted row stream, so neither
+variant has a stable SHA baseline. Count-based completion is retained, not a
+guarantee of full-stream equivalence or losslessness.
+
+Both **E2E - stock_market join** and **Stock market Azure** expose `variant` and
+`batching_speed`. Selecting `both` creates separate jobs on GitHub-hosted
+runners and sequential runs on one Azure VM. Artifacts and summary records use
+the full variant names so adaptive results remain separate from the existing
+standard history. Scheduled GitHub runs continue to run only `standard`.
+
 ## Running in CI against a drasi-server branch or fork
 
-This variant runs as the `stock_market / drasi_server_http_grpc_join` job of
+The selected variants run as `stock_market / <variant>` jobs of
 the [`E2E - stock_market join`](../../../../../.github/workflows/e2e-stock-market-join.yml)
 workflow. By default (scheduled or a plain manual run) it downloads the latest
 `drasi-project/drasi-server` release. To instead **build drasi-server from
@@ -174,7 +201,7 @@ GitHub controller runner. No self-hosted GitHub runner registration is needed.
 
 Use the same server and plugin settings that passed the GitHub-hosted run.
 Choose a region, VM size, OS disk type, and disk size alongside the stock-market
-workload, query capacity, and persistence inputs. The default hardware is
+variant, batch size, workload, query capacity, and persistence inputs. The default hardware is
 `Standard_D4s_v6` in `westus3` with a 128 GB Premium SSD.
 
 The repository needs `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and

@@ -19,6 +19,23 @@ set -a
 source "$ENV_FILE"
 set +a
 
+SCENARIO="${SCENARIO:-building_comfort}"
+case "$SCENARIO" in
+    building_comfort)
+        export RUN_SCRIPT="$WORKSPACE/e2e-test-framework/examples/building_comfort/run_variant.sh"
+        VARIANTS="${VARIANTS:-drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive}"
+        ;;
+    stock_market)
+        export RUN_SCRIPT="$WORKSPACE/e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join/run_test_ci.sh"
+        VARIANTS="drasi_server_http_grpc_join"
+        ;;
+    *)
+        echo "Unsupported scenario: $SCENARIO" >&2
+        exit 1
+        ;;
+esac
+export VARIANTS
+
 DRASI_SERVER_VERSION="${DRASI_SERVER_VERSION:-}"
 DRASI_SERVER_REPO="${DRASI_SERVER_REPO:-}"
 DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
@@ -26,7 +43,6 @@ DRASI_SERVER_REF="${DRASI_SERVER_REF:-}"
 # falls back to the canonical one but still builds from source when a ref is set.
 DRASI_REPO_EXPLICIT="$DRASI_SERVER_REPO"
 DRASI_REPO="${DRASI_SERVER_REPO:-drasi-project/drasi-server}"
-VARIANTS="${VARIANTS:-drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive}"
 : "${SUITE_WORK_DIR:?SUITE_WORK_DIR is required}"
 : "${PERF_PROFILE_ID:?PERF_PROFILE_ID is required}"
 
@@ -41,7 +57,7 @@ done
 
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-    ca-certificates curl git jq build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+    ca-certificates curl git jq ruby build-essential pkg-config libssl-dev libjq-dev libonig-dev \
     libprotobuf-dev protobuf-compiler cmake clang libclang-dev lsof
 
 # test-run-host and drasi-server enable drasi-core's `middleware-jq` feature,

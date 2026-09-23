@@ -3,6 +3,62 @@
 name: Building comfort Azure
 
 on:
+  workflow_call:
+    inputs:
+      scenario:
+        type: string
+        default: building_comfort
+      location:
+        type: string
+        default: westus3
+      vm_size:
+        type: string
+        default: Standard_D4s_v6
+      os_disk_type:
+        type: string
+        default: Premium_LRS
+      os_disk_size_gb:
+        type: string
+        default: "128"
+      workload_size:
+        type: string
+        default: "100000"
+      query_tuning:
+        type: string
+        default: "10000"
+      persist_index:
+        type: boolean
+        default: false
+      state_store:
+        type: boolean
+        default: false
+      drasi_server_version:
+        type: string
+        default: ""
+      drasi_server_repo:
+        type: string
+        default: ""
+      drasi_server_ref:
+        type: string
+        default: ""
+      timeout_minutes:
+        type: string
+        default: "30"
+      plugin_registry:
+        type: string
+        default: ""
+      plugin_tag:
+        type: string
+        default: ""
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      TEST_RESULTS_APP_PRIVATE_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       location:
@@ -153,6 +209,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  SCENARIO: ${{ inputs.scenario || 'building_comfort' }}
   AZURE_RESOURCE_GROUP: drasi-e2e-test-infra
   BICEP_FILE: infra/azure/test-vm/main.bicep
   ADMIN_USERNAME: githubrunner
@@ -164,7 +221,7 @@ env:
 
 jobs:
   test:
-    name: building_comfort / ${{ matrix.vm_size }}
+    name: ${{ inputs.scenario || 'building_comfort' }} / ${{ matrix.vm_size }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
@@ -189,6 +246,7 @@ jobs:
 
       - name: Resolve test inputs
         env:
+          IN_WORKLOAD_SIZE: ${{ inputs.workload_size }}
           IN_LOCATION: ${{ inputs.location }}
           IN_VM_SIZE: ${{ matrix.vm_size }}
           MATRIX_JOB_INDEX: ${{ strategy.job-index }}
@@ -219,7 +277,12 @@ jobs:
           IN_VM_SIZE="${IN_VM_SIZE:-Standard_D4s_v6}"
 
           variant_arr=()
-          if [[ -z "$V_DRASI_LIB$V_HTTP_STD$V_HTTP_ADAPTIVE$V_GRPC_STD$V_GRPC_ADAPTIVE" ]]; then
+          if [[ "$SCENARIO" == "stock_market" ]]; then
+            variant_arr=(drasi_server_http_grpc_join)
+          elif [[ "$SCENARIO" != "building_comfort" ]]; then
+            echo "Unsupported scenario: $SCENARIO" >&2
+            exit 1
+          elif [[ -z "$V_DRASI_LIB$V_HTTP_STD$V_HTTP_ADAPTIVE$V_GRPC_STD$V_GRPC_ADAPTIVE" ]]; then
             # Scheduled runs have no workflow_dispatch inputs.
             variant_arr=(drasi_lib http_standard http_adaptive grpc_standard grpc_adaptive)
           else
@@ -238,7 +301,9 @@ jobs:
           # Query selection. Empty (scheduled runs, no dispatch inputs) = both.
           # Deselecting a query drops it and its subscribing reaction.
           queries_arr=()
-          if [[ -z "$V_Q_MAIN$V_Q_AGG" ]]; then
+          if [[ "$SCENARIO" == "stock_market" ]]; then
+            queries_arr=(watchlist-prices)
+          elif [[ -z "$V_Q_MAIN$V_Q_AGG" ]]; then
             queries_arr=(building-comfort building-comfort-floor-agg)
           else
             [[ "$V_Q_MAIN" == "true" ]] && queries_arr+=(building-comfort)
@@ -254,8 +319,13 @@ jobs:
           timeout_minutes="${IN_TIMEOUT_MINUTES:-30}"
           os_disk_type="${IN_OS_DISK_TYPE:-Premium_LRS}"
           os_disk_size_gb="${IN_OS_DISK_SIZE_GB:-128}"
+          workload_size="${IN_WORKLOAD_SIZE:-100000}"
           [[ "$bootstrap_size" == "off" ]] && bootstrap_size=""
 
+          if [[ "$SCENARIO" == "stock_market" && ! "$workload_size" =~ ^(100000|250000|500000)$ ]]; then
+            echo "Unsupported stock-market workload size: $workload_size" >&2
+            exit 1
+          fi
           [[ "$timeout_minutes" =~ ^[1-9][0-9]*$ ]] || {
             echo "Invalid timeout_minutes: $timeout_minutes" >&2
             exit 1
@@ -359,6 +429,7 @@ jobs:
             echo "IMAGE_VERSION=$image_version"
             echo "VARIANTS=$variants"
             echo "QUERIES=$queries"
+            echo "WORKLOAD_SIZE=$workload_size"
             echo "DRASI_SERVER_VERSION=$IN_SERVER_VERSION"
             echo "DRASI_SERVER_REPO=$IN_SERVER_REPO"
             echo "DRASI_SERVER_REF=$IN_SERVER_REF"
@@ -450,8 +521,10 @@ jobs:
           git archive --format=tar.gz --output="$RUNNER_TEMP/test-infra.tar.gz" "$GITHUB_SHA"
 
           {
+            printf 'SCENARIO=%q\n' "$SCENARIO"
             printf 'VARIANTS=%q\n' "$VARIANTS"
             printf 'QUERIES=%q\n' "$QUERIES"
+            printf 'WORKLOAD_SIZE=%q\n' "$WORKLOAD_SIZE"
             printf 'DRASI_SERVER_VERSION=%q\n' "$DRASI_SERVER_VERSION"
             printf 'DRASI_SERVER_REPO=%q\n' "$DRASI_SERVER_REPO"
             printf 'DRASI_SERVER_REF=%q\n' "$DRASI_SERVER_REF"
@@ -530,7 +603,7 @@ jobs:
       - name: Build result summaries
         if: always() && env.VM_PUBLIC_IP != ''
         env:
-          WORKFLOW_FILE: building-comfort-azure.yml
+          WORKFLOW_FILE: ${{ inputs.scenario == 'stock_market' && 'stock-market-azure.yml' || 'building-comfort-azure.yml' }}
           RUNNER_LABEL: ${{ env.PERF_PROFILE_ID }}
         run: |
           set -euo pipefail
@@ -554,17 +627,17 @@ jobs:
 
             python3 .github/scripts/emit_summary.py \
               --artifacts "$variant_artifacts" \
-              --scenario building_comfort \
+              --scenario "$SCENARIO" \
               --variant "$variant" \
               --job-status "$status" \
-              --output "$summary_dir/building_comfort__${variant}__${VM_SIZE}.json"
+              --output "$summary_dir/${SCENARIO}__${variant}__${VM_SIZE}.json"
           done
 
       - name: Upload result summary
         if: always() && env.VM_PUBLIC_IP != ''
         uses: actions/upload-artifact@v6
         with:
-          name: summary-building_comfort-azure-${{ matrix.vm_size }}
+          name: summary-${{ env.SCENARIO }}-azure-${{ matrix.vm_size }}
           path: ${{ runner.temp }}/summary
           if-no-files-found: warn
 
@@ -574,7 +647,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$LOCAL_ARTIFACTS_DIR"
           summary_file="$LOCAL_ARTIFACTS_DIR/summary.md"
-          combined_summary="$RUNNER_TEMP/building-comfort-summary.md"
+          combined_summary="$RUNNER_TEMP/${SCENARIO}-summary.md"
 
           {
             echo "## Azure test environment"
@@ -592,7 +665,7 @@ jobs:
             cat "$summary_file" >> "$combined_summary"
           else
             {
-              echo "## Building comfort test"
+              echo "## $SCENARIO test"
               echo
               echo "No test summary was produced. Check the workflow logs and uploaded artifacts."
             } >> "$combined_summary"
@@ -605,7 +678,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: building-comfort-azure-${{ matrix.vm_size }}-${{ env.PERF_PROFILE_ID }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.scenario == 'stock_market' && 'stock-market' || 'building-comfort' }}-azure-${{ matrix.vm_size }}-${{ env.PERF_PROFILE_ID }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.LOCAL_ARTIFACTS_DIR }}
           if-no-files-found: warn
 

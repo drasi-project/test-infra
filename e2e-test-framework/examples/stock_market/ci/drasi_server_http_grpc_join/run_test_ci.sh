@@ -483,14 +483,8 @@ verify_test_run_status() {
     return 0
 }
 
-# Render a markdown summary into $GITHUB_STEP_SUMMARY so it shows up on the
-# workflow run page. Local runs (no GITHUB_STEP_SUMMARY env var) skip this.
 write_step_summary() {
-    if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
-        return 0
-    fi
-
-    local out="$GITHUB_STEP_SUMMARY"
+    local out="$ARTIFACTS_DIR/summary.md"
     local drasi_source="${DRASI_BUILD_SOURCE:-unknown}"
     local server_version
     server_version="$("$DRASI_SERVER_BIN" --version 2>/dev/null | head -n1 || echo unknown)"
@@ -539,7 +533,10 @@ write_step_summary() {
             echo "| \`$rid\` | $records | $duration | $rps |"
         done < <(find "$DATA_CACHE" -path '*output_log/performance_metrics/*.json' -type f -print0 2>/dev/null || true)
         echo
-    } >> "$out"
+    } > "$out"
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" && "$GITHUB_STEP_SUMMARY" != "$out" ]]; then
+        cat "$out" >> "$GITHUB_STEP_SUMMARY"
+    fi
 }
 
 resolve_workload

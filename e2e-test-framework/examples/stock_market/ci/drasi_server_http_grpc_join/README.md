@@ -158,6 +158,37 @@ freshly built binary. The step summary labels the run with the resolved source
 be pushed and public (the clone is anonymous). Locally, export `DRASI_SERVER_REF`
 (and optionally `DRASI_REPO`) before running the script for the same effect.
 
+## Running on an Azure VM
+
+Use **Actions > Stock market Azure > Run workflow** via
+[stock-market-azure.yml](../../../../../.github/workflows/stock-market-azure.yml).
+This is a separate manual workflow from the GitHub-hosted join test. The new
+workflow must be committed, pushed, and present on the repository's default
+branch for the **Run workflow** button to appear; after that, select the branch
+containing the version you want to test.
+
+It reuses the provisioning and cleanup in
+[building-comfort-azure.yml](../../../../../.github/workflows/building-comfort-azure.yml).
+The workload runs natively on an ephemeral Ubuntu 24.04 Azure VM, not on the
+GitHub controller runner. No self-hosted GitHub runner registration is needed.
+
+Use the same server and plugin settings that passed the GitHub-hosted run.
+Choose a region, VM size, OS disk type, and disk size alongside the stock-market
+workload, query capacity, and persistence inputs. The default hardware is
+`Standard_D4s_v6` in `westus3` with a 128 GB Premium SSD.
+
+The repository needs `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and
+`AZURE_SUBSCRIPTION_ID` secrets plus the Azure OIDC trust and provisioning
+permissions used by **Building comfort Azure**. An OIDC policy restricted to
+the calling workflow identity must also allow this workflow.
+
+The workflow uploads throughput summaries, logs, Azure hardware metadata, and
+binary/plugin fingerprints. It deletes the per-run VM and network resources
+on completion, including test failures, and verifies cleanup. Runs share the
+existing Azure resource-group concurrency lock. No stock-market Azure schedule
+is added, and manual results are not published to the scheduled performance
+history. Azure VM and disk charges apply while the resources exist.
+
 ## Default ports
 
 | Component                                          | Port                    |

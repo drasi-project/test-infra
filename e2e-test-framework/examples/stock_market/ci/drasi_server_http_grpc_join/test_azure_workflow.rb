@@ -86,6 +86,60 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     assert_equal "always()", cleanup["if"]
   end
 
+  def test_cleanup_pins_network_api_for_delete_and_wait
+    executable("az", <<~'RUBY')
+      #!/usr/bin/env ruby
+      require "json"
+      args = ARGV
+      File.open(ENV.fetch("AZ_CALLS"), "a") { |file| file.puts(JSON.dump(args)) }
+      case args.first(2)
+      when ["resource", "list"]
+        abort "wrong resource group" unless args[args.index("--resource-group") + 1] == "test-group"
+        puts ENV.fetch("RESOURCE_ID")
+      when ["resource", "delete"], ["resource", "wait"]
+        abort "wrong resource ID" unless args[args.index("--ids") + 1] == ENV.fetch("RESOURCE_ID")
+        if ENV.fetch("RESOURCE_TYPE").start_with?("Microsoft.Network/")
+          api_index = args.index("--api-version")
+          abort "NoRegisteredProviderFound: unpinned Network API" unless api_index && args[api_index + 1] == "2024-05-01"
+        end
+      else
+        abort "unexpected az command: #{args.inspect}"
+      end
+    RUBY
+    executable("sleep", "#!/usr/bin/env bash\nexit 0\n")
+    cleanup = step("Delete per-run Azure resources")
+    function = cleanup[/^delete_resource\(\) \{\n.*?^\}\n/m]
+    refute_nil function
+    resource_types = %w[
+      Microsoft.Network/publicIPAddresses
+      Microsoft.Network/virtualNetworks
+      Microsoft.Network/networkSecurityGroups
+      Microsoft.Network/networkInterfaces
+      Microsoft.Compute/virtualMachines
+      Microsoft.Compute/disks
+    ]
+    resource_types.each do |resource_type|
+      calls_file = File.join(@directory, "cleanup-calls.jsonl")
+      File.write(calls_file, "")
+      env = {
+        "PATH" => "#{@bin}:#{ENV.fetch('PATH')}", "AZ_CALLS" => calls_file,
+        "AZURE_RESOURCE_GROUP" => "test-group", "RESOURCE_TYPE" => resource_type,
+        "RESOURCE_ID" => "/subscriptions/test/resourceGroups/test-group/providers/#{resource_type}/run-resource"
+      }
+      output, errors, result = Open3.capture3(
+        env, "bash", stdin_data: "set -euo pipefail\n#{function}\ndelete_resource \"$RESOURCE_TYPE\" run-resource\n"
+      )
+      assert result.success?, "#{resource_type}: #{output}#{errors}"
+      calls = File.readlines(calls_file).map { |line| JSON.parse(line) }
+      assert_equal [%w[resource list], %w[resource delete], %w[resource wait]], calls.map { |args| args.first(2) }
+      assert_includes calls.last, "--deleted"
+      calls.drop(1).each do |args|
+        assert_equal env["RESOURCE_ID"], args[args.index("--ids") + 1]
+        refute_includes args, "--api-version" if resource_type.start_with?("Microsoft.Compute/")
+      end
+    end
+  end
+
   def test_stock_market_inputs_are_packaged_for_the_vm
     output, result = resolve("stock_market", "IN_WORKLOAD_SIZE" => "250000", "IN_QUERY_TUNING" => "100000", "IN_STATE_STORE" => "true", "IN_BATCHING_SPEED" => "5000")
     assert result.success?, output

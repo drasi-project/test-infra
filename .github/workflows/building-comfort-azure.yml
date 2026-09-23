@@ -740,10 +740,14 @@ jobs:
                 return 0
               else
                 echo "Deleting $resource_type/$resource_name (attempt $attempt/3)"
-                if az resource delete --ids "$resource_id" &&
+                local resource_args=(--ids "$resource_id")
+                if [[ "$resource_type" == Microsoft.Network/* ]]; then
+                  resource_args+=(--api-version 2024-05-01)
+                fi
+                if az resource delete "${resource_args[@]}" --verbose &&
                    az resource wait \
                      --deleted \
-                     --ids "$resource_id" \
+                     "${resource_args[@]}" \
                      --interval 10 \
                      --timeout 600; then
                   return 0

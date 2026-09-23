@@ -11,6 +11,14 @@ GitHub-hosted runners and ephemeral Azure VMs. Select `variant: adaptive` to
 enable adaptive batching on both source dispatchers, or `both` to compare it
 with the original standard variant. The query and HTTP reaction stay fixed.
 
+### SIGKILL Recovery
+
+The separate [SIGKILL recovery test](recovery/README.md) runs standard and adaptive
+HTTP/gRPC dispatchers against a fixed scripted join workload. It waits for both
+sources to drain, kills and restarts the server with persistence, and requires
+the recovered query snapshot to match a versioned golden. It does not change the
+performance workload or claim exactly-once HTTP delivery.
+
 ### 1. Basic Local Configuration (`/local/`)
 - **Purpose**: Simple standalone testing without Drasi integration
 - **Use Case**: Testing the StockTradeDataGenerator in isolation

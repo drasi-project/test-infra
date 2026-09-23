@@ -103,7 +103,6 @@ fn effective_config_log_level_override_takes_precedence() {
     let mut config = run_config("instance1");
     config.test_run_overrides = Some(TestRunDrasiLibInstanceOverrides {
         log_level: Some("trace".to_string()),
-        execution_mode: None,
     });
 
     let definition = TestRunDrasiLibInstanceDefinition::new(
@@ -130,59 +129,152 @@ fn effective_config_log_level_none_when_unset() {
 }
 
 #[test]
-fn execution_mode_defaults_to_component_graph_and_rejects_unknown_modes() {
-    use super::DrasiLibExecutionMode;
+fn removed_execution_mode_overrides_are_rejected() {
+    for key in ["execution_mode", "executionMode"] {
+        for value in [
+            serde_json::json!("componentGraph"),
+            serde_json::json!("computationGraph"),
+            serde_json::json!("invalid"),
+            serde_json::Value::Null,
+        ] {
+            let mut config = serde_json::to_value(run_config("instance1")).unwrap();
+            config["test_run_overrides"] = serde_json::json!({ key: value });
+            let error = serde_json::from_value::<TestRunDrasiLibInstanceConfig>(config)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("unknown field"), "{error}");
+            assert!(error.contains(key), "{error}");
+        }
+    }
+}
 
-    let definition = TestRunDrasiLibInstanceDefinition::new(
-        run_config("instance1"),
-        empty_instance_def("instance1", None),
-    )
-    .unwrap();
+#[test]
+fn runtime_overrides_serialize_without_an_engine_selector() {
+    let overrides: TestRunDrasiLibInstanceOverrides =
+        serde_json::from_value(serde_json::json!({ "log_level": "debug" })).unwrap();
     assert_eq!(
-        definition.execution_mode(),
-        DrasiLibExecutionMode::ComponentGraph
+        serde_json::to_value(overrides).unwrap(),
+        serde_json::json!({ "log_level": "debug" })
     );
-    assert!(serde_json::from_value::<TestRunDrasiLibInstanceOverrides>(serde_json::json!({
-        "execution_mode": "invalid"
-    }))
-    .is_err());
 }
 
 #[tokio::test]
-async fn embedded_instances_select_and_report_the_actual_runtime() {
-    use super::{DrasiLibExecutionMode, TestRunDrasiLibInstance};
+async fn embedded_instances_report_the_single_live_runtime() {
+    use super::TestRunDrasiLibInstance;
     use test_data_store::test_run_storage::TestRunDrasiLibInstanceStorage;
 
-    for mode in [
-        DrasiLibExecutionMode::ComponentGraph,
-        DrasiLibExecutionMode::ComputationGraph,
-    ] {
-        let directory = tempfile::tempdir().unwrap();
-        let mut config = run_config("instance1");
-        config.test_run_overrides = Some(TestRunDrasiLibInstanceOverrides {
-            execution_mode: Some(mode),
-            ..Default::default()
-        });
-        let definition = TestRunDrasiLibInstanceDefinition::new(
-            config,
-            empty_instance_def("instance1", None),
-        )
-        .unwrap();
-        let storage = TestRunDrasiLibInstanceStorage {
-            id: definition.id.clone(),
-            path: directory.path().to_path_buf(),
-        };
-        let instance = TestRunDrasiLibInstance::new(
-            definition,
-            storage,
-            crate::test_run_completion::LifecycleTx::disabled(),
-        )
-        .await
-        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = run_config("instance1");
+    config.start_immediately = false;
+    let definition =
+        TestRunDrasiLibInstanceDefinition::new(config, empty_instance_def("instance1", None))
+            .unwrap();
+    let storage = TestRunDrasiLibInstanceStorage {
+        id: definition.id.clone(),
+        path: directory.path().to_path_buf(),
+    };
+    let instance = TestRunDrasiLibInstance::new(
+        definition,
+        storage,
+        crate::test_run_completion::LifecycleTx::disabled(),
+    )
+    .await
+    .unwrap();
+
+    assert!(instance.get_runtime_info().await.is_err());
+    for _ in 0..2 {
+        instance.start().await.unwrap();
         let runtime = instance.get_runtime_info().await.unwrap();
-        assert_eq!(runtime.execution_mode, mode);
+        assert_eq!(runtime.execution_mode, "computationGraph");
         assert!(runtime.running);
         instance.stop().await.unwrap();
         assert!(instance.get_runtime_info().await.is_err());
     }
+}
+
+#[tokio::test]
+async fn embedded_application_adapters_preserve_result_order_and_count() {
+    use super::TestRunDrasiLibInstance;
+    use drasi_source_application::PropertyMapBuilder;
+    use test_data_store::test_run_storage::TestRunDrasiLibInstanceStorage;
+
+    let directory = tempfile::tempdir().unwrap();
+    let instance_definition = serde_json::from_value(serde_json::json!({
+        "test_drasi_lib_instance_id": "instance1",
+        "config": {
+            "sources": [{ "id": "source1", "kind": "application" }],
+            "queries": [{
+                "id": "query1",
+                "query": "MATCH (n:TestNode) RETURN n.marker AS marker",
+                "sources": ["source1"]
+            }],
+            "reactions": [{
+                "id": "reaction1", "kind": "application", "queries": ["query1"]
+            }]
+        }
+    }))
+    .unwrap();
+    let definition =
+        TestRunDrasiLibInstanceDefinition::new(run_config("instance1"), instance_definition)
+            .unwrap();
+    let storage = TestRunDrasiLibInstanceStorage {
+        id: definition.id.clone(),
+        path: directory.path().to_path_buf(),
+    };
+    let instance = TestRunDrasiLibInstance::new(
+        definition,
+        storage,
+        crate::test_run_completion::LifecycleTx::disabled(),
+    )
+    .await
+    .unwrap();
+    let source = instance.get_source_handle("source1").await.unwrap();
+    let reaction = instance.get_reaction_handle("reaction1").await.unwrap();
+    let mut subscription = reaction
+        .subscribe_with_options(Default::default())
+        .await
+        .unwrap();
+
+    for index in 0..3 {
+        let marker = format!("ordered-node-{index}");
+        source
+            .send_node_insert(
+                marker.as_str(),
+                vec!["TestNode".to_string()],
+                PropertyMapBuilder::new()
+                    .with_string("marker", &marker)
+                    .build(),
+            )
+            .await
+            .unwrap();
+    }
+
+    let mut previous_sequence = None;
+    for index in 0..3 {
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let result = subscription
+                    .recv()
+                    .await
+                    .expect("reaction subscription closed");
+                if !result.results.is_empty() {
+                    break result;
+                }
+            }
+        })
+        .await
+        .expect("application reaction did not receive the source change");
+        assert_eq!(result.query_id, "query1");
+        assert_eq!(result.results.len(), 1);
+        if let Some(previous) = previous_sequence {
+            assert!(result.sequence > previous);
+        }
+        previous_sequence = Some(result.sequence);
+        let payload = serde_json::to_string(&result.results).unwrap();
+        assert!(
+            payload.contains(&format!("ordered-node-{index}")),
+            "{payload}"
+        );
+    }
+    instance.stop().await.unwrap();
 }

@@ -108,7 +108,6 @@ pub struct ErrorResponse {
             test_runs::TestRunCreatedResponse,
             test_runs::TestRunInfo,
             test_run_host::drasi_lib_instances::DrasiLibRuntimeInfo,
-            test_run_host::drasi_lib_instances::DrasiLibExecutionMode,
         )
     ),
     tags(

@@ -40,40 +40,41 @@ no network hop, no separate process to start, and no plugin install step.
 ## Prerequisites
 
 - The sibling `drasi-core` checkout; `test-run-host` uses its local path
-  dependencies with the `computation` feature enabled.
+  dependencies. No runtime feature opt-in is required.
 - This repository buildable via `cargo build --locked --release`.
 - No external services.
 
-## Select the embedded engine
+## Embedded runtime
 
-The default is ComponentGraph. To use ComputationGraph without changing the
-test definition, set the embedded instance's runtime override:
+ComputationGraph is the only embedded runtime. The checked-in configuration
+uses it without an engine override:
 
 ```json
 {
   "test_drasi_lib_instance_id": "internal-drasi-lib",
-  "start_immediately": true,
-  "test_run_overrides": {
-    "execution_mode": "computationGraph"
-  }
+  "start_immediately": true
 }
 ```
 
 This object belongs in `test_run_host.test_runs[0].drasi_lib_instances`.
-Use `componentGraph` for the control run. Both modes use the same application
-source/reaction implementations; no Drasi Server or dynamic plugins are loaded.
-Unknown mode values are rejected.
+The existing application source/reaction implementations remain in use; no
+Drasi Server or dynamic plugins are loaded. The removed
+`test_run_overrides.execution_mode` setting is rejected for all values, including
+`componentGraph`, `computationGraph`, and null. Omit it rather than using an old
+runtime label for a new benchmark. Runtime overrides support `log_level` only.
 
-Confirm the live engine with:
+Confirm the live instance with:
 
 ```bash
 curl http://localhost:63123/api/test_runs/drasi_lib_dev_repo.building_comfort.test_run_001/drasi_lib_instances/internal-drasi-lib/runtime
 ```
 
-The response reads `execution_mode` and `running` from the actual embedded
-DrasiLib instance. For performance comparisons, finish builds first, warm up
-both modes, alternate repeated runs, and use identical logging and workload
-settings. The supplied local example and the gRPC example have different
+The response includes the fixed informational `execution_mode: "computationGraph"`
+identifier and the actual embedded DrasiLib instance's `running` status.
+For performance comparisons, finish builds first, warm up, repeat runs, and use
+identical logging and workload settings. Historical ComponentGraph measurements
+must identify the assessed commit; that engine is not selectable here.
+The supplied local example and the gRPC example have different
 generator intervals, query aliases, and stop thresholds; align those explicitly
 when comparing the same workload across hosting modes.
 

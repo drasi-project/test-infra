@@ -63,44 +63,18 @@ fn default_start_immediately() -> bool {
 
 /// Overrides for drasi-lib instance configuration at runtime.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TestRunDrasiLibInstanceOverrides {
     /// Override log level (trace, debug, info, warn, error).
     pub log_level: Option<String>,
-    /// Select the engine without changing the test definition.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_mode: Option<DrasiLibExecutionMode>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum DrasiLibExecutionMode {
-    #[default]
-    ComponentGraph,
-    ComputationGraph,
-}
-
-impl From<DrasiLibExecutionMode> for drasi_lib::ExecutionMode {
-    fn from(mode: DrasiLibExecutionMode) -> Self {
-        match mode {
-            DrasiLibExecutionMode::ComponentGraph => Self::ComponentGraph,
-            DrasiLibExecutionMode::ComputationGraph => Self::ComputationGraph,
-        }
-    }
-}
-
-impl From<drasi_lib::ExecutionMode> for DrasiLibExecutionMode {
-    fn from(mode: drasi_lib::ExecutionMode) -> Self {
-        match mode {
-            drasi_lib::ExecutionMode::ComponentGraph => Self::ComponentGraph,
-            drasi_lib::ExecutionMode::ComputationGraph => Self::ComputationGraph,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct DrasiLibRuntimeInfo {
     pub instance_id: String,
-    pub execution_mode: DrasiLibExecutionMode,
+    /// Informational identifier of the sole runtime, not a configuration selector.
+    #[schema(example = "computationGraph")]
+    pub execution_mode: String,
     pub running: bool,
 }
 
@@ -158,13 +132,6 @@ pub struct TestRunDrasiLibInstanceDefinition {
 }
 
 impl TestRunDrasiLibInstanceDefinition {
-    pub fn execution_mode(&self) -> DrasiLibExecutionMode {
-        self.test_run_overrides
-            .as_ref()
-            .and_then(|overrides| overrides.execution_mode)
-            .unwrap_or_default()
-    }
-
     /// Create a test run drasi-lib instance definition.
     pub fn new(
         config: TestRunDrasiLibInstanceConfig,
@@ -259,9 +226,7 @@ impl TestRunDrasiLibInstance {
         }
 
         let config = self.definition.effective_config();
-        let mut builder = DrasiLib::builder()
-            .with_id(self.id.to_string())
-            .with_execution_mode(self.definition.execution_mode().into());
+        let mut builder = DrasiLib::builder().with_id(self.id.to_string());
         let mut source_handles = HashMap::new();
         let mut reaction_handles = HashMap::new();
 
@@ -377,7 +342,7 @@ impl TestRunDrasiLibInstance {
             .context("drasi-lib instance is not running")?;
         Ok(DrasiLibRuntimeInfo {
             instance_id: self.id.to_string(),
-            execution_mode: core.execution_mode().into(),
+            execution_mode: "computationGraph".to_string(),
             running: core.is_running().await,
         })
     }

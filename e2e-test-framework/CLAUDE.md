@@ -179,7 +179,7 @@ The framework deploys as a Drasi SourceProvider:
 - Dispatcher/handler kinds: `DrasiServerChannel` → `DrasiLibInstanceChannel`, `DrasiServerCallback` → `DrasiLibInstanceCallback`.
 - Removed `DrasiServerApi` source dispatcher; embedded drasi-lib instances do not expose an HTTP endpoint.
 
-In this development workspace, the embedded instance uses `drasi-lib`, `drasi-core`, and the application/bootstrap crates from the sibling `drasi-core` checkout through direct path dependencies in `test-run-host/Cargo.toml`. The same binary includes both engines. Select the engine with the instance's runtime `test_run_overrides.execution_mode` (`componentGraph` or `computationGraph`); omission preserves ComponentGraph. Inspect `/api/test_runs/<run-id>/drasi_lib_instances/<instance-id>/runtime` for the actual running engine rather than relying on configuration.
+In this development workspace, the embedded instance uses `drasi-lib`, `drasi-core`, and the application/bootstrap crates from the sibling `drasi-core` checkout through direct path dependencies in `test-run-host/Cargo.toml`. ComputationGraph is the only runtime and requires no feature or configuration opt-in. The removed `test_run_overrides.execution_mode` selector is rejected, including `componentGraph`, `computationGraph`, and null values; omit the field. Runtime overrides support `log_level` only. Inspect `/api/test_runs/<run-id>/drasi_lib_instances/<instance-id>/runtime` for the informational `execution_mode: "computationGraph"` identifier and live `running` status. The endpoint does not provide an engine selector.
 
 Schema shape:
 

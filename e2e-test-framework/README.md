@@ -33,9 +33,9 @@ A comprehensive testing framework for validating Drasi, a Change Processing Plat
   - [Profiling Embedded Results](#profiling-embedded-results)
   - [Output Loggers](#output-loggers)
 - [drasi-lib instances](#drasi-lib-instances)
-  - [Choose the Execution Mode](#choose-the-execution-mode)
+  - [Single Embedded Runtime](#single-embedded-runtime)
   - [Run a Complete Example](#run-a-complete-example)
-  - [Check the Running Mode](#check-the-running-mode)
+  - [Check the Running Instance](#check-the-running-instance)
 - [REST API](#rest-api)
 - [Development](#development)
 
@@ -89,7 +89,7 @@ e2e-test-framework/
 The Test Service can host drasi-lib instances in the same process. Sources and
 reactions connect through `DrasiLibInstanceChannel`; the embedded instance does
 not expose an HTTP/gRPC server. See [drasi-lib instances](#drasi-lib-instances)
-for engine selection and a complete runnable example.
+for runtime information and a complete runnable example.
 
 To test an **external Drasi Server** instead, use HTTP/gRPC dispatchers and
 reaction handlers.
@@ -1094,23 +1094,23 @@ entries use `id` and `config`, not `source_type`, `reaction_type`, or `propertie
 See the [complete example configuration](examples/building_comfort/local/drasi_lib/config.json)
 for the component definitions and their channel connections.
 
-### Choose the Execution Mode
+### Single Embedded Runtime
 
-Both engines are included in this workspace's test-service build. Select one per
-embedded instance using
-`test_run_host.test_runs[].drasi_lib_instances[].test_run_overrides.execution_mode`.
+Embedded instances always use ComputationGraph, including builds without
+drasi-lib's default features. There is no engine feature or configuration opt-in.
+The existing application source and reaction adapters remain in use.
 
-| Value | Engine | Default? |
-|-------|--------|----------|
-| `componentGraph` | ComponentGraph | Yes, when the override is omitted |
-| `computationGraph` | ComputationGraph | No, opt in explicitly |
+The removed
+`test_run_host.test_runs[].drasi_lib_instances[].test_run_overrides.execution_mode`
+setting is rejected rather than silently relabelling a benchmark. Remove the
+field entirely, even if its value is `computationGraph` or null. ComponentGraph
+cannot be selected. Historical comparisons must identify the assessed commit.
 
-Values are case-sensitive; unknown mode values are rejected. The instance's
-`start_immediately` also defaults to `true`.
+Runtime overrides support `log_level` only. The instance's `start_immediately`
+defaults to `true`.
 
 **Runtime configuration excerpt — not a complete configuration file.** In the
-complete example, add `test_run_overrides` to the existing instance entry; keep
-the source and reaction settings:
+complete example, keep the existing source and reaction settings:
 
 ```yaml
 test_run_host:
@@ -1122,21 +1122,19 @@ test_run_host:
         - test_drasi_lib_instance_id: internal-drasi-lib
           start_immediately: true
           test_run_overrides:
-            execution_mode: computationGraph
+            log_level: info
 ```
 
-This is **test-service configuration for an embedded instance**. Drasi Server's
-`executionMode` YAML field and Server command-line flags do not select the engine
-here. This harness schema has no `runtime`, `storage`, or `auth` blocks.
-When testing an external Drasi Server, configure its engine separately in that
-Server; the harness only connects to it.
+This is **test-service configuration for an embedded instance**, not Drasi
+Server configuration. This harness schema has no `runtime`, `storage`, or `auth`
+blocks. External Drasi Server HTTP/gRPC scenarios are separate hosting and
+transport choices, not alternative internal engines; the harness only connects
+to those services.
 
 ### Run a Complete Example
 
 Use the checked-in [Building Comfort configuration](examples/building_comfort/local/drasi_lib/config.json).
-It omits the engine override, so it runs ComponentGraph unchanged. For
-ComputationGraph, add the override shown above to that configuration (using JSON
-syntax in `config.json`).
+It runs ComputationGraph as written, without an engine override.
 
 From `e2e-test-framework/`:
 
@@ -1157,7 +1155,7 @@ its reaction stop thresholds count output records rather than proving every
 input has finished processing. Use the separate
 [throughput and diagnostic settings](#profiling-embedded-results) when measuring.
 
-### Check the Running Mode
+### Check the Running Instance
 
 From another terminal, while the instance is running:
 
@@ -1176,18 +1174,17 @@ For the unmodified example, expect:
 ```json
 {
   "instance_id": "drasi_lib_dev_repo.building_comfort.test_run_001.internal-drasi-lib",
-  "execution_mode": "componentGraph",
+  "execution_mode": "computationGraph",
   "running": true
 }
 ```
 
-With the override, `execution_mode` should be `computationGraph`.
-`execution_mode` and `running` come from the live `DrasiLib`, not from
-configuration. The route requires a running instance; a stopped or
-not-yet-started instance currently returns an error, not a configuration-only
-mode report.
+`execution_mode` is a fixed informational runtime identifier, not a configuration
+field. `running` comes from the live `DrasiLib`. The route requires a started
+instance; a stopped or not-yet-started instance returns an error, not a
+configuration-only report.
 
-For the engines themselves, see the core
+For ComputationGraph itself, see the core
 [design](https://github.com/drasi-project/drasi-core/blob/agentofreality-parallel-computation-graph/lib/docs/computation-graph-design.md),
 [usage](https://github.com/drasi-project/drasi-core/blob/agentofreality-parallel-computation-graph/lib/docs/computation-graph-usage.md),
 and [configuration](https://github.com/drasi-project/drasi-core/blob/agentofreality-parallel-computation-graph/lib/docs/computation-graph-configuration.md)

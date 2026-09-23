@@ -35,5 +35,5 @@ large_enum_variant = "allow"
 lto = true
 
 # test-run-host uses direct paths into the sibling ../../drasi-core checkout.
-# The computation feature is enabled in the same binary for both runtime modes.
+# ComputationGraph is the sole drasi-lib runtime; no engine feature is needed.
 # Keep the existing sibling checkout; no Git or registry patches are needed.

@@ -3,11 +3,14 @@ name: E2E - stock_market recovery
 on:
   workflow_dispatch:
     inputs:
-      variant:
-        description: "Source dispatchers to test (each runs clean control and SIGKILL recovery)."
-        type: choice
-        options: [standard, adaptive, both]
-        default: both
+      standard:
+        description: "Standard HTTP + gRPC dispatchers (clean control and SIGKILL recovery)."
+        type: boolean
+        default: true
+      adaptive:
+        description: "Adaptive HTTP + gRPC dispatchers (clean control and SIGKILL recovery)."
+        type: boolean
+        default: true
       batching_speed:
         description: "Adaptive maximum batch size; 50 ms maximum wait."
         type: choice
@@ -52,25 +55,28 @@ jobs:
       - name: Validate settings
         id: settings
         env:
-          SELECTION: ${{ inputs.variant }}
+          V_STANDARD: ${{ inputs.standard }}
+          V_ADAPTIVE: ${{ inputs.adaptive }}
           MINUTES: ${{ inputs.timeout_minutes }}
           CORE_REF: ${{ inputs.drasi_core_ref }}
           SERVER_REF: ${{ inputs.drasi_server_ref }}
         run: |
           set -euo pipefail
-          case "$SELECTION" in
-            standard) variants='["standard"]' ;;
-            adaptive) variants='["adaptive"]' ;;
-            both) variants='["standard","adaptive"]' ;;
-            *) echo "Unsupported variant: $SELECTION" >&2; exit 1 ;;
-          esac
+          variants=()
+          if [[ "$V_STANDARD" == "true" ]]; then variants+=(standard); fi
+          if [[ "$V_ADAPTIVE" == "true" ]]; then variants+=(adaptive); fi
+          (( ${#variants[@]} > 0 )) || {
+            echo "ERROR: no variants selected. Tick at least one checkbox." >&2
+            exit 1
+          }
           [[ "$MINUTES" =~ ^[1-9][0-9]?$ ]] && (( MINUTES <= 60 )) || {
             echo "timeout_minutes must be 1-60" >&2; exit 1;
           }
           [[ -z "$CORE_REF" || -n "$SERVER_REF" ]] || {
             echo "drasi_core_ref requires drasi_server_ref" >&2; exit 1;
           }
-          echo "variants=$variants" >> "$GITHUB_OUTPUT"
+          json="$(printf '%s\n' "${variants[@]}" | jq -R . | jq -sc .)"
+          echo "variants=$json" >> "$GITHUB_OUTPUT"
           echo "timeout_seconds=$((MINUTES * 60))" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable

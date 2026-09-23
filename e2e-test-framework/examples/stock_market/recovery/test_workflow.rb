@@ -5,12 +5,34 @@ require 'json'
 require 'fileutils'
 
 workflow = YAML.load_file(File.expand_path('../../../../.github/workflows/e2e-stock-market-recovery.yml', __dir__))
+trigger = workflow['on'] || workflow[true]
+inputs = trigger.fetch('workflow_dispatch').fetch('inputs')
+abort 'Single-choice variant input remains' if inputs.key?('variant')
+%w[standard adaptive].each do |name|
+  abort "Invalid checkbox default: #{name}" unless inputs.fetch(name).values_at('type', 'default') == ['boolean', true]
+end
 steps = workflow.fetch('jobs').fetch('prepare').fetch('steps')
-validation = steps.find { |step| step['id'] == 'settings' }.fetch('run')
+settings = steps.find { |step| step['id'] == 'settings' }
+abort 'Missing standard input wiring' unless settings.dig('env', 'V_STANDARD') == '${{ inputs.standard }}'
+abort 'Missing adaptive input wiring' unless settings.dig('env', 'V_ADAPTIVE') == '${{ inputs.adaptive }}'
+validation = settings.fetch('run')
 Dir.mktmpdir('stock-recovery-workflow') do |directory|
-  env = {'SELECTION' => 'both', 'MINUTES' => '30', 'CORE_REF' => '', 'SERVER_REF' => '',
+  env = {'V_STANDARD' => 'true', 'V_ADAPTIVE' => 'true', 'MINUTES' => '30', 'CORE_REF' => '', 'SERVER_REF' => '',
          'GITHUB_OUTPUT' => File.join(directory, 'output')}
-  [ [{}, true], [{'SELECTION' => 'invalid'}, false], [{'MINUTES' => '0'}, false],
+  [ ['true', 'false', %w[standard]], ['false', 'true', %w[adaptive]],
+    ['true', 'true', %w[standard adaptive]], ['false', 'false', nil] ].each do |standard, adaptive, expected|
+    File.write(env['GITHUB_OUTPUT'], '')
+    output, errors, result = Open3.capture3(env.merge('V_STANDARD' => standard, 'V_ADAPTIVE' => adaptive), 'bash', stdin_data: validation)
+    abort "Unexpected checkbox result: #{standard}/#{adaptive}: #{output} #{errors}" unless result.success? == !expected.nil?
+    if expected
+      outputs = File.readlines(env['GITHUB_OUTPUT']).to_h { |line| line.strip.split('=', 2) }
+      abort 'Wrong variant matrix' unless JSON.parse(outputs.fetch('variants')) == expected
+    else
+      abort 'Missing empty selection diagnostic' unless errors.include?('no variants selected')
+      abort 'Failed selection wrote outputs' unless File.zero?(env['GITHUB_OUTPUT'])
+    end
+  end
+  [ [{}, true], [{'MINUTES' => '0'}, false],
     [{'MINUTES' => '61'}, false], [{'CORE_REF' => 'main'}, false],
     [{'CORE_REF' => 'main', 'SERVER_REF' => 'main'}, true] ].each do |override, expected|
     output, errors, result = Open3.capture3(env.merge(override), 'bash', stdin_data: validation)

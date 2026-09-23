@@ -125,7 +125,8 @@ cross-source join contract:
 
 | Input | Values | Effect |
 | --- | --- | --- |
-| `variant` | `standard` (default), `adaptive`, `both` | Selects the original join, adaptive dispatch on both sources, or both variants. |
+| `standard` | checkbox (checked by default) | Runs the original HTTP + gRPC join. |
+| `adaptive` | checkbox (unchecked by default) | Runs adaptive dispatch on both sources; check both boxes to compare variants. |
 | `batching_speed` | `5000`, `10000` (default), `50000` | Maximum events per adaptive batch for both dispatchers; maximum wait is 50 ms. Standard dispatchers are unchanged. |
 | `workload_size` | `100000`, `250000`, `500000` | Number of stock changes; the reaction stop target remains 75% of the workload. |
 | `query_tuning` | `1000`, `10000`, `100000` | Sets query priority, dispatch, and bootstrap buffer capacities. |
@@ -156,12 +157,23 @@ the same. Cross-source timing can still change the emitted row stream, so neithe
 variant has a stable SHA baseline. Count-based completion is retained, not a
 guarantee of full-stream equivalence or losslessness.
 
-Both **E2E - stock_market join** and **Stock market Azure** expose `variant` and
-`batching_speed`. Selecting `both` creates separate jobs on GitHub-hosted
+Both **E2E - stock_market join** and **Stock market Azure** expose independent
+`standard` and `adaptive` checkboxes alongside `batching_speed`. Select at least
+one; selecting neither fails before builds or VM provisioning. Checking both creates separate jobs on GitHub-hosted
 runners and sequential runs on one Azure VM. Artifacts and summary records use
 the full variant names so adaptive results remain separate from the existing
 standard history. Scheduled GitHub-hosted runs continue to run only `standard`;
 scheduled Azure runs cover both variants on all three hardware tiers.
+
+GitHub Actions has no native multi-select input, so these boolean inputs provide
+multi-selection through checkboxes. CLI/API dispatches should replace the former
+`variant=both` input with `standard=true` and `adaptive=true`, for example:
+
+```bash
+gh workflow run stock-market-azure.yml -f standard=true -f adaptive=true
+```
+
+Local `VARIANT` environment values are unchanged.
 
 ## Running in CI against a drasi-server branch or fork
 

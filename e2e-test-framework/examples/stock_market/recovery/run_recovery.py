@@ -83,6 +83,7 @@ class Recovery:
     def __init__(self, args, work):
         self.args, self.work = args, work
         self.processes, self.logs = [], []
+        self.process_logs = {}
         self.server = None
         self.crash_injected = False
         self.admin = f"http://127.0.0.1:{args.admin_port}"
@@ -96,14 +97,37 @@ class Recovery:
         process = subprocess.Popen(command, cwd=self.work, env=dict(os.environ, RUST_LOG=log_filter),
                                    stdout=stream, stderr=subprocess.STDOUT)
         self.processes.append(process)
+        self.process_logs[process] = self.work / filename
         return process
+
+    def check_processes(self, description):
+        for process in self.processes:
+            exit_code = process.poll()
+            if exit_code is None:
+                continue
+            logfile = self.process_logs.get(process)
+            self.verdict["failed_process"] = {
+                "pid": process.pid, "exit_code": exit_code,
+                "log": logfile.name if logfile else None, "waiting_for": description,
+            }
+            message = f"{logfile.stem if logfile else 'Process'} (pid={process.pid}) exited with {exit_code} while waiting for {description}"
+            if logfile:
+                try:
+                    with logfile.open("rb") as stream:
+                        stream.seek(0, os.SEEK_END)
+                        size = stream.tell()
+                        stream.seek(max(0, size - 8192))
+                        tail = stream.read().decode("utf-8", errors="replace")
+                    message += f"\nLast lines of {logfile.name}:\n" + "\n".join(tail.splitlines()[-25:])
+                except OSError as error:
+                    message += f"\nCould not read {logfile.name}: {error}"
+            raise RuntimeError(message)
 
     def wait(self, description, probe):
         deadline = time.monotonic() + self.args.timeout
         last_error = None
         while time.monotonic() < deadline:
-            for process in self.processes:
-                require(process.poll() is None, f"Process {process.pid} exited with {process.returncode}")
+            self.check_processes(description)
             try:
                 result = probe()
                 if result:

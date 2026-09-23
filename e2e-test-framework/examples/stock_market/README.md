@@ -7,8 +7,9 @@ The stock market example provides multiple configuration options to demonstrate 
 ### CI Cross-Source Join
 
 The [HTTP + gRPC join](ci/drasi_server_http_grpc_join/README.md) runs on both
-GitHub-hosted runners and ephemeral Azure VMs. Select `variant: adaptive` to
-enable adaptive batching on both source dispatchers, or `both` to compare it
+GitHub-hosted runners and ephemeral Azure VMs. Check `adaptive` to
+enable adaptive batching on both source dispatchers, or check both `standard`
+and `adaptive` to compare it
 with the original standard variant. The query and HTTP reaction stay fixed.
 
 ### SIGKILL Recovery

@@ -2,7 +2,7 @@
 # against an external drasi-server.
 #
 # Both variants share run_test_ci.sh and the same join workload. Manual runs
-# select standard, adaptive, or both; scheduled runs retain the standard
+# use a checkbox per variant; scheduled runs retain the standard
 # baseline. Each matrix entry has its own artifacts and result summary.
 
 name: E2E - stock_market join
@@ -10,11 +10,14 @@ name: E2E - stock_market join
 on:
   workflow_dispatch:
     inputs:
-      variant:
-        description: "standard, adaptive HTTP + gRPC source dispatchers, or both."
-        type: choice
-        options: [standard, adaptive, both]
-        default: standard
+      standard:
+        description: "Standard HTTP + gRPC source dispatchers."
+        type: boolean
+        default: true
+      adaptive:
+        description: "Adaptive HTTP + gRPC source dispatchers."
+        type: boolean
+        default: false
       batching_speed:
         description: "Adaptive max batch size for both source dispatchers (50 ms max wait)."
         type: choice
@@ -84,15 +87,22 @@ jobs:
       - name: Compute variant matrix
         id: compute
         env:
-          IN_VARIANT: ${{ inputs.variant }}
+          EVENT_NAME: ${{ github.event_name }}
+          V_STANDARD: ${{ inputs.standard }}
+          V_ADAPTIVE: ${{ inputs.adaptive }}
         run: |
           set -euo pipefail
-          case "${IN_VARIANT:-standard}" in
-            standard) variants=(drasi_server_http_grpc_join) ;;
-            adaptive) variants=(drasi_server_http_grpc_join_adaptive) ;;
-            both) variants=(drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive) ;;
-            *) echo "Unsupported stock-market variant: $IN_VARIANT" >&2; exit 1 ;;
-          esac
+          variants=()
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            variants=(drasi_server_http_grpc_join)
+          else
+            if [[ "$V_STANDARD" == "true" ]]; then variants+=(drasi_server_http_grpc_join); fi
+            if [[ "$V_ADAPTIVE" == "true" ]]; then variants+=(drasi_server_http_grpc_join_adaptive); fi
+          fi
+          (( ${#variants[@]} > 0 )) || {
+            echo "ERROR: no variants selected. Tick at least one checkbox." >&2
+            exit 1
+          }
           json="$(printf '%s\n' "${variants[@]}" | jq -R . | jq -sc .)"
           echo "variants=$json" >> "$GITHUB_OUTPUT"
 

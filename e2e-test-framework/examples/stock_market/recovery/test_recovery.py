@@ -13,6 +13,49 @@ from workload import RUN_ID, SOURCE_IDS
 
 
 class RecoveryTest(unittest.TestCase):
+    def test_failed_restart_reports_server_error_and_preserves_failed_verdict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = argparse.Namespace(mode="sigkill", variant="adaptive", admin_port=8091, service_port=63124,
+                                      timeout=1)
+            recovery = runner.Recovery(args, Path(directory))
+            process = Mock(pid=7520)
+            process.poll.return_value = 1
+            recovery.processes = [process]
+            logfile = Path(directory) / "drasi-server.log"
+            detail = ("failed to deserialize durable outbox entry at sequence 2: "
+                      "invalid type: integer `712048398700485272`, expected a sequence. "
+                      "Refusing to start under Strict recovery policy.")
+            logfile.write_text("older startup output\n" * 2000 + detail + "\n")
+            recovery.process_logs[process] = logfile
+            recovery.crash_injected = True
+            probe = Mock()
+            recovery.execute = lambda: recovery.wait("Drasi Server health", probe)
+            with patch("builtins.print"):
+                self.assertEqual(1, recovery.run())
+            probe.assert_not_called()
+            verdict = json.loads((Path(directory) / "verdict.json").read_text())
+            self.assertFalse(verdict["passed"])
+            self.assertTrue(verdict["crash_injected"])
+            self.assertIn(detail, verdict["error"])
+            self.assertIn("drasi-server (pid=7520)", verdict["error"])
+            self.assertLess(len(verdict["error"]), 9000)
+            self.assertEqual({"pid": 7520, "exit_code": 1, "log": "drasi-server.log",
+                              "waiting_for": "Drasi Server health"}, verdict["failed_process"])
+
+    def test_missing_process_log_does_not_hide_exit_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = argparse.Namespace(mode="clean", variant="standard", admin_port=8091, service_port=63124)
+            recovery = runner.Recovery(args, Path(directory))
+            process = Mock(pid=456)
+            process.poll.return_value = 101
+            recovery.processes = [process]
+            recovery.process_logs[process] = Path(directory) / "test-service.log"
+            with self.assertRaisesRegex(RuntimeError, r"test-service \(pid=456\) exited with 101") as error:
+                recovery.check_processes("test source APIs")
+            self.assertIn("Could not read test-service.log", str(error.exception))
+            process.poll.return_value = None
+            recovery.check_processes("test source APIs")
+
     def test_control_request_supports_bounded_flush_timeout(self):
         with patch.object(runner.urllib.request, "urlopen") as urlopen:
             urlopen.return_value.__enter__.return_value.read.return_value = b"{}"

@@ -2,12 +2,21 @@
 
 Run **Actions > E2E - stock_market recovery > Run workflow** using
 [e2e-stock-market-recovery.yml](../../../../.github/workflows/e2e-stock-market-recovery.yml).
-The workflow is manual-only and runs on GitHub-hosted Linux runners. Select
-`standard`, `adaptive`, or `both` (default). Each selected variant runs a clean
+The workflow is manual-only and runs on GitHub-hosted Linux runners. Select the
+`standard` and/or `adaptive` checkboxes; both are checked by default. Selecting
+neither fails validation before building binaries. Each selected variant runs a clean
 control followed by a SIGKILL trial against the same committed golden.
 Push and merge the workflow into the default branch to make its dispatch form
 available, then select the branch under test. Use matching server/plugin versions,
 including the source-build and plugin overrides used by the performance tests.
+
+CLI/API dispatches use boolean inputs instead of the former `variant` selector:
+
+```bash
+gh workflow run e2e-stock-market-recovery.yml -f standard=true -f adaptive=true
+```
+
+The local controller's `--variant standard|adaptive` option is unchanged.
 
 ## Fixed Recovery Workload
 

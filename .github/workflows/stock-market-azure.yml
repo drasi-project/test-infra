@@ -3,11 +3,14 @@ name: Stock market Azure
 on:
   workflow_dispatch:
     inputs:
-      variant:
-        description: "standard, adaptive HTTP + gRPC source dispatchers, or both sequentially on one VM."
-        type: choice
-        options: [standard, adaptive, both]
-        default: standard
+      standard:
+        description: "Standard HTTP + gRPC source dispatchers."
+        type: boolean
+        default: true
+      adaptive:
+        description: "Adaptive HTTP + gRPC source dispatchers (runs sequentially when both are checked)."
+        type: boolean
+        default: false
       batching_speed:
         description: "Adaptive max batch size for both source dispatchers (50 ms max wait)."
         type: choice
@@ -82,11 +85,37 @@ permissions:
   id-token: write
 
 jobs:
+  select-variants:
+    runs-on: ubuntu-latest
+    outputs:
+      variant: ${{ steps.compute.outputs.variant }}
+    steps:
+      - name: Resolve variant checkboxes
+        id: compute
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          V_STANDARD: ${{ inputs.standard }}
+          V_ADAPTIVE: ${{ inputs.adaptive }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            variant=both
+          else
+            case "$V_STANDARD:$V_ADAPTIVE" in
+              true:true) variant=both ;;
+              true:false) variant=standard ;;
+              false:true) variant=adaptive ;;
+              *) echo "ERROR: no variants selected. Tick at least one checkbox." >&2; exit 1 ;;
+            esac
+          fi
+          echo "variant=$variant" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: select-variants
     uses: ./.github/workflows/building-comfort-azure.yml
     with:
       scenario: stock_market
-      variant: ${{ github.event_name == 'schedule' && 'both' || inputs.variant }}
+      variant: ${{ needs.select-variants.outputs.variant }}
       batching_speed: ${{ inputs.batching_speed }}
       location: ${{ inputs.location }}
       vm_size: ${{ inputs.vm_size }}

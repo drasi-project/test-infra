@@ -66,6 +66,26 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     File.readlines(File.join(@directory, "github.env")).to_h { |line| line.strip.split("=", 2) }
   end
 
+  def select_variants(workflow, event, standard, adaptive)
+    selector = workflow.fetch("jobs").fetch("select-variants")
+    compute = selector.fetch("steps").first
+    assert_equal "compute", compute["id"]
+    assert_equal "${{ github.event_name }}", compute.dig("env", "EVENT_NAME")
+    assert_equal "${{ inputs.standard }}", compute.dig("env", "V_STANDARD")
+    assert_equal "${{ inputs.adaptive }}", compute.dig("env", "V_ADAPTIVE")
+    selector.fetch("outputs").each do |name, expression|
+      assert_equal "${{ steps.compute.outputs.#{name} }}", expression
+    end
+    output_file = File.join(@directory, "selection-output")
+    File.write(output_file, "")
+    output, errors, result = Open3.capture3(
+      { "EVENT_NAME" => event, "V_STANDARD" => standard, "V_ADAPTIVE" => adaptive,
+        "GITHUB_OUTPUT" => output_file }, "bash", stdin_data: compute.fetch("run")
+    )
+    outputs = File.readlines(output_file).to_h { |line| line.strip.split("=", 2) }
+    [output + errors, result, outputs]
+  end
+
   def test_manual_entry_forwards_all_settings_and_azure_secrets
     assert_equal "Stock market Azure", @workflow["name"]
     assert_equal %w[schedule workflow_dispatch], triggers(@workflow).keys.sort
@@ -74,12 +94,15 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     job = @workflow.fetch("jobs").fetch("test")
     assert_equal "./.github/workflows/building-comfort-azure.yml", job["uses"]
     assert_equal "stock_market", job.dig("with", "scenario")
+    assert_equal "select-variants", job["needs"]
+    assert_equal "${{ needs.select-variants.outputs.variant }}", job.dig("with", "variant")
     scheduled_defaults = {
-      "variant" => "${{ github.event_name == 'schedule' && 'both' || inputs.variant }}",
       "persist_index" => "${{ inputs.persist_index || false }}",
       "state_store" => "${{ inputs.state_store || false }}"
     }
     dispatch.each_key do |input_name|
+      next if %w[standard adaptive].include?(input_name)
+
       assert_equal scheduled_defaults.fetch(input_name, "${{ inputs.#{input_name} }}"), job.fetch("with").fetch(input_name)
       assert triggers(@shared).fetch("workflow_call").fetch("inputs").key?(input_name)
     end
@@ -99,10 +122,13 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     assert_equal false, strategy["fail-fast"]
     assert_equal 1, strategy["max-parallel"]
     assert_equal "${{ fromJSON(github.event_name == 'schedule' && '#{JSON.dump(vm_sizes)}' || format('[\"{0}\"]', inputs.vm_size || 'Standard_D4s_v6')) }}", strategy.dig("matrix", "vm_size")
-    assert_equal "${{ github.event_name == 'schedule' && 'both' || inputs.variant }}", @workflow.dig("jobs", "test", "with", "variant")
+    assert_equal "${{ needs.select-variants.outputs.variant }}", @workflow.dig("jobs", "test", "with", "variant")
+    output, result, selected = select_variants(@workflow, "schedule", "", "")
+    assert result.success?, output
+    assert_equal "both", selected["variant"]
 
     profiles = vm_sizes.map do |vm_size|
-      output, result = resolve("stock_market", "IN_VARIANT" => "both", "IN_VM_SIZE" => vm_size)
+      output, result = resolve("stock_market", "IN_VARIANT" => selected.fetch("variant"), "IN_VM_SIZE" => vm_size)
       assert result.success?, output
       values = resolved_env
       assert_equal "drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive", values["VARIANTS"]
@@ -247,39 +273,43 @@ class StockMarketAzureWorkflowTest < Minitest::Test
 
   def test_both_workflows_select_the_same_variants
     github = YAML.load_file(File.join(ROOT, ".github/workflows/e2e-stock-market-join.yml"))
-    compute = github.fetch("jobs").fetch("select-variants").fetch("steps").first
-    assert_equal "${{ inputs.variant }}", compute.dig("env", "IN_VARIANT")
     [github, @workflow].each do |workflow|
-      assert_equal %w[standard adaptive both], triggers(workflow).dig("workflow_dispatch", "inputs", "variant", "options")
-      assert_equal "standard", triggers(workflow).dig("workflow_dispatch", "inputs", "variant", "default")
+      inputs = triggers(workflow).fetch("workflow_dispatch").fetch("inputs")
+      refute inputs.key?("variant")
+      assert_equal ["boolean", true], inputs.fetch("standard").values_at("type", "default")
+      assert_equal ["boolean", false], inputs.fetch("adaptive").values_at("type", "default")
     end
-    {
-      "" => %w[drasi_server_http_grpc_join],
-      "standard" => %w[drasi_server_http_grpc_join],
-      "adaptive" => %w[drasi_server_http_grpc_join_adaptive],
-      "both" => %w[drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive]
-    }.each do |selection, expected|
-      output_file = File.join(@directory, "github-output")
-      File.write(output_file, "")
-      output, errors, result = Open3.capture3(
-        { "IN_VARIANT" => selection, "GITHUB_OUTPUT" => output_file }, "bash", stdin_data: compute.fetch("run")
-      )
-      assert result.success?, output + errors
-      assert_equal expected, JSON.parse(File.read(output_file).strip.split("=", 2).last)
-      output, result = resolve("stock_market", "IN_VARIANT" => selection)
+    [
+      ["true", "false", "standard", %w[drasi_server_http_grpc_join]],
+      ["false", "true", "adaptive", %w[drasi_server_http_grpc_join_adaptive]],
+      ["true", "true", "both", %w[drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive]]
+    ].each do |standard, adaptive, selection, expected|
+      output, result, selected = select_variants(github, "workflow_dispatch", standard, adaptive)
+      assert result.success?, output
+      assert_equal expected, JSON.parse(selected.fetch("variants"))
+      output, result, selected = select_variants(@workflow, "workflow_dispatch", standard, adaptive)
+      assert result.success?, output
+      assert_equal selection, selected["variant"]
+      output, result = resolve("stock_market", "IN_VARIANT" => selected.fetch("variant"))
       assert result.success?, output
       assert_equal expected, resolved_env.fetch("VARIANTS").split
     end
+    [github, @workflow].each do |workflow|
+      output, result, selected = select_variants(workflow, "workflow_dispatch", "false", "false")
+      refute result.success?, output
+      assert_includes output, "no variants selected"
+      assert_empty selected
+    end
+    output, result, selected = select_variants(github, "schedule", "", "")
+    assert result.success?, output
+    assert_equal %w[drasi_server_http_grpc_join], JSON.parse(selected.fetch("variants"))
     run_job = github.fetch("jobs").fetch("stock-market-drasi-server-http-grpc-join")
+    assert_equal "select-variants", run_job["needs"]
     assert_equal "${{ matrix.variant }}", run_job.dig("env", "VARIANT")
     assert_equal false, run_job.dig("strategy", "fail-fast")
     steps = run_job.fetch("steps")
     assert_equal "stock_market-${{ matrix.variant }}", steps.find { |entry| entry["name"] == "Upload artifacts" }.dig("with", "name")
     assert_includes steps.find { |entry| entry["name"] == "Build result summary" }.fetch("run"), '--variant "$VARIANT"'
-    output, errors, result = Open3.capture3(
-      { "IN_VARIANT" => "unknown", "GITHUB_OUTPUT" => File.join(@directory, "github-output") }, "bash", stdin_data: compute.fetch("run")
-    )
-    refute result.success?, output + errors
   end
 
   def test_building_comfort_defaults_are_preserved

@@ -32,9 +32,9 @@ jq -e '
   .data_store.test_repos[0].local_tests[0] as $test
   | ($test.sources[] | select(.test_source_id == "stock-trades-db")
       | .model_data_generator.change_count) == 250000
-  and ($test.reactions[] | select(.test_reaction_id == "watchlist-prices")
-      | .stop_triggers[] | select(.kind == "RecordCount")
-      | .record_count) == 187500
+    and ($test.reactions[] | select(.test_reaction_id == "watchlist-prices") | .stop_triggers) == []
+    and (.test_run_host.test_runs[0].reactions[0].output_loggers[]
+      | select(.kind == "PerformanceMetrics") | .measurement_record_count) == 187500
 ' "$TEMP_DIR/work/config.ci.json" >/dev/null
 
 jq -e --slurpfile original "$SCRIPT_DIR/config.json" '
@@ -59,7 +59,10 @@ for batch_size in 5000 10000 50000; do
       and ($dispatchers | map(.source_id) == ["stock-trades-db", "watchlist-db"])
       and ([$test.sources[].source_change_dispatchers[] | select(.kind == "JsonlFile")]
            == [$original[0].data_store.test_repos[0].local_tests[0].sources[].source_change_dispatchers[] | select(.kind == "JsonlFile")])
-      and ($test.reactions == $original[0].data_store.test_repos[0].local_tests[0].reactions)
+       and ($test.reactions[0].output_handler == $original[0].data_store.test_repos[0].local_tests[0].reactions[0].output_handler)
+       and ($test.reactions[0].stop_triggers == [])
+       and (.test_run_host.test_runs[0].reactions[0].output_loggers[]
+         | select(.kind == "PerformanceMetrics") | .measurement_record_count) == 75000
     ' "$TEMP_DIR/adaptive-$batch_size/config.ci.json" >/dev/null
 done
 

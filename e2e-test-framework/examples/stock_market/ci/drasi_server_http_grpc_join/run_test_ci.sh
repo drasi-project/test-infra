@@ -18,10 +18,10 @@
 #   2. Patch the example configs so the run is CI-safe (port collision, keep
 #      artifacts on shutdown).
 #   3. Start drasi-server and the test-service as background processes.
-#   4. Poll the test-service REST API until the reaction reaches Stopped.
+#   4. Verify both source drains and the final query snapshot, then stop the run.
 #   5. Tear down both processes and copy artifacts to $ARTIFACTS_DIR.
 #
-# Required tools: bash, jq, curl, cargo. Either `gh` (preferred) or `curl`
+# Required tools: bash, jq, curl, ruby, python3, cargo. Either `gh` (preferred) or `curl`
 # is used to fetch the release.
 #
 # Environment variables (with defaults):
@@ -47,9 +47,8 @@
 #   TEST_REACTION_IDS     Space-separated list of test_reaction_id values to
 #                         snapshot at completion.
 #                         Default: "stock-market-join"
-#   TIMEOUT_SECS          Max seconds to wait for the completion signal.
+#   TIMEOUT_SECS          Max seconds to wait for source drain and snapshot equality.
 #                         Default: 1800
-#   POLL_INTERVAL_SECS    Seconds between status polls. Default: 10
 #   WORKLOAD_SIZE         Stock-trade changes to generate. Must be at least 100000.
 #                         Default: 100000
 #   QUERY_TUNING          Query capacity: 1000, 10000, or 100000. Default: 10000
@@ -83,7 +82,6 @@ TEST_SERVICE_PORT="${TEST_SERVICE_PORT:-63123}"
 TEST_RUN_ID="${TEST_RUN_ID:-drasi_server_dev_repo.stock_market.test_run_001}"
 TEST_REACTION_IDS="${TEST_REACTION_IDS:-watchlist-prices}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-1800}"
-POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-10}"
 WORKLOAD_SIZE="${WORKLOAD_SIZE:-100000}"
 QUERY_TUNING="${QUERY_TUNING:-10000}"
 PERSIST_INDEX="${PERSIST_INDEX:-false}"
@@ -151,7 +149,7 @@ resolve_workload() {
         WAL_MAX_EVENTS=$minimum_wal_events
     fi
 
-    log "Workload: changes=$WORKLOAD_SIZE reaction_stop=$REACTION_RECORD_COUNT wal_max_events=$WAL_MAX_EVENTS"
+    log "Workload: changes=$WORKLOAD_SIZE measurement_records=$REACTION_RECORD_COUNT wal_max_events=$WAL_MAX_EVENTS"
 }
 
 cleanup() {
@@ -300,7 +298,7 @@ patch_configs() {
     DRASI_PLUGIN_TAG="$DRASI_PLUGIN_TAG" \
         ruby "$SCRIPT_DIR/render_server_config.rb" "$DRASI_CFG_SRC" "$DRASI_CFG_CI"
 
-    log "Patching config.json: workload=$WORKLOAD_SIZE, reaction_stop=$REACTION_RECORD_COUNT, data_store_path=$DATA_CACHE"
+    log "Patching config.json: workload=$WORKLOAD_SIZE, measurement_records=$REACTION_RECORD_COUNT, data_store_path=$DATA_CACHE"
     jq --arg cache "$DATA_CACHE" \
         --arg srcroot "$SCRIPT_DIR/dev_repo" \
         --argjson workload "$WORKLOAD_SIZE" \
@@ -316,9 +314,13 @@ patch_configs() {
              | .model_data_generator.change_count) = $workload
          | (.data_store.test_repos[]?.local_tests[]?.reactions[]?
              | select(.test_reaction_id == "watchlist-prices")
-             | .stop_triggers[]?
-             | select(.kind == "RecordCount")
-             | .record_count) = $reaction_stop
+             | .stop_triggers) = []
+         | (.test_run_host.test_runs[]?.reactions[]?
+             | select(.test_reaction_id == "watchlist-prices")
+             | .output_loggers[]? | select(.kind == "PerformanceMetrics")
+             | .measurement_record_count) = $reaction_stop
+         | (.test_run_host.test_runs[]?.reactions[]?.start_immediately) = false
+         | (.test_run_host.test_runs[]?.sources[]?.start_mode) = "manual"
          | if $adaptive then
              (.data_store.test_repos[]?.local_tests[]?.sources[]?) |= (
                  .test_source_id as $source_id
@@ -347,7 +349,7 @@ start_drasi_server() {
     (
         cd "$WORK_DIR"
         mkdir -p data
-        "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
+        exec "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
             > "$LOG_DIR/drasi-server.log" 2>&1
     ) &
     DRASI_PID=$!
@@ -394,9 +396,7 @@ start_test_service() {
 fetch_final_reaction_state() {
     # fetch_final_reaction_state <test_reaction_id>
     # Snapshots the reaction's current state to $ARTIFACTS_DIR/final_reaction_state__<id>.json.
-    # Returns 0 if the reaction is Stopped, 1 on Error/anything else (the completion
-    # tracker only fires when every reaction is Stopped/Error, so Running here means
-    # the run aborted before the tracker could fire).
+    # Require the stopped observer and its finalized measurement window.
     local reaction_id="$1"
     local state_file="$ARTIFACTS_DIR/final_reaction_state__${reaction_id}.json"
     local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/reactions/${reaction_id}"
@@ -409,67 +409,20 @@ fetch_final_reaction_state() {
     echo "$body" > "$state_file"
     status="$(echo "$body" | jq -r '.reaction_observer.status // "Unknown"')"
     case "$status" in
-        Stopped) log "[$reaction_id] final state: Stopped"; return 0 ;;
+        Stopped)
+            if ! jq -e --argjson count "$REACTION_RECORD_COUNT" '
+                .reaction_observer.error_message == null and
+                ([.reaction_observer.logger_results[]? | select(.logger_name == "PerformanceMetrics")] |
+                    length == 1 and .[0].has_output == true and .[0].summary.record_count == $count)
+            ' "$state_file" >/dev/null; then
+                log "ERROR: [$reaction_id] missing or incomplete performance metrics"
+                return 1
+            fi
+            log "[$reaction_id] final state: Stopped; measurement complete"
+            return 0 ;;
         Error)   log "ERROR: [$reaction_id] final state: Error"; return 1 ;;
         *)       log "ERROR: [$reaction_id] final state: $status (expected Stopped)"; return 1 ;;
     esac
-}
-
-wait_for_completion_signal() {
-    # Waits for the test-run's completion tracker to fire, signaled by the
-    # test-service log line emitted from test_run_completion::completion_handlers
-    # ("TestRun '<id>' completed:") which appears once every component reaches a
-    # terminal state. Uses TEST_RUN_ID as the discriminator so multiple runs sharing
-    # the same log don't false-positive.
-    local log_file="$LOG_DIR/test-service.log"
-    local marker="TestRun '${TEST_RUN_ID}' completed:"
-    log "Waiting for completion-tracker signal in $log_file"
-    log "  marker: $marker  (timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s)"
-
-    local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
-    local start_ts=$(( $(date +%s) ))
-    local last_log_ts=0
-
-    while (( $(date +%s) < deadline )); do
-        if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
-            log "ERROR: test-service exited unexpectedly"
-            return 1
-        fi
-        if ! kill -0 "$DRASI_PID" 2>/dev/null; then
-            log "ERROR: drasi-server exited unexpectedly"
-            return 1
-        fi
-
-        if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
-            log "Completion signal observed for $TEST_RUN_ID"
-            grep -F "$marker" "$log_file" | tail -n1 | sed 's/^/[completion] /'
-            return 0
-        fi
-
-        local now elapsed
-        now=$(date +%s)
-        elapsed=$(( now - start_ts ))
-        if (( now - last_log_ts >= 30 )); then
-            log "waiting for completion t=${elapsed}s (no marker yet)"
-            last_log_ts=$now
-        fi
-
-        sleep "$POLL_INTERVAL_SECS"
-    done
-
-    log "ERROR: completion signal not observed within ${TIMEOUT_SECS}s"
-    log "--- test-service.log (last 100 lines) ---"
-    tail -n 100 "$log_file" || true
-    log "--- end test-service.log ---"
-    log "--- drasi-server.log (last 100 lines) ---"
-    tail -n 100 "$LOG_DIR/drasi-server.log" || true
-    log "--- end drasi-server.log ---"
-    # Best-effort snapshot of each reaction for debugging.
-    local id
-    for id in $TEST_REACTION_IDS; do
-        fetch_final_reaction_state "$id" || true
-    done
-    return 1
 }
 
 print_summary() {
@@ -521,6 +474,33 @@ verify_test_run_status() {
     return 0
 }
 
+verify_final_snapshot() {
+    log "Verifying final query rows against the drained input streams"
+    python3 "$SCRIPT_DIR/verify_snapshot.py" \
+        --config "$TEST_CFG_CI" \
+        --server-config "$DRASI_CFG_CI" \
+        --service-log "$LOG_DIR/test-service.log" \
+        --run-id "$TEST_RUN_ID" \
+        --service-url "http://127.0.0.1:$TEST_SERVICE_PORT" \
+        --admin-url "http://127.0.0.1:$DRASI_ADMIN_PORT" \
+        --artifacts "$ARTIFACTS_DIR" \
+        --server-pid "$DRASI_PID" \
+        --service-pid "$SERVICE_PID" \
+        --timeout "$TIMEOUT_SECS"
+}
+
+start_test_inputs() {
+    local api="http://127.0.0.1:$TEST_SERVICE_PORT/api/test_runs/$TEST_RUN_ID"
+    curl -fsS --max-time 60 -X POST "$api/reactions/watchlist-prices/start" >/dev/null || return 1
+    curl -fsS --max-time 60 -X POST "$api/sources/stock-trades-db/start" >/dev/null || return 1
+    curl -fsS --max-time 60 -X POST "$api/sources/watchlist-db/start" >/dev/null || return 1
+}
+
+finish_test_run() {
+    curl -fsS --max-time "$TIMEOUT_SECS" -X POST \
+        "http://127.0.0.1:$TEST_SERVICE_PORT/api/test_runs/$TEST_RUN_ID/stop" >/dev/null
+}
+
 write_step_summary() {
     local out="$ARTIFACTS_DIR/summary.md"
     local drasi_source="${DRASI_BUILD_SOURCE:-unknown}"
@@ -536,11 +516,21 @@ write_step_summary() {
         if [[ "${ADAPTIVE_ENABLED:-false}" == "true" ]]; then
             echo "- adaptive HTTP + gRPC dispatch: max batch size=\`$BATCHING_SPEED\`, max wait=\`50 ms\`"
         fi
-        echo "- workload: \`$WORKLOAD_SIZE\` stock-trade changes (reaction stop=$REACTION_RECORD_COUNT)"
+        echo "- workload: \`$WORKLOAD_SIZE\` stock-trade changes (measured reaction records=$REACTION_RECORD_COUNT)"
         echo "- query tuning: \`$QUERY_TUNING\`"
         echo "- server config: persistIndex=\`$PERSIST_INDEX\`, stateStore=\`$STATE_STORE\`"
         echo "- plugin registry: \`${DRASI_PLUGIN_REGISTRY:-server default}\`"
         echo "- plugin tag: \`${DRASI_PLUGIN_TAG:-latest-compatible}\`"
+        echo
+
+        echo "### Final query snapshot"
+        if [[ -s "$ARTIFACTS_DIR/snapshot_verdict.json" ]]; then
+            jq -r '"- Passed: \(.passed)",
+                   "- Expected rows: \(.expected_rows // "unavailable"); actual rows: \(.actual_rows // "unavailable")",
+                   (.error // empty)' "$ARTIFACTS_DIR/snapshot_verdict.json"
+        else
+            echo "Not verified: the test did not reach successful completion."
+        fi
         echo
 
         echo "### Reactions"
@@ -591,15 +581,14 @@ fi
 download_drasi_server
 start_drasi_server
 start_test_service
+start_test_inputs
 
 poll_rc=0
-if wait_for_completion_signal; then
-    for id in $TEST_REACTION_IDS; do
-        fetch_final_reaction_state "$id" || poll_rc=1
-    done
-else
-    poll_rc=1
-fi
+verify_final_snapshot || poll_rc=1
+finish_test_run || poll_rc=1
+for id in $TEST_REACTION_IDS; do
+    fetch_final_reaction_state "$id" || poll_rc=1
+done
 print_summary
 
 verify_test_run_status || true

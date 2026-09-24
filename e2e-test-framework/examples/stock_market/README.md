@@ -11,6 +11,9 @@ GitHub-hosted runners and ephemeral Azure VMs. Check `adaptive` to
 enable adaptive batching on both source dispatchers, or check both `standard`
 and `adaptive` to compare it
 with the original standard variant. The query and HTTP reaction stay fixed.
+Both workflows support independent RocksDB `persist_index` and redb `state_store`
+checkboxes. Every run validates the final query snapshot against an independent
+join of the completed input streams; output order does not affect the verdict.
 
 ### SIGKILL Recovery
 

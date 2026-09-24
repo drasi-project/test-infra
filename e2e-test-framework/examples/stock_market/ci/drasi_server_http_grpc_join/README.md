@@ -35,8 +35,9 @@ returns only the stock prices for symbols currently in the watchlist.
 3. Query results are POSTed as an HTTP reaction to
    `http://localhost:9002/reaction`.
 
-4. Both variants stop the reaction at **75% of the stock workload** via
-  `stop_triggers.RecordCount`: 75,000 records for the default 100,000 changes.
+4. Both variants measure the first **75% of the stock workload** in reaction
+  records: 75,000 records for the default 100,000 changes. The receiver stays
+  open until both sources drain and the final query snapshot is validated.
 
 ```
 test-service --HTTP source--> Drasi Server --HTTP reaction--> test-service
@@ -55,16 +56,16 @@ test-service --gRPC source--+
   &mdash; The watchlist replay script (seed + timed edits).
 - `run_test_ci.sh` &mdash; CI runner: downloads drasi-server, patches
   configs (admin port, absolute paths), launches both processes, waits
-  for the test-run completion signal, and writes a markdown summary
-  (reaction status + throughput) to `$GITHUB_STEP_SUMMARY`. Same shape
-  as the `building_comfort/ci/drasi_server_*` runners. **No SHA-256
+  for source drain and final snapshot equality, and writes a markdown summary
+  (snapshot verdict, reaction status, throughput) to `$GITHUB_STEP_SUMMARY`.
+  **No output-stream SHA-256
   determinism check is performed for this variant**: the cross-source
   join over an HTTP + gRPC pair produces a different multiset of
   emitted rows on each run (the relative ordering of stock ticks vs
-  watchlist edits varies, and the `RecordCount` stop trigger truncates
-  the tail at different points), so no SHA baseline is stable. The
-  count-based stop trigger is the meaningful assertion; performance
-  metrics are reported in the workflow summary for visibility.
+  watchlist edits varies), so no stream SHA baseline is stable. The
+  independent final-snapshot checker is the correctness gate.
+- `verify_snapshot.py` &mdash; replays captured source inputs, computes the
+  expected join independently, and compares full rows without requiring row order.
 - `render_server_config.rb` &mdash; renders the selected query-capacity,
   RocksDB index, redb state-store, source-WAL, and plugin settings into the
   scratch server config without changing the committed scenario definition.
@@ -82,7 +83,9 @@ its query state from them.
 
 ## Prerequisites
 
-- Bash, Ruby, jq, curl, and a Rust toolchain (unless using prebuilt binaries).
+- Bash, Ruby, Python 3, jq, curl, and a Rust toolchain (unless using prebuilt binaries).
+- Rebuild prebuilt test-service binaries after updating this runner: successful
+  dispatcher drain markers and `measurement_record_count` support are required.
 - One of:
   - a prebuilt `drasi-server` binary (see the
     [official download instructions](https://drasi.io/drasi-server/how-to-guides/installation/download-binary/));
@@ -111,7 +114,9 @@ The CI script will:
   disable `delete_on_start/stop` so artifacts are preserved.
 3. Start `drasi-server` (waiting for both port `9000` and port `50051`)
    and `test-service`.
-4. Poll the `watchlist-prices` reaction until it reaches `Stopped`.
+4. Start the receiver before the sources, verify both drains, and wait for
+  `watchlist-prices` to equal the independent expected snapshot. Then stop the
+  run and require the finalized performance measurement.
 5. Write a markdown report (variant, reaction status, throughput) to
   `ci_artifacts/summary.md` and append it to `$GITHUB_STEP_SUMMARY` when set.
 
@@ -128,7 +133,7 @@ cross-source join contract:
 | `standard` | checkbox (checked by default) | Runs the original HTTP + gRPC join. |
 | `adaptive` | checkbox (unchecked by default) | Runs adaptive dispatch on both sources; check both boxes to compare variants. |
 | `batching_speed` | `5000`, `10000` (default), `50000` | Maximum events per adaptive batch for both dispatchers; maximum wait is 50 ms. Standard dispatchers are unchanged. |
-| `workload_size` | `100000`, `250000`, `500000` | Number of stock changes; the reaction stop target remains 75% of the workload. |
+| `workload_size` | `100000`, `250000`, `500000` | Number of stock changes; the measured reaction-record window is 75% of the workload. |
 | `query_tuning` | `1000`, `10000`, `100000` | Sets query priority, dispatch, and bootstrap buffer capacities. |
 | `persist_index` | boolean | Enables the RocksDB index and replay-capable WAL durability on both sources. |
 | `state_store` | boolean | Enables the redb plugin state store under the run's scratch directory. |
@@ -152,10 +157,10 @@ explicitly. The batch limit is a maximum, not a required batch size: the
 slow-changing watchlist will normally flush smaller batches at the time limit.
 
 This does not enable server-side HTTP source batching or HTTP reaction batching.
-The seed, watchlist script, queries, output handler, and completion targets stay
+The seed, watchlist script, queries, output handler, and measurement targets stay
 the same. Cross-source timing can still change the emitted row stream, so neither
-variant has a stable SHA baseline. Count-based completion is retained, not a
-guarantee of full-stream equivalence or losslessness.
+variant has a stable stream SHA baseline. Final query state is verified; complete
+or exactly-once delivery of the intermediate result stream is not.
 
 Both **E2E - stock_market join** and **Stock market Azure** expose independent
 `standard` and `adaptive` checkboxes alongside `batching_speed`. Select at least
@@ -174,6 +179,66 @@ gh workflow run stock-market-azure.yml -f standard=true -f adaptive=true
 ```
 
 Local `VARIANT` environment values are unchanged.
+
+### Final snapshot validation
+
+Every standard/adaptive performance run, on GitHub or Azure, requires an
+independent input-derived golden snapshot. This is computed from **source inputs**,
+never from Drasi's output or a previous server run:
+
+1. Wait for successful dispatcher drain markers for both sources and require
+  their generator states to be `Finished` without a test-run error.
+2. Validate contiguous input-log chunks and sequence numbers, the configured
+  stock event count, and the watchlist events against the committed script.
+3. Replay inserts, updates, and deletes per source, then independently join
+  `Stock` and `WatchlistItem` nodes by `symbol`.
+4. Compare `Symbol`, `Name`, `Price`, and `Volume` from the server's results API
+  as a full-row multiset: order is ignored, but values and row multiplicity are
+  exact. A changed query or join definition requires updating the oracle.
+5. Fail on missing inputs, source errors, malformed results, mismatches that do
+  not converge within the timeout, or an incomplete performance measurement.
+
+Artifacts contain `golden_snapshot.json` (expected rows and input/query hashes),
+`actual_snapshot.json` (last API response), and `snapshot_verdict.json`
+(pass/fail and missing/unexpected rows). The workflow's test result includes this
+gate, so a snapshot failure also marks the published run as failed.
+
+The throughput logger freezes its count and end timestamp at the original 75%
+measurement target via `measurement_record_count`. The receiver continues
+accepting the remaining output so early shutdown cannot block the query behind
+its reaction outbox. Snapshot verification occurs outside the timed window, and
+the observer's total received count can therefore exceed the metrics count.
+This changes receiver lifetime and startup ordering; take a fresh performance
+baseline when comparing to older cutoff-based runs.
+
+This verifies the query's state for the captured workload, not the stock
+generator itself or exactly-once HTTP delivery. It is not a stored cross-run
+golden like the separate scripted recovery expectation. SHA-256 values identify
+the inputs and query, not arrival-order equivalence of the output stream.
+
+### Persistence profiles
+
+Both performance workflow forms have independent checkboxes:
+
+| `persist_index` | `state_store` | Profile |
+| --- | --- | --- |
+| false | false | In-memory index, no redb plugin state store (default). |
+| true | false | Built-in RocksDB index plus source WAL durability. |
+| false | true | In-memory index with the redb plugin state store. |
+| true | true | RocksDB index, source WALs, and redb plugin state store. |
+
+The same snapshot check applies in every profile and both dispatcher variants.
+The renderer preserves the query semantics when these settings change. For example:
+
+```bash
+gh workflow run stock-market-azure.yml -f standard=true -f adaptive=true \
+  -f persist_index=true -f state_store=true -f timeout_minutes=30
+```
+
+Persistent runs can take substantially longer because of durable writes. The
+daily performance schedule retains its existing non-persistent baseline; these
+checkboxes configure manual runs, not a new scheduled persistence matrix.
+The separate SIGKILL recovery test always enables both persistence options.
 
 ## Running in CI against a drasi-server branch or fork
 

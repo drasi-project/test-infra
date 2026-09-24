@@ -52,11 +52,11 @@ on:
         options: ["1000", "10000", "100000"]
         default: "10000"
       persist_index:
-        description: "Use the RocksDB persistent index and source WALs."
+        description: "Use the built-in RocksDB persistent index (persistIndex). Enables source WALs."
         type: boolean
         default: false
       state_store:
-        description: "Use the redb state store."
+        description: "Use the redb plugin state store (stateStore)."
         type: boolean
         default: false
       drasi_server_version:

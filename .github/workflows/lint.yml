@@ -42,6 +42,7 @@ jobs:
         run: |
           ruby e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join/test_render_server_config.rb
           bash e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join/test_render_configs.sh
+          python3 -m unittest discover -s e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join -p 'test_verify_snapshot.py'
           ruby e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join/test_azure_workflow.rb
           python3 -m unittest discover -s e2e-test-framework/examples/stock_market/recovery -p 'test_*.py'
           ruby e2e-test-framework/examples/stock_market/recovery/test_workflow.rb

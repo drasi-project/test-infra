@@ -1,29 +1,76 @@
 # Scheduled E2E test: stock_market stocks-watchlist join (HTTP + gRPC sources)
 # against an external drasi-server.
 #
-# Each test pattern lives in its own example folder and exposes a
-# `run_test_ci.sh` that downloads the drasi-server release binary,
-# orchestrates the run, and writes artifacts to $ARTIFACTS_DIR. This workflow
-# just sets env vars and invokes that script. To add another pattern, copy
-# this job and point WORKDIR at the new example folder.
+# Both variants share run_test_ci.sh and the same join workload. Manual runs
+# use a checkbox per variant; scheduled runs retain the standard
+# baseline. Each matrix entry has its own artifacts and result summary.
 
 name: E2E - stock_market join
 
 on:
   workflow_dispatch:
     inputs:
+      standard:
+        description: "Standard HTTP + gRPC source dispatchers."
+        type: boolean
+        default: true
+      adaptive:
+        description: "Adaptive HTTP + gRPC source dispatchers."
+        type: boolean
+        default: false
+      batching_speed:
+        description: "Adaptive max batch size for both source dispatchers (50 ms max wait)."
+        type: choice
+        options: ["5000", "10000", "50000"]
+        default: "10000"
+      workload_size:
+        description: "Stock-trade changes to generate. The watchlist script and join topology stay fixed."
+        type: choice
+        options:
+          - "100000"
+          - "250000"
+          - "500000"
+        default: "100000"
+      query_tuning:
+        description: "Query capacity: priorityQueueCapacity (drives priority/dispatch/bootstrap buffers)."
+        type: choice
+        options:
+          - "1000"
+          - "10000"
+          - "100000"
+        default: "10000"
+      persist_index:
+        description: "Use the built-in RocksDB persistent index (persistIndex)."
+        type: boolean
+        default: false
+      state_store:
+        description: "Use the redb plugin state store (stateStore)."
+        type: boolean
+        default: false
+      drasi_server_version:
+        description: "drasi-server release tag (e.g. v0.1.5). Only used when repo/ref below are both empty. Empty = latest."
+        required: false
+        default: ""
       drasi_server_repo:
-        description: "drasi-server repo (owner/name) to build from. Empty defaults to drasi-project/drasi-server."
+        description: "drasi-server repo (owner/name) to BUILD from source. Empty = drasi-project/drasi-server."
         required: false
         default: ""
       drasi_server_ref:
-        description: "drasi-server branch/tag/SHA to BUILD from source. Empty = download the latest release binary."
+        description: "drasi-server branch/tag/SHA to BUILD from source. Empty with a repo set = that repo's default branch."
         required: false
         default: ""
       timeout_minutes:
         description: "Max minutes to wait for the test to finish."
         required: false
         default: "30"
+      plugin_registry:
+        description: "OCI registry for short plugin refs. Empty = server default (ghcr.io/drasi-project)."
+        required: false
+        default: ""
+      plugin_tag:
+        description: "OCI tag to pin every plugin ref to. Empty = untagged (latest-compatible)."
+        required: false
+        default: ""
   schedule:
     # 07:15 UTC daily (offset from building_comfort).
     - cron: "15 7 * * *"
@@ -32,15 +79,49 @@ permissions:
   contents: read
 
 jobs:
+  select-variants:
+    runs-on: ubuntu-latest
+    outputs:
+      variants: ${{ steps.compute.outputs.variants }}
+    steps:
+      - name: Compute variant matrix
+        id: compute
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          V_STANDARD: ${{ inputs.standard }}
+          V_ADAPTIVE: ${{ inputs.adaptive }}
+        run: |
+          set -euo pipefail
+          variants=()
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            variants=(drasi_server_http_grpc_join)
+          else
+            if [[ "$V_STANDARD" == "true" ]]; then variants+=(drasi_server_http_grpc_join); fi
+            if [[ "$V_ADAPTIVE" == "true" ]]; then variants+=(drasi_server_http_grpc_join_adaptive); fi
+          fi
+          (( ${#variants[@]} > 0 )) || {
+            echo "ERROR: no variants selected. Tick at least one checkbox." >&2
+            exit 1
+          }
+          json="$(printf '%s\n' "${variants[@]}" | jq -R . | jq -sc .)"
+          echo "variants=$json" >> "$GITHUB_OUTPUT"
+
   stock-market-drasi-server-http-grpc-join:
-    name: stock_market / drasi_server_http_grpc_join
+    name: stock_market / ${{ matrix.variant }}
+    needs: select-variants
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.select-variants.outputs.variants) }}
     env:
+      VARIANT: ${{ matrix.variant }}
       WORKDIR: e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join
       # When drasi_server_ref is set, the runner builds drasi-server from that
       # branch/tag/SHA of DRASI_REPO (a fork if drasi_server_repo points at one)
       # instead of downloading the latest release.
+      DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
       DRASI_REPO: ${{ inputs.drasi_server_repo }}
       DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
     steps:
@@ -55,8 +136,8 @@ jobs:
         with:
           workspaces: e2e-test-framework
 
-      - name: Install runtime deps (jq, curl)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl
+      - name: Install runtime deps (jq, curl, ruby)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq curl ruby
 
       # test-run-host enables drasi-core's `middleware-jq` feature, which
       # pulls in jq-sys; jq-sys links against the system libjq + libonig.
@@ -78,24 +159,33 @@ jobs:
 
       - name: Build test-service
         working-directory: e2e-test-framework
-        run: cargo build --release --manifest-path test-service/Cargo.toml
+        run: |
+          cargo build --release --locked --manifest-path test-service/Cargo.toml
+          echo "TEST_SERVICE_BIN=$GITHUB_WORKSPACE/e2e-test-framework/target/release/test-service" >> "$GITHUB_ENV"
 
       - name: Record start time
         run: echo "RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
-      - name: Run scheduled test
+      - name: Run test
         id: test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
           WORK_DIR: ${{ runner.temp }}/ci_work
+          BATCHING_SPEED: ${{ inputs.batching_speed }}
+          WORKLOAD_SIZE: ${{ inputs.workload_size }}
+          QUERY_TUNING: ${{ inputs.query_tuning }}
+          PERSIST_INDEX: ${{ inputs.persist_index }}
+          STATE_STORE: ${{ inputs.state_store }}
+          DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
+          DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
         run: bash "${WORKDIR}/run_test_ci.sh"
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: stock_market-drasi_server_http_grpc_join
+          name: stock_market-${{ matrix.variant }}
           path: ${{ runner.temp }}/artifacts
           if-no-files-found: warn
 
@@ -110,15 +200,15 @@ jobs:
           python3 .github/scripts/emit_summary.py \
             --artifacts "${{ runner.temp }}/artifacts" \
             --scenario stock_market \
-            --variant drasi_server_http_grpc_join \
+            --variant "$VARIANT" \
             --job-status "${{ steps.test.outcome }}" \
-            --output "${{ runner.temp }}/summary/stock_market__drasi_server_http_grpc_join.json"
+            --output "${{ runner.temp }}/summary/stock_market__${VARIANT}.json"
 
       - name: Upload result summary
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: summary-stock_market-drasi_server_http_grpc_join
+          name: summary-stock_market-${{ matrix.variant }}
           path: ${{ runner.temp }}/summary
           if-no-files-found: warn
 

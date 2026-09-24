@@ -1,0 +1,138 @@
+name: Stock market Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      standard:
+        description: "Standard HTTP + gRPC source dispatchers."
+        type: boolean
+        default: true
+      adaptive:
+        description: "Adaptive HTTP + gRPC source dispatchers (runs sequentially when both are checked)."
+        type: boolean
+        default: false
+      batching_speed:
+        description: "Adaptive max batch size for both source dispatchers (50 ms max wait)."
+        type: choice
+        options: ["5000", "10000", "50000"]
+        default: "10000"
+      location:
+        description: "Azure region for the test VM."
+        required: true
+        default: "westus3"
+      vm_size:
+        description: "4-vCPU hardware tier."
+        type: choice
+        options:
+          - Standard_D4s_v3
+          - Standard_D4s_v6
+          - Standard_F4as_v7
+        default: Standard_D4s_v6
+      os_disk_type:
+        description: "OS disk type for the ephemeral VM."
+        type: choice
+        options:
+          - Premium_LRS
+          - StandardSSD_LRS
+          - Standard_LRS
+        default: Premium_LRS
+      os_disk_size_gb:
+        description: "OS disk size in GB."
+        type: choice
+        options: ["64", "128", "256", "512"]
+        default: "128"
+      workload_size:
+        description: "Stock-trade changes to generate; the HTTP + gRPC join stays fixed."
+        type: choice
+        options: ["100000", "250000", "500000"]
+        default: "100000"
+      query_tuning:
+        description: "Query capacity (priority, dispatch, and bootstrap buffers)."
+        type: choice
+        options: ["1000", "10000", "100000"]
+        default: "10000"
+      persist_index:
+        description: "Use the built-in RocksDB persistent index (persistIndex). Enables source WALs."
+        type: boolean
+        default: false
+      state_store:
+        description: "Use the redb plugin state store (stateStore)."
+        type: boolean
+        default: false
+      drasi_server_version:
+        description: "Release tag to download. Empty = latest; ignored when repo/ref is set."
+        default: ""
+      drasi_server_repo:
+        description: "Server repo (owner/name) to BUILD. Empty = drasi-project/drasi-server."
+        default: ""
+      drasi_server_ref:
+        description: "Server branch/tag/SHA to BUILD. Empty with a repo = its default branch."
+        default: ""
+      timeout_minutes:
+        description: "Max minutes to wait for the test to finish."
+        default: "30"
+      plugin_registry:
+        description: "OCI registry for plugins. Empty = server default."
+        default: ""
+      plugin_tag:
+        description: "OCI tag for all plugin refs. Empty = latest-compatible."
+        default: ""
+  schedule:
+    - cron: "30 7 * * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  select-variants:
+    runs-on: ubuntu-latest
+    outputs:
+      variant: ${{ steps.compute.outputs.variant }}
+    steps:
+      - name: Resolve variant checkboxes
+        id: compute
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          V_STANDARD: ${{ inputs.standard }}
+          V_ADAPTIVE: ${{ inputs.adaptive }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            variant=both
+          else
+            case "$V_STANDARD:$V_ADAPTIVE" in
+              true:true) variant=both ;;
+              true:false) variant=standard ;;
+              false:true) variant=adaptive ;;
+              *) echo "ERROR: no variants selected. Tick at least one checkbox." >&2; exit 1 ;;
+            esac
+          fi
+          echo "variant=$variant" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: select-variants
+    uses: ./.github/workflows/building-comfort-azure.yml
+    with:
+      scenario: stock_market
+      variant: ${{ needs.select-variants.outputs.variant }}
+      batching_speed: ${{ inputs.batching_speed }}
+      location: ${{ inputs.location }}
+      vm_size: ${{ inputs.vm_size }}
+      os_disk_type: ${{ inputs.os_disk_type }}
+      os_disk_size_gb: ${{ inputs.os_disk_size_gb }}
+      workload_size: ${{ inputs.workload_size }}
+      query_tuning: ${{ inputs.query_tuning }}
+      persist_index: ${{ inputs.persist_index || false }}
+      state_store: ${{ inputs.state_store || false }}
+      drasi_server_version: ${{ inputs.drasi_server_version }}
+      drasi_server_repo: ${{ inputs.drasi_server_repo }}
+      drasi_server_ref: ${{ inputs.drasi_server_ref }}
+      timeout_minutes: ${{ inputs.timeout_minutes }}
+      plugin_registry: ${{ inputs.plugin_registry }}
+      plugin_tag: ${{ inputs.plugin_tag }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

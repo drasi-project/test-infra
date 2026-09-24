@@ -1209,13 +1209,6 @@ impl ScriptSourceChangeGeneratorInternalState {
     }
 
     async fn transition_to_finished_state(&mut self) -> anyhow::Result<()> {
-        log::info!("Script Finished for TestRunSource {}", self.settings.id);
-
-        self.status = SourceChangeGeneratorStatus::Finished;
-        self.stats.actual_end_time_ns = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
         self.skips_remaining = 0;
         self.skips_spacing_mode = None;
         self.steps_remaining = 0;
@@ -1223,7 +1216,22 @@ impl ScriptSourceChangeGeneratorInternalState {
 
         let close_result = self.close_dispatchers().await;
         if let Err(error) = &close_result {
+            log::error!(
+                "Source dispatcher drain failed for TestRunSource {}: {error:#}",
+                self.settings.id
+            );
             self.transition_to_error_state("Failed to close source dispatchers", Some(error));
+        } else {
+            self.status = SourceChangeGeneratorStatus::Finished;
+            self.stats.actual_end_time_ns = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as u64;
+            log::info!(
+                "Source dispatchers drained for TestRunSource {}",
+                self.settings.id
+            );
+            log::info!("Script Finished for TestRunSource {}", self.settings.id);
         }
         self.write_result_summary().await.ok();
         close_result

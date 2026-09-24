@@ -19,8 +19,10 @@ observers against the same local Server binary in two configurations:
 - **native**: native network source/sink factories surrounding the same
   continuous-query evaluator in a ComputationGraph.
 
-The native plugin is `drasi-computation-network`, using native ABI 1.0. Existing
-network plugins retain their separate ABI 0.15. Both families are loaded into the
+The native plugin is `drasi-computation-network`, using native ABI 1.0 and binary
+wire version 2. Existing network plugins retain their separate ABI 0.15.
+Rebuild the Server, config generator and native library together; the original
+wire-version-1 native prototype is rejected. Both families are loaded into the
 same Server binary; neither comparison arm selects the removed ComponentGraph
 execution engine.
 
@@ -128,7 +130,7 @@ The driver rejects changed binaries or a changed plugin directory before
 publishing a successful comparison. Configuration-generator errors and failed
 startup process IDs are retained alongside the logs.
 
-## Initial local measurement
+## Initial local measurement (wire-version-1 baseline)
 
 On 2026-09-24, matching local release builds on macOS 26.6.2 arm64 produced
 the following rooms-only results. Each arm used 100,000 input events, 99,981
@@ -150,6 +152,47 @@ measurement of adapter cost in isolation. These numbers apply to this build and
 machine; rerun after changes rather than treating them as a release benchmark.
 The original evidence is retained in the session artifacts
 `native-perf-paired-100k-rooms/` and `native-perf-paired-100k-both/`.
+
+## Binary wire-version-2 measurement
+
+The production binary codec, bulk buffers and ownership-safe copy reductions
+were measured on 2026-09-24 with the same 100,000-input rooms profile, capacity
+10,000, one warmup pair and three measured pairs. Both arms used the new release
+Server and the same legacy plugin/test-service binaries as before.
+
+| Transport | Adapter median | Native v2 median | Native elapsed-time change |
+|---|---:|---:|---:|
+| HTTP | 11.210 s | 11.830 s | +5.5% |
+| gRPC | 12.944 s | 16.669 s | +28.8% |
+
+Every pair matched all 99,981 room results and their ordered hash. Separate
+two-query runs also matched all 49,860 floor-aggregate results on each transport.
+Native v2 is not universally faster than the adapter path. Do not subtract
+these times from the initial measurement to infer an optimization percentage:
+absolute timings vary between measurement periods. Evidence is retained in
+`native-wire-v2-100k-rooms/` and `native-wire-v2-100k-both/`.
+
+The complete pre-optimization baseline is published as
+`milestone/native-wire-baseline` in the three relevant repositories:
+Core `462a5e00`, Server `0fce279`, and test-infra `85ed408`.
+
+A separate alternating before/after comparison used the frozen pre-change
+native runtime and the new runtime, with one warmup and three measured pairs.
+The live plugin API verified native wire version 1 or 2 before sending inputs.
+Both used the same logical graph configuration and matched exact ordered outputs.
+
+| Transport | Native v1 median | Native v2 median | Median elapsed reduction |
+|---|---:|---:|---:|
+| HTTP | 39.497 s | 23.624 s | 40.2% |
+| gRPC | 32.480 s | 23.227 s | 28.5% |
+
+**This before/after run was noisy, particularly HTTP; these are observations,
+not stable speedup guarantees.** HTTP v1 ranged from 24.093 to 44.279 seconds
+and v2 from 20.717 to 40.232 seconds; one HTTP pair did not improve. gRPC v1
+ranged from 29.257 to 54.690 seconds and v2 from 22.665 to 24.141 seconds.
+The machine was not CPU-isolated. Do not mix these absolute times with the
+adapter comparison above. Full artifacts, live wire-version checks and the
+configuration-generation methodology are retained in `native-wire-before-after/`.
 
 ## Driver checks
 

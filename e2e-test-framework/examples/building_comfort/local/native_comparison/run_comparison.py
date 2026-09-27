@@ -324,11 +324,19 @@ def run_case(args, transport, mode, ordinal, warmup):
                 if runtime.get("data") != {"instanceId": "performance", "runtime": "computationGraph", "running": True}:
                     return False
                 if mode == "native":
-                    graph = request(server_url + "/api/v1/instances/performance/computation/graphs/performance")
+                    graph = request(server_url + "/api/v1/instances/performance/computation")
                     nodes = graph["data"]["components"]
                     if any(node["lifecycle"] == "Failed" or node["realization"] == "CreationFailed" for node in nodes):
                         raise RuntimeError(f"native graph startup failed: {graph}")
-                    return nodes and all(node["lifecycle"] == "Running" for node in nodes)
+                    expected_ids = {
+                        component["descriptor"]["id"]
+                        for component in config["computation"]["definition"]["components"]
+                    }
+                    observed = {node["id"]: node for node in nodes}
+                    return bool(expected_ids) and expected_ids <= observed.keys() and all(
+                        observed[component_id]["lifecycle"] == "Running"
+                        for component_id in expected_ids
+                    )
                 for kind, ids in [("sources", ["facilities-db"]), ("queries", list(expected)),
                                   ("reactions", [reaction["id"] for reaction in baseline["reactions"]])]:
                     for component_id in ids:

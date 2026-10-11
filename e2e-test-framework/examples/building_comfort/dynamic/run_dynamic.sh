@@ -63,6 +63,7 @@
 #                         leave the config untouched (server default ghcr.io/drasi-project).
 #   DRASI_SERVER_BIN      pre-built binary (skips both download and source build)
 #   TEST_SERVICE_BIN      pre-built test-service binary (otherwise cargo run)
+#   TEST_SERVICE_RUST_LOG  framework log filter (info with noisy core modules suppressed)
 #   DRASI_ADMIN_PORT      admin/REST port patched into empty.yaml (8090)
 #   DRASI_SOURCE_PORT     source ingress port to wait for (50051)
 #   SERVER_SOURCE_FILE    components/server/ file (source_grpc.json)
@@ -70,6 +71,7 @@
 #   SERVER_REACTIONS_FILE components/server/ file (reactions_grpc.json)
 #   TEST_CFG_SRC          test-service config ($SCRIPT_DIR/config.json)
 #   TEST_SERVICE_PORT     test-service REST port (63123)
+#   TEST_SERVICE_STARTUP_TIMEOUT_SECS  API startup wait, including auto-start bootstrap (600)
 #   TEST_RUN_ID           full run id (drasi_server_dev_repo.building_comfort.test_run_001)
 #   TEST_REACTION_IDS     reactions to snapshot ("building-comfort building-comfort-floor-agg")
 #   TIMEOUT_SECS          completion timeout (1800)
@@ -190,6 +192,49 @@ SERVER_PROFILE_STATE_STORE="${STATE_STORE:-false}"
 # exceed the total events this scenario emits so the default RejectIncoming
 # capacity policy never drops events.
 WAL_MAX_EVENTS="${WAL_MAX_EVENTS:-500000}"
+# --- Failure-recovery crash injection (#70 phase one) ---
+# CRASH_INJECT selects a fault-injection mode:
+#   off   (default) — no injection; today's behaviour.
+#   drain — Option A: after the source finishes DISPATCHING all changes (ingress
+#           closed) but while the server is still draining/checkpointing, SIGKILL
+#           the drasi-server process and restart it WITHOUT wiping ./data, so WAL
+#           replay + checkpoint recovery run against the persisted state. No
+#           source reconnect is needed because dispatch is already complete.
+# Recovery requires persistence, so `drain` forces PERSIST_INDEX + STATE_STORE on
+# and patches persistConfig: true (so the server restores component definitions
+# on restart instead of coming back bare).
+CRASH_INJECT="${CRASH_INJECT:-off}"
+# An optional timing delay is not a durability guarantee.
+CRASH_DELAY_MS="${CRASH_DELAY_MS:-0}"
+# What to do if the restarted server comes back with no components (i.e. the
+# persistConfig restore path did not repopulate the registry):
+#   auto (default) — re-apply components via REST only if GET shows none, and warn
+#                    loudly that this bypasses WAL-replay recovery.
+#   no             — never re-apply; let the run fail so the gap is visible.
+CRASH_REAPPLY_COMPONENTS="${CRASH_REAPPLY_COMPONENTS:-auto}"
+# RUST_LOG applied to the drasi-server process. Empty = server default. A
+# drain-injection run defaults this to `info` (below) so WAL-replay / recovery
+# lines land in drasi-server.log; override to e.g. debug for deeper tracing.
+DRASI_RUST_LOG="${DRASI_RUST_LOG:-}"
+TEST_SERVICE_RUST_LOG="${TEST_SERVICE_RUST_LOG:-info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error}"
+# Escape hatch for a NON-PERSISTENT control run. By default `drain` forces
+# persistence on (a SIGKILL with in-memory-only state cannot recover). Set this
+# to 1 to honour the PERSIST_INDEX / STATE_STORE inputs instead, so you can
+# demonstrate the "no persistence -> total loss on crash" baseline for contrast.
+CRASH_ALLOW_NO_PERSIST="${CRASH_ALLOW_NO_PERSIST:-0}"
+# A recovered server may converge its internal state WITHOUT re-emitting every
+# reaction notification, so the RecordCount-based completion marker never fires
+# and the run would otherwise hang to TIMEOUT_SECS. For a drain run we therefore
+# also treat the run as complete once the reaction record counts stop changing
+# for CRASH_SETTLE_SECS, then explicitly stop the run (which finalises each
+# reaction's DeterminismHash) so we still get a verdict. Set higher if recovery
+# catch-up is slow/bursty on the runner.
+CRASH_SETTLE_SECS="${CRASH_SETTLE_SECS:-90}"
+# Use the settle-based completion (wait for reaction counts to stop changing, then
+# probe /results and stop) even for a non-crash run. Lets a run whose stop triggers
+# are unreachable (e.g. a reduced change_count vs a 100k-calibrated RecordCount)
+# still finish and capture the results-API probe, symmetric with the crash run.
+USE_SETTLE="${USE_SETTLE:-0}"
 # --- Large-bootstrap presets (#78) ---
 # BOOTSTRAP_SIZE selects a preset that scales the building_comfort initial graph
 # (delivered as op:"i" inserts) so bootstrap load time/throughput can be measured
@@ -237,6 +282,14 @@ mkdir -p "$WORK_DIR" "$LOG_DIR" "$ARTIFACTS_DIR"
 
 DRASI_PID=""
 SERVICE_PID=""
+# Crash-injection outcome, surfaced in the summary. "no" until an injection runs;
+# then "yes" (recovered via persisted state), "reapplied" (recovered but needed a
+# REST re-apply), or "skipped" (drain window missed).
+CRASH_INJECTED="no"
+CRASH_RECOVERY_SECS=""
+# "yes" if the run was ended by count-settle (recovery converged without firing
+# the RecordCount completion marker) rather than by normal completion.
+CRASH_SETTLED="no"
 # Human-readable description of where DRASI_SERVER_BIN came from (release tag,
 # source build + optional core patch, or preset). Surfaced in the step summary
 # for result labeling.
@@ -647,6 +700,10 @@ clamp_batch_for_bootstrap() {
 # 1000, bootstrapBufferSize 10000), so it is effectively a no-op made explicit.
 # Legacy named presets (low|medium|high) are still accepted for back-compat.
 resolve_query_tuning() {
+    if [[ -n "${OUTBOX_CAPACITY:-}" && ! "$OUTBOX_CAPACITY" =~ ^[1-9][0-9]*$ ]]; then
+        log "ERROR: OUTBOX_CAPACITY must be a positive integer when set"
+        return 1
+    fi
     case "$QUERY_TUNING" in
         low|1000)      PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
         medium|10000)  PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
@@ -690,6 +747,45 @@ resolve_selected_queries() {
     log "Selected queries: [$SELECTED_QUERIES] (of: $(echo "$known" | tr '\n' ' '))"
 }
 
+# Validate CRASH_INJECT and force the settings recovery requires. A drain-phase
+# crash can only be recovered from if the server persists its state, so `drain`
+# forces the persist_index + state_store profiles on (overriding the PERSIST_INDEX
+# / STATE_STORE inputs) and, later, patches persistConfig: true.
+resolve_crash_inject() {
+    case "$CRASH_INJECT" in
+        off) return 0 ;;
+        drain) ;;
+        *)
+            log "ERROR: CRASH_INJECT must be 'off' or 'drain' (got '$CRASH_INJECT')"
+            return 1
+            ;;
+    esac
+    if [[ "$SERVER_PROFILE_PERSIST_INDEX" != "true" || "$SERVER_PROFILE_STATE_STORE" != "true" ]]; then
+        if [[ "$CRASH_ALLOW_NO_PERSIST" == "1" ]]; then
+            log "CRASH_INJECT=drain + CRASH_ALLOW_NO_PERSIST=1: NON-PERSISTENT control run."
+            log "  Honouring inputs (persist_index=$SERVER_PROFILE_PERSIST_INDEX state_store=$SERVER_PROFILE_STATE_STORE)."
+            log "  EXPECT recovery to FAIL/LOSE state: a SIGKILL discards in-memory-only query state and the restart comes back empty."
+        else
+            log "CRASH_INJECT=drain requires persistence; forcing PERSIST_INDEX=true STATE_STORE=true (were persist_index=$SERVER_PROFILE_PERSIST_INDEX state_store=$SERVER_PROFILE_STATE_STORE)"
+            SERVER_PROFILE_PERSIST_INDEX=true
+            SERVER_PROFILE_STATE_STORE=true
+        fi
+    fi
+    # Capture the server's recovery/WAL-replay logs (default level info).
+    if [[ -z "$DRASI_RUST_LOG" ]]; then
+        DRASI_RUST_LOG="info"
+    fi
+    # Per-record reaction JSONL makes the recovered final state diffable row-by-row
+    # but adds per-record disk I/O that markedly slows a 100k-change run. Leave it
+    # to the caller (LOG_JSONL=1) rather than forcing it, so the crash run's timing
+    # matches the ordinary path; the determinism verdict + record counts already
+    # answer pass/fail without it.
+    if [[ "$LOG_JSONL" != "1" ]]; then
+        log "CRASH_INJECT=drain: LOG_JSONL=0 (fast). Set LOG_JSONL=1 for a row-level forensic diff if the SHA mismatches."
+    fi
+    log "CRASH_INJECT=drain: SIGKILL after successful dispatcher drain (+${CRASH_DELAY_MS}ms), restart preserving ./data (reapply_components=$CRASH_REAPPLY_COMPONENTS, server RUST_LOG=$DRASI_RUST_LOG, LOG_JSONL=$LOG_JSONL)"
+}
+
 # Select the committed base server yaml from the two INDEPENDENT instance-config
 # toggles (PERSIST_INDEX, STATE_STORE). Each of the four combinations has its own
 # committed yaml under base/, so the yaml stays the source of truth for
@@ -697,8 +793,7 @@ resolve_selected_queries() {
 # The driver derives SERVER_PERSIST_INDEX from the selected yaml so it can also
 # enable source WAL durability (persistent queries reject non-replay sources) and
 # pre-create the RocksDB index dir.
-resolve_server_config() {
-    local pi="$SERVER_PROFILE_PERSIST_INDEX" ss="$SERVER_PROFILE_STATE_STORE" base
+resolve_server_config() {    local pi="$SERVER_PROFILE_PERSIST_INDEX" ss="$SERVER_PROFILE_STATE_STORE" base
     case "$pi:$ss" in
         false:false) base="drasi_server.empty.yaml" ;;
         true:false)  base="drasi_server.persist_index.yaml" ;;
@@ -1005,6 +1100,21 @@ patch_configs() {
             "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
     fi
 
+    # Recovery needs the server to restore its component definitions on restart,
+    # so flip persistConfig to true for a crash-injection run. The base yamls ship
+    # persistConfig: false; without this the restarted server comes back bare.
+    # Skipped for the non-persistent control run (nothing to restore anyway).
+    if [[ "$CRASH_INJECT" == "drain" && "$SERVER_PERSIST_INDEX" == "true" ]]; then
+        if grep -qE '^persistConfig:' "$DRASI_CFG_CI"; then
+            sed -E 's/^persistConfig:[[:space:]]*false[[:space:]]*$/persistConfig: true/' \
+                "$DRASI_CFG_CI" > "$DRASI_CFG_CI.tmp" && mv "$DRASI_CFG_CI.tmp" "$DRASI_CFG_CI"
+        else
+            printf 'persistConfig: true\n' >> "$DRASI_CFG_CI"
+        fi
+        log "CRASH_INJECT=drain: patched persistConfig -> true"
+        grep -E '^persistConfig:' "$DRASI_CFG_CI" | sed 's/^/  /'
+    fi
+
     pin_plugin_tags
     set_plugin_registry
 
@@ -1124,6 +1234,7 @@ start_drasi_server() {
     mkdir -p "$WORK_DIR/data"
     (
         cd "$WORK_DIR"
+        [[ -n "$DRASI_RUST_LOG" ]] && export RUST_LOG="$DRASI_RUST_LOG"
         exec "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
             > "$LOG_DIR/drasi-server.log" 2>&1
     ) &
@@ -1135,6 +1246,173 @@ start_drasi_server() {
         return 1
     fi
     prepare_rocksdb_index_dirs
+}
+
+# Restart drasi-server for crash-recovery: re-exec on the SAME config WITHOUT
+# wiping ./data, so RocksDB index + redb WAL + persisted config survive and the
+# server replays/recovers on startup. Appends to the existing server log so the
+# pre-crash and post-crash logs stay in one file. Updates DRASI_PID (same shell)
+# so the completion wait and cleanup track the new process.
+restart_drasi_server() {
+    log "Restarting drasi-server for recovery (preserving $WORK_DIR/data)"
+    # Clear boundary so the pre-crash and post-crash halves of the single
+    # appended log file are easy to separate when triaging a failed recovery.
+    {
+        echo "================================================================="
+        echo "[dyn] ===== DRASI-SERVER RESTART (recovery) $(date -u +%FT%TZ) ====="
+        echo "================================================================="
+    } >> "$LOG_DIR/drasi-server.log"
+    (
+        cd "$WORK_DIR"
+        [[ -n "$DRASI_RUST_LOG" ]] && export RUST_LOG="$DRASI_RUST_LOG"
+        exec "$DRASI_SERVER_BIN" --config "$DRASI_CFG_CI" \
+            >> "$LOG_DIR/drasi-server.log" 2>&1
+    ) &
+    DRASI_PID=$!
+    log "drasi-server restarted pid=$DRASI_PID"
+    if ! wait_for_http "http://127.0.0.1:${DRASI_ADMIN_PORT}/health" "drasi-server admin API (recovery)" 120; then
+        log "--- drasi-server.log (last 200 lines) ---"
+        tail -n 200 "$LOG_DIR/drasi-server.log" || true
+        return 1
+    fi
+    prepare_rocksdb_index_dirs
+}
+
+# Block until the source generator reports a successful dispatcher drain, i.e.
+# the test-service log shows "Source dispatchers drained for TestRunSource". This marks the
+# point where ingress is closed but the server may still be draining — the
+# drain-phase (Option A) injection window. Bounded by TIMEOUT_SECS.
+wait_for_source_finished() {
+    local log_file="$LOG_DIR/test-service.log"
+    local marker="Source dispatchers drained for TestRunSource ${TEST_RUN_ID}."
+    local failure_marker="Source dispatcher drain failed for TestRunSource ${TEST_RUN_ID}."
+    local completion="TestRun '${TEST_RUN_ID}' completed:"
+    log "Waiting for successful source-dispatcher drain before crash injection"
+    log "  marker: $marker  (timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s)"
+    local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
+    local start_ts; start_ts=$(date +%s)
+    local last_log_ts=0
+    local now; now=$(date +%s)
+    while (( now < deadline )); do
+        if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
+            log "ERROR: test-service exited before source finished"; return 1
+        fi
+        if ! kill -0 "$DRASI_PID" 2>/dev/null; then
+            log "ERROR: drasi-server exited before source finished"; return 1
+        fi
+        if [[ -s "$log_file" ]] && grep -qF "$failure_marker" "$log_file"; then
+            log "ERROR: source dispatcher drain failed; refusing crash injection"
+            return 1
+        fi
+        if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
+            log "Successful source-dispatcher drain marker observed"
+            return 0
+        fi
+        # If the run already completed we missed the drain window entirely.
+        if [[ -s "$log_file" ]] && grep -qF "$completion" "$log_file"; then
+            log "WARNING: run completed before dispatcher-drained marker; drain window missed"
+            return 2
+        fi
+        # Progress heartbeat so a slow-but-moving dispatch is distinguishable from
+        # a genuine stall. Shows per-reaction record counts (climbing = flowing).
+        if (( now - last_log_ts >= 30 )); then
+            log "waiting for source-dispatcher drain t=$(( now - start_ts ))s (no marker yet)$(reaction_progress)"
+            last_log_ts=$now
+        fi
+        sleep "$POLL_INTERVAL_SECS"
+        now=$(date +%s)
+    done
+    log "ERROR: dispatcher-drained marker not observed within ${TIMEOUT_SECS}s; a rebuilt test-service is required"
+    log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" 2>/dev/null || true
+    log "--- drasi-server.log (last 100 lines) ---"; tail -n 100 "$LOG_DIR/drasi-server.log" 2>/dev/null || true
+    return 1
+}
+
+# Option A crash injection: wait for the drain window, SIGKILL the server, then
+# restart it against the persisted state. Returns non-zero only on a setup error
+# (a missed window is downgraded to a skip so the run still completes cleanly and
+# we can see whether the ordinary path passes).
+inject_crash_and_restart() {
+    local rc=0
+    wait_for_source_finished || rc=$?
+    if (( rc == 2 )); then
+        log "Crash injection SKIPPED (drain window missed). Increase load or lower CRASH_DELAY_MS."
+        CRASH_INJECTED="skipped"
+        return 0
+    elif (( rc != 0 )); then
+        return "$rc"
+    fi
+
+    local grace_s
+    grace_s="$(awk -v ms="$CRASH_DELAY_MS" 'BEGIN { printf "%.3f", ms/1000 }')"
+    log "Grace ${CRASH_DELAY_MS}ms before SIGKILL"
+    sleep "$grace_s"
+
+    if ! kill -0 "$DRASI_PID" 2>/dev/null; then
+        log "WARNING: drasi-server already gone before injection; skipping"
+        CRASH_INJECTED="skipped"
+        return 0
+    fi
+
+    # If the run finished during the grace period, crashing now tests nothing
+    # (the pre-crash stream already produced the verdict). Downgrade to a skip.
+    if grep -qF "TestRun '${TEST_RUN_ID}' completed:" "$LOG_DIR/test-service.log" 2>/dev/null; then
+        log "WARNING: run completed during grace window; crash injection SKIPPED (drain window too short)."
+        log "         Increase load (BOOTSTRAP_SIZE / change_count) or lower CRASH_DELAY_MS to widen it."
+        CRASH_INJECTED="skipped"
+        return 0
+    fi
+
+    local killed_pid="$DRASI_PID"
+    local crash_start; crash_start=$(date +%s)
+    log "INJECT: SIGKILL drasi-server pid=$killed_pid (drain-phase hard crash)"
+    printf '[dyn] ===== SIGKILL (drain-phase crash) pid=%s %s =====\n' \
+        "$killed_pid" "$(date -u +%FT%TZ)" >> "$LOG_DIR/drasi-server.log"
+    kill -KILL "$killed_pid" 2>/dev/null || true
+    # Reap the killed background job so it doesn't linger as a zombie.
+    wait "$killed_pid" 2>/dev/null || true
+
+    if ! restart_drasi_server; then
+        log "ERROR: drasi-server failed to restart after crash"
+        return 1
+    fi
+
+    local recovery_s=$(( $(date +%s) - crash_start ))
+    log "RECOVERY: server healthy again ${recovery_s}s after SIGKILL"
+    CRASH_INJECTED="yes"
+    CRASH_RECOVERY_SECS="$recovery_s"
+    # Reaction record counts at the moment of recovery. Compare against the
+    # completion-loop progress lines: climbing => the recovered server is
+    # re-emitting/catching up; frozen here => it delivered nothing post-restart
+    # (lost in-flight work or reaction not re-subscribed).
+    log "Reaction counts at recovery:$(reaction_progress)"
+
+    # Confirm the restart repopulated the component registry (persistConfig path).
+    # If it came back bare, optionally re-apply via REST as a fallback. The admin
+    # API wraps the list as {"success":..,"data":[..]}, so read .data (falling back
+    # to a bare array / .queries for older shapes).
+    local qcount
+    qcount="$(curl -fsS "${DRASI_API}/queries" 2>/dev/null \
+        | jq -r 'if has("data") then (.data | length)
+                 elif type=="array" then length
+                 elif has("queries") then (.queries | length)
+                 else 0 end' 2>/dev/null || echo 0)"
+    log "Post-recovery component check: /queries reports $qcount query(ies)"
+    if [[ "${qcount:-0}" == "0" ]]; then
+        case "$CRASH_REAPPLY_COMPONENTS" in
+            auto)
+                log "WARNING: recovered server has no components; re-applying via REST."
+                log "WARNING: re-applying re-bootstraps queries and BYPASSES WAL-replay recovery -- results are NOT a pure recovery signal."
+                apply_server_components || { log "ERROR: component re-apply after recovery failed"; return 1; }
+                CRASH_INJECTED="reapplied"
+                ;;
+            no)
+                log "ERROR: recovered server has no components and CRASH_REAPPLY_COMPONENTS=no; failing so the gap is visible."
+                return 1
+                ;;
+        esac
+    fi
+    return 0
 }
 
 # drasi_apply <resource-path> <json-body>
@@ -1325,11 +1603,14 @@ apply_server_components() {
         q_body="$(printf '%s' "$q" | jq \
             --argjson pq "$PRIORITY_QUEUE_CAP" \
             --argjson db "$DISPATCH_BUFFER_CAP" \
+            --arg outbox "${OUTBOX_CAPACITY:-}" \
             --argjson bb "$BOOTSTRAP_BUFFER_SIZE" '
             .priorityQueueCapacity = $pq
             | .dispatchBufferCapacity = $db
-            | .bootstrapBufferSize = $bb')"
+            | .bootstrapBufferSize = $bb
+            | if $outbox != "" then .outboxCapacity = ($outbox | tonumber) else . end')"
         log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
+        log "  -> query $qid outboxCapacity=$(printf '%s' "$q_body" | jq -r '.outboxCapacity // "server default"')"
         drasi_apply "/queries" "$q_body"
     done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$q_select" "$qry_file")
 
@@ -1357,11 +1638,16 @@ apply_server_components() {
 }
 
 start_test_service() {
+    local startup_timeout="${TEST_SERVICE_STARTUP_TIMEOUT_SECS:-600}"
+    [[ "$startup_timeout" =~ ^[1-9][0-9]*$ ]] || {
+        log "ERROR: TEST_SERVICE_STARTUP_TIMEOUT_SECS must be a positive integer"
+        return 1
+    }
     if [[ -n "${TEST_SERVICE_BIN:-}" ]]; then
         log "Starting pre-built test-service: $TEST_SERVICE_BIN"
         (
             cd "$REPO_ROOT/e2e-test-framework"
-            export RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error'
+            export RUST_LOG="$TEST_SERVICE_RUST_LOG"
             exec "$TEST_SERVICE_BIN" --config "$TEST_CFG_CI" \
                 > "$LOG_DIR/test-service.log" 2>&1
         ) &
@@ -1369,14 +1655,14 @@ start_test_service() {
         log "Building & starting test-service"
         (
             cd "$REPO_ROOT/e2e-test-framework"
-            RUST_LOG='info,drasi_core::query::continuous_query=error,drasi_core::path_solver=error' \
+            RUST_LOG="$TEST_SERVICE_RUST_LOG" \
             cargo run --release --manifest-path "test-service/Cargo.toml" -- --config "$TEST_CFG_CI" \
                 > "$LOG_DIR/test-service.log" 2>&1
         ) &
     fi
     SERVICE_PID=$!
     log "test-service pid=$SERVICE_PID"
-    if ! wait_for_port 127.0.0.1 "$TEST_SERVICE_PORT" "test-service API" 600; then
+    if ! wait_for_port 127.0.0.1 "$TEST_SERVICE_PORT" "test-service API" "$startup_timeout"; then
         log "--- test-service.log (last 200 lines) ---"
         tail -n 200 "$LOG_DIR/test-service.log" || true
         return 1
@@ -1443,6 +1729,7 @@ wait_for_completion_signal() {
         if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
             log "Completion signal observed for $TEST_RUN_ID"
             grep -F "$marker" "$log_file" | tail -n1 | sed 's/^/[completion] /'
+            probe_query_results
             return 0
         fi
         local elapsed
@@ -1456,6 +1743,120 @@ wait_for_completion_signal() {
     log "ERROR: completion signal not observed within ${TIMEOUT_SECS}s"
     log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" || true
     log "--- drasi-server.log (last 100 lines) ---"; tail -n 100 "$LOG_DIR/drasi-server.log" || true
+    local id
+    for id in $TEST_REACTION_IDS; do fetch_final_reaction_state "$id" || true; done
+    return 1
+}
+
+# Sum reaction_invocation_count across all reactions. Echoes the total, or empty
+# on a fetch failure so the caller can skip settle bookkeeping for that tick.
+reaction_total_count() {
+    local id url body count total=0 got=0
+    for id in $TEST_REACTION_IDS; do
+        url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/reactions/${id}"
+        body="$(curl -sS "$url" 2>/dev/null || true)"
+        [[ -z "$body" ]] && continue
+        count="$(printf '%s' "$body" | jq -r '.reaction_observer.result_summary.reaction_invocation_count // 0' 2>/dev/null || echo 0)"
+        [[ "$count" =~ ^[0-9]+$ ]] || count=0
+        total=$(( total + count ))
+        got=1
+    done
+    (( got )) && printf '%s' "$total"
+}
+
+# Probe drasi-server's OWN materialised results via the admin results API
+# (GET /queries/:id/results). This reads the server's state directly, decoupled
+# from whatever any reaction received -- the true oracle for "did the server
+# recover the correct state?". Must be called while the queries are still live
+# (before any stop). Saves one file per query into $ARTIFACTS_DIR.
+probe_query_results() {
+    local qids qid out n
+    qids="$(curl -fsS "${DRASI_API}/queries" 2>/dev/null | jq -r '(.data // .)[]?.id' 2>/dev/null)"
+    if [[ -z "$qids" ]]; then
+        log "probe_query_results: no queries returned by ${DRASI_API}/queries"
+        return 0
+    fi
+    for qid in $qids; do
+        out="$ARTIFACTS_DIR/query_results__${qid}.json"
+        if curl -fsS "${DRASI_API}/queries/${qid}/results" -o "$out" 2>/dev/null; then
+            n="$(jq -r '(.data // .) | if type=="array" then length else 0 end' "$out" 2>/dev/null || echo '?')"
+            log "probe_query_results: [$qid] server holds $n result row(s) -> query_results__${qid}.json"
+        else
+            log "probe_query_results: [$qid] results API call failed"
+        fi
+    done
+}
+
+# Stop the whole test run via REST. Finalises each reaction's loggers (the
+# DeterminismHash summary is produced in reaction stop()), so a converged-but-
+# uncompleted recovery run still yields a per-reaction SHA to compare.
+stop_test_run_via_rest() {
+    local url="http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/stop"
+    log "POST $url (finalise reactions after settle)"
+    curl -sS -X POST "$url" >/dev/null 2>&1 || log "WARNING: stop request failed"
+    # Give the reactions a moment to transition to Stopped and flush summaries.
+    local id deadline; deadline=$(( $(date +%s) + 30 ))
+    for id in $TEST_REACTION_IDS; do
+        while (( $(date +%s) < deadline )); do
+            local st
+            st="$(curl -sS "http://127.0.0.1:${TEST_SERVICE_PORT}/api/test_runs/${TEST_RUN_ID}/reactions/${id}" 2>/dev/null \
+                | jq -r '.reaction_observer.status // "?"' 2>/dev/null || echo '?')"
+            [[ "$st" == "Stopped" || "$st" == "Error" ]] && break
+            sleep 1
+        done
+    done
+}
+
+# Completion wait for a crash-injection run. Succeeds on the normal completion
+# marker OR when reaction counts stop changing for CRASH_SETTLE_SECS -- a
+# recovered server can converge its state without re-emitting enough
+# notifications to satisfy the RecordCount stop trigger, so the marker may never
+# fire. On settle we stop the run via REST to finalise the determinism hashes.
+wait_for_recovery_completion() {
+    local log_file="$LOG_DIR/test-service.log"
+    local marker="TestRun '${TEST_RUN_ID}' completed:"
+    log "Waiting for completion OR reaction-count settle (crash run)"
+    log "  marker: $marker  settle=${CRASH_SETTLE_SECS}s timeout=${TIMEOUT_SECS}s interval=${POLL_INTERVAL_SECS}s"
+    local deadline=$(( $(date +%s) + TIMEOUT_SECS ))
+    local start_ts; start_ts=$(date +%s)
+    local last_count="" last_change_ts last_log_ts=0 now
+    now=$(date +%s); last_change_ts=$now
+    while (( now < deadline )); do
+        if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
+            log "ERROR: test-service exited unexpectedly"; return 1
+        fi
+        if ! kill -0 "$DRASI_PID" 2>/dev/null; then
+            log "ERROR: drasi-server exited unexpectedly (post-recovery)"; return 1
+        fi
+        if [[ -s "$log_file" ]] && grep -qF "$marker" "$log_file"; then
+            log "Completion signal observed for $TEST_RUN_ID (recovery re-emitted to threshold)"
+            probe_query_results
+            return 0
+        fi
+        local total; total="$(reaction_total_count)"
+        if [[ -n "$total" ]]; then
+            if [[ "$total" != "$last_count" ]]; then
+                last_count="$total"; last_change_ts=$now
+            elif (( now - last_change_ts >= CRASH_SETTLE_SECS )); then
+                log "Reaction counts settled at total=$total for ${CRASH_SETTLE_SECS}s with no completion marker."
+                log "  INCONCLUSIVE: quiet reaction counts do not prove query catch-up; stopping to collect diagnostics."
+                CRASH_SETTLED="yes"
+                probe_query_results
+                stop_test_run_via_rest
+                return 0
+            fi
+        fi
+        if (( now - last_log_ts >= 30 )); then
+            local stable=$(( now - last_change_ts ))
+            log "waiting for completion/settle t=$(( now - start_ts ))s total=${total:-?} stable=${stable}s$(reaction_progress)"
+            last_log_ts=$now
+        fi
+        sleep "$POLL_INTERVAL_SECS"
+        now=$(date +%s)
+    done
+    log "ERROR: neither completion nor settle within ${TIMEOUT_SECS}s"
+    log "--- test-service.log (last 100 lines) ---"; tail -n 100 "$log_file" || true
+    log "--- drasi-server.log (last 120 lines) ---"; tail -n 120 "$LOG_DIR/drasi-server.log" || true
     local id
     for id in $TEST_REACTION_IDS; do fetch_final_reaction_state "$id" || true; done
     return 1
@@ -1513,6 +1914,53 @@ copy_determinism_verdict() {
     fi
 }
 
+# Inline determinism verdict for a crash run that ended via count-settle: the
+# completion handler that normally writes determinism_verdict.json only runs on
+# NATURAL completion, not on the explicit stop we issue after settle. Compares
+# each reaction's finalised DeterminismHash SHA to the Sha256Determinism
+# `expected` baseline in the test config. Returns 1 on any mismatch. NOTE: a
+# mismatch here is order-sensitive -- a recovery that re-emitted/reordered but
+# converged to the correct final state will also mismatch, so treat a failure as
+# "diverged stream, verify final state", not proof of data loss.
+write_crash_determinism_verdict() {
+    local verdict_file="$ARTIFACTS_DIR/determinism_verdict.json"
+    local expected_map
+    expected_map="$(jq -c '
+        .data_store.test_repos[]?.local_tests[]?.completion_handlers[]?
+        | select(.kind == "Sha256Determinism") | .expected // {}
+    ' "$TEST_CFG_CI" 2>/dev/null | head -n1)"
+    [[ -z "$expected_map" || "$expected_map" == "null" ]] && expected_map='{}'
+
+    local results="{}" fail=0 id state_file actual expected passed
+    for id in $TEST_REACTION_IDS; do
+        state_file="$ARTIFACTS_DIR/final_reaction_state__${id}.json"
+        actual=""
+        [[ -s "$state_file" ]] && actual="$(jq -r '
+            (.reaction_observer.logger_results[]?
+                | select(.logger_name == "DeterminismHash")
+                | .summary.sha256) // empty' "$state_file" 2>/dev/null)"
+        expected="$(printf '%s' "$expected_map" | jq -r --arg id "$id" '.[$id] // empty' 2>/dev/null)"
+        if [[ -z "$actual" ]]; then
+            log "[$id] no DeterminismHash SHA captured after stop"; passed=false; fail=1
+        elif [[ -z "$expected" ]]; then
+            log "[$id] determinism: no baseline; actual=$actual"; passed=true
+        elif [[ "$actual" == "$expected" ]]; then
+            log "[$id] determinism MATCH (sha=${actual:0:12}…) -- recovery reproduced the clean stream"; passed=true
+        else
+            log "[$id] determinism MISMATCH expected=${expected:0:12}… actual=${actual:0:12}… -- recovery diverged the diff stream; verify final state (reordered-but-correct vs lost data)"; passed=false; fail=1
+        fi
+        results="$(printf '%s' "$results" | jq --arg id "$id" --arg a "$actual" --arg e "$expected" --argjson p "$passed" \
+            '.[$id] = {actual: ($a // null), expected: ($e // null), passed: $p}')"
+    done
+    jq --arg run "$TEST_RUN_ID" --argjson results "$results" \
+        '{test_run_id: $run, results: $results, note: "inline crash-run verdict (count-settle); order-sensitive SHA -- a mismatch may be reordered-but-correct recovery, verify final state"}' \
+        <<<'{}' > "$verdict_file"
+    echo "::group::Determinism verdict (crash inline)"
+    jq '.' "$verdict_file" 2>/dev/null || cat "$verdict_file"
+    echo "::endgroup::"
+    return "$fail"
+}
+
 # Render a reusable markdown summary and publish it on GitHub Actions when
 # GITHUB_STEP_SUMMARY is available.
 write_step_summary() {
@@ -1536,6 +1984,9 @@ write_step_summary() {
         echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
         echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
         echo "- server config: persistIndex=\`$SERVER_PROFILE_PERSIST_INDEX\`, stateStore=\`$SERVER_PROFILE_STATE_STORE\`$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo " (source WAL durability on, max_events=$WAL_MAX_EVENTS)")"
+        if [[ "$CRASH_INJECT" != "off" ]]; then
+            echo "- crash injection: \`$CRASH_INJECT\` -> outcome=\`$CRASH_INJECTED\`$([[ -n "$CRASH_RECOVERY_SECS" ]] && echo ", recovery=${CRASH_RECOVERY_SECS}s"), completion=\`$([[ "$CRASH_SETTLED" == "yes" ]] && echo "count-settle" || echo "marker")\`"
+        fi
         echo
 
         echo "### Reactions"
@@ -1606,20 +2057,50 @@ write_step_summary() {
 }
 
 download_drasi_server
+if [[ "${1:-}" == "--prepare-server" ]]; then
+    jq -n --arg binary "$DRASI_SERVER_BIN" --arg source "$DRASI_BUILD_SOURCE" \
+        '{binary:$binary, source:$source}' > "$ARTIFACTS_DIR/server-build.json"
+    exit 0
+fi
 resolve_batching_preset
 resolve_query_tuning
 resolve_selected_queries
+resolve_crash_inject
 resolve_server_config
 resolve_bootstrap_preset
 clamp_batch_for_bootstrap
 patch_configs
 patch_bootstrap_preset
+if [[ -n "${RECOVERY_GOLDEN_DIR:-}" ]]; then
+    [[ "$LOG_JSONL" == "1" ]] || { log "ERROR: golden comparison requires LOG_JSONL=1"; exit 1; }
+    bash "$REPO_ROOT/e2e-test-framework/examples/recovery_comparison/configure_golden.sh" \
+        "$TEST_CFG_CI" "$COMPONENTS_DIR/$SERVER_QUERIES_FILE" "$SELECTED_QUERIES_JSON" \
+        "$RECOVERY_GOLDEN_DIR" "$DRASI_API"
+fi
 start_drasi_server
 apply_server_components
 start_test_service
 
+if [[ "$CRASH_INJECT" == "drain" ]]; then
+    inject_crash_and_restart || {
+        log "ERROR: crash injection/restart failed; continuing to capture artifacts"
+        CRASH_INJECTED="failed"
+    }
+fi
+
 poll_rc=0
-if wait_for_completion_signal; then
+if [[ "$CRASH_INJECT" == "drain" || "$USE_SETTLE" == "1" ]]; then
+    # Recovery (or a reduced-load run with unreachable stop triggers) can converge
+    # without firing the RecordCount marker, so use the settle-aware wait (it probes
+    # /results and stops the run on settle).
+    if wait_for_recovery_completion; then
+        for id in $TEST_REACTION_IDS; do
+            fetch_final_reaction_state "$id" || poll_rc=1
+        done
+    else
+        poll_rc=1
+    fi
+elif wait_for_completion_signal; then
     for id in $TEST_REACTION_IDS; do
         fetch_final_reaction_state "$id" || poll_rc=1
     done
@@ -1628,9 +2109,19 @@ else
 fi
 print_summary
 
+if [[ "$CRASH_INJECT" == "drain" && ( "$CRASH_INJECTED" != "yes" || "$CRASH_SETTLED" == "yes" ) ]]; then
+    log "ERROR: recovery was not verified (injection=$CRASH_INJECTED, count-settle=$CRASH_SETTLED)"
+    poll_rc=1
+fi
+
 determinism_rc=0
 verify_test_run_status || determinism_rc=$?
 copy_determinism_verdict
+# A crash run ended by count-settle has no handler-written verdict, so compute
+# one inline from the finalised per-reaction SHAs.
+if [[ "$CRASH_INJECT" == "drain" && ! -s "$ARTIFACTS_DIR/determinism_verdict.json" ]]; then
+    write_crash_determinism_verdict || determinism_rc=$?
+fi
 write_step_summary
 
 if (( poll_rc != 0 )); then

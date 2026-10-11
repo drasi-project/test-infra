@@ -238,18 +238,17 @@ impl TestRunDrasiLibInstance {
                     source_config.id
                 );
             }
-            let source_options: ApplicationSourceConfig = serde_json::from_value(
-                if source_config.config.is_null() {
+            let source_options: ApplicationSourceConfig =
+                serde_json::from_value(if source_config.config.is_null() {
                     serde_json::json!({})
                 } else {
                     source_config.config.clone()
-                },
-            )
-            .with_context(|| format!("Invalid application source config: {}", source_config.id))?;
-            let (source, handle) = ApplicationSource::new(
-                source_config.id.clone(),
-                source_options,
-            )?;
+                })
+                .with_context(|| {
+                    format!("Invalid application source config: {}", source_config.id)
+                })?;
+            let (source, handle) =
+                ApplicationSource::new(source_config.id.clone(), source_options)?;
             source
                 .set_bootstrap_provider(Box::new(NoOpBootstrapProvider::new()))
                 .await;

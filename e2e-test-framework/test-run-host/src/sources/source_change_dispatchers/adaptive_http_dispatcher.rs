@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use test_data_store::{
@@ -200,14 +200,14 @@ pub struct AdaptiveHttpSourceChangeDispatcher {
     port: u16,
     endpoint: String,
     batch_endpoint: String,
-    #[allow(dead_code)]
     timeout_seconds: u64,
     source_id: String,
     adaptive_config: AdaptiveBatchConfig,
     // Channel for sending events to the batcher
     event_tx: Option<mpsc::Sender<SourceChangeEvent>>,
     // Handle to the background batcher task
-    batcher_handle: Option<Arc<Mutex<Option<JoinHandle<()>>>>>,
+    batcher_handle: Option<JoinHandle<anyhow::Result<()>>>,
+    failure: Option<String>,
     client: Arc<Client>,
     batch_enabled: bool,
 }
@@ -276,6 +276,7 @@ impl AdaptiveHttpSourceChangeDispatcher {
             adaptive_config,
             event_tx: None,
             batcher_handle: None,
+            failure: None,
             client: Arc::new(client),
             batch_enabled,
         })
@@ -304,7 +305,6 @@ impl AdaptiveHttpSourceChangeDispatcher {
         let handle = tokio::spawn(async move {
             let mut batcher = AdaptiveBatcher::new(event_rx, adaptive_config);
             let mut successful_batches = 0u64;
-            let mut failed_batches = 0u64;
             let mut total_events = 0u64;
 
             info!("Adaptive HTTP batcher started for source {source_id}");
@@ -321,29 +321,16 @@ impl AdaptiveHttpSourceChangeDispatcher {
 
                 // Convert events to HttpChangeEvent Direct Format
                 let http_events: Vec<HttpChangeEvent> = batch
-                    .into_iter()
-                    .filter_map(|event| {
-                        // Convert SourceChangeEvent to HttpChangeEvent Direct Format
-                        match convert_to_direct_format(&event) {
-                            Some(e) => {
-                                debug!(
-                                    "Converted event: op={} -> operation={}",
-                                    event.op, e.operation
-                                );
-                                Some(e)
-                            }
-                            None => {
-                                error!("Failed to convert event with op={}", event.op);
-                                None
-                            }
-                        }
+                    .iter()
+                    .map(|event| {
+                        convert_to_direct_format(event).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "Failed to convert adaptive HTTP event with op={}",
+                                event.op
+                            )
+                        })
                     })
-                    .collect();
-
-                if http_events.is_empty() {
-                    error!("No events were successfully converted to Direct Format");
-                    continue;
-                }
+                    .collect::<anyhow::Result<_>>()?;
 
                 // Send batch or individual events
                 let success = if batch_enabled && http_events.len() > 1 {
@@ -416,46 +403,58 @@ impl AdaptiveHttpSourceChangeDispatcher {
                 if success {
                     successful_batches += 1;
                 } else {
-                    failed_batches += 1;
+                    anyhow::bail!(
+                        "Adaptive HTTP batch send failed: source={source_id}, batch_size={batch_size}, successful_batches={successful_batches}"
+                    );
                 }
 
-                if (successful_batches + failed_batches) % 100 == 0 {
+                if successful_batches.is_multiple_of(100) {
                     info!(
-                        "Adaptive HTTP metrics - Successful: {successful_batches}, Failed: {failed_batches}, Total events: {total_events}"
+                        "Adaptive HTTP metrics - Successful: {successful_batches}, Total events: {total_events}"
                     );
                 }
             }
 
             info!(
-                "Adaptive HTTP batcher completed - Successful: {successful_batches}, Failed: {failed_batches}, Total events: {total_events}"
+                "Adaptive HTTP batcher completed - Successful: {successful_batches}, Total events: {total_events}"
             );
+            Ok(())
         });
 
-        self.batcher_handle = Some(Arc::new(Mutex::new(Some(handle))));
+        self.batcher_handle = Some(handle);
         Ok(())
     }
 
-    async fn send_single_event(&self, event: &SourceChangeEvent) -> anyhow::Result<()> {
-        let url = format!("{}:{}{}", self.url, self.port, self.endpoint);
-
-        // Convert to HttpChangeEvent Direct Format
-        let http_event = convert_to_direct_format(event)
-            .ok_or_else(|| anyhow::anyhow!("Failed to convert event to Direct Format"))?;
-
-        let response = self.client.post(&url).json(&http_event).send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(anyhow::anyhow!(
-                "HTTP request failed with status {status}: {error_text}"
-            ));
+    async fn await_batcher(&mut self) -> anyhow::Result<()> {
+        let result = if let Some(mut handle) = self.batcher_handle.take() {
+            match tokio::time::timeout(
+                Duration::from_secs(self.timeout_seconds.max(5)),
+                &mut handle,
+            )
+            .await
+            {
+                Ok(Ok(result)) => result,
+                Ok(Err(error)) => Err(anyhow::anyhow!(
+                    "Adaptive HTTP batcher task failed: {error}"
+                )),
+                Err(_) => {
+                    handle.abort();
+                    let _ = handle.await;
+                    Err(anyhow::anyhow!(
+                        "Timed out waiting for adaptive HTTP batcher to drain"
+                    ))
+                }
+            }
+        } else {
+            Ok(())
+        };
+        if let Err(error) = result {
+            self.failure = Some(error.to_string());
         }
-
-        Ok(())
+        match &self.failure {
+            Some(failure) => Err(anyhow::anyhow!(failure.clone())),
+            None => Ok(()),
+        }
     }
 }
 
@@ -467,17 +466,7 @@ impl SourceChangeDispatcher for AdaptiveHttpSourceChangeDispatcher {
         // Close the event channel to signal batcher to stop
         self.event_tx = None;
 
-        // Wait for batcher to complete if running
-        if let Some(handle_arc) = self.batcher_handle.take() {
-            let mut handle_guard = handle_arc.lock().await;
-            if let Some(join_handle) = handle_guard.take() {
-                drop(handle_guard); // Release lock before awaiting
-                                    // Don't wait forever - use a timeout
-                let _ = tokio::time::timeout(Duration::from_secs(5), join_handle).await;
-            }
-        }
-
-        Ok(())
+        self.await_batcher().await
     }
 
     async fn dispatch_source_change_events(
@@ -486,6 +475,19 @@ impl SourceChangeDispatcher for AdaptiveHttpSourceChangeDispatcher {
     ) -> anyhow::Result<()> {
         if events.is_empty() {
             return Ok(());
+        }
+
+        if let Some(failure) = &self.failure {
+            anyhow::bail!(failure.clone());
+        }
+        if self
+            .batcher_handle
+            .as_ref()
+            .is_some_and(JoinHandle::is_finished)
+        {
+            self.event_tx = None;
+            self.await_batcher().await?;
+            anyhow::bail!("Adaptive HTTP batcher stopped unexpectedly");
         }
 
         // Start batcher if not already running
@@ -497,18 +499,237 @@ impl SourceChangeDispatcher for AdaptiveHttpSourceChangeDispatcher {
         if let Some(ref tx) = self.event_tx {
             for event in events {
                 if tx.send(event.clone()).await.is_err() {
-                    error!("Failed to send event to batcher");
-                    // Fall back to direct sending
-                    self.send_single_event(event).await?;
+                    self.event_tx = None;
+                    self.await_batcher().await?;
+                    anyhow::bail!("Adaptive HTTP batcher channel closed unexpectedly");
                 }
             }
         } else {
-            // Fallback: send events directly
-            for event in events {
-                self.send_single_event(event).await?;
-            }
+            anyhow::bail!("Adaptive HTTP batcher not initialized");
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{http::StatusCode, routing::post, Router};
+    use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::Notify;
+
+    fn dispatcher(port: u16) -> AdaptiveHttpSourceChangeDispatcher {
+        AdaptiveHttpSourceChangeDispatcher {
+            url: "http://127.0.0.1".to_owned(),
+            port,
+            endpoint: "/events".to_owned(),
+            batch_endpoint: "/events/batch".to_owned(),
+            timeout_seconds: 1,
+            source_id: "test-source".to_owned(),
+            adaptive_config: AdaptiveBatchConfig {
+                max_batch_size: 2,
+                min_batch_size: 2,
+                min_wait_time: Duration::from_millis(50),
+                max_wait_time: Duration::from_millis(100),
+                adaptive_enabled: false,
+                ..Default::default()
+            },
+            event_tx: None,
+            batcher_handle: None,
+            failure: None,
+            client: Arc::new(
+                Client::builder()
+                    .timeout(Duration::from_secs(1))
+                    .build()
+                    .unwrap(),
+            ),
+            batch_enabled: true,
+        }
+    }
+
+    fn event(ordinal: u64) -> SourceChangeEvent {
+        serde_json::from_value(json!({"op":"i", "reactivatorStart_ns":1, "reactivatorEnd_ns":1,
+            "payload":{"source":{"db":"test","table":"node","ts_ns":1,"lsn":ordinal},
+                "before":null,"after":{"id":format!("item-{ordinal}"),"labels":["Item"],"properties":{"ordinal":ordinal}}}
+        })).unwrap()
+    }
+
+    fn server(app: Router) -> (u16, JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            axum::Server::from_tcp(listener)
+                .unwrap()
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        });
+        (port, task)
+    }
+
+    #[tokio::test]
+    async fn close_waits_for_final_batch_response() {
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let records = Arc::new(AtomicUsize::new(0));
+        let app = Router::new().route(
+            "/events/batch",
+            post({
+                let entered = entered.clone();
+                let release = release.clone();
+                let records = records.clone();
+                move |axum::Json(body): axum::Json<serde_json::Value>| {
+                    let entered = entered.clone();
+                    let release = release.clone();
+                    let records = records.clone();
+                    async move {
+                        records
+                            .fetch_add(body["events"].as_array().unwrap().len(), Ordering::SeqCst);
+                        entered.notify_one();
+                        release.notified().await;
+                        StatusCode::OK
+                    }
+                }
+            }),
+        );
+        let (port, task) = server(app);
+        let mut dispatcher = dispatcher(port);
+        dispatcher
+            .dispatch_source_change_events(vec![&event(1), &event(2)])
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
+        {
+            let close = dispatcher.close();
+            tokio::pin!(close);
+            assert!(tokio::time::timeout(Duration::from_millis(20), &mut close)
+                .await
+                .is_err());
+            release.notify_one();
+            close.await.unwrap();
+        }
+        assert_eq!(records.load(Ordering::SeqCst), 2);
+        assert!(dispatcher.event_tx.is_none());
+        assert!(dispatcher.batcher_handle.is_none());
+        dispatcher.close().await.unwrap();
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn failed_batch_propagates_and_cannot_restart_or_fallback() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let app = Router::new().route(
+            "/events/batch",
+            post({
+                let requests = requests.clone();
+                move || {
+                    let requests = requests.clone();
+                    async move {
+                        requests.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
+                }
+            }),
+        );
+        let (port, task) = server(app);
+        let mut dispatcher = dispatcher(port);
+        dispatcher
+            .dispatch_source_change_events(vec![&event(1), &event(2)])
+            .await
+            .unwrap();
+        let error = dispatcher.close().await.unwrap_err().to_string();
+        assert!(error.contains("batch send failed"));
+        assert_eq!(dispatcher.close().await.unwrap_err().to_string(), error);
+        assert_eq!(
+            dispatcher
+                .dispatch_source_change_events(vec![&event(3)])
+                .await
+                .unwrap_err()
+                .to_string(),
+            error
+        );
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn malformed_event_is_not_silently_filtered() {
+        let mut dispatcher = dispatcher(1);
+        let mut invalid = event(1);
+        invalid.op = "invalid".to_owned();
+        dispatcher
+            .dispatch_source_change_events(vec![&invalid, &event(2)])
+            .await
+            .unwrap();
+        assert!(dispatcher
+            .close()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to convert"));
+    }
+
+    #[tokio::test]
+    async fn failed_single_event_and_request_timeout_propagate() {
+        let app = Router::new().route(
+            "/events",
+            post(|| async { StatusCode::SERVICE_UNAVAILABLE }),
+        );
+        let (port, task) = server(app);
+        let mut first = dispatcher(port);
+        first
+            .dispatch_source_change_events(vec![&event(1)])
+            .await
+            .unwrap();
+        assert!(first.close().await.is_err());
+        task.abort();
+
+        let app = Router::new().route(
+            "/events",
+            post(|| async {
+                std::future::pending::<()>().await;
+                StatusCode::OK
+            }),
+        );
+        let (port, task) = server(app);
+        let mut second = dispatcher(port);
+        second.client = Arc::new(
+            Client::builder()
+                .timeout(Duration::from_millis(30))
+                .build()
+                .unwrap(),
+        );
+        second
+            .dispatch_source_change_events(vec![&event(1)])
+            .await
+            .unwrap();
+        assert!(second.close().await.is_err());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn task_panic_is_latched() {
+        let mut dispatcher = dispatcher(1);
+        dispatcher.batcher_handle = Some(tokio::spawn(async { panic!("batcher panic") }));
+        let error = dispatcher.close().await.unwrap_err().to_string();
+        assert!(error.contains("batcher task failed"));
+        assert_eq!(dispatcher.close().await.unwrap_err().to_string(), error);
+    }
+
+    #[tokio::test]
+    async fn drain_timeout_aborts_task_instead_of_detaching() {
+        let mut dispatcher = dispatcher(1);
+        let handle = tokio::spawn(async { std::future::pending::<anyhow::Result<()>>().await });
+        let abort = handle.abort_handle();
+        dispatcher.batcher_handle = Some(handle);
+        let error = dispatcher.close().await.unwrap_err().to_string();
+        assert!(error.contains("Timed out"));
+        assert!(abort.is_finished());
+        assert_eq!(dispatcher.close().await.unwrap_err().to_string(), error);
     }
 }

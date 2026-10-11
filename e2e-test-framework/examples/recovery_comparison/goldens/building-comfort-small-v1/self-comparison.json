@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "verdict": "inconclusive",
+  "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5",
+  "reasons": [
+    "baseline capture incomplete: Fresh standard-gRPC 100k uninterrupted capture passed strict hashes. Observed snapshots captured at record-count stop; terminal output boundary not independently established.",
+    "recovery capture incomplete: Fresh standard-gRPC 100k uninterrupted capture passed strict hashes. Observed snapshots captured at record-count stop; terminal output boundary not independently established."
+  ],
+  "missing_queries": [],
+  "unexpected_queries": [],
+  "queries": [
+    {
+      "query_id": "building-comfort",
+      "delivery": {
+        "verdict": "passed",
+        "reason": null,
+        "expected_observations": 99981,
+        "actual_observations": 99981,
+        "missing": [],
+        "unexpected": [],
+        "duplicates": {},
+        "conflicting": [],
+        "reordered": false
+      },
+      "state": {
+        "verdict": "passed",
+        "reason": null,
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "query_id": "building-comfort-floor-agg",
+      "delivery": {
+        "verdict": "passed",
+        "reason": null,
+        "expected_observations": 49860,
+        "actual_observations": 49860,
+        "missing": [],
+        "unexpected": [],
+        "duplicates": {},
+        "conflicting": [],
+        "reordered": false
+      },
+      "state": {
+        "verdict": "passed",
+        "reason": null,
+        "missing": [],
+        "unexpected": []
+      }
+    }
+  ]
+}

@@ -212,6 +212,37 @@ pub enum CompletionHandlerDefinition {
     /// expected baseline. Used to verify that a seeded test run produces the
     /// same reaction output (and ordering) across runs.
     Sha256Determinism(Sha256DeterminismHandlerConfig),
+    #[serde(alias = "RecoveryComparison")]
+    RecoveryResultVerification(RecoveryResultVerificationHandlerConfig),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveryResultVerificationHandlerConfig {
+    pub baseline_path: String,
+    pub workload_fingerprint: String,
+    pub queries: Vec<RecoveryResultVerificationQueryConfig>,
+    pub capture_evidence_path: Option<String>,
+    #[serde(default = "recovery_enforce_default")]
+    pub enforce: bool,
+}
+
+fn recovery_enforce_default() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveryResultVerificationQueryConfig {
+    pub query_id: String,
+    pub test_reaction_id: String,
+    pub config_fingerprint: String,
+    pub identity_contract: Option<String>,
+    pub identity_pointer: Option<String>,
+    pub query_id_pointer: String,
+    pub payload_pointer: String,
+    pub snapshot_path: Option<String>,
+    pub snapshot_url: Option<String>,
 }
 
 /// Configuration for LogCompletionHandler

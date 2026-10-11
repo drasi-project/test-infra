@@ -27,6 +27,7 @@ use test_data_store::{test_run_storage::TestRunId, TestDataStore};
 use super::types::ComponentCompletionSummary;
 
 pub mod log;
+pub mod recovery_comparison;
 pub mod sha256_determinism;
 
 pub use log::LogCompletionHandler;
@@ -71,6 +72,13 @@ pub fn create_completion_handler(
         }
         CompletionHandlerDefinition::Sha256Determinism(cfg) => Ok(Box::new(
             Sha256DeterminismCompletionHandler::new(cfg, data_store, test_run_id),
+        )),
+        CompletionHandlerDefinition::RecoveryResultVerification(cfg) => Ok(Box::new(
+            recovery_comparison::RecoveryResultVerificationCompletionHandler::new(
+                cfg,
+                data_store,
+                test_run_id,
+            )?,
         )),
     }
 }

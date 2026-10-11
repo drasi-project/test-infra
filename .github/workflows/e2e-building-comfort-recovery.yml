@@ -1,0 +1,351 @@
+name: E2E - building_comfort recovery
+
+on:
+  schedule:
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+    inputs:
+      http_standard:
+        description: "http_standard (HTTP, REST-applied)"
+        type: boolean
+        default: true
+      http_adaptive:
+        description: "http_adaptive (HTTP, dispatcher + egress batching)"
+        type: boolean
+        default: false
+      grpc_standard:
+        description: "grpc_standard (gRPC, REST-applied)"
+        type: boolean
+        default: true
+      grpc_adaptive:
+        description: "grpc_adaptive (gRPC adaptive dispatcher)"
+        type: boolean
+        default: false
+      query_building_comfort:
+        description: "Run the per-room 'building-comfort' query"
+        type: boolean
+        default: true
+      query_floor_agg:
+        description: "Run the 'building-comfort-floor-agg' aggregate query"
+        type: boolean
+        default: true
+      batching_speed:
+        description: "Adaptive batch size (max records per batch; affects adaptive variants only)."
+        type: choice
+        options:
+          - "5000"
+          - "10000"
+          - "50000"
+        default: "10000"
+      persist_index:
+        description: "Use the built-in RocksDB persistent index. Required for recovery; disabling fails validation."
+        type: boolean
+        default: true
+      state_store:
+        description: "Use the redb plugin state store. Required for recovery; disabling fails validation."
+        type: boolean
+        default: true
+      bootstrap_size:
+        description: "Large-bootstrap preset (rooms). Scales the initial graph so bootstrap load is measured separately from steady-state."
+        type: choice
+        options:
+          - "off"
+          - 10k
+          - 100k
+          - 1m
+        default: "off"
+      drasi_server_version:
+        description: "drasi-server release tag. Used only when repo/ref are empty. Empty = latest."
+        type: string
+        default: ""
+      drasi_server_repo:
+        description: "drasi-server repo (owner/name) to BUILD from source. Empty = drasi-project/drasi-server."
+        type: string
+        default: ""
+      drasi_server_ref:
+        description: "drasi-server branch/tag/SHA to BUILD. Empty with repo set = that repo's default branch."
+        type: string
+        default: ""
+      timeout_minutes:
+        description: "Max minutes per test wait, excluding builds. Positive integer up to 60."
+        type: string
+        default: "30"
+      plugin_registry:
+        description: "OCI registry for plugins. Empty = server default (ghcr.io/drasi-project)."
+        type: string
+        default: ""
+      plugin_tag:
+        description: "OCI tag to pin every plugin ref. Empty = latest-compatible."
+        type: string
+        default: ""
+      outbox_capacity:
+        description: "Retained query outputs per query."
+        type: string
+        default: "20000"
+      query_tuning:
+        description: "Query capacity: priorityQueueCapacity (drives priority/dispatch/bootstrap buffers)."
+        type: choice
+        options:
+          - "1000"
+          - "10000"
+          - "100000"
+        default: "10000"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Build test binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      timeout_seconds: ${{ steps.settings.outputs.timeout_seconds }}
+      variants: ${{ steps.settings.outputs.variants }}
+      queries: ${{ steps.settings.outputs.queries }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate settings
+        id: settings
+        env:
+          MINUTES: ${{ github.event_name == 'schedule' && '45' || inputs.timeout_minutes }}
+          OUTBOX_CAPACITY: ${{ github.event_name == 'schedule' && '20000' || inputs.outbox_capacity }}
+          V_HTTP_STD: ${{ github.event_name == 'schedule' && 'true' || inputs.http_standard }}
+          V_HTTP_ADAPTIVE: ${{ github.event_name == 'schedule' && 'true' || inputs.http_adaptive }}
+          V_GRPC_STD: ${{ github.event_name == 'schedule' && 'true' || inputs.grpc_standard }}
+          V_GRPC_ADAPTIVE: ${{ github.event_name == 'schedule' && 'true' || inputs.grpc_adaptive }}
+          V_Q_MAIN: ${{ github.event_name == 'schedule' && 'true' || inputs.query_building_comfort }}
+          V_Q_AGG: ${{ github.event_name == 'schedule' && 'true' || inputs.query_floor_agg }}
+          PERSIST_INDEX: ${{ github.event_name == 'schedule' && 'true' || inputs.persist_index }}
+          STATE_STORE: ${{ github.event_name == 'schedule' && 'true' || inputs.state_store }}
+          BOOTSTRAP_SIZE: ${{ github.event_name == 'schedule' && 'off' || inputs.bootstrap_size }}
+        run: |
+          [[ "$V_Q_MAIN" == true && "$V_Q_AGG" == true && "$BOOTSTRAP_SIZE" == off ]] || {
+            echo "ERROR: this golden requires both queries and bootstrap off." >&2
+            exit 1
+          }
+          [[ "$OUTBOX_CAPACITY" =~ ^[1-9][0-9]*$ ]] || {
+            echo "ERROR: outbox_capacity must be a positive integer." >&2
+            exit 1
+          }
+          [[ "$MINUTES" =~ ^[1-9][0-9]?$ ]] && (( MINUTES <= 60 )) || {
+            echo "ERROR: timeout_minutes must be an integer from 1 to 60." >&2
+            exit 1
+          }
+          [[ "$PERSIST_INDEX" == true && "$STATE_STORE" == true ]] || {
+            echo "ERROR: recovery requires persist_index and state_store enabled." >&2
+            exit 1
+          }
+          variants=()
+          if [[ "$V_HTTP_STD" == true ]]; then variants+=(http_standard); fi
+          if [[ "$V_HTTP_ADAPTIVE" == true ]]; then variants+=(http_adaptive); fi
+          if [[ "$V_GRPC_STD" == true ]]; then variants+=(grpc_standard); fi
+          if [[ "$V_GRPC_ADAPTIVE" == true ]]; then variants+=(grpc_adaptive); fi
+          (( ${#variants[@]} > 0 )) || {
+            echo "ERROR: select at least one HTTP/gRPC variant." >&2
+            exit 1
+          }
+          queries=()
+          if [[ "$V_Q_MAIN" == true ]]; then queries+=(building-comfort); fi
+          if [[ "$V_Q_AGG" == true ]]; then queries+=(building-comfort-floor-agg); fi
+          (( ${#queries[@]} > 0 )) || {
+            echo "ERROR: select at least one query." >&2
+            exit 1
+          }
+          echo "variants=$(printf '%s\n' "${variants[@]}" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          echo "queries=${queries[*]}" >> "$GITHUB_OUTPUT"
+          echo "timeout_seconds=$((MINUTES * 60))" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: e2e-test-framework
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            jq curl lsof build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+            libprotobuf-dev protobuf-compiler cmake clang libclang-dev
+          echo "JQ_LIB_DIR=$(dirname "$(find /usr/lib -name libjq.so -print -quit)")" >> "$GITHUB_ENV"
+
+      - name: Build test-service
+        working-directory: e2e-test-framework
+        run: cargo build --release --locked --manifest-path test-service/Cargo.toml
+
+      - name: Build or download Drasi Server
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRASI_REPO: ${{ github.event_name == 'schedule' && 'drasi-project/drasi-server' || inputs.drasi_server_repo }}
+          DRASI_SERVER_REF: ${{ github.event_name == 'schedule' && 'main' || inputs.drasi_server_ref }}
+          DRASI_CORE_REPO: drasi-project/drasi-core
+          DRASI_CORE_REF: ${{ github.event_name == 'schedule' && 'main' || '' }}
+          DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
+          WORK_DIR: ${{ runner.temp }}/server-build
+          ARTIFACTS_DIR: ${{ runner.temp }}/build-artifacts
+        run: |
+          bash e2e-test-framework/examples/building_comfort/dynamic/run_dynamic.sh --prepare-server
+          mkdir -p "$RUNNER_TEMP/bundle"
+          server_bin="$(jq -er .binary "$ARTIFACTS_DIR/server-build.json")"
+          cp "$server_bin" "$RUNNER_TEMP/bundle/drasi-server"
+          cp e2e-test-framework/target/release/test-service "$RUNNER_TEMP/bundle/test-service"
+          cp "$ARTIFACTS_DIR/server-build.json" "$RUNNER_TEMP/bundle/"
+          if [[ -d "$WORK_DIR/drasi-server-src/.git" ]]; then
+            git -C "$WORK_DIR/drasi-server-src" rev-parse HEAD > "$RUNNER_TEMP/bundle/server-commit.txt"
+            cp "$WORK_DIR/drasi-server-src/Cargo.lock" "$RUNNER_TEMP/bundle/server-Cargo.lock"
+          fi
+          sha256sum "$RUNNER_TEMP/bundle/drasi-server" "$RUNNER_TEMP/bundle/test-service" > "$RUNNER_TEMP/bundle/sha256.txt"
+          tar -czf "$RUNNER_TEMP/build-artifacts/recovery-binaries.tar.gz" -C "$RUNNER_TEMP/bundle" .
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-build
+          path: ${{ runner.temp }}/build-artifacts
+          retention-days: 14
+
+  recovery:
+    name: Building-comfort SIGKILL recovery / ${{ matrix.variant }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.prepare.outputs.variants) }}
+    env:
+      VARIANT: ${{ matrix.variant }}
+      RECOVERY_CASE: sigkill-drain
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DRASI_PLUGIN_REGISTRY: ${{ github.event_name == 'schedule' && 'ghcr.io/drasi-project' || inputs.plugin_registry }}
+      DRASI_PLUGIN_TAG: ${{ github.event_name == 'schedule' && 'drasi-nightly-test' || inputs.plugin_tag }}
+      TIMEOUT_SECS: ${{ needs.prepare.outputs.timeout_seconds }}
+      DRASI_RUST_LOG: info,drasi_lib::queries=debug,drasi_lib::reactions=debug
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq curl lsof libjq1 libonig5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: recovery-build
+          path: ${{ runner.temp }}/build-artifacts
+
+      - name: Unpack binaries
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/results"
+          tar -xzf "$RUNNER_TEMP/build-artifacts/recovery-binaries.tar.gz" -C "$RUNNER_TEMP/bin"
+          chmod +x "$RUNNER_TEMP/bin/drasi-server" "$RUNNER_TEMP/bin/test-service"
+          echo "DRASI_SERVER_BIN=$RUNNER_TEMP/bin/drasi-server" >> "$GITHUB_ENV"
+          echo "TEST_SERVICE_BIN=$RUNNER_TEMP/bin/test-service" >> "$GITHUB_ENV"
+          cp "$RUNNER_TEMP/bin/sha256.txt" "$RUNNER_TEMP/bin/server-build.json" "$RUNNER_TEMP/results/"
+
+      - name: ${{ env.RECOVERY_CASE }} recovery against stored baseline
+        env:
+          CRASH_INJECT: "drain"
+          OUTBOX_CAPACITY: ${{ github.event_name == 'schedule' && '20000' || inputs.outbox_capacity }}
+          PERSIST_INDEX: ${{ github.event_name == 'schedule' && 'true' || inputs.persist_index }}
+          STATE_STORE: ${{ github.event_name == 'schedule' && 'true' || inputs.state_store }}
+          BATCHING_SPEED: ${{ github.event_name == 'schedule' && '10000' || inputs.batching_speed }}
+          QUERIES: ${{ needs.prepare.outputs.queries }}
+          BOOTSTRAP_SIZE: ${{ github.event_name == 'schedule' && 'off' || inputs.bootstrap_size }}
+          CRASH_DELAY_MS: "0"
+          CRASH_REAPPLY_COMPONENTS: "no"
+          CRASH_SETTLE_SECS: "120"
+          POLL_INTERVAL_SECS: "1"
+          LOG_JSONL: "1"
+          QUERY_TUNING: ${{ github.event_name == 'schedule' && '10000' || inputs.query_tuning }}
+        run: |
+          export RECOVERY_GOLDEN_DIR="$GITHUB_WORKSPACE/e2e-test-framework/examples/recovery_comparison/goldens/building-comfort-small-v1"
+          WORK_DIR="$RUNNER_TEMP/results/$RECOVERY_CASE/work" \
+          ARTIFACTS_DIR="$RUNNER_TEMP/results/$RECOVERY_CASE/artifacts" \
+            bash e2e-test-framework/examples/building_comfort/run_variant.sh
+
+      - name: Recovery summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            printf '## Building-comfort recovery: %s / %s\n\nJob status: %s\n\n' "$VARIANT" "$RECOVERY_CASE" "$JOB_STATUS"
+            printf 'Inspect uploaded verdicts, snapshots, logs, and binary provenance.\n'
+            verdict="$RUNNER_TEMP/results/$RECOVERY_CASE/work/test_data_cache/test_runs/drasi_server_dev_repo.building_comfort.test_run_001/recovery_verdict.json"
+            printf '\n### Required Golden Snapshot Equality\n\n'
+            printf 'Snapshot equality is enforced. Delivery/overall verdicts remain advisory; terminal-boundary verification for #70 is unfinished.\n'
+            if [[ -s "$verdict" ]]; then
+              if ! jq -e -s '
+                def valid_verdict: . == "passed" or . == "failed" or . == "inconclusive";
+                def unsigned_integer: type == "number" and . >= 0 and . == floor;
+                def strings: type == "array" and all(.[]; type == "string");
+                def nullable_string: . == null or type == "string";
+                def differences:
+                  type == "array" and all(.[];
+                    type == "object" and has("row") and (.count | unsigned_integer));
+                def state_report:
+                  type == "object" and (.verdict | valid_verdict) and
+                  has("reason") and (.reason | nullable_string) and
+                  (.missing | differences) and (.unexpected | differences);
+                def delivery_report:
+                  type == "object" and (.verdict | valid_verdict) and
+                  has("reason") and (.reason | nullable_string) and
+                  (.expected_observations | unsigned_integer) and
+                  (.actual_observations | unsigned_integer) and
+                  (.missing | strings) and (.unexpected | strings) and
+                  (.duplicates | type == "object" and all(.[]; unsigned_integer)) and
+                  (.conflicting | strings) and has("reordered") and
+                  (.reordered == null or (.reordered | type == "boolean"));
+                length == 1 and (.[0] |
+                  type == "object" and
+                  .test_run_id == "drasi_server_dev_repo.building_comfort.test_run_001" and
+                  (.enforced | type == "boolean") and
+                  .error == null and
+                  (.verdict | valid_verdict) and
+                  (.comparison | type == "object") and
+                  .comparison.schema_version == 1 and
+                  .comparison.verdict == .verdict and
+                  (.comparison.workload_fingerprint | type == "string" and length > 0) and
+                  (.comparison.reasons | strings) and
+                  (.comparison.missing_queries | strings) and
+                  (.comparison.unexpected_queries | strings) and
+                  (.comparison.queries | type == "array") and
+                  ([.comparison.queries[].query_id] | sort) ==
+                    ["building-comfort", "building-comfort-floor-agg"] and
+                  all(.comparison.queries[];
+                    type == "object" and
+                    (.state | state_report) and
+                    (.delivery | delivery_report)))
+              ' "$verdict" >/dev/null; then
+                printf 'ERROR: required golden comparison report is invalid or incomplete; comparison execution is not verified. Inspect recovery_verdict.json.\n'
+                exit 1
+              fi
+              jq -r '"Overall: \(.verdict) (enforced=\(.enforced))", (.comparison.queries[]? | "- \(.query_id): state=\(.state.verdict), delivery=\(.delivery.verdict)"), (.error // empty)' "$verdict"
+              if ! jq -e '
+                (.comparison.missing_queries | length) == 0 and
+                (.comparison.unexpected_queries | length) == 0 and
+                all(.comparison.queries[];
+                  .state.verdict == "passed" and
+                  (.state.missing | length) == 0 and
+                  (.state.unexpected | length) == 0)
+              ' "$verdict" >/dev/null; then
+                printf 'ERROR: required golden snapshot equality failed or is inconclusive for an expected query. Inspect per-query state differences in recovery_verdict.json.\n'
+                exit 1
+              fi
+            else
+              printf 'ERROR: required comparison report was not produced; comparison is not verified.\n'
+              exit 1
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload recovery artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-${{ env.RECOVERY_CASE }}-${{ matrix.variant }}
+          path: ${{ runner.temp }}/results
+          retention-days: 14

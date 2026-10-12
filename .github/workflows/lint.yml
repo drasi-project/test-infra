@@ -19,6 +19,17 @@ on:
     branches: [ "main" ]
 
 jobs:
+  performance-alerts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test performance baseline policy
+        run: python3 -m unittest discover -s .github/scripts/tests -v
+      - name: Test performance issue reporting
+        run: node --test .github/scripts/tests/report_performance.test.cjs
+
   lint:
     uses: drasi-project/.github/.github/workflows/rust-lint.yaml@main
     with:

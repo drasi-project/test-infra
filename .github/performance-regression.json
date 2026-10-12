@@ -1,0 +1,18 @@
+{
+  "baseline": {
+    "window": 7,
+    "min_samples": 5,
+    "max_age_days": 30
+  },
+  "metrics": [
+    {
+      "name": "throughput",
+      "scope": "reactions",
+      "path": "records_per_sec",
+      "unit": "records/s",
+      "direction": "higher_is_better",
+      "threshold_percent": 20,
+      "overrides": []
+    }
+  ]
+}

@@ -10,11 +10,11 @@ on:
         required: true
         default: "westus3"
       vm_size:
-        description: "4-vCPU hardware tier: D4s_v3, D4s_v6 (baseline), or F4as_v7 (high-performance candidate)."
+        description: "4-vCPU hardware tier: D4s_v4, D4s_v6 (baseline), or F4as_v7 (high-performance candidate)."
         required: true
         type: choice
         options:
-          - Standard_D4s_v3
+          - Standard_D4s_v4
           - Standard_D4s_v6
           - Standard_F4as_v7
         default: Standard_D4s_v6
@@ -171,7 +171,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        vm_size: ${{ fromJSON(github.event_name == 'schedule' && '["Standard_D4s_v3","Standard_D4s_v6","Standard_F4as_v7"]' || format('["{0}"]', inputs.vm_size || 'Standard_D4s_v6')) }}
+        vm_size: ${{ fromJSON(github.event_name == 'schedule' && '["Standard_D4s_v4","Standard_D4s_v6","Standard_F4as_v7"]' || format('["{0}"]', inputs.vm_size || 'Standard_D4s_v6')) }}
 
     steps:
       - name: Checkout

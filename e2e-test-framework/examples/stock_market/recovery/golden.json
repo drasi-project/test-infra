@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "workload_id": "stock-market-sigkill-v1",
+  "provenance": "Analytical expectation for the fixed scripted workload, not a captured delivery stream.",
+  "rounds": 2000,
+  "watchlist_copies": 64,
+  "snapshot_templates": [
+    {"WatchlistId": "watch-MSFT", "Symbol": "MSFT", "Name": "Microsoft", "Price": 12000, "Volume": 3000, "StockRevision": 2000, "WatchRevision": 2000},
+    {"WatchlistId": "watch-AAPL", "Symbol": "AAPL", "Name": "Apple", "Price": 12100, "Volume": 3001, "StockRevision": 2000, "WatchRevision": 2000}
+  ]
+}

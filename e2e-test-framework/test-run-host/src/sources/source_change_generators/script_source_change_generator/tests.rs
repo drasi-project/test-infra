@@ -4,6 +4,64 @@ use test_data_store::test_run_storage::TestRunId;
 
 struct RecordingDispatcher(Arc<Mutex<Vec<serde_json::Value>>>);
 
+struct DrainDispatcher {
+    release: Arc<tokio::sync::Notify>,
+    fail: bool,
+}
+
+#[async_trait]
+impl SourceChangeDispatcher for DrainDispatcher {
+    async fn close(&mut self) -> anyhow::Result<()> {
+        self.release.notified().await;
+        if self.fail {
+            anyhow::bail!("final batch failed");
+        }
+        Ok(())
+    }
+
+    async fn dispatch_source_change_events(
+        &mut self,
+        _events: Vec<&SourceChangeEvent>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn drain_barrier_waits_for_success_and_rejects_failure() {
+    for fail in [false, true] {
+        let (mut state, _receiver, _events, _output) = fixture(false).await;
+        let release = Arc::new(tokio::sync::Notify::new());
+        state.dispatchers.push(Box::new(DrainDispatcher {
+            release: release.clone(),
+            fail,
+        }));
+        state.status = SourceChangeGeneratorStatus::Running;
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            state.transition_to_finished_state()
+        )
+        .await
+        .is_err());
+        assert_eq!(state.status, SourceChangeGeneratorStatus::Running);
+        assert_eq!(state.stats.actual_end_time_ns, 0);
+        release.notify_one();
+        let result = state.transition_to_finished_state().await;
+        if fail {
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("final batch failed"));
+            assert_eq!(state.status, SourceChangeGeneratorStatus::Error);
+            assert_eq!(state.stats.actual_end_time_ns, 0);
+        } else {
+            result.unwrap();
+            assert_eq!(state.status, SourceChangeGeneratorStatus::Finished);
+            assert!(state.stats.actual_end_time_ns > 0);
+        }
+    }
+}
+
 #[async_trait]
 impl SourceChangeDispatcher for RecordingDispatcher {
     async fn close(&mut self) -> anyhow::Result<()> {

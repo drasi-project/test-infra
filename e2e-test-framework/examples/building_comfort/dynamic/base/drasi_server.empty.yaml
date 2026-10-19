@@ -16,7 +16,6 @@
 #   <path/to>/bin/drasi-server --config base/drasi_server.empty.yaml
 
 apiVersion: drasi.io/v1
-id: building-comfort-dynamic
 host: "0.0.0.0"
 port: 8080
 logLevel: info
@@ -34,6 +33,8 @@ plugins:
   - ref: reaction/log
 
 # No sources / queries / reactions: applied dynamically via the REST API.
-sources: []
-queries: []
-reactions: []
+instances:
+  - id: building-comfort-dynamic
+    sources: []
+    queries: []
+    reactions: []

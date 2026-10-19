@@ -99,7 +99,7 @@ count_probe() {
 }
 
 snapshot_probe() {
-    request "$ADMIN_URL/api/v1/queries/items/results" > "$WORK/snapshot-current.json" || return 1
+    request "$ADMIN_URL/api/v1/instances/scripted-pause-comparison/queries/items/results" > "$WORK/snapshot-current.json" || return 1
     jq -e --argjson count "$1" '
         if .success != true or (.data | type) != "array" then error("Invalid snapshot")
         else (.data | map(.Ordinal) | sort) == [range(1; $count + 1)] end
@@ -185,7 +185,7 @@ prepare_config() {
         --arg endpoint "grpc://127.0.0.1:$REACTION_PORT" --argjson verify "$VERIFY_PLUGINS" \
         --argjson install "${AUTO_INSTALL_PLUGINS:-false}" \
         --arg registry "${DRASI_PLUGIN_REGISTRY:-}" --arg tag "${DRASI_PLUGIN_TAG:-}" '
-        .port=$admin | .sources[0].port=$source | .reactions[0].endpoint=$endpoint |
+        .port=$admin | .instances[0].sources[0].port=$source | .instances[0].reactions[0].endpoint=$endpoint |
         .verifyPlugins=$verify | .autoInstallPlugins=$install |
         if $registry != "" then .pluginRegistry=$registry else . end |
         if $tag != "" then .plugins |= map(.ref += ":" + $tag) else . end

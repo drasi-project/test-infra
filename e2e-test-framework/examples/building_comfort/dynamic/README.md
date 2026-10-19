@@ -19,7 +19,7 @@ different `*_FILE` selection), applied via REST.
 
 | Surface | How it's configured | Why |
 | --- | --- | --- |
-| Drasi Server source / queries / reactions | **Dynamic** — `POST /api/v1/{sources,queries,reactions}` from `components/server/*.json` | Drasi Server accepts full component configs over REST |
+| Drasi Server source / queries / reactions | **Dynamic** — `POST /api/v1/instances/building-comfort-dynamic/{sources,queries,reactions}` from `components/server/*.json` | Drasi Server accepts full component configs over REST |
 | Test-service (framework) source dispatcher + reaction handler | Static `config.json` | The framework keeps dispatcher/handler in the *test definition*; its REST API only references components by id, so they can't be injected |
 
 ## Layout
@@ -31,7 +31,7 @@ dynamic/
     drasi_server.persist_index.yaml # persist_index profile: built-in RocksDB (persistIndex: true)
     drasi_server.state_store.yaml   # state_store profile: redb plugin state store
   components/server/
-    source_grpc.json                # gRPC source        (POST /api/v1/sources)
+    source_grpc.json                # gRPC source        (POST /api/v1/instances/building-comfort-dynamic/sources)
     source_http.json                # HTTP source, adaptiveEnabled: false
     source_http_adaptive.json       # HTTP source, adaptiveEnabled: true (+ tuned)
     queries.json                    # array; constant across variants
@@ -84,7 +84,7 @@ signal, not a config nuisance.
 | Axis | Env var | Workflow input | Values (default) | Configures | Applies to |
 | --- | --- | --- | --- | --- | --- |
 | Source adaptive batching | `BATCHING_SPEED` | `batching_speed` | low / medium / high (**medium**) | adaptive source `adaptiveMax*` / gRPC adaptive dispatcher `batch_size`+`batch_timeout_ms` | adaptive variants only |
-| Query capacity | `QUERY_TUNING` | `query_tuning` | low / medium / high (**medium**) | `priorityQueueCapacity`, `dispatchBufferCapacity`, `bootstrapBufferSize` on every query | all dynamic |
+| Query capacity | `QUERY_TUNING` | `query_tuning` | low / medium / high (**medium**) | `priorityQueueCapacity`, `dispatchBufferCapacity` on every query, including live input queued during bootstrap | all dynamic |
 | Persistent index | `PERSIST_INDEX` | `persist_index` | true / false (**false**) | instance-level `persistIndex: true` (built-in RocksDB) + source WAL durability | all dynamic |
 | State store | `STATE_STORE` | `state_store` | true / false (**false**) | instance-level redb `stateStore` | all dynamic |
 

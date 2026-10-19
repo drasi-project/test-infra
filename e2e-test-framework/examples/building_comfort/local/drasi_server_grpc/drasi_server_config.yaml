@@ -14,7 +14,6 @@
 #        cargo run --release --manifest-path <path/to/drasi-server>/Cargo.toml -- --config drasi_server_config.yaml
 
 apiVersion: drasi.io/v1
-id: building-comfort-grpc
 host: "0.0.0.0"
 port: 8080
 logLevel: info
@@ -30,84 +29,86 @@ plugins:
   - ref: reaction/grpc
   - ref: reaction/log
 
-sources:
+instances:
+  - id: building-comfort-grpc
+    sources:
   # gRPC source matching the dispatcher in config.json:
   #   { "kind": "Grpc", "host": "localhost", "port": 50051,
   #     "source_id": "facilities-db", ... }
-  - kind: grpc
-    id: facilities-db
-    autoStart: true
-    host: "0.0.0.0"
-    port: 50051
-    timeoutMs: 60000
+      - kind: grpc
+        id: facilities-db
+        autoStart: true
+        host: "0.0.0.0"
+        port: 50051
+        timeoutMs: 60000
 
-queries:
+    queries:
   # The reaction in the E2E config subscribes to query_ids: ["building-comfort"]
   # so the query id must match. The BuildingHierarchy model data generator
   # produces Room nodes with temperature / humidity / co2 properties.
-  - id: building-comfort
-    autoStart: true
-    queryLanguage: Cypher
-    sources:
-      - sourceId: facilities-db
-    query: |
-      MATCH (r:Room)
-      RETURN elementId(r) AS RoomId,
-             r.temperature AS Temperature,
-             r.humidity AS Humidity,
-             r.co2 AS Co2
+      - id: building-comfort
+        autoStart: true
+        queryLanguage: Cypher
+        sources:
+          - sourceId: facilities-db
+        query: |
+          MATCH (r:Room)
+          RETURN elementId(r) AS RoomId,
+                 r.temperature AS Temperature,
+                 r.humidity AS Humidity,
+                 r.co2 AS Co2
 
   # Floor-level aggregate: exercises a one-hop traversal across
   # Floor -[:FLOOR_ROOM]-> Room plus avg / min / max / count aggregations.
-  - id: building-comfort-floor-agg
-    autoStart: true
-    queryLanguage: Cypher
-    sources:
-      - sourceId: facilities-db
-    query: |
-      MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room)
-      WITH f,
-           avg(r.temperature) AS AvgTemperature,
-           max(r.co2)         AS MaxCo2,
-           min(r.humidity)    AS MinHumidity,
-           count(r)           AS RoomCount
-      RETURN elementId(f)     AS FloorId,
-             AvgTemperature,
-             MaxCo2,
-             MinHumidity,
-             RoomCount
+      - id: building-comfort-floor-agg
+        autoStart: true
+        queryLanguage: Cypher
+        sources:
+          - sourceId: facilities-db
+        query: |
+          MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room)
+          WITH f,
+               avg(r.temperature) AS AvgTemperature,
+               max(r.co2)         AS MaxCo2,
+               min(r.humidity)    AS MinHumidity,
+               count(r)           AS RoomCount
+          RETURN elementId(f)     AS FloorId,
+                 AvgTemperature,
+                 MaxCo2,
+                 MinHumidity,
+                 RoomCount
 
-reactions:
+    reactions:
   # gRPC reaction streams per-room query results back to the test
   # framework's GrpcReactionHandler listening at grpc://localhost:50052.
-  - kind: grpc
-    id: building-comfort-out
-    autoStart: true
-    queries:
-      - building-comfort
-    endpoint: "grpc://localhost:50052"
-    timeoutMs: 60000
-    batchSize: 1
-    batchFlushTimeoutMs: 100
-    maxRetries: 5
-    connectionRetryAttempts: 10
-    initialConnectionTimeoutMs: 15000
-    metadata:
-      x-query-sequence: "building-comfort"
+      - kind: grpc
+        id: building-comfort-out
+        autoStart: true
+        queries:
+          - building-comfort
+        endpoint: "grpc://localhost:50052"
+        timeoutMs: 60000
+        batchSize: 1
+        batchFlushTimeoutMs: 100
+        maxRetries: 5
+        connectionRetryAttempts: 10
+        initialConnectionTimeoutMs: 15000
+        metadata:
+          x-query-sequence: "building-comfort"
 
   # gRPC reaction streams floor-aggregate query results back to the test
   # framework's GrpcReactionHandler listening at grpc://localhost:50053.
-  - kind: grpc
-    id: building-comfort-floor-agg-out
-    autoStart: true
-    queries:
-      - building-comfort-floor-agg
-    endpoint: "grpc://localhost:50053"
-    timeoutMs: 60000
-    batchSize: 1
-    batchFlushTimeoutMs: 100
-    maxRetries: 5
-    connectionRetryAttempts: 10
-    initialConnectionTimeoutMs: 15000
-    metadata:
-      x-query-sequence: "building-comfort-floor-agg"
+      - kind: grpc
+        id: building-comfort-floor-agg-out
+        autoStart: true
+        queries:
+          - building-comfort-floor-agg
+        endpoint: "grpc://localhost:50053"
+        timeoutMs: 60000
+        batchSize: 1
+        batchFlushTimeoutMs: 100
+        maxRetries: 5
+        connectionRetryAttempts: 10
+        initialConnectionTimeoutMs: 15000
+        metadata:
+          x-query-sequence: "building-comfort-floor-agg"

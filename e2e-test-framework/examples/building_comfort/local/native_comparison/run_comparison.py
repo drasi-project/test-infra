@@ -199,20 +199,22 @@ def adapter_config(transport, selection, ports, capacity):
             reaction["baseUrl"] = f"http://127.0.0.1:{ports['receivers'][index]}"
     return {
         "apiVersion": "drasi.io/v1",
-        "id": "performance",
         "host": "127.0.0.1",
         "port": ports["server"],
         "logLevel": "warn",
         "persistConfig": False,
-        "persistIndex": False,
         "verifyPlugins": False,
         "autoInstallPlugins": False,
         "enableUi": False,
-        "defaultPriorityQueueCapacity": capacity,
-        "defaultDispatchBufferCapacity": capacity,
-        "sources": [source],
-        "queries": queries,
-        "reactions": reactions,
+        "instances": [{
+            "id": "performance",
+            "persistIndex": False,
+            "defaultPriorityQueueCapacity": capacity,
+            "defaultDispatchBufferCapacity": capacity,
+            "sources": [source],
+            "queries": queries,
+            "reactions": reactions,
+        }],
     }
 
 
@@ -330,7 +332,7 @@ def run_case(args, transport, mode, ordinal, warmup):
                         raise RuntimeError(f"native graph startup failed: {graph}")
                     expected_ids = {
                         component["descriptor"]["id"]
-                        for component in config["computation"]["definition"]["components"]
+                        for component in config["instances"][0]["computation"]["definition"]["components"]
                     }
                     observed = {node["id"]: node for node in nodes}
                     return bool(expected_ids) and expected_ids <= observed.keys() and all(
@@ -338,7 +340,7 @@ def run_case(args, transport, mode, ordinal, warmup):
                         for component_id in expected_ids
                     )
                 for kind, ids in [("sources", ["facilities-db"]), ("queries", list(expected)),
-                                  ("reactions", [reaction["id"] for reaction in baseline["reactions"]])]:
+                                  ("reactions", [reaction["id"] for reaction in baseline["instances"][0]["reactions"]])]:
                     for component_id in ids:
                         component = request(server_url + f"/api/v1/instances/performance/{kind}/{component_id}")
                         if component["data"]["status"] == "Error":

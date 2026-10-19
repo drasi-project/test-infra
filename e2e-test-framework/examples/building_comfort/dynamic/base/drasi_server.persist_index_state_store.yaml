@@ -12,17 +12,10 @@
 # Sources/queries/reactions are still applied dynamically via the admin REST API.
 
 apiVersion: drasi.io/v1
-id: building-comfort-dynamic
 host: "0.0.0.0"
 port: 8080
 logLevel: info
 persistConfig: false
-persistIndex: true
-
-stateStore:
-  kind: redb
-  path: ./data/state.redb
-
 autoInstallPlugins: true
 # Disable cosign signature verification so locally-built plugins are loaded
 # without a signed lockfile (mirrors the static ci configs).
@@ -35,6 +28,14 @@ plugins:
   - ref: reaction/log
 
 # No sources / queries / reactions: applied dynamically via the REST API.
-sources: []
-queries: []
-reactions: []
+instances:
+  - id: building-comfort-dynamic
+    persistIndex: true
+
+    stateStore:
+      kind: redb
+      path: ./data/state.redb
+
+    sources: []
+    queries: []
+    reactions: []

@@ -52,12 +52,16 @@ class ComparisonContractTests(unittest.TestCase):
             self.assertEqual([item["test_reaction_id"] for item in definition["reactions"]], [ROOMS])
             self.assertEqual([item["query_id"] for item in definition["sources"][0]["subscribers"]], [ROOMS])
             config = adapter_config("http", "rooms", self.ports, 10000)
-            self.assertEqual([query["id"] for query in config["queries"]], [ROOMS])
-            self.assertEqual(len(config["reactions"]), 1)
-            self.assertFalse(config["persistIndex"])
+            self.assertEqual(len(config["instances"]), 1)
+            instance = config["instances"][0]
+            self.assertEqual(instance["id"], "performance")
+            self.assertEqual([query["id"] for query in instance["queries"]], [ROOMS])
+            self.assertEqual(len(instance["reactions"]), 1)
+            self.assertFalse(instance["persistIndex"])
             self.assertFalse(config["autoInstallPlugins"])
-            self.assertFalse(config["queries"][0]["enableBootstrap"])
-            self.assertEqual(config["queries"][0]["priorityQueueCapacity"], 10000)
+            self.assertFalse(instance["queries"][0]["enableBootstrap"])
+            self.assertEqual(instance["queries"][0]["priorityQueueCapacity"], 10000)
+            self.assertTrue({"id", "queries", "reactions", "persistIndex"}.isdisjoint(config))
 
     def test_uncalibrated_aggregate_and_too_small_workloads_are_rejected(self):
         for selection, count in [("both", 1000), ("rooms", 31)]:

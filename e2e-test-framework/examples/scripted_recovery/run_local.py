@@ -123,7 +123,7 @@ class Scenario:
         return events
 
     def snapshot(self, expected):
-        response = request(self.admin_url + "/api/v1/queries/items/results")
+        response = request(self.admin_url + "/api/v1/instances/scripted-recovery/queries/items/results")
         require(response.get("success") is True, f"Snapshot request failed: {response}")
         rows = response["data"]
         require(isinstance(rows, list), f"Invalid snapshot: {response}")
@@ -209,13 +209,15 @@ class Scenario:
                 "output_loggers": [{"kind": "JsonlFile", "max_lines_per_file": 1}],
             }]
             server_config = {
-                "id": "scripted-recovery", "host": "127.0.0.1", "port": args.admin_port,
-                "persistConfig": True, "persistIndex": True, "enableUi": False,
-                "stateStore": {"kind": "redb", "path": "./data/state.redb"},
+                "host": "127.0.0.1", "port": args.admin_port,
+                "persistConfig": True, "enableUi": False,
                 "autoInstallPlugins": False,
                 "verifyPlugins": not args.allow_local_plugins,
                 "plugins": [{"ref": "source/grpc"}, {"ref": "reaction/grpc"}],
-                "sources": [{"kind": "grpc", "id": "script-db", "autoStart": True,
+                "instances": [{
+                    "id": "scripted-recovery", "persistIndex": True,
+                    "stateStore": {"kind": "redb", "path": "./data/state.redb"},
+                    "sources": [{"kind": "grpc", "id": "script-db", "autoStart": True,
                              "host": "127.0.0.1", "port": args.source_port,
                              "durability": {"enabled": True, "max_events": 1000}}],
                 "queries": [{"id": "items", "autoStart": True,
@@ -226,6 +228,7 @@ class Scenario:
                                "autoStart": True, "batchSize": 1, "batchFlushTimeoutMs": 100,
                                "endpoint": f"grpc://127.0.0.1:{args.reaction_port}",
                                "metadata": {"x-query-sequence": "items"}}],
+                }],
             }
             (self.work / "data").mkdir()
             write_json(self.work / "server.yaml", server_config)

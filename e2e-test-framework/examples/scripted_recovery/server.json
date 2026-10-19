@@ -1,15 +1,16 @@
 {
-  "id": "scripted-pause-comparison",
   "host": "127.0.0.1",
   "port": 8092,
   "persistConfig": true,
-  "persistIndex": true,
   "enableUi": false,
-  "stateStore": {"kind": "redb", "path": "./data/state.redb"},
   "autoInstallPlugins": false,
   "verifyPlugins": true,
   "plugins": [{"ref": "source/grpc"}, {"ref": "reaction/grpc"}],
-  "sources": [{
+  "instances": [{
+    "id": "scripted-pause-comparison",
+    "persistIndex": true,
+    "stateStore": {"kind": "redb", "path": "./data/state.redb"},
+    "sources": [{
     "kind": "grpc", "id": "script-db", "autoStart": true,
     "host": "127.0.0.1", "port": 50063,
     "durability": {"enabled": true, "max_events": 20000}
@@ -25,5 +26,6 @@
     "batchSize": 1, "batchFlushTimeoutMs": 100,
     "endpoint": "grpc://127.0.0.1:50064",
     "metadata": {"x-query-sequence": "items"}
+    }]
   }]
 }

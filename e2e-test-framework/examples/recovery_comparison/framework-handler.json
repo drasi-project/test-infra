@@ -12,6 +12,6 @@
     "identity_pointer": null,
     "query_id_pointer": "/payload/request_body/query_id",
     "payload_pointer": "/payload/request_body/result",
-    "snapshot_url": "http://127.0.0.1:8090/api/v1/queries/building-comfort/results"
+    "snapshot_url": "http://127.0.0.1:8090/api/v1/instances/building-comfort-dynamic/queries/building-comfort/results"
   }]
 }

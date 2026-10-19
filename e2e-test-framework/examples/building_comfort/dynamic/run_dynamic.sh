@@ -12,7 +12,7 @@
 # Instead of booting Drasi Server from a fully-populated static YAML (see
 # local/drasi_server_grpc), this driver boots a BARE server from
 # base/drasi_server.empty.yaml and then applies the scenario at runtime via
-# the Drasi Server admin REST API (POST /api/v1/{sources,queries,reactions}),
+# the instance-scoped Drasi Server admin REST API,
 # composing it from reusable building blocks under components/server/.
 #
 # This makes it cheap to test many component-config combinations: swap a
@@ -83,8 +83,8 @@
 #                         adaptiveMax*); standard variants are left untouched.
 #   QUERY_TUNING          query capacity (priorityQueueCapacity): 1000|10000|
 #                         100000 (10000). Legacy low|medium|high still accepted.
-#                         Sets priorityQueueCapacity / dispatchBufferCapacity /
-#                         bootstrapBufferSize on every server query component.
+#                         Sets priorityQueueCapacity / dispatchBufferCapacity
+#                         on every server query component.
 #                         Perf/backpressure only; results (determinism SHAs)
 #                         must not change. 10000 == server defaults.
 #   PERSIST_INDEX         true|false (false). Selects a base yaml with instance-
@@ -277,6 +277,7 @@ DRASI_CFG_CI="$WORK_DIR/drasi_server.empty.ci.yaml"
 TEST_CFG_CI="$WORK_DIR/config.ci.json"
 
 DRASI_API="http://127.0.0.1:${DRASI_ADMIN_PORT}/api/v1"
+DRASI_INSTANCE_API="${DRASI_API}/instances/building-comfort-dynamic"
 
 mkdir -p "$WORK_DIR" "$LOG_DIR" "$ARTIFACTS_DIR"
 
@@ -692,12 +693,12 @@ clamp_batch_for_bootstrap() {
 }
 
 # Map the QUERY_TUNING preset to server query capacity knobs applied to every
-# query component (priorityQueueCapacity / dispatchBufferCapacity /
-# bootstrapBufferSize). These are perf/backpressure only, so all values must
+# query component (priorityQueueCapacity / dispatchBufferCapacity).
+# These are perf/backpressure only, so all values must
 # yield identical determinism SHAs. QUERY_TUNING is the priorityQueueCapacity
 # (1000|10000|100000); each maps to a matching buffer tuple. 10000 matches the
 # drasi-server defaults (priorityQueueCapacity 10000, dispatchBufferCapacity
-# 1000, bootstrapBufferSize 10000), so it is effectively a no-op made explicit.
+# 1000), so it is effectively a no-op made explicit.
 # Legacy named presets (low|medium|high) are still accepted for back-compat.
 resolve_query_tuning() {
     if [[ -n "${OUTBOX_CAPACITY:-}" && ! "$OUTBOX_CAPACITY" =~ ^[1-9][0-9]*$ ]]; then
@@ -705,15 +706,15 @@ resolve_query_tuning() {
         return 1
     fi
     case "$QUERY_TUNING" in
-        low|1000)      PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100;   BOOTSTRAP_BUFFER_SIZE=1000   ;;
-        medium|10000)  PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000;  BOOTSTRAP_BUFFER_SIZE=10000  ;;
-        high|100000)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000; BOOTSTRAP_BUFFER_SIZE=100000 ;;
+        low|1000)      PRIORITY_QUEUE_CAP=1000;   DISPATCH_BUFFER_CAP=100   ;;
+        medium|10000)  PRIORITY_QUEUE_CAP=10000;  DISPATCH_BUFFER_CAP=1000  ;;
+        high|100000)   PRIORITY_QUEUE_CAP=100000; DISPATCH_BUFFER_CAP=10000 ;;
         *)
             log "ERROR: invalid QUERY_TUNING='$QUERY_TUNING' (expected 1000|10000|100000)"
             return 1
             ;;
     esac
-    log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE"
+    log "Query tuning '$QUERY_TUNING' -> priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP"
 }
 
 # Resolve the QUERIES selector into SELECTED_QUERIES (space list) and
@@ -809,7 +810,7 @@ resolve_server_config() {    local pi="$SERVER_PROFILE_PERSIST_INDEX" ss="$SERVE
         log "ERROR: base server config not found: $DRASI_CFG_SRC"
         return 1
     fi
-    if grep -qE '^persistIndex:[[:space:]]*true([[:space:]]|$)' "$DRASI_CFG_SRC"; then
+    if grep -qE '^[[:space:]]+persistIndex:[[:space:]]*true([[:space:]]|$)' "$DRASI_CFG_SRC"; then
         SERVER_PERSIST_INDEX=true
     else
         SERVER_PERSIST_INDEX=false
@@ -1392,7 +1393,7 @@ inject_crash_and_restart() {
     # API wraps the list as {"success":..,"data":[..]}, so read .data (falling back
     # to a bare array / .queries for older shapes).
     local qcount
-    qcount="$(curl -fsS "${DRASI_API}/queries" 2>/dev/null \
+    qcount="$(curl -fsS "${DRASI_INSTANCE_API}/queries" 2>/dev/null \
         | jq -r 'if has("data") then (.data | length)
                  elif type=="array" then length
                  elif has("queries") then (.queries | length)
@@ -1420,7 +1421,7 @@ inject_crash_and_restart() {
 drasi_apply() {
     local path="$1" body="$2"
     local resp http_code json_body ok
-    resp="$(curl -sS -w $'\n%{http_code}' -X POST "${DRASI_API}${path}" \
+    resp="$(curl -sS -w $'\n%{http_code}' -X POST "${DRASI_INSTANCE_API}${path}" \
         -H 'Content-Type: application/json' --data-binary "$body" 2>&1)" || {
         log "ERROR: POST ${path} failed (curl): $resp"
         return 1
@@ -1603,13 +1604,11 @@ apply_server_components() {
         q_body="$(printf '%s' "$q" | jq \
             --argjson pq "$PRIORITY_QUEUE_CAP" \
             --argjson db "$DISPATCH_BUFFER_CAP" \
-            --arg outbox "${OUTBOX_CAPACITY:-}" \
-            --argjson bb "$BOOTSTRAP_BUFFER_SIZE" '
+            --arg outbox "${OUTBOX_CAPACITY:-}" '
             .priorityQueueCapacity = $pq
             | .dispatchBufferCapacity = $db
-            | .bootstrapBufferSize = $bb
             | if $outbox != "" then .outboxCapacity = ($outbox | tonumber) else . end')"
-        log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
+        log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP)"
         log "  -> query $qid outboxCapacity=$(printf '%s' "$q_body" | jq -r '.outboxCapacity // "server default"')"
         drasi_apply "/queries" "$q_body"
     done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$q_select" "$qry_file")
@@ -1624,9 +1623,9 @@ apply_server_components() {
     done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$r_select" "$rxn_file")
 
     log "Component snapshot:"
-    curl -fsS "${DRASI_API}/sources"   | jq -c '.' || true
-    curl -fsS "${DRASI_API}/queries"   | jq -c '.' || true
-    curl -fsS "${DRASI_API}/reactions" | jq -c '.' || true
+    curl -fsS "${DRASI_INSTANCE_API}/sources"   | jq -c '.' || true
+    curl -fsS "${DRASI_INSTANCE_API}/queries"   | jq -c '.' || true
+    curl -fsS "${DRASI_INSTANCE_API}/reactions" | jq -c '.' || true
 
     # The source's ingress port must be listening before the test-service
     # starts dispatching change events to it.
@@ -1771,14 +1770,14 @@ reaction_total_count() {
 # (before any stop). Saves one file per query into $ARTIFACTS_DIR.
 probe_query_results() {
     local qids qid out n
-    qids="$(curl -fsS "${DRASI_API}/queries" 2>/dev/null | jq -r '(.data // .)[]?.id' 2>/dev/null)"
+    qids="$(curl -fsS "${DRASI_INSTANCE_API}/queries" 2>/dev/null | jq -r '(.data // .)[]?.id' 2>/dev/null)"
     if [[ -z "$qids" ]]; then
-        log "probe_query_results: no queries returned by ${DRASI_API}/queries"
+        log "probe_query_results: no queries returned by ${DRASI_INSTANCE_API}/queries"
         return 0
     fi
     for qid in $qids; do
         out="$ARTIFACTS_DIR/query_results__${qid}.json"
-        if curl -fsS "${DRASI_API}/queries/${qid}/results" -o "$out" 2>/dev/null; then
+        if curl -fsS "${DRASI_INSTANCE_API}/queries/${qid}/results" -o "$out" 2>/dev/null; then
             n="$(jq -r '(.data // .) | if type=="array" then length else 0 end' "$out" 2>/dev/null || echo '?')"
             log "probe_query_results: [$qid] server holds $n result row(s) -> query_results__${qid}.json"
         else
@@ -1982,7 +1981,7 @@ write_step_summary() {
         echo "- reactions component: \`$SERVER_REACTIONS_FILE\`"
         echo "- test config: \`$(basename "$TEST_CFG_SRC")\`"
         echo "- batching speed: \`$BATCHING_SPEED\` (batch_size=$BATCH_SIZE, wait_ms=$BATCH_WAIT_MS)"
-        echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP, bootstrapBufferSize=$BOOTSTRAP_BUFFER_SIZE)"
+        echo "- query tuning: \`$QUERY_TUNING\` (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP)"
         echo "- server config: persistIndex=\`$SERVER_PROFILE_PERSIST_INDEX\`, stateStore=\`$SERVER_PROFILE_STATE_STORE\`$([[ "$SERVER_PERSIST_INDEX" == "true" ]] && echo " (source WAL durability on, max_events=$WAL_MAX_EVENTS)")"
         if [[ "$CRASH_INJECT" != "off" ]]; then
             echo "- crash injection: \`$CRASH_INJECT\` -> outcome=\`$CRASH_INJECTED\`$([[ -n "$CRASH_RECOVERY_SECS" ]] && echo ", recovery=${CRASH_RECOVERY_SECS}s"), completion=\`$([[ "$CRASH_SETTLED" == "yes" ]] && echo "count-settle" || echo "marker")\`"
@@ -2075,7 +2074,7 @@ if [[ -n "${RECOVERY_GOLDEN_DIR:-}" ]]; then
     [[ "$LOG_JSONL" == "1" ]] || { log "ERROR: golden comparison requires LOG_JSONL=1"; exit 1; }
     bash "$REPO_ROOT/e2e-test-framework/examples/recovery_comparison/configure_golden.sh" \
         "$TEST_CFG_CI" "$COMPONENTS_DIR/$SERVER_QUERIES_FILE" "$SELECTED_QUERIES_JSON" \
-        "$RECOVERY_GOLDEN_DIR" "$DRASI_API"
+        "$RECOVERY_GOLDEN_DIR" "$DRASI_INSTANCE_API"
 fi
 start_drasi_server
 apply_server_components

@@ -15,7 +15,6 @@
 #        cargo run --release --manifest-path <path/to/drasi-server>/Cargo.toml -- --config drasi_server_config.yaml
 
 apiVersion: drasi.io/v1
-id: building-comfort-http-adaptive
 host: "0.0.0.0"
 port: 8080
 logLevel: info
@@ -31,108 +30,110 @@ plugins:
   - ref: reaction/http
   - ref: reaction/log
 
-sources:
+instances:
+  - id: building-comfort-http-adaptive
+    sources:
   # HTTP webhook source matching the dispatcher's source_id="events-http"
   # on port 8081.
-  - kind: http
-    id: events-http
-    autoStart: true
-    host: "0.0.0.0"
-    port: 8081
-    timeoutMs: 60000
+      - kind: http
+        id: events-http
+        autoStart: true
+        host: "0.0.0.0"
+        port: 8081
+        timeoutMs: 60000
 
-queries:
-  - id: building-comfort
-    autoStart: true
-    queryLanguage: Cypher
-    sources:
-      - sourceId: events-http
-    query: |
-      MATCH (r:Room)
-      RETURN elementId(r) AS RoomId,
-             r.temperature AS Temperature,
-             r.humidity AS Humidity,
-             r.co2 AS Co2
+    queries:
+      - id: building-comfort
+        autoStart: true
+        queryLanguage: Cypher
+        sources:
+          - sourceId: events-http
+        query: |
+          MATCH (r:Room)
+          RETURN elementId(r) AS RoomId,
+                 r.temperature AS Temperature,
+                 r.humidity AS Humidity,
+                 r.co2 AS Co2
 
   # Floor-level aggregate: exercises a one-hop traversal across
   # Floor -[:FLOOR_ROOM]-> Room plus avg / min / max / count aggregations.
-  - id: building-comfort-floor-agg
-    autoStart: true
-    queryLanguage: Cypher
-    sources:
-      - sourceId: events-http
-    query: |
-      MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room)
-      WITH f,
-           avg(r.temperature) AS AvgTemperature,
-           max(r.co2)         AS MaxCo2,
-           min(r.humidity)    AS MinHumidity,
-           count(r)           AS RoomCount
-      RETURN elementId(f)     AS FloorId,
-             AvgTemperature,
-             MaxCo2,
-             MinHumidity,
-             RoomCount
+      - id: building-comfort-floor-agg
+        autoStart: true
+        queryLanguage: Cypher
+        sources:
+          - sourceId: events-http
+        query: |
+          MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room)
+          WITH f,
+               avg(r.temperature) AS AvgTemperature,
+               max(r.co2)         AS MaxCo2,
+               min(r.humidity)    AS MinHumidity,
+               count(r)           AS RoomCount
+          RETURN elementId(f)     AS FloorId,
+                 AvgTemperature,
+                 MaxCo2,
+                 MinHumidity,
+                 RoomCount
 
-reactions:
+    reactions:
   # HTTP webhook reaction posts query results to the test framework's
   # HttpReactionHandler at http://localhost:3000/events.
-  - kind: http
-    id: http-webhook
-    autoStart: true
-    queries:
-      - building-comfort
-    baseUrl: "http://localhost:3000"
-    timeoutMs: 60000
-    outputTemplates:
-      routes:
-        building-comfort:
-          added:
-            method: POST
-            url: "/events"
-            headers:
-              Content-Type: "application/json"
-              X-Query-Sequence: "building-comfort"
-          updated:
-            method: POST
-            url: "/events"
-            headers:
-              Content-Type: "application/json"
-              X-Query-Sequence: "building-comfort"
-          deleted:
-            method: POST
-            url: "/events"
-            headers:
-              Content-Type: "application/json"
-              X-Query-Sequence: "building-comfort"
+      - kind: http
+        id: http-webhook
+        autoStart: true
+        queries:
+          - building-comfort
+        baseUrl: "http://localhost:3000"
+        timeoutMs: 60000
+        outputTemplates:
+          routes:
+            building-comfort:
+              added:
+                method: POST
+                url: "/events"
+                headers:
+                  Content-Type: "application/json"
+                  X-Query-Sequence: "building-comfort"
+              updated:
+                method: POST
+                url: "/events"
+                headers:
+                  Content-Type: "application/json"
+                  X-Query-Sequence: "building-comfort"
+              deleted:
+                method: POST
+                url: "/events"
+                headers:
+                  Content-Type: "application/json"
+                  X-Query-Sequence: "building-comfort"
 
   # Floor-aggregate HTTP webhook reaction posts results to the test
   # framework's HttpReactionHandler at http://localhost:3001/events.
-  - kind: http
-    id: http-webhook-floor-agg
-    autoStart: true
-    queries:
-      - building-comfort-floor-agg
-    baseUrl: "http://localhost:3001"
-    timeoutMs: 60000
-    outputTemplates:
-      routes:
-        building-comfort-floor-agg:
-          added:
-            method: POST
-            url: "/events"
-            headers:
-              Content-Type: "application/json"
-              X-Query-Sequence: "building-comfort-floor-agg"
-          updated:
-            method: POST
-            url: "/events"
-            headers:
-              Content-Type: "application/json"
-              X-Query-Sequence: "building-comfort-floor-agg"
-          deleted:
-            method: POST
-            url: "/events"
-            headers:
-              Content-Type: "application/json"
-              X-Query-Sequence: "building-comfort-floor-agg"
+      - kind: http
+        id: http-webhook-floor-agg
+        autoStart: true
+        queries:
+          - building-comfort-floor-agg
+        baseUrl: "http://localhost:3001"
+        timeoutMs: 60000
+        outputTemplates:
+          routes:
+            building-comfort-floor-agg:
+              added:
+                method: POST
+                url: "/events"
+                headers:
+                  Content-Type: "application/json"
+                  X-Query-Sequence: "building-comfort-floor-agg"
+              updated:
+                method: POST
+                url: "/events"
+                headers:
+                  Content-Type: "application/json"
+                  X-Query-Sequence: "building-comfort-floor-agg"
+              deleted:
+                method: POST
+                url: "/events"
+                headers:
+                  Content-Type: "application/json"
+                  X-Query-Sequence: "building-comfort-floor-agg"

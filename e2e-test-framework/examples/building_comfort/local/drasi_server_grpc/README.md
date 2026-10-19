@@ -3,6 +3,11 @@
 End-to-end test that drives an **external Drasi Server** with a synthetic
 building-hierarchy data stream over gRPC.
 
+The default Server configuration uses `drasi.network/grpc-source` and
+`drasi.network/grpc-sink` in the hosting DrasiLib instance's ComputationGraph.
+The source and reaction protobuf services, query text and identities are
+unchanged. The generator supplies initial inserts; no gRPC bootstrap is used.
+
 ## What this test does
 
 1. The E2E test service generates change events for a `BuildingHierarchy` model
@@ -24,38 +29,20 @@ test-service  --gRPC source-->  Drasi Server  --gRPC reaction-->  test-service
 
 ## Prerequisites
 
-- One of:
-  - a prebuilt `drasi-server` binary (see the [official download
-    instructions](https://drasi.io/drasi-server/how-to-guides/installation/download-binary/)
-    &mdash; downloads the binary into `./bin/drasi-server`); **or**
-  - a checkout of the [drasi-server](https://github.com/drasi-project/drasi-server)
-    repo with a working Rust toolchain.
-
-  In either case the `source/grpc`, `reaction/grpc`, and `reaction/log`
-  plugins are fetched automatically (`autoInstallPlugins: true`).
+- A Server built against the matching drasi-core checkout and the independently
+  built `drasi-computation-source-grpc` and `drasi-computation-sink-grpc`
+  libraries. From drasi-core, run `make build-native-network-plugins`.
+  Rebuilding the Server alone does not rebuild its plugins.
 - This repository's E2E test service buildable via `cargo build --release`.
 
 ## 1. Start the external Drasi Server
 
-Pick whichever option matches how you installed Drasi Server. In both
-cases run from this folder so the relative `--config` path resolves.
-
-### Option A: prebuilt binary
-
-Replace `<path/to>` with the relative path from this folder to your
-Drasi Server install (the binary lives at `<path/to>/bin/drasi-server`):
+Run from this folder with the matching local native libraries. This profile does
+not auto-install legacy plugins from a registry.
 
 ```bash
-<path/to>/bin/drasi-server --config drasi_server_config.yaml
-```
-
-### Option B: cargo run from a drasi-server repo checkout
-
-Replace `<path/to/drasi-server>` with the relative path from this folder
-to your local drasi-server repo:
-
-```bash
-cargo run --release --manifest-path <path/to/drasi-server>/Cargo.toml -- --config drasi_server_config.yaml
+<path/to/drasi-server> --config drasi_server_config.yaml \
+  --plugins-dir <path/to/native-libraries> --skip-verification
 ```
 
 Drasi Server will:
@@ -121,7 +108,7 @@ Client extension (or `curl`).
 - **Connection refused on 50051** &mdash; Drasi Server is not running or its
   source did not bind. Confirm the server logs show
   `gRPC source listening on 0.0.0.0:50051`.
-- **No reaction events received** &mdash; Drasi Server's `reaction/grpc`
+- **No reaction events received** &mdash; Drasi Server's native gRPC sink
   plugin retries connecting to `grpc://localhost:50052`. The test service
   must be started so the gRPC reaction handler is listening before the
   reaction plugin gives up its retries (see `connectionRetryAttempts` in

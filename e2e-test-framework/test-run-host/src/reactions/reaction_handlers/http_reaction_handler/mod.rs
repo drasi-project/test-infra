@@ -322,6 +322,9 @@ async fn http_instance_thread(
         .await;
 }
 
+#[cfg(test)]
+mod native_batch_tests;
+
 async fn handle_reaction(
     State(state): State<HttpInstanceState>,
     method: Method,
@@ -402,6 +405,15 @@ async fn handle_reaction(
                     .map(|o| o.keys().cloned().collect::<Vec<_>>())
                     .unwrap_or_default()
             );
+            return (StatusCode::BAD_REQUEST, "Batch contains no result items");
+        }
+        if batch_items.iter().any(|item| {
+            item.get("results")
+                .and_then(|results| results.as_array())
+                .is_none_or(|results| results.is_empty())
+        }) {
+            log::warn!("HTTP reaction batch contains an invalid or empty results entry");
+            return (StatusCode::BAD_REQUEST, "Invalid batch result entry");
         }
 
         log::info!(
@@ -485,6 +497,10 @@ async fn handle_reaction(
                     .await
                 {
                     log::error!("Failed to send batch reaction message: {e}");
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Batch delivery interrupted",
+                    );
                 }
             }
         }

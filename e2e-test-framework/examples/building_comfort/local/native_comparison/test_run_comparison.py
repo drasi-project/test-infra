@@ -2,6 +2,7 @@
 # Licensed under the Apache License, Version 2.0.
 
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -9,7 +10,8 @@ from unittest.mock import patch
 
 from run_comparison import (
     FLOORS, ROOMS, adapter_config, compare_pair, digest, observer_result, prepare_workload,
-    receivers_ready, run_api_id, source_completed, verify_artifacts
+    receivers_ready, run_api_id, source_completed, verify_artifacts, native_artifacts,
+    verify_native_catalogue
 )
 
 
@@ -162,6 +164,76 @@ class ComparisonContractTests(unittest.TestCase):
             request.return_value = {"reaction_observer": {"status": "Error"}}
             with self.assertRaisesRegex(RuntimeError, "receiver startup failed"):
                 receivers_ready("http://service/run", [ROOMS])
+
+    def test_native_directory_requires_each_exact_family_library(self):
+        with tempfile.TemporaryDirectory() as directory, patch("run_comparison.platform.system", return_value="Linux"):
+            root = Path(directory)
+            native, installed = root / "native", root / "installed"
+            native.mkdir()
+            installed.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "missing"):
+                native_artifacts(native, installed, ["http"])
+            for role in ("source", "sink"):
+                name = f"libdrasi_computation_{role}_http.so"
+                (native / name).write_bytes(role.encode())
+                (installed / name).write_bytes(role.encode())
+            self.assertEqual(len(native_artifacts(native, installed, ["http"])), 2)
+            (installed / "libdrasi_computation_sink_http.so").write_bytes(b"stale")
+            with self.assertRaisesRegex(RuntimeError, "differs"):
+                native_artifacts(native, installed, ["http"])
+
+    def test_live_native_identity_versions_and_factory_match_the_generated_components(self):
+        plugins, components = [], []
+        for role in ("source", "sink"):
+            identity = {"id": f"drasi-computation-{role}-http", "version": "test"}
+            implementation = {"name": f"drasi.network/http-{role}", "version": "1", "plugin": identity}
+            metadata = {"implementation": implementation, "configuration_version": 1,
+                        "ports": [], "completion": "Handled" if role == "sink" else None,
+                        "role": role.title()}
+            plugins.append({"plugin": identity, "abi_version": "1.0.0", "wire_version": 2,
+                            "factories": [metadata]})
+            specification = {**metadata, "descriptor": {"ports": []}}
+            components.append({"construction": {"Factory": specification}})
+        catalogue, definition = {"plugins": plugins}, {"components": components}
+        verify_native_catalogue(catalogue, definition, "http")
+        for change in ("missing", "wire", "factory", "identity"):
+            altered = copy.deepcopy(catalogue)
+            if change == "missing":
+                altered["plugins"].pop()
+            elif change == "wire":
+                altered["plugins"][0]["wire_version"] = 1
+            elif change == "factory":
+                altered["plugins"][0]["factories"][0]["implementation"]["name"] = "unrelated"
+            else:
+                altered["plugins"][0]["factories"][0]["implementation"]["plugin"]["version"] = "other"
+            with self.assertRaises(RuntimeError):
+                verify_native_catalogue(altered, definition, "http")
+
+    def test_local_profiles_use_only_native_network_factories_and_keep_their_protocol_settings(self):
+        root = Path(__file__).resolve().parent.parent
+        for profile in ("http", "http_adaptive", "grpc", "grpc_adaptive"):
+            config = json.loads((root / f"drasi_server_{profile}" / "drasi_server_config.yaml").read_text())
+            self.assertFalse(config["autoInstallPlugins"])
+            instance = config["instances"][0]
+            self.assertEqual(instance["sources"], [])
+            self.assertEqual(instance["queries"], [])
+            self.assertEqual(instance["reactions"], [])
+            specifications = [node["construction"]["Factory"]
+                              for node in instance["computation"]["definition"]["components"]]
+            transport = profile.split("_")[0]
+            self.assertEqual([spec["implementation"]["name"] for spec in specifications].count(
+                f"drasi.network/{transport}-source"), 1)
+            sinks = [spec for spec in specifications
+                     if spec["implementation"]["name"] == f"drasi.network/{transport}-sink"]
+            self.assertEqual(len(sinks), 2)
+            for spec in sinks:
+                settings = {name: value["Literal"] for name, value in spec["configuration"].items()}
+                self.assertEqual(settings["failurePolicy"], "strict")
+                if profile == "grpc_adaptive":
+                    self.assertEqual(settings["batchSize"], 100)
+                    self.assertEqual(settings["batchFlushTimeoutMs"], 50)
+                elif transport == "http":
+                    self.assertIn("outputTemplates", settings)
 
 
 if __name__ == "__main__":

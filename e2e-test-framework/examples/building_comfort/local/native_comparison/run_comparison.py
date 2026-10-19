@@ -57,6 +57,56 @@ def verify_artifacts(binaries, plugin_directory, plugins):
     if current != plugins:
         raise RuntimeError("plugin directory changed during comparison")
 
+def native_artifacts(native_directory, plugin_directory, transports):
+    system = platform.system()
+    if system == "Windows":
+        prefix, suffix = "", ".dll"
+    elif system == "Darwin":
+        prefix, suffix = "lib", ".dylib"
+    elif system == "Linux":
+        prefix, suffix = "lib", ".so"
+    else:
+        raise RuntimeError(f"unsupported native library platform: {system}")
+    artifacts = {}
+    for transport in transports:
+        for role in ("source", "sink"):
+            package = f"drasi-computation-{role}-{transport}"
+            name = prefix + package.replace("-", "_") + suffix
+            path = native_directory / name
+            installed = plugin_directory / name
+            if not path.is_file() or not installed.is_file():
+                raise RuntimeError(f"required native library is missing: {name}")
+            sha = digest(path)
+            if digest(installed) != sha:
+                raise RuntimeError(f"Server plugin differs from configuration-generator library: {name}")
+            artifacts[package] = {"path": str(path), "sha256": sha}
+    return artifacts
+
+
+def verify_native_catalogue(catalogue, definition, transport):
+    for role in ("source", "sink"):
+        package = f"drasi-computation-{role}-{transport}"
+        kind = f"drasi.network/{transport}-{role}"
+        matches = [item for item in catalogue["plugins"] if item["plugin"]["id"] == package]
+        if len(matches) != 1:
+            raise RuntimeError(f"required native plugin identity is missing or duplicated: {package}")
+        metadata = matches[0]
+        factories = metadata["factories"]
+        if (metadata["abi_version"] != "1.0.0" or metadata["wire_version"] != 2
+                or len(factories) != 1 or factories[0]["implementation"]["name"] != kind):
+            raise RuntimeError(f"unexpected native ABI/wire/factory contract: {package}")
+        specifications = [item["construction"]["Factory"] for item in definition["components"]
+                          if "Factory" in item.get("construction", {})]
+        components = [item for item in specifications if item["implementation"]["name"] == kind]
+        if not components or any(
+                item["implementation"] != factories[0]["implementation"]
+                or item["configuration_version"] != factories[0]["configuration_version"]
+                or item["descriptor"]["ports"] != factories[0]["ports"]
+                or item["completion"] != factories[0]["completion"]
+                or item["role"] != factories[0]["role"]
+                for item in components):
+            raise RuntimeError(f"loaded native factory differs from generated definition: {package}")
+
 
 def reserve_ports(count):
     sockets = []
@@ -280,7 +330,7 @@ def run_case(args, transport, mode, ordinal, warmup):
     write_json(output / "published-baseline-handlers.json", baselines)
     if mode == "native":
         generated = subprocess.run(
-            [str(args.config_generator), str(args.native_plugin), str(output / "adapter-config.json"), str(args.capacity)],
+            [str(args.config_generator), str(args.native_plugins), str(output / "adapter-config.json"), str(args.capacity)],
             capture_output=True, text=True,
         )
         (output / "config-generator.stdout").write_text(generated.stdout)
@@ -352,6 +402,10 @@ def run_case(args, transport, mode, ordinal, warmup):
             wait_for("Drasi component readiness", time.monotonic() + 60, processes, ready)
             provenance["runtime"] = request(server_url + "/api/v1/instances/performance/runtime")
             provenance["loaded_plugins"] = request(server_url + "/api/v1/plugins")
+            if mode == "native":
+                catalogue = request(server_url + "/api/v1/plugins/computation")
+                verify_native_catalogue(catalogue, config["instances"][0]["computation"]["definition"], transport)
+                provenance["native_catalogue"] = catalogue
             write_json(output / "provenance.json", provenance)
             started = time.monotonic()
             request(run_url + "/sources/facilities-db/start", method="POST")
@@ -398,7 +452,7 @@ def compare_pair(left, right):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for flag in ["server", "test-service", "config-generator", "native-plugin", "plugins", "output"]:
+    for flag in ["server", "test-service", "config-generator", "native-plugins", "plugins", "output"]:
         parser.add_argument("--" + flag, required=True, type=Path)
     parser.add_argument("--transport", choices=["http", "grpc", "both"], default="both")
     parser.add_argument("--queries", choices=["rooms", "both"], default="rooms")
@@ -409,26 +463,27 @@ def main():
     parser.add_argument("--timeout", type=float, default=1200)
     parser.add_argument("--jsonl", action="store_true", help="retain per-event diagnostics in both arms (changes timing)")
     args = parser.parse_args()
-    for name in ["server", "test_service", "config_generator", "native_plugin", "plugins", "output"]:
+    for name in ["server", "test_service", "config_generator", "native_plugins", "plugins", "output"]:
         setattr(args, name, getattr(args, name).resolve())
     if args.runs < 1 or args.warmups < 0 or args.capacity < 1 or args.timeout <= 0:
         parser.error("runs/capacity/timeout must be positive and warmups nonnegative")
     if args.output.exists():
         parser.error("output directory must not already exist")
-    for name in ["server", "test_service", "config_generator", "native_plugin"]:
+    for name in ["server", "test_service", "config_generator"]:
         if not getattr(args, name).is_file():
             parser.error(f"{name} is not a file")
     if not args.plugins.is_dir():
         parser.error("plugins must be a directory containing matching local libraries")
+    if not args.native_plugins.is_dir():
+        parser.error("native-plugins must be a directory containing the independent native libraries")
+    transports = ["http", "grpc"] if args.transport == "both" else [args.transport]
     artifacts = sorted(path for path in args.plugins.iterdir() if path.suffix in (".so", ".dylib", ".dll"))
-    native_hash = digest(args.native_plugin)
     plugin_hashes = {path.name: digest(path) for path in artifacts}
-    if native_hash not in plugin_hashes.values():
-        parser.error("the plugin directory must contain the exact native network library")
     binary_hashes = {
         name: {"path": str(getattr(args, name)), "sha256": digest(getattr(args, name))}
-        for name in ["server", "test_service", "config_generator", "native_plugin"]
+        for name in ["server", "test_service", "config_generator"]
     }
+    binary_hashes.update(native_artifacts(args.native_plugins, args.plugins, transports))
     args.output.mkdir(parents=True)
     write_json(args.output / "binaries.json", {
         "platform": platform.platform(),
@@ -437,7 +492,6 @@ def main():
         "arguments": {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
     })
     records = []
-    transports = ["http", "grpc"] if args.transport == "both" else [args.transport]
     for transport in transports:
         for index in range(args.warmups + args.runs):
             order = ["adapters", "native"] if index % 2 == 0 else ["native", "adapters"]

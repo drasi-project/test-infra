@@ -19,9 +19,11 @@ observers against the same local Server binary in two configurations:
 - **native**: native network source/sink factories surrounding the same
   continuous-query evaluator in a ComputationGraph.
 
-The native plugin is `drasi-computation-network`, using native ABI 1.0 and binary
-wire version 2. Existing network plugins retain their separate ABI 0.15.
-Rebuild the Server, config generator and native library together; the original
+The native libraries are `drasi-computation-source-http`,
+`drasi-computation-source-grpc`, `drasi-computation-sink-http` and
+`drasi-computation-sink-grpc`, using native ABI 1.0 and binary wire version 2.
+Existing network plugins retain their separate ABI 0.17.
+Rebuild the Server, config generator and native libraries together; the original
 wire-version-1 native prototype is rejected. Both families are loaded into the
 same Server binary; neither comparison arm selects the removed ComponentGraph
 execution engine.
@@ -33,7 +35,9 @@ Use the existing sibling checkouts and the same release build profile:
 ```sh
 # In drasi-core:
 export CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=3
-cargo build --release --lib -p drasi-computation-network --features dynamic-plugin
+for package in drasi-computation-source-http drasi-computation-source-grpc drasi-computation-sink-http drasi-computation-sink-grpc; do
+    cargo build --release --lib -p "$package" --features "$package/dynamic-plugin"
+done
 for package in drasi-source-http drasi-source-grpc drasi-reaction-http drasi-reaction-grpc; do
     cargo build --release --lib -p "$package" --features "$package/dynamic-plugin"
 done
@@ -45,11 +49,14 @@ cargo build --release --bin drasi-server --example native-perf-config
 cargo build --release -p test-service
 ```
 
-Create a dedicated plugin directory containing the native network library and
+Create a dedicated plugin directory containing the four native network libraries and
 the four existing network libraries. For macOS these are:
 
 ```text
-libdrasi_computation_network.dylib
+libdrasi_computation_source_http.dylib
+libdrasi_computation_source_grpc.dylib
+libdrasi_computation_sink_http.dylib
+libdrasi_computation_sink_grpc.dylib
 libdrasi_source_http.dylib
 libdrasi_source_grpc.dylib
 libdrasi_reaction_http.dylib
@@ -69,7 +76,7 @@ python3 run_comparison.py \
   --server /path/to/drasi-server/target/release/drasi-server \
   --test-service /path/to/test-infra/e2e-test-framework/target/release/test-service \
   --config-generator /path/to/drasi-server/target/release/examples/native-perf-config \
-  --native-plugin /path/to/drasi-core/target/release/libdrasi_computation_network.dylib \
+  --native-plugins /path/to/drasi-core/target/release \
   --plugins /path/to/comparison-plugins \
   --output /path/to/new-comparison-results \
   --transport both --queries rooms --changes 100000 --warmups 1 --runs 3
@@ -81,6 +88,9 @@ unchanged workload through the test-service API. Each run gets separate ports,
 configuration, working directory and retained evidence. Processes are stopped
 using their exact owned PIDs. The driver does not invoke the older local runner
 with its broad process-killing preflight, download binaries, or change branches.
+It requires the exact source and sink library for each selected protocol in both
+the generator and Server directories, checks their hashes, and verifies the live
+ABI/wire/factory identities against the generated graph before sending data.
 
 The default rooms-only profile uses the same room query as `perf_sweep` and
 expects `change_count - 19` results for the fixed 1-building/3-floor/4-room
@@ -113,10 +123,9 @@ A negative `native_elapsed_change_percent` means lower elapsed time.
 This is an **end-to-end native-versus-adapter path comparison**, not a claim that
 all timing differences are serializer cost alone. The old plugin path includes
 its existing subscription/result queues and forwarding tasks. The native path
-uses direct graph pipes and native FFI operations. The rooms-only profile avoids
-a further difference: ordinary two-query configuration owns separate query
-tasks, whereas two queries in one native graph share a graph controller.
-Two-query timings therefore include that scheduling difference.
+uses direct graph pipes and native FFI operations. Both configurations use the instance's ComputationGraph and graph-owned query
+tasks. The rooms-only profile isolates one query; the two-query profile also
+includes aggregate evaluation and independent output delivery.
 
 The wire protocol, query text, generator seed/data, selected queries and output
 meaning remain fixed. Native FFI still serializes envelopes and validates

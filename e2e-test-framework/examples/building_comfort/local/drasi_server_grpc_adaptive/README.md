@@ -3,6 +3,11 @@
 Same end-to-end shape as `drasi_server_grpc/`, but the test service uses the
 **adaptive gRPC dispatcher** to optimise throughput under load.
 
+The Server configuration uses the native gRPC source and sink factories in the
+hosting DrasiLib graph. Its 100-item sink batches now use real host-owned
+collection and a flush deadline, with completion only after the receiver
+acknowledges the exact item count. Query text and producer identities are unchanged.
+
 ## What this test does
 
 1. The E2E test service generates change events for a `BuildingHierarchy`
@@ -23,31 +28,20 @@ test-service  --adaptive gRPC--> Drasi Server  --gRPC reaction--> test-service
 
 ## Prerequisites
 
-- One of:
-  - a prebuilt `drasi-server` binary (see the [official download
-    instructions](https://drasi.io/drasi-server/how-to-guides/installation/download-binary/)); **or**
-  - a checkout of the [drasi-server](https://github.com/drasi-project/drasi-server)
-    repo with a working Rust toolchain.
-
-  The `source/grpc`, `reaction/grpc`, and `reaction/log` plugins are
-  auto-installed.
+- A matching local Server and the independent
+  `drasi-computation-source-grpc`/`drasi-computation-sink-grpc` libraries.
+  Build them from the matching drasi-core checkout with
+  `make build-native-network-plugins`; Server builds alone do not update plugins.
 - This repository buildable via `cargo build --release`.
 
 ## 1. Start the external Drasi Server
 
-Pick whichever option matches how you installed Drasi Server. Run from
-this folder so the relative `--config` path resolves.
-
-### Option A: prebuilt binary
+Run from this folder with the matching native library directory. Automatic
+legacy plugin installation is disabled.
 
 ```bash
-<path/to>/bin/drasi-server --config drasi_server_config.yaml
-```
-
-### Option B: cargo run from a drasi-server repo checkout
-
-```bash
-cargo run --release --manifest-path <path/to/drasi-server>/Cargo.toml -- --config drasi_server_config.yaml
+<path/to/drasi-server> --config drasi_server_config.yaml \
+  --plugins-dir <path/to/native-libraries> --skip-verification
 ```
 
 Drasi Server will start:

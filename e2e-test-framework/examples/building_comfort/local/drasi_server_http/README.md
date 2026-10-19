@@ -3,6 +3,12 @@
 End-to-end test that drives an **external Drasi Server** over HTTP webhooks
 instead of gRPC.
 
+The default Server configuration uses `drasi.network/http-source` and
+`drasi.network/http-sink` in the hosting DrasiLib instance's ComputationGraph.
+It keeps the same source/query identities and webhook protocols without legacy
+Source/Reaction adapters. The generator supplies initial state as ordinary
+inserts, so query bootstrap is explicitly disabled.
+
 ## What this test does
 
 1. The E2E test service generates change events for a `BuildingHierarchy`
@@ -29,38 +35,20 @@ test-service --HTTP source--> Drasi Server --HTTP reaction--> test-service
 
 ## Prerequisites
 
-- One of:
-  - a prebuilt `drasi-server` binary (see the [official download
-    instructions](https://drasi.io/drasi-server/how-to-guides/installation/download-binary/)
-    &mdash; downloads the binary into `./bin/drasi-server`); **or**
-  - a checkout of the [drasi-server](https://github.com/drasi-project/drasi-server)
-    repo with a working Rust toolchain.
-
-  In either case the `source/http`, `reaction/http`, and `reaction/log`
-  plugins are fetched automatically (`autoInstallPlugins: true`).
+- A Server built against the matching drasi-core checkout and the independently
+  built `drasi-computation-source-http` and `drasi-computation-sink-http`
+  libraries. From drasi-core, run `make build-native-network-plugins`.
+  Native plugins are not rebuilt merely by rebuilding the Server.
 - This repository buildable via `cargo build --release`.
 
 ## 1. Start the external Drasi Server
 
-Pick whichever option matches how you installed Drasi Server. In both
-cases run from this folder so the relative `--config` path resolves.
-
-### Option A: prebuilt binary
-
-Replace `<path/to>` with the relative path from this folder to your
-Drasi Server install (the binary lives at `<path/to>/bin/drasi-server`):
+Run from this folder, pointing at the directory containing the matching local
+native libraries. Automatic registry installation is disabled in this profile.
 
 ```bash
-<path/to>/bin/drasi-server --config drasi_server_config.yaml
-```
-
-### Option B: cargo run from a drasi-server repo checkout
-
-Replace `<path/to/drasi-server>` with the relative path from this folder
-to your local drasi-server repo:
-
-```bash
-cargo run --release --manifest-path <path/to/drasi-server>/Cargo.toml -- --config drasi_server_config.yaml
+<path/to/drasi-server> --config drasi_server_config.yaml \
+  --plugins-dir <path/to/native-libraries> --skip-verification
 ```
 
 Drasi Server will:
@@ -129,8 +117,8 @@ Client extension (or `curl`).
 - **No reaction events received** &mdash; The reaction handler must be
   listening on port 9001 before Drasi Server starts pushing. The test
   service binds it as soon as the run starts; if the test service starts
-  *after* Drasi Server, the first batch may be lost while the reaction
-  retries.
+  *after* Drasi Server, strict native delivery can fail after exhausted retries;
+  start the receiver before activating the source rather than accepting loss.
 - **`address already in use: 8080`** &mdash; Either the test service or
   Drasi Server is already bound. Stop the other process or change one of
   their ports.

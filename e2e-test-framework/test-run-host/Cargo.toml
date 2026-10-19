@@ -21,10 +21,6 @@ drasi-lib = { path = "../../../drasi-core/lib", features = [
 # Core models (for SourceMiddlewareConfig and other shared types)
 drasi-core = { path = "../../../drasi-core/core" }
 
-# Core bootstrap providers (used by the application API)
-drasi-bootstrap-noop = { path = "../../../drasi-core/components/bootstrappers/noop" }
-drasi-bootstrap-application = { path = "../../../drasi-core/components/bootstrappers/application" }
-
 # Core reaction (used by the application API)
 drasi-reaction-application = { path = "../../../drasi-core/components/reactions/application" }
 

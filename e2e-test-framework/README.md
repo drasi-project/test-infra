@@ -1098,7 +1098,48 @@ for the component definitions and their channel connections.
 
 Embedded instances always use ComputationGraph, including builds without
 drasi-lib's default features. There is no engine feature or configuration opt-in.
-The existing application source and reaction adapters remain in use.
+Application inputs and reactions are native graph nodes. Queries use the shared
+native pipeline builder, not Source/Reaction execution adapters or another query
+runtime. The embedded host no longer depends on the old plugin SDK/FFI or unused
+application/noop bootstrap crates.
+
+The source channel, query input and reaction pipes are bounded. Volatile input can
+buffer while its source is stopped, up to its capacity; no persistence is implied.
+Legacy `durability` source settings are rejected explicitly. Persistent application
+admission requires an actual native `SourceAdmission`/QoS binding, not a flag on
+this volatile test-host channel.
+
+Source/query/reaction `auto_start` values and application properties are retained
+by both initial configuration and the programmatic APIs. Queries and reactions
+can be declared before their upstream components. The graph resolves those
+connections when the missing components arrive, without re-adding the consumers.
+Native reaction connections in this host use bounded delivery; a query's
+`dispatch_mode` still controls its separate result-catalogue subscriptions, not
+these explicitly configured graph pipes.
+
+Channel and callback-style test handlers share one owned native-envelope reader.
+Channel handlers preserve per-change JSON and optional profiling; callback-style
+handlers preserve whole-result batches. Pause retains input, full output
+backpressures, and stop wakes waits and joins the worker. A reaction receiver
+transfers exactly once. Updating an already transferred binding requires stopping
+its observer and explicitly deleting/recreating the reaction; it is not silently
+replaced underneath that reader.
+
+Instance owners are registered before startup. A failed start or cancelled stop
+retains the core for inspection and awaited cleanup. `Stopping` does not permit a
+fresh start; complete `stop` before restarting. Removal releases the registered
+owner only after shutdown succeeds, including cleanup after a failed start.
+
+The application input dispatcher validates a complete batch before accepting it,
+preserves nested properties, relation updates, CDC deletes and source event time,
+and then hands changes to the native source. Source event nanoseconds are
+converted to the core's millisecond `effective_from`; query result timestamps
+still mean production time. Its bounded forwarding worker borrows the host only
+while resolving the source handle, not for the lifetime of the stream. Cancelled
+close retains that worker and queued input for a later drain attempt. Forwarding
+failures remain errors on subsequent close/dispatch calls rather than being
+logged and reported as success. This drain confirms source-channel acceptance,
+not downstream processing or durable effects.
 
 The removed
 `test_run_host.test_runs[].drasi_lib_instances[].test_run_overrides.execution_mode`

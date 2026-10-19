@@ -23,8 +23,7 @@ use test_data_store::{
 
 use crate::common::OutputHandlerMessage;
 
-pub mod drasi_lib_instance_callback_handler;
-pub mod drasi_lib_instance_channel_handler;
+pub mod drasi_lib_instance_handler;
 pub mod grpc_reaction_handler;
 pub mod http_reaction_handler;
 
@@ -95,16 +94,12 @@ pub async fn create_reaction_handler(
         )
             as Box<dyn crate::reactions::ReactionOutputHandler + Send + Sync>),
         ReactionHandlerDefinition::DrasiLibInstanceCallback(definition) => {
-            drasi_lib_instance_callback_handler::DrasiLibInstanceCallbackHandler::create(
-                id, definition,
-            )
-            .await
+            drasi_lib_instance_handler::DrasiLibInstanceHandler::create_callback(id, definition)
+                .await
         }
         ReactionHandlerDefinition::DrasiLibInstanceChannel(definition) => {
-            drasi_lib_instance_channel_handler::DrasiLibInstanceChannelHandler::create(
-                id, definition,
-            )
-            .await
+            drasi_lib_instance_handler::DrasiLibInstanceHandler::create_channel(id, definition)
+                .await
         }
     }
 }

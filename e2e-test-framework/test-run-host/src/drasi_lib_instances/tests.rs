@@ -16,6 +16,11 @@ use crate::drasi_lib_instances::{
     TestRunDrasiLibInstanceConfig, TestRunDrasiLibInstanceDefinition,
     TestRunDrasiLibInstanceOverrides, TestRunDrasiLibInstanceState,
 };
+use anyhow::{Context, Result};
+use drasi_lib::computation::v1::*;
+use drasi_source_application::PropertyMapBuilder;
+use serde_json::{json, Value};
+use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 use test_data_store::test_repo_storage::models::{
     DrasiLibInstanceConfig, TestDrasiLibInstanceDefinition,
 };
@@ -77,6 +82,10 @@ fn state_display_uses_human_readable_strings() {
         "Uninitialized"
     );
     assert_eq!(TestRunDrasiLibInstanceState::Running.to_string(), "Running");
+    assert_eq!(
+        TestRunDrasiLibInstanceState::Stopping.to_string(),
+        "Stopping"
+    );
     assert_eq!(TestRunDrasiLibInstanceState::Stopped.to_string(), "Stopped");
     assert_eq!(
         TestRunDrasiLibInstanceState::Error("boom".to_string()).to_string(),
@@ -177,9 +186,7 @@ async fn embedded_instances_report_the_single_live_runtime() {
         definition,
         storage,
         crate::test_run_completion::LifecycleTx::disabled(),
-    )
-    .await
-    .unwrap();
+    );
 
     assert!(instance.get_runtime_info().await.is_err());
     for _ in 0..2 {
@@ -193,7 +200,7 @@ async fn embedded_instances_report_the_single_live_runtime() {
 }
 
 #[tokio::test]
-async fn embedded_application_adapters_preserve_result_order_and_count() {
+async fn embedded_native_application_reaction_preserves_result_order_and_count() {
     use super::TestRunDrasiLibInstance;
     use drasi_source_application::PropertyMapBuilder;
     use test_data_store::test_run_storage::TestRunDrasiLibInstanceStorage;
@@ -225,15 +232,11 @@ async fn embedded_application_adapters_preserve_result_order_and_count() {
         definition,
         storage,
         crate::test_run_completion::LifecycleTx::disabled(),
-    )
-    .await
-    .unwrap();
+    );
+    instance.start().await.unwrap();
     let source = instance.get_source_handle("source1").await.unwrap();
-    let reaction = instance.get_reaction_handle("reaction1").await.unwrap();
-    let mut subscription = reaction
-        .subscribe_with_options(Default::default())
-        .await
-        .unwrap();
+    let mut subscription = instance.take_reaction_receiver("reaction1").await.unwrap();
+    assert!(instance.take_reaction_receiver("reaction1").await.is_err());
 
     for index in 0..3 {
         let marker = format!("ordered-node-{index}");
@@ -253,10 +256,13 @@ async fn embedded_application_adapters_preserve_result_order_and_count() {
     for index in 0..3 {
         let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let result = subscription
+                let input = subscription
                     .recv()
                     .await
                     .expect("reaction subscription closed");
+                let result =
+                    drasi_lib::computation::v1::QueryChangeCodec::to_legacy_result(&input.envelope)
+                        .unwrap();
                 if !result.results.is_empty() {
                     break result;
                 }
@@ -277,4 +283,438 @@ async fn embedded_application_adapters_preserve_result_order_and_count() {
         );
     }
     instance.stop().await.unwrap();
+}
+
+pub(crate) fn native_instance(
+    mut config: Value,
+) -> Result<(super::TestRunDrasiLibInstance, tempfile::TempDir)> {
+    let directory = tempfile::tempdir()?;
+    let fields = config
+        .as_object_mut()
+        .context("test configuration must be an object")?;
+    for field in ["sources", "queries", "reactions"] {
+        fields.entry(field).or_insert_with(|| json!([]));
+    }
+    let definition = TestRunDrasiLibInstanceDefinition::new(
+        run_config("instance1"),
+        serde_json::from_value(json!({
+            "test_drasi_lib_instance_id": "instance1",
+            "config": config,
+        }))?,
+    )?;
+    let storage = test_data_store::test_run_storage::TestRunDrasiLibInstanceStorage {
+        id: definition.id.clone(),
+        path: directory.path().to_path_buf(),
+    };
+    Ok((
+        super::TestRunDrasiLibInstance::new(
+            definition,
+            storage,
+            crate::test_run_completion::LifecycleTx::disabled(),
+        ),
+        directory,
+    ))
+}
+
+async fn next_result(
+    receiver: &mut tokio::sync::mpsc::Receiver<InputEnvelope>,
+) -> Result<drasi_lib::channels::QueryResult> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let input = receiver.recv().await.context("native reaction closed")?;
+            let result = QueryChangeCodec::to_legacy_result(&input.envelope)?;
+            if !result.results.is_empty() {
+                return Ok(result);
+            }
+        }
+    })
+    .await?
+}
+
+async fn expect_row(
+    receiver: &mut tokio::sync::mpsc::Receiver<InputEnvelope>,
+    query: &str,
+    row: Value,
+) -> Result<()> {
+    let result = next_result(receiver).await?;
+    assert_eq!(result.query_id, query);
+    assert!(
+        matches!(
+            &result.results[..],
+            [drasi_lib::channels::ResultDiff::Add { data, .. }] if data == &row
+        ),
+        "{result:?}"
+    );
+    Ok(())
+}
+
+fn both_runtimes<F, Fut>(case: F) -> Result<()>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    for current_thread in [true, false] {
+        let mut builder = if current_thread {
+            tokio::runtime::Builder::new_current_thread()
+        } else {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            builder.worker_threads(2);
+            builder
+        };
+        builder
+            .enable_all()
+            .build()?
+            .block_on(async { tokio::time::timeout(Duration::from_secs(20), case()).await? })?;
+    }
+    Ok(())
+}
+
+async fn native_programmatic_lifecycle() -> Result<()> {
+    use super::api_models::*;
+    let (instance, _directory) = native_instance(json!({}))?;
+    assert!(instance.get_drasi_lib().await.is_none());
+    instance.start().await?;
+    let result = async {
+        instance
+            .create_reaction(CreateReactionRequest {
+                name: "sink".into(),
+                reaction_type: "application".into(),
+                queries: vec!["names".into()],
+                auto_start: true,
+                properties: json!({"tag":"observer"}),
+            })
+            .await?;
+        let reaction = instance.get_reaction("sink").await?;
+        assert_eq!(reaction.queries, ["names"]);
+        assert_eq!(reaction.reaction_type, "application");
+        assert_eq!(reaction.properties, json!({"tag":"observer"}));
+        assert!(reaction.auto_start);
+        let mut receiver = instance.take_reaction_receiver("sink").await?;
+        assert!(instance.take_reaction_receiver("sink").await.is_err());
+        instance
+            .create_query(CreateQueryRequest {
+                name: "names".into(),
+                query: "MATCH (n:Person) RETURN n.name AS name".into(),
+                sources: vec!["input".into()],
+                auto_start: true,
+                profiling: false,
+            })
+            .await?;
+        instance
+            .create_source(CreateSourceRequest {
+                name: "input".into(),
+                source_type: "application".into(),
+                auto_start: false,
+                properties: json!({"tag":"producer"}),
+            })
+            .await?;
+        let source = instance.get_source("input").await?;
+        assert_eq!(source.source_type, "application");
+        assert_eq!(source.properties, json!({"tag":"producer"}));
+        assert!(!source.auto_start);
+        assert!(instance
+            .list_sources()
+            .await?
+            .iter()
+            .any(|source| { source.name == "input" && source.source_type == "application" }));
+        assert_eq!(instance.list_queries().await?.len(), 1);
+        assert_eq!(instance.list_reactions().await?.len(), 1);
+        let core = instance.get_drasi_lib().await.context("instance owner")?;
+        let snapshot = core.computation_control()?.desired_snapshot();
+        let legacy_source = SourcePluginAdapterFactory::default()
+            .descriptor()
+            .implementation
+            .clone();
+        let legacy_reaction = ReactionPluginAdapterFactory::default()
+            .descriptor()
+            .implementation
+            .clone();
+        assert!(!snapshot.specifications.values().any(|spec| {
+            spec.implementation == legacy_source || spec.implementation == legacy_reaction
+        }));
+        let source_generation = core.computation_component("input")?.generation();
+        let input = instance.get_source_handle("input").await?;
+        input
+            .send_node_insert(
+                "before-start",
+                vec!["Person"],
+                PropertyMapBuilder::new()
+                    .with_string("name", "Buffered")
+                    .build(),
+            )
+            .await?;
+        assert!(receiver.try_recv().is_err());
+        instance.start_source("input").await?;
+        expect_row(&mut receiver, "names", json!({"name":"Buffered"})).await?;
+        let updated = instance
+            .update_query(
+                "names",
+                UpdateQueryRequest {
+                    query: Some("MATCH (n:Person) RETURN n.name AS name, true AS updated".into()),
+                    sources: None,
+                    auto_start: None,
+                    profiling: None,
+                },
+            )
+            .await?;
+        assert!(updated.query.contains("updated"));
+        assert_eq!(
+            core.computation_component("input")?.generation(),
+            source_generation
+        );
+        input
+            .send_node_insert(
+                "updated",
+                vec!["Person"],
+                PropertyMapBuilder::new()
+                    .with_string("name", "Updated")
+                    .build(),
+            )
+            .await?;
+        expect_row(
+            &mut receiver,
+            "names",
+            json!({"name":"Updated","updated":true}),
+        )
+        .await?;
+        instance.stop_query("names").await?;
+        input
+            .send_node_insert(
+                "paused",
+                vec!["Person"],
+                PropertyMapBuilder::new()
+                    .with_string("name", "Paused")
+                    .build(),
+            )
+            .await?;
+        instance.start_query("names").await?;
+        expect_row(
+            &mut receiver,
+            "names",
+            json!({"name":"Paused","updated":true}),
+        )
+        .await?;
+        instance.stop_source("input").await?;
+        input
+            .send_node_insert(
+                "source-stopped",
+                vec!["Person"],
+                PropertyMapBuilder::new()
+                    .with_string("name", "Restarted")
+                    .build(),
+            )
+            .await?;
+        instance.start_source("input").await?;
+        expect_row(
+            &mut receiver,
+            "names",
+            json!({"name":"Restarted","updated":true}),
+        )
+        .await?;
+        assert!(instance.delete_source("input").await.is_err());
+        assert!(instance.get_source_handle("input").await.is_ok());
+        instance.delete_reaction("sink").await?;
+        instance.delete_query("names").await?;
+        instance.delete_source("input").await?;
+        assert!(instance.get_source_handle("input").await.is_err());
+        assert!(instance.list_queries().await?.is_empty());
+        assert!(instance.list_reactions().await?.is_empty());
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = instance.stop().await;
+    result?;
+    cleanup
+}
+
+async fn native_multi_query_results() -> Result<()> {
+    let (instance, _directory) = native_instance(json!({
+        "sources":[{"id":"input","kind":"application"}],
+        "queries":[
+            {"id":"first","query":"MATCH (n:Item) RETURN n.marker AS marker","sources":["input"]},
+            {"id":"second","query":"MATCH (n:Item) RETURN n.marker AS marker","sources":["input"]}
+        ],
+        "reactions":[{"id":"sink","kind":"application","queries":["first","second"]}]
+    }))?;
+    instance.start().await?;
+    let result = async {
+        let input = instance.get_source_handle("input").await?;
+        let mut receiver = instance.take_reaction_receiver("sink").await?;
+        for index in 0..5 {
+            input
+                .send_node_insert(
+                    index.to_string(),
+                    vec!["Item"],
+                    PropertyMapBuilder::new()
+                        .with_integer("marker", index)
+                        .build(),
+                )
+                .await?;
+        }
+        let mut rows = std::collections::BTreeMap::<String, Vec<Value>>::new();
+        let mut sequences = HashMap::<String, u64>::new();
+        for _ in 0..10 {
+            let result = next_result(&mut receiver).await?;
+            if let Some(previous) = sequences.insert(result.query_id.clone(), result.sequence) {
+                assert!(result.sequence > previous);
+            }
+            let [drasi_lib::channels::ResultDiff::Add { data, .. }] = &result.results[..] else {
+                anyhow::bail!("unexpected result: {result:?}");
+            };
+            rows.entry(result.query_id)
+                .or_default()
+                .push(data["marker"].clone());
+        }
+        let expected = (0..5).map(|index| json!(index)).collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            std::collections::BTreeMap::from([
+                ("first".into(), expected.clone()),
+                ("second".into(), expected),
+            ])
+        );
+        assert!(receiver.try_recv().is_err(), "unexpected duplicate result");
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let cleanup = instance.stop().await;
+    result?;
+    cleanup
+}
+
+async fn native_failed_start_retains_owner() -> Result<()> {
+    let (instance, _directory) = native_instance(json!({
+        "sources":[
+            {"id":"input","kind":"application"},
+            {"id":"unsupported","kind":"not-a-source"}
+        ]
+    }))?;
+    assert!(instance.get_drasi_lib().await.is_none());
+    let error = instance
+        .start()
+        .await
+        .expect_err("unsupported source must fail visibly");
+    assert!(error.to_string().contains("Unsupported"), "{error}");
+    assert!(matches!(
+        instance.get_state().await,
+        TestRunDrasiLibInstanceState::Error(_)
+    ));
+    let owner = instance
+        .get_drasi_lib()
+        .await
+        .context("failed startup lost the owner")?;
+    assert!(!owner.is_running().await);
+    assert!(instance
+        .start()
+        .await
+        .expect_err("restart cannot replace retained ownership")
+        .to_string()
+        .contains("must be stopped"));
+    assert!(Arc::ptr_eq(
+        &owner,
+        &instance.get_drasi_lib().await.context("retained owner")?
+    ));
+    instance.stop().await?;
+    assert!(instance.get_drasi_lib().await.is_none());
+    assert!(instance.get_source_handle("input").await.is_err());
+    assert_eq!(
+        instance.get_state().await,
+        TestRunDrasiLibInstanceState::Stopped
+    );
+    Ok(())
+}
+
+struct StopGate {
+    descriptor: ComponentDescriptor,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl ComputationComponent for StopGate {
+    fn descriptor(&self) -> &ComponentDescriptor {
+        &self.descriptor
+    }
+    async fn start(&mut self) -> Result<()> {
+        Ok(())
+    }
+    async fn stop(&mut self) -> Result<()> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl ComputationService for StopGate {
+    async fn run(&mut self) -> Result<()> {
+        std::future::pending().await
+    }
+}
+
+async fn native_cancelled_stop_retains_owner() -> Result<()> {
+    let (instance, _directory) = native_instance(json!({}))?;
+    instance.start().await?;
+    let core = instance.get_drasi_lib().await.context("instance owner")?;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let service = core
+        .add_computation_component(ComponentAddition::new(ConstructedComponent::service(
+            Box::new(StopGate {
+                descriptor: ComponentDescriptor::try_new(
+                    ComponentId::try_new("stop-gate")?,
+                    vec![],
+                )?,
+                entered: entered.clone(),
+                release: release.clone(),
+            }),
+        )))
+        .await?;
+    service.wait_started().await?;
+    let mut stopping = Box::pin(instance.stop());
+    tokio::select! {
+        _ = entered.notified() => {},
+        result = &mut stopping => anyhow::bail!("stop completed before the gate: {result:?}"),
+    }
+    drop(stopping);
+    assert!(Arc::ptr_eq(
+        &core,
+        &instance
+            .get_drasi_lib()
+            .await
+            .context("stop lost the owner")?
+    ));
+    assert_eq!(
+        instance.get_state().await,
+        TestRunDrasiLibInstanceState::Stopping
+    );
+    assert!(
+        instance.start().await.is_err(),
+        "cancelled shutdown must not report a successful restart"
+    );
+    release.notify_one();
+    instance.stop().await?;
+    assert!(instance.get_drasi_lib().await.is_none());
+    assert!(!core.is_running().await);
+    Ok(())
+}
+
+#[test]
+fn native_instance_programmatic_dependencies_metadata_and_lifecycle() -> Result<()> {
+    both_runtimes(native_programmatic_lifecycle)
+}
+
+#[test]
+fn native_instance_fanout_keeps_exact_per_query_order_and_count() -> Result<()> {
+    both_runtimes(native_multi_query_results)
+}
+
+#[test]
+fn native_instance_failed_start_keeps_cleanup_ownership() -> Result<()> {
+    both_runtimes(native_failed_start_retains_owner)
+}
+
+#[test]
+fn native_instance_cancelled_shutdown_can_be_awaited_again() -> Result<()> {
+    both_runtimes(native_cancelled_stop_retains_owner)
 }

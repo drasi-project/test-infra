@@ -412,7 +412,7 @@ impl TestRunHost {
             (LifecycleTx::disabled(), None)
         };
 
-        let mut test_run = TestRun {
+        let test_run = TestRun {
             id: test_run_id.clone(),
             drasi_lib_instances: HashMap::new(),
             queries: HashMap::new(),
@@ -422,45 +422,53 @@ impl TestRunHost {
             lifecycle_tx,
             completion_monitoring_task,
         };
-
-        // Add drasi instances first (they need to be available for other components)
-        for mut instance_config in config.drasi_lib_instances {
-            instance_config.test_id = Some(config.test_id.clone());
-            instance_config.test_repo_id = Some(config.test_repo_id.clone());
-            instance_config.test_run_id = Some(config.test_run_id.clone());
-            self.add_drasi_lib_instance_to_test_run(&mut test_run, instance_config)
-                .await?;
-        }
-
-        // Add queries
-        for mut query_config in config.queries {
-            query_config.test_id = Some(config.test_id.clone());
-            query_config.test_repo_id = Some(config.test_repo_id.clone());
-            query_config.test_run_id = Some(config.test_run_id.clone());
-            self.add_query_to_test_run(&mut test_run, query_config)
-                .await?;
-        }
-
-        // Add reactions
-        for mut reaction_config in config.reactions {
-            reaction_config.test_id = Some(config.test_id.clone());
-            reaction_config.test_repo_id = Some(config.test_repo_id.clone());
-            reaction_config.test_run_id = Some(config.test_run_id.clone());
-            self.add_reaction_to_test_run(&mut test_run, reaction_config)
-                .await?;
-        }
-
-        // Add sources
-        for mut source_config in config.sources {
-            source_config.test_id = Some(config.test_id.clone());
-            source_config.test_repo_id = Some(config.test_repo_id.clone());
-            source_config.test_run_id = Some(config.test_run_id.clone());
-            self.add_source_to_test_run(&mut test_run, source_config)
-                .await?;
-        }
-
-        test_run.status = TestRunStatus::Running;
         test_runs_lock.insert(test_run_id.clone(), test_run);
+        let test_run = test_runs_lock
+            .get_mut(&test_run_id)
+            .expect("test run was just registered");
+
+        let configured = async {
+            // Add drasi instances first (they need to be available for other components)
+            for mut instance_config in config.drasi_lib_instances {
+                instance_config.test_id = Some(config.test_id.clone());
+                instance_config.test_repo_id = Some(config.test_repo_id.clone());
+                instance_config.test_run_id = Some(config.test_run_id.clone());
+                self.add_drasi_lib_instance_to_test_run(test_run, instance_config)
+                    .await?;
+            }
+
+            // Add queries
+            for mut query_config in config.queries {
+                query_config.test_id = Some(config.test_id.clone());
+                query_config.test_repo_id = Some(config.test_repo_id.clone());
+                query_config.test_run_id = Some(config.test_run_id.clone());
+                self.add_query_to_test_run(test_run, query_config).await?;
+            }
+
+            // Add reactions
+            for mut reaction_config in config.reactions {
+                reaction_config.test_id = Some(config.test_id.clone());
+                reaction_config.test_repo_id = Some(config.test_repo_id.clone());
+                reaction_config.test_run_id = Some(config.test_run_id.clone());
+                self.add_reaction_to_test_run(test_run, reaction_config)
+                    .await?;
+            }
+
+            // Add sources
+            for mut source_config in config.sources {
+                source_config.test_id = Some(config.test_id.clone());
+                source_config.test_repo_id = Some(config.test_repo_id.clone());
+                source_config.test_run_id = Some(config.test_run_id.clone());
+                self.add_source_to_test_run(test_run, source_config).await?;
+            }
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        if let Err(error) = configured {
+            test_run.status = TestRunStatus::Error(format!("{error:#}"));
+            return Err(error);
+        }
+        test_run.status = TestRunStatus::Running;
 
         Ok(test_run_id)
     }
@@ -470,6 +478,16 @@ impl TestRunHost {
 
         let test_runs = self.test_runs.read().await;
         for (test_run_id, test_run) in test_runs.iter() {
+            for instance in test_run.drasi_lib_instances.values() {
+                if instance.definition.start_immediately
+                    && matches!(
+                        instance.get_state().await,
+                        TestRunDrasiLibInstanceState::Uninitialized
+                    )
+                {
+                    instance.start().await?;
+                }
+            }
             // Set TestRunHost on all sources
             for (source_id, source) in test_run.sources.iter() {
                 log::debug!(
@@ -557,12 +575,18 @@ impl TestRunHost {
             .get_test_run_drasi_lib_instance_storage(&id)
             .await?;
 
+        let start_immediately = definition.start_immediately;
         let test_run_drasi_lib_instance =
-            TestRunDrasiLibInstance::new(definition, output_storage, test_run.lifecycle_tx.clone())
+            TestRunDrasiLibInstance::new(definition, output_storage, test_run.lifecycle_tx.clone());
+        test_run.drasi_lib_instances.insert(
+            test_drasi_lib_instance_id.clone(),
+            test_run_drasi_lib_instance,
+        );
+        if start_immediately && matches!(*self.status.read().await, TestRunHostStatus::Running) {
+            test_run.drasi_lib_instances[&test_drasi_lib_instance_id]
+                .start()
                 .await?;
-        test_run
-            .drasi_lib_instances
-            .insert(test_drasi_lib_instance_id, test_run_drasi_lib_instance);
+        }
 
         Ok(())
     }
@@ -1328,13 +1352,16 @@ impl TestRunHost {
             .await?;
 
         // Create the TestRunDrasiLibInstance and add it to the TestRun.
+        let start_immediately = definition.start_immediately;
         let test_run_drasi_lib_instance_obj =
-            TestRunDrasiLibInstance::new(definition, output_storage, test_run.lifecycle_tx.clone())
-                .await?;
+            TestRunDrasiLibInstance::new(definition, output_storage, test_run.lifecycle_tx.clone());
 
         test_run
             .drasi_lib_instances
-            .insert(instance_id, test_run_drasi_lib_instance_obj);
+            .insert(instance_id.clone(), test_run_drasi_lib_instance_obj);
+        if start_immediately {
+            test_run.drasi_lib_instances[&instance_id].start().await?;
+        }
 
         Ok(id)
     }
@@ -1379,15 +1406,12 @@ impl TestRunHost {
             Some(test_run) => {
                 if let Some(instance) = test_run
                     .drasi_lib_instances
-                    .remove(&test_run_drasi_lib_instance_id.test_drasi_lib_instance_id)
+                    .get(&test_run_drasi_lib_instance_id.test_drasi_lib_instance_id)
                 {
-                    // Stop the instance if it's running
-                    if matches!(
-                        instance.get_state().await,
-                        TestRunDrasiLibInstanceState::Running
-                    ) {
-                        instance.stop().await?;
-                    }
+                    instance.stop().await?;
+                    test_run
+                        .drasi_lib_instances
+                        .remove(&test_run_drasi_lib_instance_id.test_drasi_lib_instance_id);
                     Ok(())
                 } else {
                     anyhow::bail!(
@@ -1514,12 +1538,7 @@ impl TestRunHost {
 
                 // Stop drasi instances
                 for instance in test_run.drasi_lib_instances.values() {
-                    if matches!(
-                        instance.get_state().await,
-                        TestRunDrasiLibInstanceState::Running
-                    ) {
-                        instance.stop().await?;
-                    }
+                    instance.stop().await?;
                 }
 
                 test_run.status = TestRunStatus::Stopped;
@@ -1530,14 +1549,19 @@ impl TestRunHost {
     }
 
     pub async fn delete_test_run(&self, test_run_id: &TestRunId) -> anyhow::Result<()> {
-        // First stop the test run if it's running
+        // Failed initialization can retain live component owners too.
         let status = self.get_test_run_status(test_run_id).await?;
-        if status == TestRunStatus::Running {
+        if status != TestRunStatus::Stopped {
             self.stop_test_run(test_run_id).await?;
         }
 
         // Remove the test run
         let mut test_runs = self.test_runs.write().await;
+        if let Some(run) = test_runs.get(test_run_id) {
+            for instance in run.drasi_lib_instances.values() {
+                instance.stop().await?;
+            }
+        }
         test_runs
             .remove(test_run_id)
             .ok_or_else(|| anyhow::anyhow!("TestRun not found: {test_run_id:?}"))?;

@@ -248,14 +248,14 @@ pub async fn create_reaction_handler(
             Ok(Box::new(GrpcReactionHandler::new(id, def).await?))
         }
         ReactionHandlerDefinition::DrasiLibInstanceCallback(def) => {
-            use super::reaction_handlers::drasi_lib_instance_callback_handler::DrasiLibInstanceCallbackHandler;
-            DrasiLibInstanceCallbackHandler::create(id, def)
+            use super::reaction_handlers::drasi_lib_instance_handler::DrasiLibInstanceHandler;
+            DrasiLibInstanceHandler::create_callback(id, def)
                 .await
                 .map(|h| h as Box<dyn ReactionOutputHandler + Send + Sync>)
         }
         ReactionHandlerDefinition::DrasiLibInstanceChannel(def) => {
-            use super::reaction_handlers::drasi_lib_instance_channel_handler::DrasiLibInstanceChannelHandler;
-            DrasiLibInstanceChannelHandler::create(id, def)
+            use super::reaction_handlers::drasi_lib_instance_handler::DrasiLibInstanceHandler;
+            DrasiLibInstanceHandler::create_channel(id, def)
                 .await
                 .map(|h| h as Box<dyn ReactionOutputHandler + Send + Sync>)
         }

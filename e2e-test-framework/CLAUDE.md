@@ -199,7 +199,31 @@ Schema shape:
 }
 ```
 
-Lifecycle: `DrasiLib::builder().with_id(...).with_source(...).with_query(...).with_reaction(...).build().await?`, then `core.start().await?`; shutdown uses `core.shutdown().await?`. Only `kind == "application"` sources and reactions are supported initially.
+Lifecycle: construct and register `TestRunDrasiLibInstance::new(...)` before
+awaiting `start()`. Initial host configuration starts these registered owners in
+`initialize_sources`; programmatic additions register before honoring
+`start_immediately`. Native source/reaction batches and
+`computation_pipeline().native_source(...).query(...)` build the instance's
+single graph. Only `kind == "application"` sources and reactions are supported.
+The host has no application/noop bootstrap or old plugin-SDK dependency.
+
+Keep `auto_start` and properties intact in initial configuration and CRUD. Native
+reaction pipes are explicitly bounded; query `dispatch_mode` controls catalogue
+readers, not those pipes. Volatile source buffering does not imply durability;
+legacy WAL settings are rejected rather than silently downgraded.
+
+Shutdown uses `core.shutdown().await?`. Failed startup and interrupted shutdown
+retain the core and component handles until cleanup succeeds. Preserve the
+`Stopping` state and do not remove a registered instance before awaited shutdown.
+Native reaction receivers transfer once to their owned handler; do not replace
+an already transferred binding during an update.
+
+The application input dispatcher uses a weak host reference and releases the
+test-run registry read guard before forwarding. Its owned worker is joined
+gracefully without taking the handle across an await. Cancelled/timed-out close
+retains ownership; queued input is removed only after a channel permit is held.
+Validate batches before enqueueing, preserve native graph values and logical
+event timestamps, and surface/latch worker failures instead of silently skipping.
 
 ## External Drasi Server Testing
 

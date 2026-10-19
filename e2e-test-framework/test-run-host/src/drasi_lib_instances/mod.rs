@@ -16,14 +16,10 @@ use std::{collections::HashMap, fmt, sync::Arc};
 
 use anyhow::Context;
 use derive_more::Debug;
-use drasi_bootstrap_noop::NoOpBootstrapProvider;
-use drasi_lib::{DrasiLib, QueryConfig, Source};
-use drasi_reaction_application::{ApplicationReaction, ApplicationReactionHandle};
-use drasi_source_application::{
-    ApplicationSource, ApplicationSourceConfig, ApplicationSourceHandle,
-};
+use drasi_lib::{computation::v1::InputEnvelope, DrasiLib, QueryConfig};
+use drasi_source_application::ApplicationSourceHandle;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, Mutex, RwLock};
 use utoipa::ToSchema;
 
 use test_data_store::{
@@ -40,7 +36,7 @@ pub mod api_models;
 pub mod programmatic_api;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Runtime configuration for a test run drasi-lib instance.
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
@@ -163,6 +159,7 @@ impl TestRunDrasiLibInstanceDefinition {
 pub enum TestRunDrasiLibInstanceState {
     Uninitialized,
     Running,
+    Stopping,
     Stopped,
     Error(String),
 }
@@ -172,6 +169,7 @@ impl fmt::Display for TestRunDrasiLibInstanceState {
         match self {
             Self::Uninitialized => write!(f, "Uninitialized"),
             Self::Running => write!(f, "Running"),
+            Self::Stopping => write!(f, "Stopping"),
             Self::Stopped => write!(f, "Stopped"),
             Self::Error(message) => write!(f, "Error: {message}"),
         }
@@ -187,49 +185,54 @@ pub struct TestRunDrasiLibInstance {
     #[debug(skip)]
     pub source_handles: Arc<RwLock<HashMap<String, ApplicationSourceHandle>>>,
     #[debug(skip)]
-    pub reaction_handles: Arc<RwLock<HashMap<String, ApplicationReactionHandle>>>,
+    pub reaction_receivers: Arc<RwLock<HashMap<String, mpsc::Receiver<InputEnvelope>>>>,
     pub state: Arc<RwLock<TestRunDrasiLibInstanceState>>,
     pub storage: TestRunDrasiLibInstanceStorage,
     pub id: TestRunDrasiLibInstanceId,
     #[debug(skip)]
     lifecycle_tx: crate::test_run_completion::LifecycleTx,
+    #[debug(skip)]
+    lifecycle: Mutex<()>,
 }
 
 impl TestRunDrasiLibInstance {
-    /// Create a new drasi-lib instance and optionally start it immediately.
-    pub async fn new(
+    /// Construct an unstarted owner. Register it before awaiting `start`.
+    pub fn new(
         definition: TestRunDrasiLibInstanceDefinition,
         storage: TestRunDrasiLibInstanceStorage,
         lifecycle_tx: crate::test_run_completion::LifecycleTx,
-    ) -> anyhow::Result<Self> {
-        let instance = Self {
+    ) -> Self {
+        Self {
             id: definition.id.clone(),
             definition,
             core: Arc::new(RwLock::new(None)),
             source_handles: Arc::new(RwLock::new(HashMap::new())),
-            reaction_handles: Arc::new(RwLock::new(HashMap::new())),
+            reaction_receivers: Arc::new(RwLock::new(HashMap::new())),
             state: Arc::new(RwLock::new(TestRunDrasiLibInstanceState::Uninitialized)),
             storage,
             lifecycle_tx,
-        };
-        if instance.definition.start_immediately {
-            instance.start().await?;
+            lifecycle: Mutex::new(()),
         }
-        Ok(instance)
     }
 
     /// Start this drasi-lib instance.
     pub async fn start(&self) -> anyhow::Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
         let current = self.state.read().await.clone();
         if matches!(current, TestRunDrasiLibInstanceState::Running) {
             return Ok(());
         }
+        anyhow::ensure!(
+            self.core.read().await.is_none(),
+            "the previous drasi-lib instance must be stopped before restarting"
+        );
 
         let config = self.definition.effective_config();
-        let mut builder = DrasiLib::builder().with_id(self.id.to_string());
-        let mut source_handles = HashMap::new();
-        let mut reaction_handles = HashMap::new();
-
+        let configured = async {
+        let mut owner = self.core.write().await;
+        let core = Arc::new(DrasiLib::builder().with_id(self.id.to_string()).build().await?);
+        *owner = Some(core.clone());
+        drop(owner);
         for source_config in &config.sources {
             if source_config.kind != "application" {
                 anyhow::bail!(
@@ -238,22 +241,19 @@ impl TestRunDrasiLibInstance {
                     source_config.id
                 );
             }
-            let source_options: ApplicationSourceConfig =
-                serde_json::from_value(if source_config.config.is_null() {
-                    serde_json::json!({})
-                } else {
-                    source_config.config.clone()
-                })
-                .with_context(|| {
-                    format!("Invalid application source config: {}", source_config.id)
-                })?;
-            let (source, handle) =
-                ApplicationSource::new(source_config.id.clone(), source_options)?;
-            source
-                .set_bootstrap_provider(Box::new(NoOpBootstrapProvider::new()))
-                .await;
-            source_handles.insert(source_config.id.clone(), handle);
-            builder = builder.with_source(source);
+            let options = if source_config.config.is_null() {
+                serde_json::json!({})
+            } else {
+                source_config.config.clone()
+            };
+            let handle = Self::add_native_application_source(
+                &core,
+                &self.id.to_string(),
+                &source_config.id,
+                &options,
+                source_config.auto_start,
+            ).await?;
+            self.source_handles.write().await.insert(source_config.id.clone(), handle);
         }
 
         for query_config in &config.queries {
@@ -278,7 +278,7 @@ impl TestRunDrasiLibInstance {
             query.query = defaults.query;
             query.auto_start = defaults.auto_start;
             query.sources = defaults.sources;
-            builder = builder.with_query(query);
+            Self::add_native_query(&core, query).await?;
         }
 
         for reaction_config in &config.reactions {
@@ -289,22 +289,31 @@ impl TestRunDrasiLibInstance {
                     reaction_config.id
                 );
             }
-            let (reaction, handle) = ApplicationReaction::builder(reaction_config.id.clone())
-                .with_queries(reaction_config.queries.clone())
-                .with_auto_start(reaction_config.auto_start)
-                .build();
-            reaction_handles.insert(reaction_config.id.clone(), handle);
-            builder = builder.with_reaction(reaction);
+            let properties = if reaction_config.config.is_null() {
+                serde_json::json!({})
+            } else {
+                reaction_config.config.clone()
+            };
+            let receiver = Self::add_native_application_reaction(
+                &core,
+                &reaction_config.id,
+                &reaction_config.queries,
+                reaction_config.auto_start,
+                &properties,
+            ).await?;
+            self.reaction_receivers.write().await.insert(reaction_config.id.clone(), receiver);
         }
 
-        let core = Arc::new(builder.build().await?);
-        core.start().await?;
         self.storage
             .write_instance_config(&serde_json::to_value(&config)?)
             .await?;
-        *self.core.write().await = Some(core);
-        *self.source_handles.write().await = source_handles;
-        *self.reaction_handles.write().await = reaction_handles;
+        core.start().await?;
+        Ok::<_, anyhow::Error>(())
+        }.await;
+        if let Err(error) = configured {
+            *self.state.write().await = TestRunDrasiLibInstanceState::Error(error.to_string());
+            return Err(error);
+        }
         *self.state.write().await = TestRunDrasiLibInstanceState::Running;
         self.lifecycle_tx
             .drasi_lib_instance_started(self.id.clone());
@@ -313,11 +322,19 @@ impl TestRunDrasiLibInstance {
 
     /// Stop this drasi-lib instance.
     pub async fn stop(&self) -> anyhow::Result<()> {
-        if let Some(core) = self.core.write().await.take() {
-            core.shutdown().await?;
+        let _lifecycle = self.lifecycle.lock().await;
+        let mut instance = self.core.write().await;
+        if let Some(core) = instance.as_ref() {
+            *self.state.write().await = TestRunDrasiLibInstanceState::Stopping;
+            if let Err(error) = core.shutdown().await {
+                *self.state.write().await =
+                    TestRunDrasiLibInstanceState::Error(format!("{error:#}"));
+                return Err(error.into());
+            }
         }
+        *instance = None;
         self.source_handles.write().await.clear();
-        self.reaction_handles.write().await.clear();
+        self.reaction_receivers.write().await.clear();
         *self.state.write().await = TestRunDrasiLibInstanceState::Stopped;
         self.lifecycle_tx
             .drasi_lib_instance_stopped(self.id.clone());
@@ -356,17 +373,19 @@ impl TestRunDrasiLibInstance {
             .ok_or_else(|| anyhow::anyhow!("drasi-lib instance source handle not found: {name}"))
     }
 
-    /// Get an application reaction handle by reaction name.
-    pub async fn get_reaction_handle(
+    /// Transfer the application's native reaction receiver to its one consumer.
+    pub async fn take_reaction_receiver(
         &self,
         name: &str,
-    ) -> anyhow::Result<ApplicationReactionHandle> {
-        self.reaction_handles
-            .read()
+    ) -> anyhow::Result<mpsc::Receiver<InputEnvelope>> {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.reaction_receivers
+            .write()
             .await
-            .get(name)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("drasi-lib instance reaction handle not found: {name}"))
+            .remove(name)
+            .ok_or_else(|| {
+                anyhow::anyhow!("reaction receiver '{name}' is unavailable or already taken")
+            })
     }
 
     async fn with_core<F, Fut, T>(&self, f: F) -> anyhow::Result<T>

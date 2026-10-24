@@ -1,0 +1,7 @@
+{
+  "actual_sha256": "f53a8e949413c448dc7816b5b0e8dff751dd649fd403f7640d724683e6f7c527",
+  "crash_injected": false,
+  "status": "passed",
+  "test_run_id": "drasi_server_dev_repo.building_comfort.run_7c115fe98798457399e77cbeb641f084",
+  "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5"
+}

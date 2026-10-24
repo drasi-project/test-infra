@@ -38,6 +38,14 @@ whether a report file exists. Build/run errors from Cargo have Cargo's exit code
 
 ## Complete-boundary gRPC qualification
 
+The manual [completed recovery workflow](../../../.github/workflows/e2e-building-comfort-completion.yml)
+builds Core, Server and the gRPC libraries from the selected revisions, then
+requires both a fresh completed reference and exact crash/recovery comparison.
+It never downloads replacement plugins or accepts an advisory verdict. Select
+feature revisions until their metrics support has reached the default branches.
+The older multi-transport scheduled workflow remains a separate snapshot gate,
+not evidence that terminal processing and delivery completed.
+
 `qualify_building_comfort.py` runs the actual Server and test-service executables
 with freshly built gRPC source/reaction libraries. It creates a new, private
 work directory and never resets an existing run. Supply matching binaries and

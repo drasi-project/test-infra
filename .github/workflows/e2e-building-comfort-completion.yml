@@ -1,0 +1,122 @@
+name: E2E - completed Building Comfort recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      core_ref:
+        description: Core revision containing committed-query progress support
+        required: true
+        default: main
+      server_ref:
+        description: Server revision containing the owned OTLP exporter
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  completed-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_DEV_STRIP: none
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: test-infra
+      - uses: actions/checkout@v5
+        with:
+          repository: drasi-project/drasi-core
+          ref: ${{ inputs.core_ref }}
+          path: drasi-core
+      - uses: actions/checkout@v5
+        with:
+          repository: drasi-project/drasi-server
+          ref: ${{ inputs.server_ref }}
+          path: drasi-server
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - name: Prepare native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+            protobuf-compiler cmake clang libclang-dev
+          echo "JQ_LIB_DIR=$(dirname "$(find /usr/lib -name libjq.so -print -quit)")" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/completion-target" >> "$GITHUB_ENV"
+          echo "RESULTS=$RUNNER_TEMP/completed-recovery" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/completed-recovery"
+      - name: Validate completion evidence checks
+        run: |
+          python3 -m unittest discover \
+            -s test-infra/e2e-test-framework/examples/recovery_comparison \
+            -p 'test_*.py'
+      - name: Build matching Server and gRPC libraries
+        run: |
+          cargo build --locked --manifest-path drasi-server/Cargo.toml --bin drasi-server
+          # Core's root lock is not tracked. Preserve the consumer's resolved
+          # versions where possible, then retain the generated plugin lock.
+          if [[ ! -f drasi-core/Cargo.lock ]]; then
+            cp drasi-server/Cargo.lock drasi-core/Cargo.lock
+          fi
+          cargo build --manifest-path drasi-core/Cargo.toml \
+            -p drasi-source-grpc -p drasi-reaction-grpc \
+            --features drasi-source-grpc/dynamic-plugin,drasi-reaction-grpc/dynamic-plugin
+          cp drasi-core/Cargo.lock "$RESULTS/core-Cargo.lock"
+          cp drasi-server/Cargo.lock "$RESULTS/server-Cargo.lock"
+      - name: Build the actual test service and strict comparator
+        run: |
+          cargo build --locked --manifest-path test-infra/e2e-test-framework/Cargo.toml \
+            -p test-service -p test-run-host --bin test-service --bin recovery-compare
+          cp test-infra/e2e-test-framework/Cargo.lock "$RESULTS/test-infra-Cargo.lock"
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          metadata = {
+              repo: subprocess.check_output(["git", "-C", repo, "rev-parse", "HEAD"], text=True).strip()
+              for repo in ("drasi-core", "drasi-server", "test-infra")
+          }
+          metadata["rustc"] = subprocess.check_output(["rustc", "--version"], text=True).strip()
+          metadata["profile"] = "debug; freshly built matching gRPC libraries"
+          Path(os.environ["RESULTS"], "build.json").write_text(json.dumps(metadata, indent=2))
+          PY
+      - name: Capture a genuinely completed 100000-input reference
+        run: |
+          python3 test-infra/e2e-test-framework/examples/recovery_comparison/qualify_building_comfort.py \
+            --server-bin "$CARGO_TARGET_DIR/debug/drasi-server" \
+            --test-service-bin "$CARGO_TARGET_DIR/debug/test-service" \
+            --compare-bin "$CARGO_TARGET_DIR/debug/recovery-compare" \
+            --plugins-dir "$CARGO_TARGET_DIR/debug" \
+            --build-metadata "$RESULTS/build.json" \
+            --output "$RESULTS/reference" --timeout 1800
+      - name: Require exact pending-input SIGKILL recovery
+        run: |
+          python3 test-infra/e2e-test-framework/examples/recovery_comparison/qualify_building_comfort.py \
+            --server-bin "$CARGO_TARGET_DIR/debug/drasi-server" \
+            --test-service-bin "$CARGO_TARGET_DIR/debug/test-service" \
+            --compare-bin "$CARGO_TARGET_DIR/debug/recovery-compare" \
+            --plugins-dir "$CARGO_TARGET_DIR/debug" \
+            --build-metadata "$RESULTS/build.json" \
+            --output "$RESULTS/recovery" --timeout 1800 \
+            --baseline "$RESULTS/reference/actual.json" --crash
+      - name: Retain completion, state, delivery and build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: completed-building-comfort-recovery
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/completed-recovery/*.json
+            ${{ runner.temp }}/completed-recovery/*.lock
+            ${{ runner.temp }}/completed-recovery/reference/*.json
+            ${{ runner.temp }}/completed-recovery/reference/*.log
+            ${{ runner.temp }}/completed-recovery/reference/otel/*.jsonl
+            ${{ runner.temp }}/completed-recovery/recovery/*.json
+            ${{ runner.temp }}/completed-recovery/recovery/*.log
+            ${{ runner.temp }}/completed-recovery/recovery/otel/*.jsonl

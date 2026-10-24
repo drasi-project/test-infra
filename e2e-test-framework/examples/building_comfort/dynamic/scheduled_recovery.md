@@ -55,6 +55,13 @@ recovery gates remain enforced; the shared handler still uses `enforce: false`.
 
 ## Unfinished Terminal-Boundary Verification (#70)
 
+The separate [completed gRPC workflow](../../../../.github/workflows/e2e-building-comfort-completion.yml)
+now requires a fresh matching-build reference, actual pending-input SIGKILL
+recovery, OTel query progress, fully recorded receiver batches and exact
+comparison. A [completed v2 reference and recovery record](../../recovery_comparison/goldens/building-comfort-small-v2)
+preserves the qualified 100,000-input case. That does not upgrade the older
+multi-transport workflow described on this page.
+
 The workflow enforces equality of captured snapshots, not proof that those
 snapshots represent the fully processed terminal state. The stored golden has
 `capture.complete: false`, and the generated handler has no terminal-boundary

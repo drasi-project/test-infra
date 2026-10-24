@@ -1,0 +1,72 @@
+{
+  "binary_and_plugin_hashes_rechecked": true,
+  "comparison": {
+    "missing_queries": [],
+    "queries": [
+      {
+        "delivery": {
+          "actual_observations": 99981,
+          "conflicting": [],
+          "duplicates": {},
+          "expected_observations": 99981,
+          "missing": [],
+          "reason": null,
+          "reordered": false,
+          "unexpected": [],
+          "verdict": "passed"
+        },
+        "query_id": "building-comfort",
+        "state": {
+          "missing": [],
+          "reason": null,
+          "unexpected": [],
+          "verdict": "passed"
+        }
+      },
+      {
+        "delivery": {
+          "actual_observations": 49860,
+          "conflicting": [],
+          "duplicates": {},
+          "expected_observations": 49860,
+          "missing": [],
+          "reason": null,
+          "reordered": false,
+          "unexpected": [],
+          "verdict": "passed"
+        },
+        "query_id": "building-comfort-floor-agg",
+        "state": {
+          "missing": [],
+          "reason": null,
+          "unexpected": [],
+          "verdict": "passed"
+        }
+      }
+    ],
+    "reasons": [],
+    "schema_version": 1,
+    "unexpected_queries": [],
+    "verdict": "passed",
+    "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5"
+  },
+  "replay_log_lines": [
+    "2026-10-24T10:46:03.842274Z  INFO drasi_host_sdk::callbacks: [plugin:facilities-db] [facilities-db] WAL resumed from persisted state: head=100000, next_sequence=100001",
+    "2026-10-24T10:46:23.350627Z  INFO drasi_host_sdk::callbacks: [plugin:grpc-source] Query 'building-comfort' subscribing to gRPC source 'facilities-db' with WAL replay from seq 100000",
+    "2026-10-24T10:46:23.350751Z  INFO drasi_host_sdk::callbacks: [plugin:grpc-source] [facilities-db] WAL replay: 0 events (seq 100001..=100000)",
+    "2026-10-24T10:46:34.490259Z  INFO drasi_host_sdk::callbacks: [plugin:grpc-source] Query 'building-comfort-floor-agg' subscribing to gRPC source 'facilities-db' with WAL replay from seq 88748",
+    "2026-10-24T10:46:34.540542Z  INFO drasi_host_sdk::callbacks: [plugin:grpc-source] [facilities-db] WAL replay: 11252 events (seq 88749..=100000)"
+  ],
+  "restored_input_cursors": {
+    "building-comfort": 100000,
+    "building-comfort-floor-agg": 88748
+  },
+  "result": {
+    "actual_sha256": "6f631d0e2921f72836d7734c20de62e86603a4e2e1e3603197a2c9f0c9ae584f",
+    "crash_injected": true,
+    "status": "passed",
+    "test_run_id": "drasi_server_dev_repo.building_comfort.run_aae0e924ba86411db3699ce5e38dd815",
+    "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5"
+  },
+  "server_restart_log_sha256": "4330092f2d78becef964212539c9f0b1bd082a40da998d0cb2b01cae89da7d24"
+}

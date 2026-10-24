@@ -1,0 +1,20 @@
+{
+  "binaries": {
+    "comparator": "73e27ec3b3b113bd0d567837a6ec3d0da60ed96d2a272d1491f99df8fc85e56a",
+    "server": "b553c9f6e5961e4b72cda199493064f939ac99edeaa22af365a1fdc67ee6e080",
+    "test_service": "e32c3dc1a2877096167f4bafc08c98295bbcd1873f8082881cfbb482c6d6742f"
+  },
+  "boundary_validator_sha256": "2ae487b58fd0afb30fe218d0bd48f0d851b8d6e686eadb81f907c3601424f96a",
+  "build": {
+    "drasi-core": "3dd8a27d4d7d38e48031be0d3774d255e35300e0",
+    "drasi-server": "006b038cffffd948cd54d4b4fb71f57e5e27aa02",
+    "profile": "Rust 1.95.0, debug, incremental disabled; rebuilt after WAL startup retention repair",
+    "test-infra": "2aef8c3463b7e8d1b98186b4f6c8b6f5896f4ac3"
+  },
+  "plugins": {
+    "libdrasi_reaction_grpc.dylib": "1699f1419e4ac0219bb15975bdad9ba1b47d175569b66c73c83c55a524df01c7",
+    "libdrasi_source_grpc.dylib": "e9716845709ad9f25be968370f4645911e7ad872da30e33de5230724dd319e71"
+  },
+  "runner_sha256": "76e75c22ddfeedd31d3b2ed48777ab318e45f232f0d0b587e564b62042b72f7b",
+  "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5"
+}

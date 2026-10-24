@@ -1,0 +1,301 @@
+{
+  "nodes": {
+    "B_000": {
+      "id": "B_000",
+      "labels": [
+        "Building"
+      ],
+      "properties": {}
+    },
+    "F_000_000": {
+      "id": "F_000_000",
+      "labels": [
+        "Floor"
+      ],
+      "properties": {}
+    },
+    "F_000_001": {
+      "id": "F_000_001",
+      "labels": [
+        "Floor"
+      ],
+      "properties": {}
+    },
+    "F_000_002": {
+      "id": "F_000_002",
+      "labels": [
+        "Floor"
+      ],
+      "properties": {}
+    },
+    "R_000_000_000": {
+      "id": "R_000_000_000",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 5049.0,
+        "humidity": 5265.0,
+        "temperature": 4950.0
+      }
+    },
+    "R_000_000_001": {
+      "id": "R_000_000_001",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 5276.0,
+        "humidity": 5026.0,
+        "temperature": 4905.0
+      }
+    },
+    "R_000_000_002": {
+      "id": "R_000_000_002",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 5105.0,
+        "humidity": 4799.0,
+        "temperature": 4935.0
+      }
+    },
+    "R_000_000_003": {
+      "id": "R_000_000_003",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 4736.0,
+        "humidity": 5088.0,
+        "temperature": 5011.0
+      }
+    },
+    "R_000_001_000": {
+      "id": "R_000_001_000",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 4769.0,
+        "humidity": 5061.0,
+        "temperature": 5111.0
+      }
+    },
+    "R_000_001_001": {
+      "id": "R_000_001_001",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 5053.0,
+        "humidity": 5159.0,
+        "temperature": 4843.0
+      }
+    },
+    "R_000_001_002": {
+      "id": "R_000_001_002",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 4982.0,
+        "humidity": 5000.0,
+        "temperature": 5041.0
+      }
+    },
+    "R_000_001_003": {
+      "id": "R_000_001_003",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 4780.0,
+        "humidity": 4809.0,
+        "temperature": 4900.0
+      }
+    },
+    "R_000_002_000": {
+      "id": "R_000_002_000",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 4959.0,
+        "humidity": 4933.0,
+        "temperature": 4929.0
+      }
+    },
+    "R_000_002_001": {
+      "id": "R_000_002_001",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 4822.0,
+        "humidity": 4894.0,
+        "temperature": 5116.0
+      }
+    },
+    "R_000_002_002": {
+      "id": "R_000_002_002",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 5172.0,
+        "humidity": 4928.0,
+        "temperature": 4969.0
+      }
+    },
+    "R_000_002_003": {
+      "id": "R_000_002_003",
+      "labels": [
+        "Room"
+      ],
+      "properties": {
+        "co2": 5045.0,
+        "humidity": 4958.0,
+        "temperature": 5095.0
+      }
+    }
+  },
+  "relations": {
+    "BFR_B_000_F_000_000": {
+      "end_id": "F_000_000",
+      "id": "BFR_B_000_F_000_000",
+      "labels": [
+        "BUILDING_FLOOR"
+      ],
+      "properties": {},
+      "start_id": "B_000"
+    },
+    "BFR_B_000_F_000_001": {
+      "end_id": "F_000_001",
+      "id": "BFR_B_000_F_000_001",
+      "labels": [
+        "BUILDING_FLOOR"
+      ],
+      "properties": {},
+      "start_id": "B_000"
+    },
+    "BFR_B_000_F_000_002": {
+      "end_id": "F_000_002",
+      "id": "BFR_B_000_F_000_002",
+      "labels": [
+        "BUILDING_FLOOR"
+      ],
+      "properties": {},
+      "start_id": "B_000"
+    },
+    "BFR_F_000_000_R_000_000_000": {
+      "end_id": "R_000_000_000",
+      "id": "BFR_F_000_000_R_000_000_000",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_000"
+    },
+    "BFR_F_000_000_R_000_000_001": {
+      "end_id": "R_000_000_001",
+      "id": "BFR_F_000_000_R_000_000_001",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_000"
+    },
+    "BFR_F_000_000_R_000_000_002": {
+      "end_id": "R_000_000_002",
+      "id": "BFR_F_000_000_R_000_000_002",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_000"
+    },
+    "BFR_F_000_000_R_000_000_003": {
+      "end_id": "R_000_000_003",
+      "id": "BFR_F_000_000_R_000_000_003",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_000"
+    },
+    "BFR_F_000_001_R_000_001_000": {
+      "end_id": "R_000_001_000",
+      "id": "BFR_F_000_001_R_000_001_000",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_001"
+    },
+    "BFR_F_000_001_R_000_001_001": {
+      "end_id": "R_000_001_001",
+      "id": "BFR_F_000_001_R_000_001_001",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_001"
+    },
+    "BFR_F_000_001_R_000_001_002": {
+      "end_id": "R_000_001_002",
+      "id": "BFR_F_000_001_R_000_001_002",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_001"
+    },
+    "BFR_F_000_001_R_000_001_003": {
+      "end_id": "R_000_001_003",
+      "id": "BFR_F_000_001_R_000_001_003",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_001"
+    },
+    "BFR_F_000_002_R_000_002_000": {
+      "end_id": "R_000_002_000",
+      "id": "BFR_F_000_002_R_000_002_000",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_002"
+    },
+    "BFR_F_000_002_R_000_002_001": {
+      "end_id": "R_000_002_001",
+      "id": "BFR_F_000_002_R_000_002_001",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_002"
+    },
+    "BFR_F_000_002_R_000_002_002": {
+      "end_id": "R_000_002_002",
+      "id": "BFR_F_000_002_R_000_002_002",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_002"
+    },
+    "BFR_F_000_002_R_000_002_003": {
+      "end_id": "R_000_002_003",
+      "id": "BFR_F_000_002_R_000_002_003",
+      "labels": [
+        "FLOOR_ROOM"
+      ],
+      "properties": {},
+      "start_id": "F_000_002"
+    }
+  }
+}

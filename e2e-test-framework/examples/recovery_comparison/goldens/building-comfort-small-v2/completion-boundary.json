@@ -1,0 +1,358 @@
+{
+  "final_input_sequence": 100000,
+  "metrics_export": {
+    "body": {
+      "resourceMetrics": [
+        {
+          "resource": {
+            "attributes": [
+              {
+                "key": "service.name",
+                "value": {
+                  "stringValue": "drasi-server"
+                }
+              },
+              {
+                "key": "service.instance.id",
+                "value": {
+                  "stringValue": "a2928adc-3c5f-4943-a68b-fcba7c0f7588"
+                }
+              },
+              {
+                "key": "process.pid",
+                "value": {
+                  "intValue": "9020"
+                }
+              },
+              {
+                "key": "service.version",
+                "value": {
+                  "stringValue": "0.2.4"
+                }
+              }
+            ],
+            "droppedAttributesCount": 0,
+            "entityRefs": []
+          },
+          "schemaUrl": "",
+          "scopeMetrics": [
+            {
+              "metrics": [
+                {
+                  "description": "Committed logical input or produced output sequence of a ready query",
+                  "gauge": {
+                    "dataPoints": [
+                      {
+                        "asInt": "100000",
+                        "attributes": [
+                          {
+                            "key": "drasi.instance.id",
+                            "value": {
+                              "stringValue": "building-comfort-dynamic"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.id",
+                            "value": {
+                              "stringValue": "building-comfort-floor-agg"
+                            }
+                          },
+                          {
+                            "key": "drasi.component.generation",
+                            "value": {
+                              "stringValue": "7"
+                            }
+                          },
+                          {
+                            "key": "drasi.component.operation",
+                            "value": {
+                              "stringValue": "3"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.output.generation",
+                            "value": {
+                              "stringValue": "0"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.config_hash",
+                            "value": {
+                              "stringValue": "10467926270270006474"
+                            }
+                          },
+                          {
+                            "key": "drasi.progress.persistent",
+                            "value": {
+                              "boolValue": true
+                            }
+                          },
+                          {
+                            "key": "drasi.progress.stage",
+                            "value": {
+                              "stringValue": "input.committed"
+                            }
+                          },
+                          {
+                            "key": "drasi.input.kind",
+                            "value": {
+                              "stringValue": "source"
+                            }
+                          },
+                          {
+                            "key": "drasi.input.id",
+                            "value": {
+                              "stringValue": "facilities-db"
+                            }
+                          }
+                        ],
+                        "exemplars": [],
+                        "flags": 0,
+                        "startTimeUnixNano": "1792838064810163000",
+                        "timeUnixNano": "1792838065060892000"
+                      },
+                      {
+                        "asInt": "49860",
+                        "attributes": [
+                          {
+                            "key": "drasi.instance.id",
+                            "value": {
+                              "stringValue": "building-comfort-dynamic"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.id",
+                            "value": {
+                              "stringValue": "building-comfort-floor-agg"
+                            }
+                          },
+                          {
+                            "key": "drasi.component.generation",
+                            "value": {
+                              "stringValue": "7"
+                            }
+                          },
+                          {
+                            "key": "drasi.component.operation",
+                            "value": {
+                              "stringValue": "3"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.output.generation",
+                            "value": {
+                              "stringValue": "0"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.config_hash",
+                            "value": {
+                              "stringValue": "10467926270270006474"
+                            }
+                          },
+                          {
+                            "key": "drasi.progress.persistent",
+                            "value": {
+                              "boolValue": true
+                            }
+                          },
+                          {
+                            "key": "drasi.progress.stage",
+                            "value": {
+                              "stringValue": "output.produced"
+                            }
+                          }
+                        ],
+                        "exemplars": [],
+                        "flags": 0,
+                        "startTimeUnixNano": "1792838064810163000",
+                        "timeUnixNano": "1792838065060892000"
+                      },
+                      {
+                        "asInt": "99981",
+                        "attributes": [
+                          {
+                            "key": "drasi.component.generation",
+                            "value": {
+                              "stringValue": "3"
+                            }
+                          },
+                          {
+                            "key": "drasi.component.operation",
+                            "value": {
+                              "stringValue": "3"
+                            }
+                          },
+                          {
+                            "key": "drasi.instance.id",
+                            "value": {
+                              "stringValue": "building-comfort-dynamic"
+                            }
+                          },
+                          {
+                            "key": "drasi.progress.persistent",
+                            "value": {
+                              "boolValue": true
+                            }
+                          },
+                          {
+                            "key": "drasi.progress.stage",
+                            "value": {
+                              "stringValue": "output.produced"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.config_hash",
+                            "value": {
+                              "stringValue": "17250753498519931879"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.id",
+                            "value": {
+                              "stringValue": "building-comfort"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.output.generation",
+                            "value": {
+                              "stringValue": "0"
+                            }
+                          }
+                        ],
+                        "exemplars": [],
+                        "flags": 0,
+                        "startTimeUnixNano": "1792838064810163000",
+                        "timeUnixNano": "1792838065060892000"
+                      },
+                      {
+                        "asInt": "100000",
+                        "attributes": [
+                          {
+                            "key": "drasi.component.generation",
+                            "value": {
+                              "stringValue": "3"
+                            }
+                          },
+                          {
+                            "key": "drasi.component.operation",
+                            "value": {
+                              "stringValue": "3"
+                            }
+                          },
+                          {
+                            "key": "drasi.input.id",
+                            "value": {
+                              "stringValue": "facilities-db"
+                            }
+                          },
+                          {
+                            "key": "drasi.input.kind",
+                            "value": {
+                              "stringValue": "source"
+                            }
+                          },
+                          {
+                            "key": "drasi.instance.id",
+                            "value": {
+                              "stringValue": "building-comfort-dynamic"
+                            }
+                          },
+                          {
+                            "key": "drasi.progress.persistent",
+                            "value": {
+                              "boolValue": true
+                            }
+                          },
+                          {
+                            "key": "drasi.progress.stage",
+                            "value": {
+                              "stringValue": "input.committed"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.config_hash",
+                            "value": {
+                              "stringValue": "17250753498519931879"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.id",
+                            "value": {
+                              "stringValue": "building-comfort"
+                            }
+                          },
+                          {
+                            "key": "drasi.query.output.generation",
+                            "value": {
+                              "stringValue": "0"
+                            }
+                          }
+                        ],
+                        "exemplars": [],
+                        "flags": 0,
+                        "startTimeUnixNano": "1792838064810163000",
+                        "timeUnixNano": "1792838065060892000"
+                      }
+                    ]
+                  },
+                  "metadata": [],
+                  "name": "drasi.query.progress.sequence",
+                  "unit": ""
+                }
+              ],
+              "schemaUrl": "",
+              "scope": {
+                "attributes": [],
+                "droppedAttributesCount": 0,
+                "name": "drasi.progress",
+                "version": ""
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "received_at_ns": 1792838065062410000
+  },
+  "pid": 9020,
+  "queries": {
+    "building-comfort": {
+      "epoch": [
+        3,
+        3,
+        0,
+        17250753498519931879
+      ],
+      "input": 100000,
+      "observed_at_ns": 1792838065060892000,
+      "output": 99981
+    },
+    "building-comfort-floor-agg": {
+      "epoch": [
+        7,
+        3,
+        0,
+        10467926270270006474
+      ],
+      "input": 100000,
+      "observed_at_ns": 1792838065060892000,
+      "output": 49860
+    }
+  },
+  "receivers": {
+    "building-comfort": {
+      "item_count": 39,
+      "recorded_at_ns": 1792837998114294000,
+      "sequence": 99981
+    },
+    "building-comfort-floor-agg": {
+      "item_count": 5,
+      "recorded_at_ns": 1792838065118354000,
+      "sequence": 49860
+    }
+  },
+  "recorded_at_ns": 1792838065584002000,
+  "service_instance_id": "a2928adc-3c5f-4943-a68b-fcba7c0f7588",
+  "test_run_id": "drasi_server_dev_repo.building_comfort.run_7c115fe98798457399e77cbeb641f084"
+}

@@ -153,7 +153,7 @@ def recovered_cursors(log, total):
     for query in QUERIES:
         pattern = (
             rf"Query '{re.escape(query)}' subscribing to .* source '{re.escape(SOURCE)}' "
-            rf".*resume_from: Some\((\d+)\)"
+            rf"with WAL replay from seq (\d+)"
         )
         match = re.search(pattern, text)
         if match is None:

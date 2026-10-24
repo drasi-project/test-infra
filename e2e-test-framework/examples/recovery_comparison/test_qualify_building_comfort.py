@@ -69,12 +69,12 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "server.log"
             lines = [
-                f"Query '{query}' subscribing to gRPC source 'facilities-db' (bootstrap: false, resume_from: Some({value}), request_handle: true)"
+                f"Query '{query}' subscribing to gRPC source 'facilities-db' with WAL replay from seq {value}"
                 for query, value in zip(QUERIES, (80, 100))
             ]
             path.write_text("\n".join(lines))
             self.assertEqual(recovered_cursors(path, 100)[QUERIES[0]], 80)
-            path.write_text("\n".join(line.replace("Some(80)", "Some(100)") for line in lines))
+            path.write_text("\n".join(line.replace("seq 80", "seq 100") for line in lines))
             with self.assertRaises(ValueError):
                 recovered_cursors(path, 100)
             path.write_text(lines[0])

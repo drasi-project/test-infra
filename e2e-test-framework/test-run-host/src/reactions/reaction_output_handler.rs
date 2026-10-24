@@ -75,6 +75,12 @@ impl Serialize for ReactionHandlerStatus {
 pub enum ReactionHandlerMessage {
     /// Invocation containing reaction data
     Invocation(ReactionInvocation),
+    /// Follows every invocation from a complete, sequenced producer batch.
+    BatchComplete {
+        query_id: String,
+        sequence: u64,
+        item_count: usize,
+    },
     /// Control signal for handler lifecycle
     Control(ReactionControlSignal),
     /// Error occurred in handler

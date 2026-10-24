@@ -85,6 +85,23 @@ impl GrpcInstanceImpl {
 
         // Convert Drasi QueryResult to internal format
         let json_results = convert_from_drasi_query_result(result.clone())?;
+        anyhow::ensure!(
+            json_results.len() == result.results.len(),
+            "gRPC conversion did not preserve the complete producer batch"
+        );
+        let completed = result
+            .results
+            .last()
+            .filter(|last| {
+                last.sequence > 0
+                    && self.settings.query_ids.contains(&result.query_id)
+                    && result.results.iter().all(|item| item.sequence > 0)
+                    && result
+                        .results
+                        .windows(2)
+                        .all(|pair| pair[0].sequence <= pair[1].sequence)
+            })
+            .map(|last| (result.query_id.clone(), last.sequence, result.results.len()));
 
         // Process each result item as a separate invocation
         // This ensures stop triggers can fire mid-batch
@@ -145,6 +162,18 @@ impl GrpcInstanceImpl {
             }
         }
 
+        if let Some((query_id, sequence, item_count)) = completed {
+            self.tx
+                .send(ReactionHandlerMessage::BatchComplete {
+                    query_id,
+                    sequence,
+                    item_count,
+                })
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!("Cannot confirm complete receiver batch: {error}")
+                })?;
+        }
         Ok(())
     }
 }
@@ -228,14 +257,44 @@ mod producer_capture_tests {
     }
 
     async fn receive(rx: &mut Receiver<ReactionHandlerMessage>) -> ReactionInvocation {
-        match rx.recv().await.unwrap() {
-            ReactionHandlerMessage::Invocation(invocation) => invocation,
-            _ => panic!("Expected invocation"),
+        loop {
+            match rx.recv().await.unwrap() {
+                ReactionHandlerMessage::Invocation(invocation) => return invocation,
+                ReactionHandlerMessage::BatchComplete { .. } => {}
+                _ => panic!("Expected invocation"),
+            }
         }
     }
 
     fn key(invocation: &ReactionInvocation) -> &Value {
         &invocation.payload.metadata.as_ref().unwrap()["headers"]["x-drasi-producer-key"]
+    }
+
+    #[tokio::test]
+    async fn completion_marker_follows_every_record_in_the_batch() {
+        let (instance, mut rx) = instance();
+        instance
+            .process_query_result(batch(vec![item(44, 100), item(45, 101)]))
+            .await
+            .unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(ReactionHandlerMessage::Invocation(_))
+        ));
+        assert!(matches!(
+            rx.recv().await,
+            Some(ReactionHandlerMessage::Invocation(_))
+        ));
+        assert!(matches!(
+            rx.recv().await,
+            Some(ReactionHandlerMessage::BatchComplete { query_id, sequence: 45, item_count: 2 })
+                if query_id == "items"
+        ));
+        drop(rx);
+        assert!(instance
+            .process_query_result(batch(vec![item(46, 102)]))
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -306,6 +365,7 @@ mod producer_capture_tests {
             empty.payload.value,
             json!({"query_id":"items","results":[]})
         );
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -697,24 +757,15 @@ impl ReactionOutputHandler for GrpcReactionHandler {
 
         // Wait for instance to stop
         let mut instance_handle = self.instance_handle.write().await;
-        if let Some(handle) = instance_handle.take() {
-            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
-                Ok(Ok(Ok(_))) => {
-                    debug!("Drasi ReactionService instance shut down successfully");
-                }
-                Ok(Ok(Err(e))) => {
-                    error!(
-                        "Drasi ReactionService instance error during shutdown: {}",
-                        e
-                    );
-                }
-                Ok(Err(e)) => {
-                    error!("Task join error during shutdown: {}", e);
-                }
-                Err(_) => {
-                    error!("Timeout waiting for Drasi ReactionService instance to shut down");
-                }
-            }
+        if let Some(handle) = instance_handle.as_mut() {
+            let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("gRPC receiver shutdown timed out; worker remains owned")
+                })?;
+            instance_handle.take();
+            result??;
+            debug!("Drasi ReactionService instance shut down successfully");
         }
 
         *self.status.write().await = ReactionHandlerStatus::Stopped;

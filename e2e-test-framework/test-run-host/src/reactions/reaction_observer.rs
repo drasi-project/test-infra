@@ -17,7 +17,12 @@
 //! This module provides an observer for reactions that handles
 //! HTTP callbacks and other reaction types using reaction-specific handlers.
 
-use std::{fmt, sync::Arc, time::SystemTime};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use derive_more::Debug;
 
@@ -45,6 +50,9 @@ use crate::{
 };
 
 use super::TestRunReactionOverrides;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ReactionObserverStatus {
@@ -154,6 +162,16 @@ pub struct ReactionObserverMetrics {
     pub reaction_invocation_count: u64,
     pub reaction_invocation_first_ns: u64,
     pub reaction_invocation_last_ns: u64,
+    pub recorded_batches: BTreeMap<String, RecordedBatch>,
+}
+
+/// Evidence that all records preceding a producer batch marker reached every logger.
+/// Final logger flush is still required before capturing files.
+#[derive(Clone, Debug, Serialize)]
+pub struct RecordedBatch {
+    pub sequence: u64,
+    pub item_count: usize,
+    pub recorded_at_ns: u64,
 }
 
 impl ReactionObserverMetrics {
@@ -200,6 +218,7 @@ impl ReactionObserverMetrics {
 pub struct ReactionObserverSummary {
     pub observer_runtime_s: String,
     pub reaction_invocation_count: u64,
+    pub recorded_batches: BTreeMap<String, RecordedBatch>,
 }
 
 impl fmt::Display for ReactionObserverSummary {
@@ -222,6 +241,7 @@ impl From<&ReactionObserverMetrics> for ReactionObserverSummary {
         Self {
             observer_runtime_s: metrics.get_observer_run_duration_s_string(Some(now_ns)),
             reaction_invocation_count: metrics.reaction_invocation_count,
+            recorded_batches: metrics.recorded_batches.clone(),
         }
     }
 }
@@ -229,6 +249,7 @@ impl From<&ReactionObserverMetrics> for ReactionObserverSummary {
 #[derive(Debug)]
 struct ReactionObserverInternalState {
     status: ReactionObserverStatus,
+    stopping: bool,
     handler_status: ReactionHandlerStatus,
     error_message: Option<String>,
     metrics: ReactionObserverMetrics,
@@ -243,6 +264,16 @@ struct ReactionObserverInternalState {
 }
 
 impl ReactionObserverInternalState {
+    fn fail(&mut self, error: String) {
+        log::error!("{error}");
+        self.status = ReactionObserverStatus::Error;
+        if self.error_message.is_none() {
+            self.lifecycle_tx
+                .reaction_error(self.reaction_id.clone(), error.clone());
+            self.error_message = Some(error);
+        }
+    }
+
     fn new(
         lifecycle_tx: crate::test_run_completion::LifecycleTx,
         reaction_id: TestRunReactionId,
@@ -254,6 +285,7 @@ impl ReactionObserverInternalState {
 
         Self {
             status: ReactionObserverStatus::Stopped,
+            stopping: false,
             handler_status: ReactionHandlerStatus::Uninitialized,
             error_message: None,
             metrics: ReactionObserverMetrics {
@@ -277,6 +309,7 @@ pub struct ReactionObserver {
     output_handler: Arc<Box<dyn ReactionOutputHandler + Send + Sync>>,
     observer_task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     observer_command_tx: Arc<Mutex<Option<Sender<ReactionObserverMessage>>>>,
+    lifecycle: Mutex<()>,
 }
 
 impl ReactionObserver {
@@ -327,6 +360,7 @@ impl ReactionObserver {
             output_handler,
             observer_task_handle: Arc::new(Mutex::new(None)),
             observer_command_tx: Arc::new(Mutex::new(None)),
+            lifecycle: Mutex::new(()),
         })
     }
 
@@ -348,7 +382,12 @@ impl ReactionObserver {
     }
 
     pub async fn pause(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
+        let _lifecycle = self.lifecycle.lock().await;
         let mut internal_state = self.internal_state.lock().await;
+        anyhow::ensure!(
+            !internal_state.stopping,
+            "Finish receiver cleanup before pausing"
+        );
 
         match internal_state.status {
             ReactionObserverStatus::Running => {
@@ -383,7 +422,12 @@ impl ReactionObserver {
     }
 
     pub async fn reset(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
+        let _lifecycle = self.lifecycle.lock().await;
         let mut internal_state = self.internal_state.lock().await;
+        anyhow::ensure!(
+            !internal_state.stopping,
+            "Finish receiver cleanup before resetting"
+        );
 
         match internal_state.status {
             ReactionObserverStatus::Running => {
@@ -446,7 +490,12 @@ impl ReactionObserver {
     }
 
     pub async fn start(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
+        let _lifecycle = self.lifecycle.lock().await;
         let mut internal_state = self.internal_state.lock().await;
+        anyhow::ensure!(
+            !internal_state.stopping,
+            "Finish receiver cleanup before starting"
+        );
 
         match internal_state.status {
             ReactionObserverStatus::Running => {
@@ -458,6 +507,19 @@ impl ReactionObserver {
                 internal_state.handler_status = self.output_handler.status().await;
             }
             ReactionObserverStatus::Stopped => {
+                let mut worker = self.observer_task_handle.lock().await;
+                if let Some(handle) = worker.as_mut() {
+                    anyhow::ensure!(
+                        handle.is_finished(),
+                        "Previous observer cleanup is unfinished"
+                    );
+                    let result = handle.await;
+                    worker.take();
+                    if let Err(error) = result {
+                        internal_state.fail(format!("Previous observer failed: {error}"));
+                        return Err(error.into());
+                    }
+                }
                 // Initialize loggers
                 internal_state.loggers = create_reaction_loggers(
                     self.settings.id.clone(),
@@ -480,6 +542,7 @@ impl ReactionObserver {
                     "[ReactionObserver] Starting output handler for reaction: {}",
                     self.settings.id
                 );
+                internal_state.stopping = true;
                 self.output_handler.start().await?;
                 log::info!(
                     "[ReactionObserver] Output handler started successfully for reaction: {}",
@@ -502,8 +565,9 @@ impl ReactionObserver {
                     .await;
                 });
 
-                *self.observer_task_handle.lock().await = Some(observer_task);
+                *worker = Some(observer_task);
 
+                internal_state.stopping = false;
                 internal_state.status = ReactionObserverStatus::Running;
                 internal_state
                     .lifecycle_tx
@@ -536,68 +600,74 @@ impl ReactionObserver {
     }
 
     pub async fn stop(&self) -> anyhow::Result<ReactionObserverCommandResponse> {
-        let mut internal_state = self.internal_state.lock().await;
-
-        match internal_state.status {
-            ReactionObserverStatus::Running | ReactionObserverStatus::Paused => {
-                // Stop the output handler
-                self.output_handler.stop().await?;
-
-                // Stop the observer task
-                if let Some(tx) = self.observer_command_tx.lock().await.take() {
-                    let (response_tx, _) = oneshot::channel();
-                    let _ = tx
-                        .send(ReactionObserverMessage {
-                            command: ReactionObserverCommand::Stop,
-                            response_tx: Some(response_tx),
-                        })
-                        .await;
-                }
-
-                if let Some(handle) = self.observer_task_handle.lock().await.take() {
-                    let _ = handle.await;
-                }
-
-                // Close loggers and collect results
-                log::info!(
-                    "Closing {} loggers in stop() method",
-                    internal_state.loggers.len()
-                );
-                let mut results = Vec::new();
-                for (idx, logger) in internal_state.loggers.iter_mut().enumerate() {
-                    log::debug!("Calling end_test_run on logger {idx} in stop()");
-                    match logger.end_test_run().await {
-                        Ok(result) => {
-                            log::info!("Logger {idx} completed in stop(): {result:?}");
-                            results.push(result);
-                        }
-                        Err(e) => {
-                            log::error!("Logger {idx} failed to end test run in stop(): {e}");
-                        }
-                    }
-                }
-                internal_state.logger_results.extend(results);
-                internal_state.loggers.clear();
-
-                internal_state.status = ReactionObserverStatus::Stopped;
-                internal_state
-                    .lifecycle_tx
-                    .reaction_stopped(internal_state.reaction_id.clone());
-                internal_state.handler_status = self.output_handler.status().await;
-                internal_state.metrics.observer_stop_time_ns = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-                    as u64;
-            }
-            ReactionObserverStatus::Stopped => {
+        let _lifecycle = self.lifecycle.lock().await;
+        {
+            let mut state = self.internal_state.lock().await;
+            if state.status == ReactionObserverStatus::Stopped && !state.stopping {
                 return Err(ReactionObserverError::AlreadyStopped.into());
             }
-            ReactionObserverStatus::Error => {
-                return Err(ReactionObserverError::Error(internal_state.status).into());
+            state.stopping = true;
+        }
+        if let Err(error) = self.output_handler.stop().await {
+            self.internal_state
+                .lock()
+                .await
+                .fail(format!("Receiver shutdown failed: {error:#}"));
+            return Err(error);
+        }
+        // The observer must remain able to record accepted requests while the
+        // network handler drains. Never hold its state lock while joining it.
+        {
+            let mut command = self.observer_command_tx.lock().await;
+            if let Some(tx) = command.as_ref() {
+                if tx
+                    .send(ReactionObserverMessage {
+                        command: ReactionObserverCommand::Stop,
+                        response_tx: None,
+                    })
+                    .await
+                    .is_err()
+                {
+                    log::debug!("Observer control channel closed; joining its completed worker");
+                }
+                command.take();
             }
         }
-
+        {
+            let mut worker = self.observer_task_handle.lock().await;
+            if let Some(handle) = worker.as_mut() {
+                let result = tokio::time::timeout(Duration::from_secs(5), handle)
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!("Receiver recording drain timed out; worker remains owned")
+                    })?;
+                worker.take();
+                if let Err(error) = result {
+                    self.internal_state
+                        .lock()
+                        .await
+                        .fail(format!("Receiver recording worker failed: {error}"));
+                    return Err(error.into());
+                }
+            }
+        }
+        let mut internal_state = self.internal_state.lock().await;
+        if let Err(error) = finish_loggers(&mut internal_state).await {
+            internal_state.fail(format!("Receiver logger finalization failed: {error:#}"));
+            return Err(error);
+        }
+        internal_state.handler_status = self.output_handler.status().await;
+        internal_state.metrics.observer_stop_time_ns = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos() as u64;
+        internal_state.stopping = false;
+        if let Some(error) = &internal_state.error_message {
+            anyhow::bail!("Receiver did not record a complete capture: {error}");
+        }
+        internal_state.status = ReactionObserverStatus::Stopped;
+        internal_state
+            .lifecycle_tx
+            .reaction_stopped(internal_state.reaction_id.clone());
         let external_state = ReactionObserverExternalState {
             status: internal_state.status,
             handler_status: internal_state.handler_status,
@@ -655,6 +725,9 @@ async fn observe_reaction_handler(
                     ReactionHandlerMessage::Invocation(invocation) => {
                         let mut state = internal_state.lock().await;
                         handle_reaction_invocation(&mut state, invocation).await;
+                        if state.status == ReactionObserverStatus::Error {
+                            continue;
+                        }
 
                         // Check stop triggers
                         let handler_status = output_handler.status().await;
@@ -713,6 +786,9 @@ async fn observe_reaction_handler(
                             }
                         }
                     }
+                    ReactionHandlerMessage::BatchComplete { query_id, sequence, item_count } => {
+                        record_batch(&mut *internal_state.lock().await, query_id, sequence, item_count);
+                    }
                     ReactionHandlerMessage::Error(error) => {
                         log::error!("Reaction handler error: {error}");
                         let mut state = internal_state.lock().await;
@@ -732,6 +808,22 @@ async fn observe_reaction_handler(
                 match command_msg.command {
                     ReactionObserverCommand::Stop => {
                         log::debug!("Reaction observer received stop command");
+                        handler_rx.close();
+                        while let Some(message) = handler_rx.recv().await {
+                            let mut state = internal_state.lock().await;
+                            match message {
+                                ReactionHandlerMessage::Invocation(invocation) => {
+                                    handle_reaction_invocation(&mut state, invocation).await;
+                                }
+                                ReactionHandlerMessage::BatchComplete { query_id, sequence, item_count } => {
+                                    record_batch(&mut state, query_id, sequence, item_count);
+                                }
+                                ReactionHandlerMessage::Error(error) => {
+                                    state.fail(format!("Handler error during drain: {error}"));
+                                }
+                                ReactionHandlerMessage::Control(_) => {}
+                            }
+                        }
                         if let Some(_tx) = command_msg.response_tx {
                             // We don't need to send the external state here as it's only used internally
                         }
@@ -843,12 +935,51 @@ async fn handle_reaction_invocation(
         state.loggers.len()
     );
 
+    let mut failure = None;
     for (idx, logger) in state.loggers.iter_mut().enumerate() {
         log::trace!("Sending record to logger {idx}");
         if let Err(e) = logger.log_handler_record(&handler_record).await {
             log::error!("Failed to log reaction invocation to logger {idx}: {e}");
+            failure.get_or_insert_with(|| {
+                format!("Logger {idx} failed to record receiver output: {e:#}")
+            });
         }
     }
+    if let Some(failure) = failure {
+        state.fail(failure);
+    }
+}
+
+fn record_batch(
+    state: &mut ReactionObserverInternalState,
+    query_id: String,
+    sequence: u64,
+    item_count: usize,
+) {
+    if state.status == ReactionObserverStatus::Error {
+        return;
+    }
+    let Ok(now) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) else {
+        state.fail("Cannot timestamp recorded producer batch".into());
+        return;
+    };
+    state.metrics.recorded_batches.insert(
+        query_id,
+        RecordedBatch {
+            sequence,
+            item_count,
+            recorded_at_ns: now.as_nanos() as u64,
+        },
+    );
+}
+
+async fn finish_loggers(state: &mut ReactionObserverInternalState) -> anyhow::Result<()> {
+    while let Some(logger) = state.loggers.first_mut() {
+        let result = logger.end_test_run().await?;
+        state.loggers.remove(0);
+        state.logger_results.push(result);
+    }
+    Ok(())
 }
 
 // Helper function to create reaction loggers

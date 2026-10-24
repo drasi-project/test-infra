@@ -36,6 +36,82 @@ Valid comparisons write a JSON report to stdout. Invalid input writes a diagnost
 to stderr without a report; shell callers must check the exit code, not merely
 whether a report file exists. Build/run errors from Cargo have Cargo's exit codes.
 
+## Complete-boundary gRPC qualification
+
+`qualify_building_comfort.py` runs the actual Server and test-service executables
+with freshly built gRPC source/reaction libraries. It creates a new, private
+work directory and never resets an existing run. Supply matching binaries and
+libraries; it does not clone repositories, build plugins, or download replacements.
+
+First capture an uninterrupted reference:
+
+```bash
+python3 qualify_building_comfort.py \
+  --server-bin /build/drasi-server \
+  --test-service-bin /build/test-service \
+  --compare-bin /build/recovery-compare \
+  --plugins-dir /build/plugins \
+  --output /artifacts/new-reference
+```
+
+Then run a real SIGKILL/restart against that reference:
+
+```bash
+python3 qualify_building_comfort.py \
+  --server-bin /build/drasi-server \
+  --test-service-bin /build/test-service \
+  --compare-bin /build/recovery-compare \
+  --plugins-dir /build/plugins \
+  --output /artifacts/new-recovery \
+  --baseline /artifacts/new-reference/actual.json --crash
+```
+
+The default is the existing 100,000-input, two-query workload. `--workload` can
+select a smaller finite preflight with the same query definitions; its different
+fingerprint prevents substitution for the full reference. `--build-metadata`
+can attach source-revision/build information. Every run records executable,
+plugin, workload and controller hashes. Recovery requires the reference's exact
+hashes and preserves the killed Server's data and saved configuration.
+
+Completion requires all of the following:
+
+- The source's dispatchers actually closed successfully, and its independent
+  source log contains the entire consecutive finite input.
+- Fresh OTLP query-progress gauges from the current Server process show both
+  queries committed that final input. Component, output and collection identities
+  cannot be mixed across samples or restarts.
+- Each receiver recorded the complete terminal producer batch. Its
+  `recorded_batches` summary advances only after all preceding batch records
+  reached every logger; invocation counts alone are insufficient.
+- Explicit receiver stop drains accepted records, joins the observer and
+  finalizes its loggers before capture import. Recording/finalization errors
+  cannot become successful completion.
+- Final room values and floor aggregates match an independent replay of the
+  captured source data. There must be exactly one row per floor. Only the
+  independent floating-point average check allows absolute error up to `1e-7`;
+  shared reference/recovery state and delivery comparisons remain exact.
+- A crash run restores both saved queries without reapplying definitions.
+  Actual source-subscription resume cursors must show that some input remained
+  unprocessed at the crash; killing an already-completed run is rejected.
+
+The qualifier uses the shared Rust `--import` and comparison implementations.
+A reference must also pass comparison against itself, including producer-key
+uniqueness. `result.json` is written as passed only after comparison and owned
+process cleanup succeed. Missing, delayed, stale or invalid evidence cannot
+fall back to quiet time, count thresholds or a skipped crash.
+
+This is the **standard gRPC** profile, not qualification of every transport.
+It uses a bounded 100,000-entry outbox for the finite workload. The older dynamic
+runner and HTTP/adaptive cases retain their separately documented limitations.
+The old `building-comfort-small-v1` capture remains incomplete and unchanged;
+the new qualifier does not promote or repair it automatically.
+
+Regression checks:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p 'test_*.py'
+```
+
 ## Framework Configuration
 
 The building-comfort recovery workflow accepts multiple HTTP/gRPC modes and always

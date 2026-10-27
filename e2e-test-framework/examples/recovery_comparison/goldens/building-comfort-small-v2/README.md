@@ -37,11 +37,22 @@ performs exact reference/recovery state and delivery comparisons.
 `golden-actual.json.gz` expands to an artifact with SHA-256:
 
 ```text
-f53a8e949413c448dc7816b5b0e8dff751dd649fd403f7640d724683e6f7c527
+d44fe5561d1d203f66db22d259484634e7aeddf14dd522a54a6b10d7f331ff51
 ```
 
 The workload fingerprint is
-`7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5`.
+`cb3248faa7e1b362c52adb516c008f1fbab03681d6474618c5cd895df72b1c3d`.
+
+**Representation-only rebase.** Query declarations now use `inputs` instead of the removed
+`sources`/`sourceId` objects, which changes the canonical workload and query fingerprints.
+This is not a new capture: the artifacts differ from the original capture only in those
+fingerprint strings. The original capture's artifact SHA-256 was
+`f53a8e949413c448dc7816b5b0e8dff751dd649fd403f7640d724683e6f7c527` and its workload
+fingerprint `7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5`; both,
+with the per-query fingerprints, are recorded in
+[representation-rebase.json](representation-rebase.json). `result.json`, `comparison.json`,
+`recovery-verification.json` and `completion-boundary.json` are the original run's reports and
+keep the original values. No new completion or recovery evidence is asserted.
 The configuration remains the finite, two-query, 12-room workload with seed
 `123456789` and bootstrap off.
 
@@ -55,8 +66,10 @@ outputs and 49,860 aggregate outputs, with no missing, extra, duplicated,
 conflicting or reordered records.
 
 `recovered-actual.json.gz` and `recovery-boundary.json` retain that run. Its
-uncompressed artifact SHA-256 is
-`6f631d0e2921f72836d7734c20de62e86603a4e2e1e3603197a2c9f0c9ae584f`.
+uncompressed artifact SHA-256 was originally
+`6f631d0e2921f72836d7734c20de62e86603a4e2e1e3603197a2c9f0c9ae584f` (matching
+`recovery-verification.json`); after the representation-only rebase above it is
+`d3d3e387c44ce99e874a3e93c77cca385e312c15265376f91ffcbcb3ea4e6dc6`.
 Both runs' executable and plugin hashes were rechecked after qualification.
 This proves the recorded standard-gRPC pending-input crash case, not every
 possible transport/failure window.

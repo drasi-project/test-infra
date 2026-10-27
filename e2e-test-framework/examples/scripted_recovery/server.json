@@ -19,7 +19,7 @@
     "id": "items", "autoStart": true,
     "query": "MATCH (item:Item) RETURN item.ordinal AS Ordinal",
     "queryLanguage": "Cypher", "enableBootstrap": false,
-    "outboxCapacity": 20000, "sources": [{"sourceId": "script-db"}]
+    "outboxCapacity": 20000, "inputs": ["script-db"]
   }],
   "reactions": [{
     "kind": "grpc", "id": "items-out", "queries": ["items"], "autoStart": true,

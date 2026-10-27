@@ -160,7 +160,7 @@
                     {
                       "id": "all-stocks",
                       "query": "MATCH (s:Stock) RETURN elementId(s) AS StockId, s.symbol, s.name, s.price, s.volume, s.daily_open, s.price_change",
-                      "sources": [
+                      "inputs": [
                         "stock-trades-db"
                       ],
                       "auto_start": true,
@@ -169,7 +169,7 @@
                     {
                       "id": "high-volume-trades",
                       "query": "MATCH (s:Stock) WHERE s.volume > 50000000 RETURN elementId(s) AS StockId, s.symbol, s.volume, s.price",
-                      "sources": [
+                      "inputs": [
                         "stock-trades-db"
                       ],
                       "auto_start": true,
@@ -178,7 +178,7 @@
                     {
                       "id": "price-movements",
                       "query": "MATCH (s:Stock) WHERE abs(s.price - s.daily_open) > (s.daily_open * 0.05) RETURN elementId(s) AS StockId, s.symbol, s.price, s.daily_open, s.price_change",
-                      "sources": [
+                      "inputs": [
                         "stock-trades-db"
                       ],
                       "auto_start": true,

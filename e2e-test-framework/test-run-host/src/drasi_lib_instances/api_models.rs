@@ -106,12 +106,12 @@ pub struct SourceCreatedResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
     "name": "active-users",
-    "sources": ["postgresql-source"],
+    "inputs": ["postgresql-source"],
     "status": "running"
 }))]
 pub struct QueryInfo {
     pub name: String,
-    pub sources: Vec<String>,
+    pub inputs: Vec<String>,
     pub status: ComponentStatus,
 }
 
@@ -119,7 +119,7 @@ pub struct QueryInfo {
 #[schema(example = json!({
     "name": "active-users",
     "query": "MATCH (u:User)-[:LOGGED_IN]->(s:Session) WHERE s.active = true RETURN u",
-    "sources": ["postgresql-source"],
+    "inputs": ["postgresql-source"],
     "status": "running",
     "auto_start": true,
     "profiling": false
@@ -127,7 +127,7 @@ pub struct QueryInfo {
 pub struct QueryDetails {
     pub name: String,
     pub query: String,
-    pub sources: Vec<String>,
+    pub inputs: Vec<String>,
     pub status: ComponentStatus,
     pub auto_start: bool,
     #[serde(default)]
@@ -138,14 +138,14 @@ pub struct QueryDetails {
 #[schema(example = json!({
     "name": "active-users",
     "query": "MATCH (u:User)-[:LOGGED_IN]->(s:Session) WHERE s.active = true RETURN u",
-    "sources": ["postgresql-source"],
+    "inputs": ["postgresql-source"],
     "auto_start": true,
     "profiling": false
 }))]
 pub struct CreateQueryRequest {
     pub name: String,
     pub query: String,
-    pub sources: Vec<String>,
+    pub inputs: Vec<String>,
     #[serde(default)]
     pub auto_start: bool,
     #[serde(default)]
@@ -155,7 +155,7 @@ pub struct CreateQueryRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateQueryRequest {
     pub query: Option<String>,
-    pub sources: Option<Vec<String>>,
+    pub inputs: Option<Vec<String>>,
     pub auto_start: Option<bool>,
     pub profiling: Option<bool>,
 }

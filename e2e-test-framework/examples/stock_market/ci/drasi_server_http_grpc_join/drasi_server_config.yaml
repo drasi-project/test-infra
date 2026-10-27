@@ -70,9 +70,9 @@ instances:
       - id: watchlist-prices
         autoStart: true
         queryLanguage: Cypher
-        sources:
-          - sourceId: stock-trades-db
-          - sourceId: watchlist-db
+        inputs:
+          - stock-trades-db
+          - watchlist-db
     # Drasi materializes a virtual :WATCHES edge between any WatchlistItem
     # and Stock that share the same `symbol` property, even though the
     # two nodes come from different sources. No relation events are

@@ -763,8 +763,8 @@ pub struct DrasiLibQueryConfig {
     /// Cypher query string.
     pub query: String,
 
-    /// IDs of sources this query subscribes to.
-    pub sources: Vec<String>,
+    /// IDs of upstream components (sources, queries or transformers) this query consumes.
+    pub inputs: Vec<String>,
 
     /// Whether to automatically start this query.
     #[serde(default = "default_true")]

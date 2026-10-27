@@ -223,7 +223,7 @@ class Scenario:
                 "queries": [{"id": "items", "autoStart": True,
                              "query": "MATCH (item:Item) RETURN item.ordinal AS Ordinal",
                              "queryLanguage": "Cypher", "enableBootstrap": False,
-                             "outboxCapacity": 1000, "sources": [{"sourceId": "script-db"}]}],
+                             "outboxCapacity": 1000, "inputs": ["script-db"]}],
                 "reactions": [{"kind": "grpc", "id": "items-out", "queries": ["items"],
                                "autoStart": True, "batchSize": 1, "batchFlushTimeoutMs": 100,
                                "endpoint": f"grpc://127.0.0.1:{args.reaction_port}",

@@ -139,7 +139,7 @@ data_store:
                       MATCH (n:Item)
                       WHERE n.status = 'active'
                       RETURN elementId(n) AS ItemId, n.name, n.status
-                    sources:
+                    inputs:
                       - test-db
                     auto_start: true
                     properties:

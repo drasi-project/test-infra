@@ -1,0 +1,26 @@
+{
+  "artifacts": {
+    "golden-actual.json.gz": {
+      "original_artifact_sha256": "2072e0b114e26000793acab028d971fb2d922568f0cfce8317325ef2ee07e54f",
+      "rebased_artifact_sha256": "fd8093b25c23aaafd4211edf5e31ec2eadb3d6a8c74d3ac0cf8e94dcbbe71924",
+      "fingerprint_occurrences_replaced": 3
+    }
+  },
+  "kind": "representation-only rebase",
+  "reason": "The query declaration field `sources` (objects with `sourceId`) was replaced by `inputs` (bare component names) in the v1 configuration. Fingerprints are SHA-256 of canonical (`jq -cS .`) workload/query JSON, so they change with the representation.",
+  "not_a_new_capture": true,
+  "unchanged": "Every captured event, producer identity, row signature, operation, payload and snapshot is byte-identical; only the workload_fingerprint and per-query config_fingerprint hash strings in the rebased artifacts were replaced. No new recovery or completion evidence is asserted.",
+  "original_workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5",
+  "workload_fingerprint": "cb3248faa7e1b362c52adb516c008f1fbab03681d6474618c5cd895df72b1c3d",
+  "queries": {
+    "building-comfort": {
+      "original_config_fingerprint": "7a4c55aaa060053321a22d6df73da377ee3dfac1b8a08464945413085ec7470f",
+      "config_fingerprint": "2a3d3c4f9be3f5bac9985f290da9b86e6daeb372bec5f0c3d0f5228a1ef161d3"
+    },
+    "building-comfort-floor-agg": {
+      "original_config_fingerprint": "8f834f57e1816ad8349bc2e7889e58834b90db8a28c71643af8365b5e99131cc",
+      "config_fingerprint": "613319c9820c85abdeda99ecfdbb4c582cd8103ee20f2ea44348f60e1294d37c"
+    }
+  },
+  "historical_files_unchanged": "self-comparison.json and the README capture tables describe the original representation and retain its fingerprints."
+}

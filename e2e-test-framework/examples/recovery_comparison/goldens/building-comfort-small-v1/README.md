@@ -20,13 +20,28 @@ producer query ID, sequence, row signature, and operation using identity contrac
 this capture. This does not yet establish stable identity mapping across separate
 runs or transports.
 
+## Representation-only rebase
+
+The v1 query declarations now use `inputs` (bare component names) instead of the removed
+`sources`/`sourceId` objects. Fingerprints hash the canonical workload and query JSON, so
+the active `workload.json`, `golden-actual.json.gz` and `provenance.json` carry the new
+workload fingerprint `cb3248faa7e1b362c52adb516c008f1fbab03681d6474618c5cd895df72b1c3d`
+and per-query config fingerprints. This is **not a new capture**: every captured event,
+producer identity, row signature, operation, payload and snapshot is byte-identical, and
+only those three fingerprint strings inside `golden-actual.json.gz` were replaced. The
+original fingerprints and artifact SHA-256 values are preserved in
+[representation-rebase.json](representation-rebase.json) and
+`provenance.json` (`original_capture_workload_fingerprint`). The capture table, self-comparison
+and verdict files below describe the original representation and are unchanged. No new
+recovery or completion evidence is asserted.
+
 ## Files
 
 - [Golden room snapshot](query_results__building-comfort.json)
 - [Golden aggregate snapshot](query_results__building-comfort-floor-agg.json)
 - [Producer-key checks](identity-validation.json)
 - [Strict hash checks](determinism_verdict.json)
-- [Workload](workload.json) and [provenance](provenance.json)
+- [Workload](workload.json), [provenance](provenance.json) and [representation rebase](representation-rebase.json)
 - [Self-comparison](self-comparison.json)
 - `golden-actual.json.gz`: normalized artifact containing producer identities,
   semantic event payloads, and both snapshots. Decompress before using as the

@@ -229,10 +229,6 @@ pub(crate) async fn start_web_api(
         .layer(axum::extract::Extension(test_data_store.clone()))
         .layer(axum::extract::Extension(test_run_host));
 
-    log::info!("Test Service Web API listening on http://{addr}");
-    log::info!("API Documentation available at http://{addr}/docs");
-    log::info!("OpenAPI JSON specification available at http://{addr}/api-docs/openapi.json");
-
     let instance = match axum::Server::try_bind(&addr) {
         Ok(builder) => builder.serve(app.into_make_service()),
         Err(err) => {
@@ -253,6 +249,11 @@ pub(crate) async fn start_web_api(
             std::process::exit(1);
         }
     };
+
+    let addr = instance.local_addr();
+    log::info!("Test Service Web API listening on http://{addr}");
+    log::info!("API Documentation available at http://{addr}/docs");
+    log::info!("OpenAPI JSON specification available at http://{addr}/api-docs/openapi.json");
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = instance.with_graceful_shutdown(shutdown_signal(test_data_store));

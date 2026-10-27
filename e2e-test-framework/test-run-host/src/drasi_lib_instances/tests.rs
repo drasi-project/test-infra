@@ -213,7 +213,7 @@ async fn embedded_native_application_reaction_preserves_result_order_and_count()
             "queries": [{
                 "id": "query1",
                 "query": "MATCH (n:TestNode) RETURN n.marker AS marker",
-                "sources": ["source1"]
+                "inputs": ["source1"]
             }],
             "reactions": [{
                 "id": "reaction1", "kind": "application", "queries": ["query1"]
@@ -395,7 +395,7 @@ async fn native_programmatic_lifecycle() -> Result<()> {
             .create_query(CreateQueryRequest {
                 name: "names".into(),
                 query: "MATCH (n:Person) RETURN n.name AS name".into(),
-                sources: vec!["input".into()],
+                inputs: vec!["input".into()],
                 auto_start: true,
                 profiling: false,
             })
@@ -451,13 +451,17 @@ async fn native_programmatic_lifecycle() -> Result<()> {
                 "names",
                 UpdateQueryRequest {
                     query: Some("MATCH (n:Person) RETURN n.name AS name, true AS updated".into()),
-                    sources: None,
+                    inputs: None,
                     auto_start: None,
                     profiling: None,
                 },
             )
             .await?;
         assert!(updated.query.contains("updated"));
+        assert!(
+            !core.get_query_config("names").await?.enable_bootstrap,
+            "an update must preserve the explicit live-only input"
+        );
         assert_eq!(
             core.computation_component("input")?.generation(),
             source_generation
@@ -531,8 +535,8 @@ async fn native_multi_query_results() -> Result<()> {
     let (instance, _directory) = native_instance(json!({
         "sources":[{"id":"input","kind":"application"}],
         "queries":[
-            {"id":"first","query":"MATCH (n:Item) RETURN n.marker AS marker","sources":["input"]},
-            {"id":"second","query":"MATCH (n:Item) RETURN n.marker AS marker","sources":["input"]}
+            {"id":"first","query":"MATCH (n:Item) RETURN n.marker AS marker","inputs":["input"]},
+            {"id":"second","query":"MATCH (n:Item) RETURN n.marker AS marker","inputs":["input"]}
         ],
         "reactions":[{"id":"sink","kind":"application","queries":["first","second"]}]
     }))?;

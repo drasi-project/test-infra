@@ -364,7 +364,7 @@ fn source_change(event: &SourceChangeEvent, source_id: &str) -> Result<SourceCha
     Ok(if matches!(event.op.as_str(), "i" | "insert") {
         SourceChange::Insert { element }
     } else {
-        SourceChange::Update { element }
+        SourceChange::update(element)
     })
 }
 

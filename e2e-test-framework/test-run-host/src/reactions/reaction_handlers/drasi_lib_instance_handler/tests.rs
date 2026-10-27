@@ -184,7 +184,7 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
             "test_drasi_lib_instance_id":"instance",
             "config":{
                 "sources":[{"id":"input","kind":"application"}],
-                "queries":[{"id":"names","query":"MATCH (n:Item) RETURN n.value AS value","sources":["input"]}],
+                "queries":[{"id":"names","query":"MATCH (n:Item) RETURN n.value AS value","inputs":["input"]}],
                 "reactions":[{"id":"sink","kind":"application","queries":["names"]}]
             }
         }))?,

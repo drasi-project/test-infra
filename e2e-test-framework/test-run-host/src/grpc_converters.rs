@@ -307,6 +307,56 @@ pub fn convert_from_drasi_query_result(result: QueryResult) -> Result<Vec<JsonVa
     Ok(output)
 }
 
+/// Convert one native gRPC sink change to JSON. It states the real operation,
+/// the canonical identity and only the images the change carries; a missing
+/// `before`, `after` or `element` stays absent.
+pub fn convert_from_drasi_change(change: &drasi::v1::Change) -> Result<JsonValue> {
+    use drasi::v1::{element_shape::Kind, ChangeOperation};
+    let mut object = Map::new();
+    let operation = match ChangeOperation::try_from(change.operation) {
+        Ok(ChangeOperation::Add) => "ADD",
+        Ok(ChangeOperation::Replace) => "REPLACE",
+        Ok(ChangeOperation::Patch) => "PATCH",
+        Ok(ChangeOperation::Delete) => "DELETE",
+        _ => anyhow::bail!("change has no operation"),
+    };
+    object.insert("operation".into(), JsonValue::String(operation.into()));
+    let identity = change
+        .identity
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("change has no identity"))?;
+    object.insert(
+        "identity".into(),
+        serde_json::json!({"namespace": identity.namespace, "id": identity.id}),
+    );
+    if let Some(element) = &change.element {
+        let kind = match Kind::try_from(element.kind) {
+            Ok(Kind::Node) => Some("node"),
+            Ok(Kind::Relation) => Some("relation"),
+            _ => None,
+        };
+        let mut shape = Map::new();
+        if let Some(kind) = kind {
+            shape.insert("kind".into(), JsonValue::String(kind.into()));
+        }
+        shape.insert("labels".into(), serde_json::json!(element.labels));
+        object.insert("element".into(), JsonValue::Object(shape));
+    }
+    if let Some(before) = &change.before {
+        object.insert("before".into(), proto_struct_to_json(before)?);
+    }
+    if let Some(after) = &change.after {
+        object.insert("after".into(), proto_struct_to_json(after)?);
+    }
+    if operation == "PATCH" {
+        object.insert(
+            "removedProperties".into(),
+            serde_json::json!(change.removed_properties),
+        );
+    }
+    Ok(JsonValue::Object(object))
+}
+
 /// Convert protobuf Struct to JSON
 fn proto_struct_to_json(s: &Struct) -> Result<JsonValue> {
     let mut map = Map::new();

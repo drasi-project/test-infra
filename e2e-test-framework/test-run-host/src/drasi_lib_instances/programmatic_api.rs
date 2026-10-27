@@ -171,10 +171,10 @@ impl TestRunDrasiLibInstance {
                 let info = core.get_query_info(&name).await?;
                 infos.push(QueryInfo {
                     name: info.id,
-                    sources: info
-                        .source_subscriptions
+                    inputs: info
+                        .inputs
                         .into_iter()
-                        .map(|s| s.source_id)
+                        .map(|input| input.component)
                         .collect(),
                     status: convert_component_status(status),
                 });
@@ -192,10 +192,10 @@ impl TestRunDrasiLibInstance {
             Ok(QueryDetails {
                 name: info.id,
                 query: info.query,
-                sources: info
-                    .source_subscriptions
+                inputs: info
+                    .inputs
                     .into_iter()
-                    .map(|s| s.source_id)
+                    .map(|input| input.component)
                     .collect(),
                 status: convert_component_status(info.status),
                 auto_start: config.auto_start,
@@ -210,7 +210,7 @@ impl TestRunDrasiLibInstance {
         let config = query_config_from_request(
             &request.name,
             request.query,
-            request.sources,
+            request.inputs,
             request.auto_start,
         );
         let name = request.name.clone();
@@ -232,7 +232,7 @@ impl TestRunDrasiLibInstance {
         let config = query_config_from_request(
             query_id,
             request.query.unwrap_or(existing.query),
-            request.sources.unwrap_or(existing.sources),
+            request.inputs.unwrap_or(existing.inputs),
             request.auto_start.unwrap_or(existing.auto_start),
         );
         let id = query_id.to_string();
@@ -521,10 +521,10 @@ impl TestRunDrasiLibInstance {
 
     pub(super) async fn add_native_query(core: &DrasiLib, config: QueryConfig) -> Result<()> {
         let mut builder = core.computation_pipeline()?;
-        for source in &config.sources {
+        for input in &config.inputs {
             builder = builder.native_source(Endpoint::new(
-                ComponentId::try_new(source.source_id.as_str())?,
-                PortId::try_new("out")?,
+                ComponentId::try_new(input.component.as_str())?,
+                PortId::try_new(input.port.as_deref().unwrap_or("out"))?,
             ))?;
         }
         let report = core.add_components(builder.query(config).build()?).await?;
@@ -602,14 +602,17 @@ fn reaction_inputs(core: &DrasiLib, id: &str) -> Result<Vec<String>> {
 pub(super) fn query_config_from_request(
     id: &str,
     query: String,
-    sources: Vec<String>,
+    inputs: Vec<String>,
     auto_start: bool,
 ) -> QueryConfig {
+    // Embedded application sources are live-only inputs with no snapshot provider, so
+    // their queries explicitly opt out of bootstrap rather than relying on a default.
     let mut builder = drasi_lib::Query::cypher(id)
         .query(query)
-        .auto_start(auto_start);
-    for source in sources {
-        builder = builder.from_source(source);
+        .auto_start(auto_start)
+        .enable_bootstrap(false);
+    for input in inputs {
+        builder = builder.from_input(input);
     }
     builder.build()
 }

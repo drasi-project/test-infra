@@ -78,10 +78,12 @@ fn converts_complete_node_relation_update_and_delete_records() -> Result<()> {
         element: Element::Relation {
             in_node, out_node, ..
         },
+        removed_properties,
     } = source_change(&relation, "input")?
     else {
         anyhow::bail!("expected a relation update");
     };
+    assert!(removed_properties.is_empty());
     assert_eq!(in_node, ElementReference::new("input", "one"));
     assert_eq!(out_node, ElementReference::new("other", "two"));
     relation.op = "d".into();
@@ -245,7 +247,7 @@ async fn worker_failure_is_reported_and_remains_latched() -> Result<()> {
 async fn forwarding_does_not_hold_the_test_run_registry_lock() -> Result<()> {
     let (instance, _directory) = crate::drasi_lib_instances::tests::native_instance(json!({
         "sources":[{"id":"input","kind":"application"}],
-        "queries":[{"id":"values","query":"MATCH (n:Item) RETURN n.value AS value","sources":["input"]}],
+        "queries":[{"id":"values","query":"MATCH (n:Item) RETURN n.value AS value","inputs":["input"]}],
         "reactions":[{"id":"sink","kind":"application","queries":["values"]}]
     }))?;
     let run_id = instance.id.test_run_id.clone();

@@ -260,7 +260,7 @@ impl TestRunDrasiLibInstance {
             let defaults = programmatic_api::query_config_from_request(
                 &query_config.id,
                 query_config.query.clone(),
-                query_config.sources.clone(),
+                query_config.inputs.clone(),
                 query_config.auto_start,
             );
             let mut options = serde_json::to_value(&defaults)?;
@@ -277,7 +277,7 @@ impl TestRunDrasiLibInstance {
             query.id = defaults.id;
             query.query = defaults.query;
             query.auto_start = defaults.auto_start;
-            query.sources = defaults.sources;
+            query.inputs = defaults.inputs;
             Self::add_native_query(&core, query).await?;
         }
 

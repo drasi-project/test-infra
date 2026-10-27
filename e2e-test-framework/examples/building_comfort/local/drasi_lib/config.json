@@ -172,7 +172,7 @@
                     {
                       "id": "all-rooms",
                       "query": "MATCH (r:Room) RETURN elementId(r) AS RoomId, r.temperature, r.humidity, r.co2",
-                      "sources": [
+                      "inputs": [
                         "facilities-db"
                       ],
                       "auto_start": true,
@@ -181,7 +181,7 @@
                     {
                       "id": "floor-agg",
                       "query": "MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room) WITH f, avg(r.temperature) AS AvgTemperature, max(r.co2) AS MaxCo2, min(r.humidity) AS MinHumidity, count(r) AS RoomCount RETURN elementId(f) AS FloorId, AvgTemperature, MaxCo2, MinHumidity, RoomCount",
-                      "sources": [
+                      "inputs": [
                         "facilities-db"
                       ],
                       "auto_start": true,

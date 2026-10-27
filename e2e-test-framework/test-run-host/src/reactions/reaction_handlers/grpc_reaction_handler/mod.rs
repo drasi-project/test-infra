@@ -25,16 +25,17 @@ use tokio::sync::{
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, trace};
 
-use crate::grpc_converters::{convert_from_drasi_query_result, drasi};
+use crate::grpc_converters::{convert_from_drasi_change, convert_from_drasi_query_result, drasi};
 use crate::reactions::reaction_output_handler::{
     ReactionHandlerMessage, ReactionHandlerPayload, ReactionHandlerStatus, ReactionHandlerType,
     ReactionInvocation, ReactionOutputHandler,
 };
 
+use drasi::v1::change_service_server::{ChangeService, ChangeServiceServer};
 use drasi::v1::reaction_service_server::{ReactionService, ReactionServiceServer};
 use drasi::v1::{
-    ProcessResultsRequest, ProcessResultsResponse, QueryResult, ReactionHealthCheckResponse,
-    StreamResultsResponse, SubscribeRequest,
+    ChangeBatch, ProcessChangesRequest, ProcessResultsRequest, ProcessResultsResponse, QueryResult,
+    ReactionHealthCheckResponse, StreamResultsResponse, SubscribeRequest,
 };
 
 #[derive(Clone, Debug)]
@@ -176,6 +177,100 @@ impl GrpcInstanceImpl {
         }
         Ok(())
     }
+}
+
+impl GrpcInstanceImpl {
+    /// One invocation per change of a native gRPC sink batch. The producer is
+    /// the real output port (`component/port`), never a query identity, and the
+    /// element identity replaces the evaluator row signature.
+    async fn process_change_batch(&self, batch: ChangeBatch) -> anyhow::Result<()> {
+        let timestamp = chrono::Utc::now();
+        let output = batch
+            .output
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("change batch has no output identity"))?;
+        let endpoint = format!("{}/{}", output.component, output.port);
+        let completed = batch
+            .changes
+            .last()
+            .filter(|last| {
+                last.sequence > 0
+                    && self.settings.query_ids.contains(&output.component)
+                    && batch.changes.iter().all(|change| change.sequence > 0)
+                    && batch
+                        .changes
+                        .windows(2)
+                        .all(|pair| pair[0].sequence <= pair[1].sequence)
+            })
+            .map(|last| (output.component.clone(), last.sequence, batch.changes.len()));
+        for change in &batch.changes {
+            let mut count = self.invocation_count.write().await;
+            *count += 1;
+            let invocation_id = format!("grpc-invocation-{}", *count);
+            drop(count);
+            let payload = ReactionHandlerPayload {
+                value: serde_json::json!({
+                    "output": {
+                        "alias": output.alias,
+                        "component": output.component,
+                        "port": output.port,
+                    },
+                    "change": convert_from_drasi_change(change)?,
+                }),
+                timestamp,
+                invocation_id: Some(invocation_id),
+                metadata: Some(change_metadata(&endpoint, change)),
+            };
+            self.tx
+                .send(ReactionHandlerMessage::Invocation(ReactionInvocation {
+                    handler_type: ReactionHandlerType::Grpc,
+                    payload,
+                }))
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to send message to output handler: {e}"))?;
+        }
+        if let Some((query_id, sequence, item_count)) = completed {
+            self.tx
+                .send(ReactionHandlerMessage::BatchComplete {
+                    query_id,
+                    sequence,
+                    item_count,
+                })
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!("Cannot confirm complete receiver batch: {error}")
+                })?;
+        }
+        Ok(())
+    }
+}
+
+fn change_metadata(endpoint: &str, change: &drasi::v1::Change) -> serde_json::Value {
+    let identity = change.identity.clone().unwrap_or_default();
+    let operation = drasi::v1::ChangeOperation::try_from(change.operation)
+        .map(|operation| operation.as_str_name())
+        .unwrap_or("CHANGE_OPERATION_UNSPECIFIED");
+    let mut metadata = serde_json::json!({
+        "headers": {
+            "x-drasi-producer-output": endpoint,
+            "x-drasi-producer-sequence": change.sequence.to_string(),
+            "x-drasi-producer-identity": identity.id,
+            "x-drasi-producer-operation": operation,
+        }
+    });
+    if change.sequence > 0 {
+        metadata["headers"]["x-drasi-producer-key"] = serde_json::Value::String(
+            serde_json::json!([
+                endpoint,
+                change.sequence.to_string(),
+                identity.namespace,
+                identity.id,
+                operation
+            ])
+            .to_string(),
+        );
+    }
+    metadata
 }
 
 fn producer_metadata(query_id: &str, item: &drasi::v1::QueryResultItem) -> serde_json::Value {
@@ -682,6 +777,184 @@ impl GrpcReactionHandler {
     }
 }
 
+#[cfg(test)]
+mod native_change_tests {
+    use super::*;
+    use serde_json::json;
+    use test_data_store::test_run_storage::TestRunId;
+
+    fn instance() -> (GrpcInstanceImpl, Receiver<ReactionHandlerMessage>) {
+        let (tx, rx) = channel(20);
+        (
+            GrpcInstanceImpl {
+                tx,
+                settings: GrpcReactionHandlerSettings {
+                    host: "127.0.0.1".to_owned(),
+                    port: 50052,
+                    correlation_metadata_key: None,
+                    test_run_query_id: TestRunQueryId::new(
+                        &TestRunId::new("repo", "test", "run"),
+                        "items",
+                    ),
+                    query_ids: vec!["items".to_owned()],
+                    include_initial_state: false,
+                },
+                invocation_count: Arc::new(RwLock::new(0)),
+            },
+            rx,
+        )
+    }
+
+    fn change(
+        operation: drasi::v1::ChangeOperation,
+        sequence: u64,
+        id: &str,
+        after: Option<f64>,
+    ) -> drasi::v1::Change {
+        drasi::v1::Change {
+            operation: operation as i32,
+            identity: Some(drasi::v1::ElementIdentity {
+                namespace: "inventory".to_owned(),
+                id: id.to_owned(),
+            }),
+            sequence,
+            after: after.map(|value| prost_types::Struct {
+                fields: std::collections::BTreeMap::from([(
+                    "value".to_owned(),
+                    prost_types::Value {
+                        kind: Some(prost_types::value::Kind::NumberValue(value)),
+                    },
+                )]),
+            }),
+            removed_properties: vec!["gone".to_owned()],
+            ..Default::default()
+        }
+    }
+
+    fn batch(changes: Vec<drasi::v1::Change>) -> ChangeBatch {
+        ChangeBatch {
+            output: Some(drasi::v1::OutputIdentity {
+                alias: "items-view".to_owned(),
+                component: "items".to_owned(),
+                port: "errors".to_owned(),
+            }),
+            changes,
+            timestamp: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn changes_are_keyed_by_output_port_and_element_identity_without_a_row_signature() {
+        use drasi::v1::ChangeOperation::{Add, Delete, Patch};
+        let (instance, mut rx) = instance();
+        instance
+            .process_change_batch(batch(vec![
+                change(Add, 7, "a", Some(1.0)),
+                change(Patch, 8, "a", Some(2.0)),
+                change(Delete, 9, "a", None),
+            ]))
+            .await
+            .unwrap();
+        let mut invocations = Vec::new();
+        for _ in 0..3 {
+            let Some(ReactionHandlerMessage::Invocation(invocation)) = rx.recv().await else {
+                panic!("expected an invocation");
+            };
+            invocations.push(invocation);
+        }
+        assert!(matches!(
+            rx.recv().await,
+            Some(ReactionHandlerMessage::BatchComplete { query_id, sequence: 9, item_count: 3 })
+                if query_id == "items"
+        ));
+        let headers = &invocations[1].payload.metadata.as_ref().unwrap()["headers"];
+        assert_eq!(headers["x-drasi-producer-output"], "items/errors");
+        assert_eq!(
+            headers["x-drasi-producer-operation"],
+            "CHANGE_OPERATION_PATCH"
+        );
+        assert!(headers.get("x-drasi-producer-row-signature").is_none());
+        assert_eq!(
+            headers["x-drasi-producer-key"],
+            json!([
+                "items/errors",
+                "8",
+                "inventory",
+                "a",
+                "CHANGE_OPERATION_PATCH"
+            ])
+            .to_string()
+        );
+        assert_eq!(
+            invocations[1].payload.value,
+            json!({
+                "output": {"alias": "items-view", "component": "items", "port": "errors"},
+                "change": {
+                    "operation": "PATCH",
+                    "identity": {"namespace": "inventory", "id": "a"},
+                    "after": {"value": 2.0},
+                    "removedProperties": ["gone"]
+                }
+            })
+        );
+        // An identity-only delete carries neither image.
+        assert_eq!(
+            invocations[2].payload.value["change"],
+            json!({"operation": "DELETE", "identity": {"namespace": "inventory", "id": "a"}})
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_without_an_output_identity_is_rejected() {
+        let (instance, _rx) = instance();
+        let mut missing = batch(vec![change(
+            drasi::v1::ChangeOperation::Add,
+            1,
+            "a",
+            Some(1.0),
+        )]);
+        missing.output = None;
+        assert!(instance.process_change_batch(missing).await.is_err());
+    }
+}
+
+#[tonic::async_trait]
+impl ChangeService for GrpcInstanceImpl {
+    async fn process_changes(
+        &self,
+        request: Request<ProcessChangesRequest>,
+    ) -> Result<Response<ProcessResultsResponse>, Status> {
+        let Some(batch) = request.into_inner().changes else {
+            return Ok(Response::new(ProcessResultsResponse {
+                success: false,
+                message: "No changes provided".to_string(),
+                error: "Missing changes in request".to_string(),
+                items_processed: 0,
+            }));
+        };
+        let count = batch.changes.len() as u32;
+        Ok(Response::new(
+            match self.process_change_batch(batch).await {
+                Ok(()) => ProcessResultsResponse {
+                    success: true,
+                    message: "Changes processed".to_string(),
+                    error: String::new(),
+                    items_processed: count,
+                },
+                Err(error) => {
+                    error!("Failed to process changes: {error}");
+                    ProcessResultsResponse {
+                        success: false,
+                        message: "Failed to process changes".to_string(),
+                        error: error.to_string(),
+                        items_processed: 0,
+                    }
+                }
+            },
+        ))
+    }
+}
+
 #[async_trait]
 impl ReactionOutputHandler for GrpcReactionHandler {
     async fn init(&self) -> anyhow::Result<Receiver<ReactionHandlerMessage>> {
@@ -720,7 +993,8 @@ impl ReactionOutputHandler for GrpcReactionHandler {
 
         let handle = tokio::spawn(async move {
             Server::builder()
-                .add_service(ReactionServiceServer::new(instance_impl))
+                .add_service(ReactionServiceServer::new(instance_impl.clone()))
+                .add_service(ChangeServiceServer::new(instance_impl))
                 .serve_with_shutdown(addr, async {
                     shutdown_notify_clone.notified().await;
                 })

@@ -229,6 +229,26 @@ Rebuilt test-service captures these fields under `payload.headers` in the existi
 - `x-drasi-producer-key`: JSON tuple of query ID, sequence string, row signature
   string, and numeric operation. Absent when sequence is zero (unavailable).
 
+#### Native gRPC sink (`drasi.v1.ChangeService`)
+
+The test service also serves `ChangeService/ProcessChanges`, which the native
+gRPC sink calls. It has no query identity or row signature: a batch carries the
+real producing output (`alias`, `component`, `port`) and each change its
+`operation` (`ADD`, `REPLACE`, `PATCH`, `DELETE`), canonical element `identity`
+and only the images it holds. Captured headers:
+
+- `x-drasi-producer-output`: `component/port` of the producing output.
+- `x-drasi-producer-sequence`: the producing stream's sequence, as a decimal string.
+- `x-drasi-producer-identity`: the element identity key.
+- `x-drasi-producer-operation`: the `ChangeOperation` name.
+- `x-drasi-producer-key`: JSON tuple of `component/port`, sequence string,
+  identity namespace, identity key and operation name; absent when the sequence
+  is zero.
+
+The paired legacy/native comparison for query output therefore uses the
+`ReactionService` fields for the legacy run and these fields for the native run;
+the two are not interchangeable identities.
+
 These fields survive repeated delivery and batch regrouping; receiver invocation
 IDs remain separate. Unary and streaming gRPC paths share this capture code.
 The semantic request body is unchanged, so existing SHA-256 baselines do not

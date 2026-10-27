@@ -16,5 +16,7 @@
     "libdrasi_source_grpc.dylib": "e9716845709ad9f25be968370f4645911e7ad872da30e33de5230724dd319e71"
   },
   "runner_sha256": "76e75c22ddfeedd31d3b2ed48777ab318e45f232f0d0b587e564b62042b72f7b",
-  "workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5"
+  "workload_fingerprint": "cb3248faa7e1b362c52adb516c008f1fbab03681d6474618c5cd895df72b1c3d",
+  "original_capture_workload_fingerprint": "7c10344dbfa46fef5071661c945f970386782a07264a2d77fdc0418cfb1e0fc5",
+  "representation_rebase": "representation-rebase.json"
 }

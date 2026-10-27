@@ -15,14 +15,17 @@
 use axum::http::StatusCode;
 use serde_json::Value;
 
-const BASE_URL: &str = "http://localhost:8080";
+mod common;
+
+use common::TestService;
 
 #[tokio::test]
-#[ignore] // Run with `cargo test -- --ignored` when service is running
-async fn test_openapi_json_endpoint() {
-    let client = reqwest::Client::new();
+async fn test_openapi_json_endpoint() -> anyhow::Result<()> {
+    let mut service = TestService::start(true).await?;
+    let client = &service.client;
+    let base_url = &service.base_url;
     let response = client
-        .get(format!("{BASE_URL}/api-docs/openapi.json"))
+        .get(format!("{base_url}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
@@ -31,33 +34,38 @@ async fn test_openapi_json_endpoint() {
     let openapi: Value = response.json().await.unwrap();
 
     // Verify it's a valid OpenAPI document
-    assert_eq!(openapi["openapi"], "3.0.0");
+    assert_eq!(openapi["openapi"], "3.0.3");
     assert!(openapi.get("info").is_some());
     assert!(openapi.get("paths").is_some());
+    service.shutdown().await
 }
 
 #[tokio::test]
-#[ignore]
-async fn test_swagger_ui_endpoint() {
-    let client = reqwest::Client::new();
-    let response = client.get(format!("{BASE_URL}/docs")).send().await.unwrap();
+async fn test_swagger_ui_endpoint() -> anyhow::Result<()> {
+    let mut service = TestService::start(true).await?;
+    let client = &service.client;
+    let base_url = &service.base_url;
+    let response = client.get(format!("{base_url}/docs")).send().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     // Should return HTML content for Swagger UI
     let content_type = response.headers().get("content-type").unwrap();
     assert!(content_type.to_str().unwrap().contains("text/html"));
+    service.shutdown().await
 }
 
 #[tokio::test]
-#[ignore]
-async fn test_only_approved_top_level_paths() {
-    let client = reqwest::Client::new();
+async fn test_only_approved_top_level_paths() -> anyhow::Result<()> {
+    let mut service = TestService::start(true).await?;
+    let client = &service.client;
+    let base_url = &service.base_url;
     let response = client
-        .get(format!("{BASE_URL}/api-docs/openapi.json"))
+        .get(format!("{base_url}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::OK);
     let openapi: Value = response.json().await.unwrap();
     let paths = openapi["paths"].as_object().unwrap();
 
@@ -74,18 +82,21 @@ async fn test_only_approved_top_level_paths() {
             "Legacy path found: {path}"
         );
     }
+    service.shutdown().await
 }
 
 #[tokio::test]
-#[ignore]
-async fn test_only_approved_tags() {
-    let client = reqwest::Client::new();
+async fn test_only_approved_tags() -> anyhow::Result<()> {
+    let mut service = TestService::start(true).await?;
+    let client = &service.client;
+    let base_url = &service.base_url;
     let response = client
-        .get(format!("{BASE_URL}/api-docs/openapi.json"))
+        .get(format!("{base_url}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::OK);
     let openapi: Value = response.json().await.unwrap();
     let tags = openapi["tags"].as_array().unwrap();
 
@@ -101,18 +112,21 @@ async fn test_only_approved_tags() {
 
     // Verify only these tags exist
     assert_eq!(tags.len(), allowed_tags.len(), "Unexpected number of tags");
+    service.shutdown().await
 }
 
 #[tokio::test]
-#[ignore]
-async fn test_test_run_nested_paths_documented() {
-    let client = reqwest::Client::new();
+async fn test_test_run_nested_paths_documented() -> anyhow::Result<()> {
+    let mut service = TestService::start(true).await?;
+    let client = &service.client;
+    let base_url = &service.base_url;
     let response = client
-        .get(format!("{BASE_URL}/api-docs/openapi.json"))
+        .get(format!("{base_url}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::OK);
     let openapi: Value = response.json().await.unwrap();
     let paths = openapi["paths"].as_object().unwrap();
 
@@ -134,52 +148,53 @@ async fn test_test_run_nested_paths_documented() {
             "Missing nested path in documentation: {expected_path}"
         );
     }
+    service.shutdown().await
 }
 
 #[tokio::test]
-#[ignore]
-async fn test_no_direct_resource_schemas() {
-    let client = reqwest::Client::new();
+async fn test_no_direct_resource_schemas() -> anyhow::Result<()> {
+    let mut service = TestService::start(true).await?;
+    let client = &service.client;
+    let base_url = &service.base_url;
     let response = client
-        .get(format!("{BASE_URL}/api-docs/openapi.json"))
+        .get(format!("{base_url}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::OK);
     let openapi: Value = response.json().await.unwrap();
+    let schemas = openapi["components"]["schemas"].as_object().unwrap();
 
-    if let Some(components) = openapi.get("components") {
-        if let Some(schemas) = components.get("schemas") {
-            let schema_keys: Vec<String> = schemas.as_object().unwrap().keys().cloned().collect();
+    // These legacy schemas should not be present.
+    let forbidden_schemas = [
+        "SourceStateResponse",
+        "QueryStateResponse",
+        "ReactionStateResponse",
+        "SourceBootstrapResponseBody",
+    ];
 
-            // These legacy schemas should not be present
-            let forbidden_schemas = vec![
-                "SourceStateResponse",
-                "QueryStateResponse",
-                "ReactionStateResponse",
-                "SourceBootstrapResponseBody",
-            ];
-
-            for forbidden in forbidden_schemas {
-                assert!(
-                    !schema_keys.contains(&forbidden.to_string()),
-                    "Legacy schema {forbidden} should not be in OpenAPI document"
-                );
-            }
-        }
+    for forbidden in forbidden_schemas {
+        assert!(
+            !schemas.contains_key(forbidden),
+            "Legacy schema {forbidden} should not be in OpenAPI document"
+        );
     }
+    service.shutdown().await
 }
 
 #[tokio::test]
-#[ignore]
-async fn test_repository_endpoints_documented() {
-    let client = reqwest::Client::new();
+async fn test_repository_endpoints_documented() -> anyhow::Result<()> {
+    let mut service = TestService::start(true).await?;
+    let client = &service.client;
+    let base_url = &service.base_url;
     let response = client
-        .get(format!("{BASE_URL}/api-docs/openapi.json"))
+        .get(format!("{base_url}/api-docs/openapi.json"))
         .send()
         .await
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::OK);
     let openapi: Value = response.json().await.unwrap();
     let paths = openapi["paths"].as_object().unwrap();
 
@@ -188,4 +203,5 @@ async fn test_repository_endpoints_documented() {
         paths.contains_key("/test_repos"),
         "Repository endpoint missing"
     );
+    service.shutdown().await
 }

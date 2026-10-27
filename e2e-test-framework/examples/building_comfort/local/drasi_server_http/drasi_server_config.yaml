@@ -724,12 +724,12 @@
                       "Literal": {
                         "joins": [],
                         "middleware": [],
-                        "sources": [
+                        "inputs": [
                           {
                             "nodes": [],
                             "pipeline": [],
                             "relations": [],
-                            "source_id": "facilities-db"
+                            "component": "facilities-db"
                           }
                         ]
                       }
@@ -1022,8 +1022,13 @@
                         }
                       }
                     },
-                    "queryId": {
-                      "Literal": "building-comfort"
+                    "outputs": {
+                      "Literal": {
+                        "building-comfort": {
+                          "component": "building-comfort",
+                          "port": "out"
+                        }
+                      }
                     },
                     "timeoutMs": {
                       "Literal": 60000
@@ -1460,12 +1465,12 @@
                       "Literal": {
                         "joins": [],
                         "middleware": [],
-                        "sources": [
+                        "inputs": [
                           {
                             "nodes": [],
                             "pipeline": [],
                             "relations": [],
-                            "source_id": "facilities-db"
+                            "component": "facilities-db"
                           }
                         ]
                       }
@@ -1758,8 +1763,13 @@
                         }
                       }
                     },
-                    "queryId": {
-                      "Literal": "building-comfort-floor-agg"
+                    "outputs": {
+                      "Literal": {
+                        "building-comfort-floor-agg": {
+                          "component": "building-comfort-floor-agg",
+                          "port": "out"
+                        }
+                      }
                     },
                     "timeoutMs": {
                       "Literal": 60000

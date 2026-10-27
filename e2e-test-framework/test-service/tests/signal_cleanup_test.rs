@@ -12,52 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::process::{Command, Stdio};
-use std::time::Duration;
-use tempfile::TempDir;
-use tokio::time::sleep;
+#![cfg(unix)]
+
+mod common;
+
+use common::TestService;
 
 #[tokio::test]
-#[ignore = "Integration test requires built binary"]
 async fn test_ctrl_c_cleanup_with_delete_on_stop() -> anyhow::Result<()> {
-    let temp_dir = TempDir::new()?;
-    let test_data_path = temp_dir.path().join("test_data_cache");
-
-    // Create a test config
-    let config = serde_json::json!({
-        "data_store": {
-            "data_store_path": test_data_path.to_str().unwrap(),
-            "delete_on_start": false,
-            "delete_on_stop": true,
-            "test_repos": []
-        },
-        "test_run_host": {
-            "drasi_lib_instances": [],
-            "queries": [],
-            "reactions": [],
-            "sources": []
-        }
-    });
-
-    let config_file = temp_dir.path().join("test_config.json");
-    std::fs::write(&config_file, serde_json::to_string_pretty(&config)?)?;
-
-    // Start the test service
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "--manifest-path",
-            "./test-service/Cargo.toml",
-            "--",
-            "--config",
-            config_file.to_str().unwrap(),
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    // Wait for service to start and create the directory
-    sleep(Duration::from_secs(3)).await;
+    let mut service = TestService::start(true).await?;
+    let test_data_path = service.data_path();
 
     // Verify the directory was created
     assert!(
@@ -65,76 +29,29 @@ async fn test_ctrl_c_cleanup_with_delete_on_stop() -> anyhow::Result<()> {
         "Test data directory should exist after startup"
     );
 
-    // Send SIGINT (Ctrl+C) to the process
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
-        kill(Pid::from_raw(child.id() as i32), Signal::SIGINT)?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        // On Windows, we can try to terminate gracefully
-        child.kill()?;
-    }
-
-    // Wait for the process to exit
-    let _exit_status = child.wait()?;
-
-    // Give a moment for cleanup to complete
-    sleep(Duration::from_millis(500)).await;
+    let marker = test_data_path.join("cleanup-marker");
+    std::fs::write(&marker, "owned test data")?;
+    let neighbor = test_data_path.with_file_name("unrelated-marker");
+    std::fs::write(&neighbor, "preserve outside data store")?;
+    service.shutdown().await?;
 
     // Verify the directory was deleted
     assert!(
         !test_data_path.exists(),
         "Test data directory should be deleted after Ctrl+C with delete_on_stop=true"
     );
+    assert_eq!(
+        std::fs::read_to_string(neighbor)?,
+        "preserve outside data store"
+    );
 
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "Integration test requires built binary"]
 async fn test_ctrl_c_no_cleanup_without_delete_on_stop() -> anyhow::Result<()> {
-    let temp_dir = TempDir::new()?;
-    let test_data_path = temp_dir.path().join("test_data_cache_no_delete");
-
-    // Create a test config with delete_on_stop = false
-    let config = serde_json::json!({
-        "data_store": {
-            "data_store_path": test_data_path.to_str().unwrap(),
-            "delete_on_start": false,
-            "delete_on_stop": false,
-            "test_repos": []
-        },
-        "test_run_host": {
-            "drasi_lib_instances": [],
-            "queries": [],
-            "reactions": [],
-            "sources": []
-        }
-    });
-
-    let config_file = temp_dir.path().join("test_config_no_delete.json");
-    std::fs::write(&config_file, serde_json::to_string_pretty(&config)?)?;
-
-    // Start the test service
-    let mut child = Command::new("cargo")
-        .args([
-            "run",
-            "--manifest-path",
-            "./test-service/Cargo.toml",
-            "--",
-            "--config",
-            config_file.to_str().unwrap(),
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    // Wait for service to start and create the directory
-    sleep(Duration::from_secs(3)).await;
+    let mut service = TestService::start(false).await?;
+    let test_data_path = service.data_path();
 
     // Verify the directory was created
     assert!(
@@ -142,31 +59,16 @@ async fn test_ctrl_c_no_cleanup_without_delete_on_stop() -> anyhow::Result<()> {
         "Test data directory should exist after startup"
     );
 
-    // Send SIGINT (Ctrl+C) to the process
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
-        kill(Pid::from_raw(child.id() as i32), Signal::SIGINT)?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        // On Windows, we can try to terminate gracefully
-        child.kill()?;
-    }
-
-    // Wait for the process to exit
-    let _exit_status = child.wait()?;
-
-    // Give a moment for cleanup to complete
-    sleep(Duration::from_millis(500)).await;
+    let marker = test_data_path.join("preserved-marker");
+    std::fs::write(&marker, "owned test data")?;
+    service.shutdown().await?;
 
     // Verify the directory was NOT deleted
     assert!(
         test_data_path.exists(),
         "Test data directory should NOT be deleted after Ctrl+C with delete_on_stop=false"
     );
+    assert_eq!(std::fs::read_to_string(marker)?, "owned test data");
 
     Ok(())
 }

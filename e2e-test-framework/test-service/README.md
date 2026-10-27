@@ -6,6 +6,7 @@ The Test Service is a REST API component of the Drasi E2E Test Framework that ma
 
 - [Installation](#installation)
 - [Running the Test Service](#running-the-test-service)
+- [Integration Tests](#integration-tests)
 - [Configuration](#configuration)
 - [API Documentation](#api-documentation)
 - [Examples](#examples)
@@ -74,6 +75,37 @@ cargo run -p test-service
 | `--data` | `-d` | `DRASI_DATA_STORE_PATH` | See config | Path where test data is stored. Overrides config file value |
 | `--port` | `-p` | `DRASI_PORT` | 63123 | Port for the Web API |
 | `--prune` | `-x` | `DRASI_PRUNE_DATA_STORE` | false | Delete data store on startup |
+
+## Integration Tests
+
+Run the HTTP API, Swagger, and Unix SIGINT cleanup contracts from the workspace:
+
+```bash
+cargo test -p test-service \
+  --test api_integration_test --test swagger_test --test signal_cleanup_test \
+  -- --test-threads=1
+
+# Include the other test-service targets:
+cargo test -p test-service --all-targets
+cargo clippy -p test-service --all-targets --no-deps -- -D warnings
+```
+
+These tests are not ignored and do not require an externally running service,
+Redis, Dapr, or containers. Each test launches Cargo's `CARGO_BIN_EXE_test-service`
+binary directly, never a nested `cargo run`. It uses a private `.test-service-*`
+directory under this crate for configuration, a local repository, logs, and data.
+The runtime configuration uses `test_run_host.test_runs`; source definitions live
+in the repository and HTTP source creation supplies `test_source_id`.
+
+The service binds an OS-assigned port (`--port 0`) and reports the actual bound
+address. The harness waits for both that address and an HTTP response identifying
+its private data store before making requests. It does not contact or stop a
+service on port 8080 or the default service port. Startup and shutdown have
+15-second deadlines, with bounded HTTP requests. On Unix, shutdown sends SIGINT
+to the exact owned PID and awaits successful exit; an error/panic fallback kills
+and reaps only that child. Private fixtures are removed after reaping. The two
+Unix-only cleanup tests check deletion/preservation before fixture teardown, not
+after it, and also check that unrelated neighboring data survives cleanup.
 
 ## Configuration
 

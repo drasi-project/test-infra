@@ -192,7 +192,7 @@ Schema shape:
     "config": {
       "log_level": "info",
       "sources": [{ "id": "source1", "kind": "application", "auto_start": true, "config": {} }],
-      "queries": [{ "id": "query1", "query": "MATCH (n) RETURN n", "sources": ["source1"], "auto_start": true, "config": {} }],
+      "queries": [{ "id": "query1", "query": "MATCH (n) RETURN n", "inputs": ["source1"], "auto_start": true, "config": {} }],
       "reactions": [{ "id": "reaction1", "kind": "application", "queries": ["query1"], "auto_start": true, "config": {} }]
     }
   }]

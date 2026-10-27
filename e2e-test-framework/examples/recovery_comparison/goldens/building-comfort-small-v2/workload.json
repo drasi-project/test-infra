@@ -6,10 +6,8 @@
       "id": "building-comfort",
       "query": "MATCH (r:Room)\nRETURN elementId(r) AS RoomId,\n       r.temperature AS Temperature,\n       r.humidity AS Humidity,\n       r.co2 AS Co2",
       "queryLanguage": "Cypher",
-      "sources": [
-        {
-          "sourceId": "facilities-db"
-        }
+      "inputs": [
+        "facilities-db"
       ]
     },
     {
@@ -17,10 +15,8 @@
       "id": "building-comfort-floor-agg",
       "query": "MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room)\nWITH f,\n     avg(r.temperature) AS AvgTemperature,\n     max(r.co2)         AS MaxCo2,\n     min(r.humidity)    AS MinHumidity,\n     count(r)           AS RoomCount\nRETURN elementId(f)     AS FloorId,\n       AvgTemperature,\n       MaxCo2,\n       MinHumidity,\n       RoomCount",
       "queryLanguage": "Cypher",
-      "sources": [
-        {
-          "sourceId": "facilities-db"
-        }
+      "inputs": [
+        "facilities-db"
       ]
     }
   ],

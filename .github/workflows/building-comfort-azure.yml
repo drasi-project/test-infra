@@ -636,6 +636,13 @@ jobs:
             local resource_type="$1"
             local resource_name="$2"
             local resource_id=""
+            local -a api_version_args=()
+
+            # Match main.bicep: discovery can advertise network API versions
+            # that are not yet supported in the deployment region.
+            if [[ "$resource_type" == Microsoft.Network/* ]]; then
+              api_version_args=(--api-version 2024-05-01)
+            fi
 
             for attempt in $(seq 1 3); do
               if ! resource_id="$(
@@ -651,10 +658,14 @@ jobs:
                 return 0
               else
                 echo "Deleting $resource_type/$resource_name (attempt $attempt/3)"
-                if az resource delete --ids "$resource_id" &&
+                if az resource delete \
+                     --ids "$resource_id" \
+                     "${api_version_args[@]}" \
+                     --verbose &&
                    az resource wait \
                      --deleted \
                      --ids "$resource_id" \
+                     "${api_version_args[@]}" \
                      --interval 10 \
                      --timeout 600; then
                   return 0
@@ -683,7 +694,8 @@ jobs:
             --output none 2>/dev/null; then
             if ! az deployment group delete \
               --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$DEPLOYMENT_NAME"; then
+              --name "$DEPLOYMENT_NAME" \
+              --verbose; then
               echo "Could not delete deployment record $DEPLOYMENT_NAME; continuing verification" >&2
             fi
           else

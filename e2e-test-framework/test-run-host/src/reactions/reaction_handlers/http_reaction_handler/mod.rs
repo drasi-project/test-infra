@@ -20,7 +20,7 @@ use axum::{
     http::{HeaderMap, Method, StatusCode},
     response::IntoResponse,
     routing::any,
-    Router, Server,
+    Router,
 };
 use test_data_store::{
     test_repo_storage::models::HttpReactionHandlerDefinition, test_run_storage::TestRunQueryId,
@@ -298,9 +298,22 @@ async fn http_instance_thread(
         settings.path
     );
 
-    let instance = Server::bind(&addr)
-        .serve(app.into_make_service())
-        .with_graceful_shutdown(async move {
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            log::error!("Failed to bind HTTP instance to {addr}: {error}");
+            *status.write().await = ReactionHandlerStatus::Error;
+            let _ = result_handler_tx_channel
+                .send(ReactionHandlerMessage::Error(ReactionHandlerError::new(
+                    format!("Failed to bind HTTP instance to {addr}: {error}"),
+                    false,
+                )))
+                .await;
+            return;
+        }
+    };
+    let instance =
+        axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async move {
             shutdown_notify.notified().await;
             log::debug!("HTTP instance received shutdown signal");
         });

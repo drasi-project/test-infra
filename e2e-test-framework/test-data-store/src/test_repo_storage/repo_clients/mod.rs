@@ -97,7 +97,7 @@ pub struct CommonTestRepoConfig {
     pub local_tests: Vec<LocalTestDefinition>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AzureStorageBlobTestRepoConfig {
     pub account_name: String,
     #[serde(serialize_with = "mask_secret")]
@@ -107,8 +107,40 @@ pub struct AzureStorageBlobTestRepoConfig {
     pub force_cache_refresh: bool,
     pub root_path: String,
 }
+
+impl std::fmt::Debug for AzureStorageBlobTestRepoConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AzureStorageBlobTestRepoConfig")
+            .field("account_name", &self.account_name)
+            .field("access_key", &"<redacted>")
+            .field("container", &self.container)
+            .field("force_cache_refresh", &self.force_cache_refresh)
+            .field("root_path", &self.root_path)
+            .finish()
+    }
+}
 fn is_false() -> bool {
     false
+}
+
+#[cfg(test)]
+mod credential_tests {
+    use super::*;
+
+    #[test]
+    fn azure_config_debug_redacts_access_key_without_changing_authentication_input() {
+        let config = AzureStorageBlobTestRepoConfig {
+            account_name: "testaccount".into(),
+            access_key: "private-test-value".into(),
+            container: "tests".into(),
+            force_cache_refresh: false,
+            root_path: "/".into(),
+        };
+        assert!(!format!("{config:?}").contains("private-test-value"));
+        assert!(format!("{config:?}").contains("<redacted>"));
+        assert_eq!(config.access_key, "private-test-value");
+    }
 }
 fn mask_secret<S>(_: &str, serializer: S) -> Result<S::Ok, S::Error>
 where

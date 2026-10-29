@@ -33,7 +33,7 @@ test-data-store = { path = "../test-data-store" }
 
 anyhow = "1.0.86"
 async-trait = "0.1.81"
-axum = "0.6.19"
+axum = { version = "0.7.9", features = ["http2"] }
 azure_core = "0.20.0"
 azure_storage = "0.20.0"
 azure_storage_blobs = "0.20.0"
@@ -52,28 +52,27 @@ rand_chacha = "0.9.0"
 rand_distr = "0.5.1"
 rand_pcg = "0.3.1"
 redis = { version = "0.27.5", features = ["tokio-comp"] }
-reqwest = { version = "0.11.24", features = ["json"] }
+reqwest = { version = "0.12.28", features = ["json"] }
 serde = { version = "1.0.163", features = ["derive"] }
 serde_json = "1.0.96"
 sha2 = "0.10"
 tempfile = "3.2"
 thiserror = "1.0.63"
 time = "0.3.37"
-tonic = "0.14"
+tonic = "0.14.8"
 tonic-prost = "0.14"
 prost = "0.14"
 prost-types = "0.14"
 tokio = { version = "1.37.0", features = ["full"] }
 tokio-stream = "0.1.17"
 tracing = "0.1.37"
-tracing-opentelemetry = "0.21"
+tracing-opentelemetry = "0.25"
 tracing-subscriber = {version = "0.3.17", features = ["env-filter"]}
 utoipa = { version = "4.2", features = ["chrono"] }
 uuid = { version = "1.0", features = ["v4"] }
 walkdir = "2.5.0"
-opentelemetry_api = "0.20"
-opentelemetry = { version = "0.20", features = ["metrics", "trace"] }
-opentelemetry-otlp = { version = "0.13", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.20", features = ["rt-tokio", "metrics", "trace"] }
-opentelemetry-semantic-conventions = "0.12"
+opentelemetry = { version = "0.24", features = ["metrics", "trace"] }
+opentelemetry-otlp = { version = "0.17", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio", "metrics", "trace"] }
+opentelemetry-semantic-conventions = "0.16"
 portpicker = "0.1"

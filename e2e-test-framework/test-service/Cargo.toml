@@ -10,7 +10,7 @@ data-collector = { path = "../data-collector" }
 test-data-store = { path = "../test-data-store" }
 test-run-host = { path = "../test-run-host" }
 
-axum = "0.6.19"
+axum = { version = "0.7.9", features = ["http2"] }
 azure_core = "0.20.0"
 azure_storage = "0.20.0"
 azure_storage_blobs = "0.20.0"
@@ -29,10 +29,10 @@ thiserror = "1.0.63"
 async-trait = "0.1.81"
 walkdir = "2.5.0"
 utoipa = { version = "4", features = ["axum_extras"] }
-utoipa-swagger-ui = { version = "4", features = ["axum"] }
+utoipa-swagger-ui = { version = "6", features = ["axum"] }
 
 [dev-dependencies]
 tempfile = "3.20.0"
 nix = { version = "0.29", features = ["signal"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12.28", features = ["json"] }
 tokio = { version = "1.37.0", features = ["full", "test-util"] }

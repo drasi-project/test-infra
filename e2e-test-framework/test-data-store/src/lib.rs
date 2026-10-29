@@ -33,6 +33,7 @@ use test_run_storage::{
     TestRunSourceStorage, TestRunStorage, TestRunStore,
 };
 
+mod azure_logging;
 pub mod data_collection_storage;
 pub mod scripts;
 pub mod test_repo_storage;

@@ -84,6 +84,7 @@ impl AzureStorageBlobTestRepoClient {
             self.settings.storage_account_name.clone(),
             self.settings.storage_credentials.clone(),
         )
+        .client_options(crate::azure_logging::client_options())
         .container_client(self.settings.storage_container.clone());
 
         Ok(container_client)

@@ -605,10 +605,9 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}/snapshot", listener.local_addr().unwrap());
-        let server = axum::Server::from_tcp(listener)
-            .unwrap()
-            .serve(app.into_make_service());
-        let task = tokio::spawn(server);
+        let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+        let task =
+            tokio::spawn(async move { axum::serve(listener, app.into_make_service()).await });
         fixture.config["queries"][0]
             .as_object_mut()
             .unwrap()

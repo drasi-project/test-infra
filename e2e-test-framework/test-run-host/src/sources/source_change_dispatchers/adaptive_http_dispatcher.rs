@@ -561,13 +561,30 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
         let task = tokio::spawn(async move {
-            axum::Server::from_tcp(listener)
-                .unwrap()
-                .serve(app.into_make_service())
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+            axum::serve(listener, app.into_make_service())
                 .await
                 .unwrap();
         });
         (port, task)
+    }
+
+    #[tokio::test]
+    async fn http2_remains_available_after_the_dependency_upgrade() {
+        let (port, task) =
+            server(Router::new().route("/", post(|| async { StatusCode::NO_CONTENT })));
+        let response = reqwest::Client::builder()
+            .http2_prior_knowledge()
+            .build()
+            .unwrap()
+            .post(format!("http://127.0.0.1:{port}/"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.version(), reqwest::Version::HTTP_2);
+        assert_eq!(response.status().as_u16(), 204);
+        task.abort();
+        let _ = task.await;
     }
 
     #[tokio::test]

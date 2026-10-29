@@ -115,7 +115,7 @@ pub enum HandlerPayload {
     },
 }
 
-impl opentelemetry_api::propagation::Extractor for HandlerRecord {
+impl opentelemetry::propagation::Extractor for HandlerRecord {
     fn get(&self, key: &str) -> Option<&str> {
         match key {
             "traceparent" => self.traceparent.as_deref(),

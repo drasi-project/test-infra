@@ -16,10 +16,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use opentelemetry::metrics::{Counter, Histogram};
-use opentelemetry::{global, runtime, KeyValue};
+use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::reader::DefaultTemporalitySelector;
-use opentelemetry_sdk::metrics::{Aggregation, InstrumentKind, MeterProvider as SdkMeterProvider};
+use opentelemetry_sdk::metrics::{Aggregation, InstrumentKind, SdkMeterProvider};
+use opentelemetry_sdk::runtime;
 use opentelemetry_sdk::Resource;
 use serde::{Deserialize, Serialize};
 
@@ -169,7 +170,7 @@ impl ProfilerMetrics {
         let bootstrap_rec_time_total = bootstrap_rec_meter
             .f64_histogram("drasi.query-result-profiler.bootstrap_rec_time_total")
             .with_description("Total time taken to process a Bootstrap Record")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         // Get a Change Record meter
@@ -183,61 +184,61 @@ impl ProfilerMetrics {
         let change_rec_time_in_reactivator = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_reactivator")
             .with_description("Total time Query Result Change spent in Reactivator")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_in_src_change_q = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_q")
             .with_description("Total time Query Result Change spent in Source Change Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_in_src_change_rtr = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_rtr")
             .with_description("Total time Query Result Change spent in Source Change Router")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_in_src_disp_q = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_disp_q")
             .with_description("Total time Query Result Change spent in Source Dispatch Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_in_src_change_disp = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_src_change_disp")
             .with_description("Total time Query Result Change spent in Source Change Dispatcher")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_in_query_change_q = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_change_q")
             .with_description("Total time Query Result Change spent being in Query Change Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_in_query_host = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_host")
             .with_description("Total time Query Result Change spent in Query Host")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_in_query_solver = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_query_solver")
             .with_description("Total time Query Result Change spent in Query Solver")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_in_result_q = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_in_result_q")
             .with_description("Total time Query Result Change spent in Query Result Queue")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         let change_rec_time_total = change_rec_meter
             .f64_histogram("drasi.query-result-profiler.change_rec_time_total")
             .with_description("Total time Query Result Change took to process")
-            .with_unit(opentelemetry::metrics::Unit::new("ns"))
+            .with_unit("ns")
             .init();
 
         // Get a Control Record meter
@@ -385,20 +386,7 @@ impl OtelMetricResultStreamLogger {
             )]))
             .with_period(Duration::from_millis(100))
             .with_temporality_selector(DefaultTemporalitySelector::new())
-            .with_aggregation_selector(|kind: InstrumentKind| match kind {
-                InstrumentKind::Counter
-                | InstrumentKind::UpDownCounter
-                | InstrumentKind::ObservableCounter
-                | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
-                InstrumentKind::ObservableGauge => Aggregation::LastValue,
-                InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
-                    boundaries: vec![
-                        0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0,
-                        2500.0, 5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0,
-                    ],
-                    record_min_max: true,
-                },
-            })
+            .with_aggregation_selector(profiler_aggregation)
             .build()?;
 
         // Set the global meter provider
@@ -425,6 +413,58 @@ impl OtelMetricResultStreamLogger {
             metrics_attributes,
             settings,
         }))
+    }
+}
+
+fn profiler_aggregation(kind: InstrumentKind) -> Aggregation {
+    match kind {
+        InstrumentKind::Counter
+        | InstrumentKind::UpDownCounter
+        | InstrumentKind::ObservableCounter
+        | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
+        InstrumentKind::ObservableGauge | InstrumentKind::Gauge => Aggregation::LastValue,
+        InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
+            boundaries: vec![
+                0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0,
+                5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0,
+            ],
+            record_min_max: true,
+        },
+    }
+}
+
+#[cfg(test)]
+mod dependency_tests {
+    use super::*;
+
+    #[test]
+    fn telemetry_upgrade_preserves_profiler_aggregation_and_latency_buckets() {
+        for kind in [
+            InstrumentKind::Counter,
+            InstrumentKind::UpDownCounter,
+            InstrumentKind::ObservableCounter,
+            InstrumentKind::ObservableUpDownCounter,
+        ] {
+            assert!(matches!(profiler_aggregation(kind), Aggregation::Sum));
+        }
+        for kind in [InstrumentKind::Gauge, InstrumentKind::ObservableGauge] {
+            assert!(matches!(profiler_aggregation(kind), Aggregation::LastValue));
+        }
+        let Aggregation::ExplicitBucketHistogram {
+            boundaries,
+            record_min_max,
+        } = profiler_aggregation(InstrumentKind::Histogram)
+        else {
+            panic!("latency histograms must retain explicit buckets");
+        };
+        assert_eq!(
+            boundaries,
+            vec![
+                0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0,
+                5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0,
+            ]
+        );
+        assert!(record_min_max);
     }
 }
 

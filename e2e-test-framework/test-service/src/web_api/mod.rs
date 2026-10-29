@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{error::Error as _, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::Extension,
@@ -229,28 +229,24 @@ pub(crate) async fn start_web_api(
         .layer(axum::extract::Extension(test_data_store.clone()))
         .layer(axum::extract::Extension(test_run_host));
 
-    let instance = match axum::Server::try_bind(&addr) {
-        Ok(builder) => builder.serve(app.into_make_service()),
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => listener,
         Err(err) => {
-            if let Some(io_err) = err
-                .source()
-                .and_then(|src| src.downcast_ref::<std::io::Error>())
-            {
-                if io_err.kind() == std::io::ErrorKind::AddrInUse {
-                    log::error!(
-                        "Port {port} is already in use. Another test-service instance is likely \
+            if err.kind() == std::io::ErrorKind::AddrInUse {
+                log::error!(
+                    "Port {port} is already in use. Another test-service instance is likely \
                          running; stop it (e.g. `pkill -f target/release/test-service`) or pass \
                          `--port <other>` to use a different port."
-                    );
-                    std::process::exit(1);
-                }
+                );
+                std::process::exit(1);
             }
             log::error!("Failed to bind test-service Web API to {addr}: {err}");
             std::process::exit(1);
         }
     };
 
-    let addr = instance.local_addr();
+    let addr = listener.local_addr().unwrap_or(addr);
+    let instance = axum::serve(listener, app.into_make_service());
     log::info!("Test Service Web API listening on http://{addr}");
     log::info!("API Documentation available at http://{addr}/docs");
     log::info!("OpenAPI JSON specification available at http://{addr}/api-docs/openapi.json");

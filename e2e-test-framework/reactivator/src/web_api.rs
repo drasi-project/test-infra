@@ -57,7 +57,10 @@ pub(crate) async fn start_web_api(cfg: Params) {
 
     log::info!("\n\nTest Reactivator Web API listening on http://{addr}");
 
-    let server = axum::Server::bind(&addr).serve(app.into_make_service());
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind Test Reactivator");
+    let server = axum::serve(listener, app.into_make_service());
 
     // Graceful shutdown when receiving `Ctrl+C` or SIGTERM
     let graceful = server.with_graceful_shutdown(shutdown_signal());

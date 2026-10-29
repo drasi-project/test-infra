@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::trace::{TraceContextExt, TracerProvider as _};
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{trace::BatchConfig, Resource};
+use opentelemetry_sdk::{trace::BatchConfigBuilder, Resource};
 use serde::{Deserialize, Serialize};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{layer::SubscriberExt, Registry};
@@ -68,12 +70,13 @@ impl OtelTraceResultStreamLogger {
         let settings = OtelTraceResultStreamLoggerSettings::new(test_run_query_id, def)?;
         log::trace!("Creating OtelTraceResultStreamLogger with settings {settings:?}, ");
 
-        let batch_config = BatchConfig::default()
+        let batch_config = BatchConfigBuilder::default()
             .with_max_queue_size(16384) // Increase queue size
             .with_max_export_batch_size(512) // Match with collector
-            .with_scheduled_delay(std::time::Duration::from_secs(1));
+            .with_scheduled_delay(std::time::Duration::from_secs(1))
+            .build();
 
-        let tracer = opentelemetry_otlp::new_pipeline()
+        let provider = opentelemetry_otlp::new_pipeline()
             .tracing()
             .with_batch_config(batch_config)
             .with_exporter(
@@ -81,19 +84,23 @@ impl OtelTraceResultStreamLogger {
                     .tonic()
                     .with_endpoint(settings.otel_endpoint.clone()),
             )
-            .with_trace_config(
-                opentelemetry_sdk::trace::config().with_resource(Resource::new(vec![
-                    KeyValue::new(
-                        opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                        format!("drasi-query-result-observer-{}", settings.test_run_query_id),
-                    ),
-                ])),
-            )
+            .with_trace_config(opentelemetry_sdk::trace::Config::default().with_resource(
+                Resource::new(vec![KeyValue::new(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                    format!("drasi-query-result-observer-{}", settings.test_run_query_id),
+                )]),
+            ))
             .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+        let tracer = provider.tracer("opentelemetry-otlp");
+        // OTLP 0.17 returns the provider instead of installing it globally.
+        opentelemetry::global::set_tracer_provider(provider);
 
         let telemetry = tracing_opentelemetry::layer()
             .with_tracer(tracer)
-            .with_exception_fields(true)
+            .with_error_fields_to_exceptions(true)
+            .with_error_records_to_exceptions(false)
+            .with_error_events_to_exceptions(false)
+            .with_error_events_to_status(false)
             .with_location(true);
         let subscriber = Registry::default().with(telemetry);
         tracing::subscriber::set_global_default(subscriber)
@@ -127,9 +134,7 @@ impl ResultStreamLogger for OtelTraceResultStreamLogger {
 }
 
 fn create_span(settings: &OtelTraceResultStreamLoggerSettings, record: &HandlerRecord) {
-    // Extract the context using the API's global propagator
-    let parent_context =
-        opentelemetry_api::global::get_text_map_propagator(|propagator| propagator.extract(record));
+    let parent_context = parent_context(record);
 
     let span = tracing::span!(tracing::Level::INFO, "query_result");
     span.set_parent(parent_context);
@@ -143,4 +148,52 @@ fn create_span(settings: &OtelTraceResultStreamLoggerSettings, record: &HandlerR
     );
     span.set_attribute("test_run_query_id", settings.test_run_query_id.to_string());
     let _ = span.enter();
+}
+
+fn parent_context(record: &HandlerRecord) -> opentelemetry::Context {
+    let context =
+        opentelemetry::global::get_text_map_propagator(|propagator| propagator.extract(record));
+    if context.span().span_context().is_valid() {
+        context
+    } else {
+        // Preserve the record's W3C context when the new API's global
+        // propagator has not been configured by the embedding application.
+        opentelemetry_sdk::propagation::TraceContextPropagator::new().extract(record)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_traceparent_and_tracestate_survive_the_api_upgrade() {
+        let record = HandlerRecord {
+            id: "record".into(),
+            sequence: 1,
+            created_time_ns: 0,
+            processed_time_ns: 0,
+            traceparent: Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".into()),
+            tracestate: Some("vendor=value".into()),
+            profiling: None,
+            payload: HandlerPayload::ReactionOutput {
+                reaction_output: serde_json::json!({}),
+            },
+        };
+        let context = parent_context(&record);
+        let span = context.span();
+        assert_eq!(
+            span.span_context().trace_id().to_string(),
+            "4bf92f3577b34da6a3ce929d0e0e4736"
+        );
+        assert_eq!(
+            span.span_context().span_id().to_string(),
+            "00f067aa0ba902b7"
+        );
+        assert_eq!(
+            span.span_context().trace_state().get("vendor"),
+            Some("value")
+        );
+        assert!(span.span_context().is_remote());
+    }
 }

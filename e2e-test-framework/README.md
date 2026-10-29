@@ -386,6 +386,14 @@ test_repos:
 
 ### Azure Blob Storage
 
+The account-key client retains the legacy Azure Storage SDK for compatibility.
+To mitigate `RUSTSEC-2026-0275`, its request transport redacts authorization
+after sending (also on cancellation), before SDK retry diagnostics can log it.
+The SDK still signs each retry; no global logging filter or subscriber is
+changed. Configuration debug output also redacts the access key. Rotate keys
+used by older builds while debug/trace logging was enabled. This is a scoped
+runtime mitigation, not a patched Azure SDK or an audit ignore.
+
 ```yaml
 test_repos:
   - kind: AzureStorageBlob
@@ -1288,6 +1296,26 @@ The Test Service provides a comprehensive REST API. Interactive documentation is
 ---
 
 ## Development
+
+Dependency security boundary (October 2026): Axum 0.7, Reqwest 0.12 and
+OpenTelemetry 0.24 / OTLP 0.17 remove the old `h2` 0.3 branch without disabling
+HTTP/2 or telemetry. The lockfile selects patched `h2` 0.4.20, TLS roots,
+Rustls/WebPKI, Tokio, crossbeam-epoch and gRPC. The migration retains graceful
+HTTP shutdown, OTLP trace-provider ownership, W3C traceparent/tracestate,
+nanosecond metric units, custom histogram buckets and batch/export intervals.
+The test host now uses the consolidated `opentelemetry` API rather than its
+old separate `opentelemetry_api` dependency.
+
+The Swagger build's old `zip` dependency reads only the crate's bundled
+checksum-verified UI archive, which has no privileged permission bits or
+symlinks. Legacy Azure credential logging is mitigated at the account-key
+client as described above. Before the legacy SDK parses service listings or
+errors, a quick-xml 0.41 preflight rejects duplicate attributes and bounds each
+element to 256 attributes, mitigating `RUSTSEC-2026-0194`. Blob downloads remain
+streaming and are not subject to this service-metadata limit. The SDK's plain
+XML reader does not use the namespace resolver affected by
+`RUSTSEC-2026-0195`. These are scoped mitigations/assessments, not blanket audit
+exemptions.
 
 ### Git Hooks Setup
 

@@ -22,9 +22,10 @@ use serde::Serialize;
 use tokio::sync::mpsc::Receiver;
 
 /// Reaction handler status enum
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ReactionHandlerStatus {
     /// Handler has not been initialized
+    #[default]
     Uninitialized,
     /// Handler is actively processing reactions
     Running,
@@ -45,12 +46,6 @@ impl ReactionHandlerStatus {
     /// Check if the handler is in a terminal state
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Stopped | Self::Error)
-    }
-}
-
-impl Default for ReactionHandlerStatus {
-    fn default() -> Self {
-        Self::Uninitialized
     }
 }
 

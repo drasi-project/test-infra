@@ -23,9 +23,8 @@ test:
 	$(MAKE) -C test-service $(MAKECMDGOALS)
 
 lint-check:
-	$(MAKE) -C proxy $(MAKECMDGOALS)
-	$(MAKE) -C reactivator $(MAKECMDGOALS)
-	$(MAKE) -C test-service $(MAKECMDGOALS)
+	cargo fmt -- --check
+	cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::print_stdout
 
 drasi-apply:
 	drasi apply -f test-source-provider/e2e-test-service-provider.yaml

@@ -20,17 +20,12 @@ use serde::{
     Deserialize, Serialize, Serializer,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TimeMode {
     Live,
+    #[default]
     Recorded,
     Rebased(u64),
-}
-
-impl Default for TimeMode {
-    fn default() -> Self {
-        Self::Recorded
-    }
 }
 
 impl FromStr for TimeMode {
@@ -89,17 +84,12 @@ impl Serialize for TimeMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SpacingMode {
     None,
     Rate(NonZeroU32),
+    #[default]
     Recorded,
-}
-
-impl Default for SpacingMode {
-    fn default() -> Self {
-        Self::Recorded
-    }
 }
 
 impl FromStr for SpacingMode {

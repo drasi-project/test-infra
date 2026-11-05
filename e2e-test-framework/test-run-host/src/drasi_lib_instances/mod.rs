@@ -229,8 +229,17 @@ impl TestRunDrasiLibInstance {
 
         let config = self.definition.effective_config();
         let configured = async {
+        let query_plugin = drasi_host_sdk::computation::NativePlugin::from_definition(
+            drasi_computation_transformer_query::plugin()?,
+        ).context("registering the embedded native query plugin")?;
         let mut owner = self.core.write().await;
-        let core = Arc::new(DrasiLib::builder().with_id(self.id.to_string()).build().await?);
+        let core = Arc::new(
+            DrasiLib::builder()
+                .with_id(self.id.to_string())
+                .with_query_factory(query_plugin.query_factory()?)
+                .build()
+                .await?,
+        );
         *owner = Some(core.clone());
         drop(owner);
         for source_config in &config.sources {

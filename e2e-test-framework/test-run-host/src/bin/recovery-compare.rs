@@ -12,6 +12,10 @@ fn main() {
     }
 }
 
+#[allow(
+    clippy::print_stdout,
+    reason = "This CLI writes its help and JSON report to stdout"
+)]
 fn run() -> Result<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() == 1 && args[0] == "--help" {

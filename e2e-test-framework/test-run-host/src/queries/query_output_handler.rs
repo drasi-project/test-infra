@@ -22,9 +22,10 @@ use serde::Serialize;
 use tokio::sync::mpsc::Receiver;
 
 /// Query handler status enum with bootstrap support
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum QueryHandlerStatus {
     /// Handler has not been initialized
+    #[default]
     Uninitialized,
     /// Handler is in bootstrap phase
     BootstrapStarted,
@@ -59,12 +60,6 @@ impl QueryHandlerStatus {
     /// Check if the handler is in a terminal state
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Stopped | Self::Deleted | Self::Error)
-    }
-}
-
-impl Default for QueryHandlerStatus {
-    fn default() -> Self {
-        Self::Uninitialized
     }
 }
 

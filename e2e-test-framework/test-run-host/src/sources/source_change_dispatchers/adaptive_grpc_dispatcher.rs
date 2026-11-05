@@ -201,7 +201,7 @@ impl AdaptiveGrpcSourceChangeDispatcher {
                     {
                         Ok(_) => {
                             successful_batches += 1;
-                            if successful_batches % 100 == 0 {
+                            if successful_batches.is_multiple_of(100) {
                                 info!(
                                     "Adaptive dispatcher metrics - Successful: {}",
                                     successful_batches

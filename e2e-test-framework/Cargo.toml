@@ -17,10 +17,11 @@ resolver = "2"
 
 [workspace.package]
 version = "0.2.0"
+rust-version = "1.95.0"
 
 [workspace.lints.rust]
 warnings = "deny"
-unused = "allow"
+unused = "deny"
 
 [workspace.lints.clippy]
 print_stdout = "warn"

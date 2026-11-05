@@ -24,9 +24,10 @@ use test_data_store::scripts::SourceChangeEvent;
 // pub mod console_change_event_logger;
 // pub mod script_change_event_logger;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum StartTimeMode {
     Live,
+    #[default]
     FirstEvent,
     Rebased(u64),
 }
@@ -55,12 +56,6 @@ impl std::fmt::Display for StartTimeMode {
             Self::FirstEvent => write!(f, "first_event"),
             Self::Rebased(time) => write!(f, "{time}"),
         }
-    }
-}
-
-impl Default for StartTimeMode {
-    fn default() -> Self {
-        Self::FirstEvent
     }
 }
 

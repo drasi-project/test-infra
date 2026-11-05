@@ -1,4 +1,5 @@
 [package]
+rust-version.workspace = true
 name = "test-data-store"
 version = "0.1.0"
 edition = "2021"
@@ -23,3 +24,8 @@ anyhow = "1.0.86"
 thiserror = "1.0.63"
 async-trait = "0.1.81"
 walkdir = "2.5.0"
+
+# Enable unused-code checks without changing the existing Clippy restriction-lint policy.
+[lints.rust]
+warnings = "deny"
+unused = "deny"

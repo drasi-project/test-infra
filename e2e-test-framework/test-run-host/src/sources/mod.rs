@@ -44,17 +44,12 @@ pub mod script_test_run_source;
 pub mod source_change_dispatchers;
 pub mod source_change_generators;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub enum SourceStartMode {
     Auto,
+    #[default]
     Bootstrap,
     Manual,
-}
-
-impl Default for SourceStartMode {
-    fn default() -> Self {
-        Self::Bootstrap
-    }
 }
 
 impl FromStr for SourceStartMode {

@@ -319,13 +319,13 @@ pub async fn recorder_thread(
                             SourceChangeRecorderStatus::Error => transition_from_error_state(&message.command, &mut recorder_state),
                         };
 
-                        if message.response_tx.is_some() {
+                        if let Some(response_tx) = message.response_tx {
                             let message_response = SourceChangeRecorderMessageResponse {
                                 result: transition_response,
                                 state: recorder_state.clone(),
                             };
 
-                            let r = message.response_tx.unwrap().send(message_response);
+                            let r = response_tx.send(message_response);
                             if let Err(e) = r {
                                 log::error!("Error in SourceChangeRecorder sending message response back to caller: {e:?}");
                             }

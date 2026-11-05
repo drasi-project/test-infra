@@ -31,9 +31,10 @@ use super::output_handler_message::OutputHandlerMessage;
 ///
 /// This enum combines the states from both ResultStreamHandlerStatus and
 /// ReactionHandlerStatus, with bootstrap states as optional transitions
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum UnifiedHandlerStatus {
     /// Handler has not been initialized
+    #[default]
     Uninitialized,
     /// Handler is in bootstrap phase (ResultStream specific)
     BootstrapStarted,
@@ -68,12 +69,6 @@ impl UnifiedHandlerStatus {
     /// Check if the handler is in a terminal state
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Stopped | Self::Deleted | Self::Error)
-    }
-}
-
-impl Default for UnifiedHandlerStatus {
-    fn default() -> Self {
-        Self::Uninitialized
     }
 }
 

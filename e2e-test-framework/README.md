@@ -91,6 +91,12 @@ reactions connect through `DrasiLibInstanceChannel`; the embedded instance does
 not expose an HTTP/gRPC server. See [drasi-lib instances](#drasi-lib-instances)
 for runtime information and a complete runnable example.
 
+Embedded instances explicitly register the statically linked native query plugin
+through the Host SDK's validated ABI. Queries run in the same ComputationGraph
+as their sources and reactions; no external plugin directory or linked-query
+fallback is required. The plugin enables the standard middleware set and system
+JQ, matching the embedded library's middleware features.
+
 To test an **external Drasi Server** instead, use HTTP/gRPC dispatchers and
 reaction handlers.
 
@@ -1351,6 +1357,11 @@ cargo test test_name -- --exact
 ```
 
 ### Linting
+
+Run this target from the workspace root. It checks formatting for this workspace
+and lints all eight packages once, without formatting sibling path dependencies.
+Unused-code warnings are errors. The supported Rust floor is declared in Cargo
+manifests and matches the pinned Rust 1.95 toolchain.
 
 ```bash
 # Check formatting and clippy

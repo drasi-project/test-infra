@@ -268,89 +268,6 @@ impl ProfilerMetrics {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct ProfilerSummary {
-    pub bootstrap_rec_count: usize,
-    pub bootstrap_rec_time_total_avg: f64,
-    pub bootstrap_rec_time_total_max: u64,
-    pub bootstrap_rec_time_total_min: u64,
-    pub change_rec_count: usize,
-    pub change_rec_time_in_reactivator_avg: f64,
-    pub change_rec_time_in_reactivator_max: u64,
-    pub change_rec_time_in_reactivator_min: u64,
-    pub change_rec_time_in_src_change_q_avg: f64,
-    pub change_rec_time_in_src_change_q_max: u64,
-    pub change_rec_time_in_src_change_q_min: u64,
-    pub change_rec_time_in_src_change_rtr_avg: f64,
-    pub change_rec_time_in_src_change_rtr_max: u64,
-    pub change_rec_time_in_src_change_rtr_min: u64,
-    pub change_rec_time_in_src_disp_q_avg: f64,
-    pub change_rec_time_in_src_disp_q_max: u64,
-    pub change_rec_time_in_src_disp_q_min: u64,
-    pub change_rec_time_in_src_change_disp_avg: f64,
-    pub change_rec_time_in_src_change_disp_max: u64,
-    pub change_rec_time_in_src_change_disp_min: u64,
-    pub change_rec_time_in_query_change_q_avg: f64,
-    pub change_rec_time_in_query_change_q_max: u64,
-    pub change_rec_time_in_query_change_q_min: u64,
-    pub change_rec_time_in_query_host_avg: f64,
-    pub change_rec_time_in_query_host_max: u64,
-    pub change_rec_time_in_query_host_min: u64,
-    pub change_rec_time_in_query_solver_avg: f64,
-    pub change_rec_time_in_query_solver_max: u64,
-    pub change_rec_time_in_query_solver_min: u64,
-    pub change_rec_time_in_result_q_avg: f64,
-    pub change_rec_time_in_result_q_max: u64,
-    pub change_rec_time_in_result_q_min: u64,
-    pub change_rec_time_total_avg: f64,
-    pub change_rec_time_total_max: u64,
-    pub change_rec_time_total_min: u64,
-    pub control_rec_count: usize,
-}
-
-impl Default for ProfilerSummary {
-    fn default() -> Self {
-        Self {
-            bootstrap_rec_count: 0,
-            bootstrap_rec_time_total_avg: 0.0,
-            bootstrap_rec_time_total_max: 0,
-            bootstrap_rec_time_total_min: u64::MAX,
-            change_rec_count: 0,
-            change_rec_time_in_reactivator_avg: 0.0,
-            change_rec_time_in_reactivator_max: 0,
-            change_rec_time_in_reactivator_min: u64::MAX,
-            change_rec_time_in_src_change_q_avg: 0.0,
-            change_rec_time_in_src_change_q_max: 0,
-            change_rec_time_in_src_change_q_min: u64::MAX,
-            change_rec_time_in_src_change_rtr_avg: 0.0,
-            change_rec_time_in_src_change_rtr_max: 0,
-            change_rec_time_in_src_change_rtr_min: u64::MAX,
-            change_rec_time_in_src_disp_q_avg: 0.0,
-            change_rec_time_in_src_disp_q_max: 0,
-            change_rec_time_in_src_disp_q_min: u64::MAX,
-            change_rec_time_in_src_change_disp_avg: 0.0,
-            change_rec_time_in_src_change_disp_max: 0,
-            change_rec_time_in_src_change_disp_min: u64::MAX,
-            change_rec_time_in_query_change_q_avg: 0.0,
-            change_rec_time_in_query_change_q_max: 0,
-            change_rec_time_in_query_change_q_min: u64::MAX,
-            change_rec_time_in_query_host_avg: 0.0,
-            change_rec_time_in_query_host_max: 0,
-            change_rec_time_in_query_host_min: u64::MAX,
-            change_rec_time_in_query_solver_avg: 0.0,
-            change_rec_time_in_query_solver_max: 0,
-            change_rec_time_in_query_solver_min: u64::MAX,
-            change_rec_time_in_result_q_avg: 0.0,
-            change_rec_time_in_result_q_max: 0,
-            change_rec_time_in_result_q_min: u64::MAX,
-            change_rec_time_total_avg: 0.0,
-            change_rec_time_total_max: 0,
-            change_rec_time_total_min: u64::MAX,
-            control_rec_count: 0,
-        }
-    }
-}
-
 #[allow(dead_code)]
 pub struct OtelMetricResultStreamLogger {
     meter_provider: SdkMeterProvider,
@@ -433,41 +350,6 @@ fn profiler_aggregation(kind: InstrumentKind) -> Aggregation {
     }
 }
 
-#[cfg(test)]
-mod dependency_tests {
-    use super::*;
-
-    #[test]
-    fn telemetry_upgrade_preserves_profiler_aggregation_and_latency_buckets() {
-        for kind in [
-            InstrumentKind::Counter,
-            InstrumentKind::UpDownCounter,
-            InstrumentKind::ObservableCounter,
-            InstrumentKind::ObservableUpDownCounter,
-        ] {
-            assert!(matches!(profiler_aggregation(kind), Aggregation::Sum));
-        }
-        for kind in [InstrumentKind::Gauge, InstrumentKind::ObservableGauge] {
-            assert!(matches!(profiler_aggregation(kind), Aggregation::LastValue));
-        }
-        let Aggregation::ExplicitBucketHistogram {
-            boundaries,
-            record_min_max,
-        } = profiler_aggregation(InstrumentKind::Histogram)
-        else {
-            panic!("latency histograms must retain explicit buckets");
-        };
-        assert_eq!(
-            boundaries,
-            vec![
-                0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0,
-                5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0,
-            ]
-        );
-        assert!(record_min_max);
-    }
-}
-
 #[async_trait]
 impl ResultStreamLogger for OtelMetricResultStreamLogger {
     async fn end_test_run(&mut self) -> anyhow::Result<ResultStreamLoggerResult> {
@@ -546,5 +428,40 @@ impl ResultStreamLogger for OtelMetricResultStreamLogger {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod dependency_tests {
+    use super::*;
+
+    #[test]
+    fn telemetry_upgrade_preserves_profiler_aggregation_and_latency_buckets() {
+        for kind in [
+            InstrumentKind::Counter,
+            InstrumentKind::UpDownCounter,
+            InstrumentKind::ObservableCounter,
+            InstrumentKind::ObservableUpDownCounter,
+        ] {
+            assert!(matches!(profiler_aggregation(kind), Aggregation::Sum));
+        }
+        for kind in [InstrumentKind::Gauge, InstrumentKind::ObservableGauge] {
+            assert!(matches!(profiler_aggregation(kind), Aggregation::LastValue));
+        }
+        let Aggregation::ExplicitBucketHistogram {
+            boundaries,
+            record_min_max,
+        } = profiler_aggregation(InstrumentKind::Histogram)
+        else {
+            panic!("latency histograms must retain explicit buckets");
+        };
+        assert_eq!(
+            boundaries,
+            vec![
+                0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0,
+                5000.0, 7500.0, 10000.0, 15000.0, 20000.0, 25000.0, 30000.0,
+            ]
+        );
+        assert!(record_min_max);
     }
 }

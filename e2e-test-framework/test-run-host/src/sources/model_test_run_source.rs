@@ -141,12 +141,8 @@ impl TestRunSource for ModelTestRunSource {
     ) -> anyhow::Result<BootstrapData> {
         log::debug!("Node Labels: {node_labels:?}, Rel Labels: {rel_labels:?}");
 
-        let bootstrap_data = if self.model_data_generator.is_some() {
-            self.model_data_generator
-                .as_ref()
-                .unwrap()
-                .get_data(node_labels, rel_labels)
-                .await
+        let bootstrap_data = if let Some(generator) = &self.model_data_generator {
+            generator.get_data(node_labels, rel_labels).await
         } else {
             Ok(BootstrapData::new())
         };

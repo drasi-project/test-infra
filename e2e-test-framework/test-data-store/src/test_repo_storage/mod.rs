@@ -59,8 +59,8 @@ impl TestRepoStore {
             test_repos: HashMap::new(),
         };
 
-        if initial_repos.is_some() {
-            for repo in initial_repos.unwrap() {
+        if let Some(initial_repos) = initial_repos {
+            for repo in initial_repos {
                 store.add_test_repo(repo, false).await?;
             }
         }

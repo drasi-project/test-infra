@@ -265,7 +265,7 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
         }
 
         // Log every 1000 records for debugging
-        if self.record_count % 1000 == 0 {
+        if self.record_count.is_multiple_of(1000) {
             log::debug!(
                 "PerformanceMetricsOutputLogger: Processed {} records",
                 self.record_count

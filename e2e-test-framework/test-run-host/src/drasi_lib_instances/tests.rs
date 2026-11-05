@@ -234,6 +234,17 @@ async fn embedded_native_application_reaction_preserves_result_order_and_count()
         crate::test_run_completion::LifecycleTx::disabled(),
     );
     instance.start().await.unwrap();
+    assert_eq!(
+        instance
+            .get_drasi_lib()
+            .await
+            .expect("running instance")
+            .query_factory_implementation()
+            .expect("registered native query factory")
+            .name
+            .as_ref(),
+        "drasi.experimental/indexed-query/ordinary"
+    );
     let source = instance.get_source_handle("source1").await.unwrap();
     let mut subscription = instance.take_reaction_receiver("reaction1").await.unwrap();
     assert!(instance.take_reaction_receiver("reaction1").await.is_err());

@@ -1,4 +1,5 @@
 [package]
+rust-version.workspace = true
 name = "test-run-host"
 version = "0.1.0"
 edition = "2021"
@@ -20,6 +21,10 @@ drasi-lib = { path = "../../../drasi-core/lib", features = [
 
 # Core models (for SourceMiddlewareConfig and other shared types)
 drasi-core = { path = "../../../drasi-core/core" }
+
+# Use the native query plugin through its validated in-process ABI.
+drasi-host-sdk = { path = "../../../drasi-core/components/host-sdk" }
+drasi-computation-transformer-query = { path = "../../../drasi-core/components/computation-plugins/transformers/query", features = ["middleware-jq"] }
 
 # Core reaction (used by the application API)
 drasi-reaction-application = { path = "../../../drasi-core/components/reactions/application" }
@@ -76,3 +81,8 @@ opentelemetry-otlp = { version = "0.17", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio", "metrics", "trace"] }
 opentelemetry-semantic-conventions = "0.16"
 portpicker = "0.1"
+
+# Enable unused-code checks without changing the existing Clippy restriction-lint policy.
+[lints.rust]
+warnings = "deny"
+unused = "deny"

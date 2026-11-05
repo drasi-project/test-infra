@@ -839,13 +839,13 @@ impl QueryResultObserverInternalState {
                 }
             };
 
-            if message.response_tx.is_some() {
+            if let Some(response_tx) = message.response_tx {
                 let message_response = QueryResultObserverMessageResponse {
                     result: transition_response,
                     state: (&*self).into(),
                 };
 
-                let r = message.response_tx.unwrap().send(message_response);
+                let r = response_tx.send(message_response);
                 if let Err(e) = r {
                     anyhow::bail!("Error sending message response back to caller: {e:?}");
                 }

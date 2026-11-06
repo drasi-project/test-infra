@@ -124,6 +124,51 @@ class StockMarketNightlyWorkflowTest < Minitest::Test
                 "IN_PLUGIN_TAG" => "candidate-plugins", "IN_TIMEOUT_MINUTES" => "30")
   end
 
+  def test_all_scheduled_e2e_jobs_require_upstream_main_but_allow_manual_fork_runs
+    entry_points = {
+      "nightly.yml" => "select-variants",
+      "building-comfort-azure.yml" => "test",
+      "stock-market-azure.yml" => "select-variants",
+      "e2e-stock-market-join.yml" => "select-variants",
+      "e2e-building-comfort-recovery.yml" => "prepare",
+      "e2e-stock-market-recovery.yml" => "prepare"
+    }
+    scheduled = Dir.glob(File.join(ROOT, ".github/workflows/*.{yml,yaml}")).select do |filename|
+      workflow = YAML.load_file(filename)
+      events = workflow.fetch("on", workflow[true])
+      events.is_a?(Hash) && events.key?("schedule")
+    end
+    assert_equal entry_points.keys.sort, scheduled.map { |filename| File.basename(filename) }.sort
+    entry_points.each do |filename, job|
+      workflow = YAML.load_file(File.join(ROOT, ".github/workflows", filename))
+      guard = workflow.fetch("jobs").fetch(job).fetch("if")
+      rule = guard.match(/\Agithub\.event_name != 'schedule' \|\| \(github\.repository == '([^']+)' && github\.ref == '([^']+)'\)\z/)
+      refute_nil rule, "#{filename}: #{guard}"
+      assert_equal "drasi-project/test-infra", rule[1], filename
+      assert_equal "refs/heads/main", rule[2], filename
+      [
+        ["schedule", "drasi-project/test-infra", "refs/heads/main", true],
+        ["schedule", "drasi-project/test-infra", "refs/heads/feature", false],
+        ["schedule", "ruokun-niu/test-infra", "refs/heads/main", false],
+        ["schedule", "other-owner/test-infra", "refs/heads/main", false],
+        ["workflow_dispatch", "ruokun-niu/test-infra", "refs/heads/main", true],
+        ["workflow_dispatch", "ruokun-niu/test-infra", "refs/heads/feature", true],
+        ["workflow_dispatch", "drasi-project/test-infra", "refs/heads/feature", true]
+      ].each do |event, repository, ref, expected|
+        allowed = event != "schedule" || (repository == rule[1] && ref == rule[2])
+        assert_equal expected, allowed, "#{filename}: #{event}/#{repository}/#{ref}"
+      end
+    end
+  end
+
+  def test_always_running_scheduled_publishers_also_require_upstream_main
+    %w[building-comfort-azure.yml e2e-stock-market-join.yml].each do |filename|
+      workflow = YAML.load_file(File.join(ROOT, ".github/workflows", filename))
+      assert_equal "always() && github.event_name == 'schedule' && github.repository == 'drasi-project/test-infra' && github.ref == 'refs/heads/main'",
+                   workflow.fetch("jobs").fetch("publish-results").fetch("if"), filename
+    end
+  end
+
   def test_stock_variants_receive_prepared_core_main_binary_and_building_comfort_keeps_its_runner
     mock_runners
     STOCK_VARIANTS.each do |variant|

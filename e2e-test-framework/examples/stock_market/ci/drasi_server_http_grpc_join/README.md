@@ -294,8 +294,9 @@ The Nightly form's server/core repository/ref and plugin-tag overrides apply to
 stock-market jobs too; its bootstrap preset applies only to building comfort.
 The mutable nightly plugin tag can lag current core `main`; build or plugin
 mismatches fail normally rather than falling back to a release. Scheduled
-coverage becomes active after these changes reach the repository's default
-branch and the workflow is enabled.
+coverage runs only in `drasi-project/test-infra` on `main`, after these changes
+reach that branch and the workflow is enabled. Fork schedules skip the tests;
+manual dispatches remain available in forks and on other branches.
 
 Regression check from the repository root:
 
@@ -336,7 +337,7 @@ resources exist.
 
 ### Daily performance schedule
 
-**Stock market Azure** runs daily at **07:30 UTC** from the default branch,
+**Stock market Azure** runs daily at **07:30 UTC** on `drasi-project/test-infra`'s `main`,
 offset from building comfort's 07:00 UTC schedule. It reuses the same hardware
 matrix: `Standard_D4s_v4`, `Standard_D4s_v6`, and `Standard_F4as_v7`. VM jobs run
 sequentially, and each VM runs both `standard` and `adaptive`, producing six
@@ -356,8 +357,9 @@ Publishing requires the same `TEST_RESULTS_APP_PRIVATE_KEY` secret and
 `TEST_RESULTS_APP_ID` repository variable as building comfort, with the GitHub
 App authorized to write to `drasi-project/test-results`. The stock-market caller
 forwards that secret through the reusable Azure workflow. Enable the schedule
-by merging these changes into the repository's default branch; scheduled
-workflows must also be enabled in forks.
+by merging these changes into `drasi-project/test-infra`'s `main`. Fork schedules
+skip tests and publication, even if enabled; manual Azure dispatches remain
+available in forks with the required credentials.
 
 ## Default ports
 

@@ -65,6 +65,7 @@ env:
 
 jobs:
   select-variants:
+    if: github.event_name != 'schedule' || (github.repository == 'drasi-project/test-infra' && github.ref == 'refs/heads/main')
     name: Select variants
     runs-on: ubuntu-latest
     outputs:

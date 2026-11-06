@@ -321,10 +321,11 @@ The **Nightly** workflow in
 [.github/workflows/nightly.yml](../../../../.github/workflows/nightly.yml)
 runs daily at 22:00 UTC on GitHub-hosted runners. Core's nightly starts at
 14:00 UTC; the gap allows for GitHub scheduling delays and its roughly 2.5-hour
-plugin build. It can also be started manually. Scheduled workflows run from the
-repository's default branch.
+plugin build. Scheduled E2E, Azure, and recovery jobs run only in
+`drasi-project/test-infra` on `main`. Fork schedules skip tests and performance
+publication; manual dispatches remain available in forks and on other branches.
 
-Scheduled and manual runs always attempt the selected tests, without checking
+Allowed scheduled and manual runs attempt the selected tests, without checking
 the upstream nightly's status or freshness. Build, plugin-loading, and test
 failures fail the run normally. If plugin publishing failed, the
 `drasi-nightly-test` tag may still point to an earlier build.

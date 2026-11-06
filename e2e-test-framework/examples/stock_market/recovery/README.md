@@ -34,9 +34,10 @@ plugin settings, and 30-minute default timeout. Scheduled defaults do not
 override manual `false` selections. The nightly plugin tag is mutable and can
 lag core `main`; mismatches remain failures, not release fallbacks.
 
-GitHub schedules run from the repository's default branch. Merge these changes
-there and enable the workflow to activate nightly recovery; a branch-only push
-does not enable its schedule.
+Scheduled execution runs only in `drasi-project/test-infra` on `main`. Merge
+these changes there and enable the workflow to activate nightly recovery.
+Fork schedules skip the build and recovery jobs, even if enabled; manual
+dispatches remain available in forks and on other branches.
 
 ## Fixed Recovery Workload
 

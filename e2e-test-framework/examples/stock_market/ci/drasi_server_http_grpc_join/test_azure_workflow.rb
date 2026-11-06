@@ -161,7 +161,7 @@ class StockMarketAzureWorkflowTest < Minitest::Test
 
     publish = @shared.fetch("jobs").fetch("publish-results")
     assert_equal ["test"], publish["needs"]
-    assert_equal "always() && github.event_name == 'schedule'", publish["if"]
+    assert_equal "always() && github.event_name == 'schedule' && github.repository == 'drasi-project/test-infra' && github.ref == 'refs/heads/main'", publish["if"]
     assert_equal "./.github/workflows/publish-test-results.yml", publish["uses"]
     [@workflow.fetch("jobs").fetch("test"), publish].each do |caller|
       assert_equal "${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}", caller.dig("secrets", "TEST_RESULTS_APP_PRIVATE_KEY")

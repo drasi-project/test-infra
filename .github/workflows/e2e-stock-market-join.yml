@@ -80,6 +80,7 @@ permissions:
 
 jobs:
   select-variants:
+    if: github.event_name != 'schedule' || (github.repository == 'drasi-project/test-infra' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     outputs:
       variants: ${{ steps.compute.outputs.variants }}
@@ -226,7 +227,7 @@ jobs:
   # condition rather than publishing dispatch runs by default.
   publish-results:
     needs: [stock-market-drasi-server-http-grpc-join]
-    if: always() && github.event_name == 'schedule'
+    if: always() && github.event_name == 'schedule' && github.repository == 'drasi-project/test-infra' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/publish-test-results.yml
     secrets:
       TEST_RESULTS_APP_PRIVATE_KEY: ${{ secrets.TEST_RESULTS_APP_PRIVATE_KEY }}

@@ -3,9 +3,10 @@
 The [building-comfort recovery workflow](../../../../.github/workflows/e2e-building-comfort-recovery.yml)
 runs daily at **22:00 UTC**, following the nightly convention in
 [test-infra PR #93](https://github.com/drasi-project/test-infra/pull/93).
-GitHub schedules run the workflow on the repository's default branch; publishing
-only to `crash-recovery` does not activate its cron schedule. GitHub may delay
-scheduled execution.
+Scheduled execution is restricted to `drasi-project/test-infra` on `main`.
+Fork schedules skip the build and recovery jobs. Manual dispatches remain
+available in forks and on other branches; publishing only to `crash-recovery`
+does not activate its cron schedule. GitHub may delay scheduled execution.
 
 ## Scheduled Configuration
 

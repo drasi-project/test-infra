@@ -95,6 +95,8 @@ pub struct PerformanceMetricsOutputLoggerConfig {
     /// the bootstrap (initial-load) phase and the remainder to steady-state.
     #[serde(default)]
     pub bootstrap_record_count: Option<u64>,
+    #[serde(default)]
+    pub measurement_record_count: Option<u64>,
 }
 
 /// Performance metrics output logger implementation
@@ -105,6 +107,7 @@ pub struct PerformanceMetricsOutputLogger {
     end_time_ns: u64,
     /// Total number of records received
     record_count: u64,
+    measurement_record_count: Option<u64>,
     /// Optional number of leading records treated as the bootstrap phase
     bootstrap_record_count: Option<u64>,
     /// Timestamp in nanoseconds when the bootstrap phase completed (i.e. when
@@ -126,6 +129,10 @@ impl PerformanceMetricsOutputLogger {
         config: &PerformanceMetricsOutputLoggerConfig,
         output_storage: &TestRunReactionStorage,
     ) -> anyhow::Result<Box<dyn OutputLogger + Send + Sync>> {
+        anyhow::ensure!(
+            config.measurement_record_count != Some(0),
+            "measurement_record_count must be positive"
+        );
         log::info!(
             "PerformanceMetricsOutputLogger::new() called for {test_run_reaction_id} with config {config:?}"
         );
@@ -160,6 +167,7 @@ impl PerformanceMetricsOutputLogger {
             start_time_ns: None,
             end_time_ns: 0,
             record_count: 0,
+            measurement_record_count: config.measurement_record_count,
             bootstrap_record_count: config.bootstrap_record_count,
             bootstrap_end_time_ns: None,
             test_run_reaction_id,
@@ -239,6 +247,9 @@ impl PerformanceMetricsOutputLogger {
 #[async_trait]
 impl OutputLogger for PerformanceMetricsOutputLogger {
     async fn log_handler_record(&mut self, _record: &HandlerRecord) -> anyhow::Result<()> {
+        if self.measurement_record_count == Some(self.record_count) {
+            return Ok(());
+        }
         // Set start time on first record
         if self.start_time_ns.is_none() {
             self.start_time_ns = Some(Self::get_current_time_ns());
@@ -250,13 +261,22 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
 
         // Increment record count
         self.record_count += 1;
+        if self.measurement_record_count == Some(self.record_count) {
+            self.end_time_ns = Self::get_current_time_ns();
+        }
 
         // Capture the bootstrap phase boundary: the moment the
         // bootstrap_record_count-th record is received marks the end of the
         // bootstrap (initial-load) phase and the start of steady-state.
         if let Some(k) = self.bootstrap_record_count {
             if k > 0 && self.record_count == k && self.bootstrap_end_time_ns.is_none() {
-                self.bootstrap_end_time_ns = Some(Self::get_current_time_ns());
+                self.bootstrap_end_time_ns = Some(
+                    if self.measurement_record_count == Some(self.record_count) {
+                        self.end_time_ns
+                    } else {
+                        Self::get_current_time_ns()
+                    },
+                );
                 log::debug!(
                     "PerformanceMetricsOutputLogger: Bootstrap phase complete at {} records",
                     self.record_count
@@ -276,6 +296,13 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
     }
 
     async fn end_test_run(&mut self) -> anyhow::Result<OutputLoggerResult> {
+        if let Some(required) = self.measurement_record_count {
+            anyhow::ensure!(
+                self.record_count == required,
+                "Incomplete performance measurement: expected {required} records, got {}",
+                self.record_count
+            );
+        }
         log::error!(
             "PerformanceMetricsOutputLogger: Ending test run for {} with {} records",
             self.test_run_reaction_id,
@@ -283,7 +310,9 @@ impl OutputLogger for PerformanceMetricsOutputLogger {
         );
 
         // Capture end time
-        self.end_time_ns = Self::get_current_time_ns();
+        if self.measurement_record_count.is_none() {
+            self.end_time_ns = Self::get_current_time_ns();
+        }
 
         // Calculate metrics
         let start_time = self.start_time_ns.unwrap_or(self.end_time_ns);
@@ -372,6 +401,7 @@ mod tests {
         let _config = PerformanceMetricsOutputLoggerConfig {
             filename: Some("test_metrics.json".to_string()),
             bootstrap_record_count: None,
+            measurement_record_count: None,
         };
 
         // Create output directory
@@ -384,6 +414,7 @@ mod tests {
             start_time_ns: None,
             end_time_ns: 0,
             record_count: 0,
+            measurement_record_count: None,
             bootstrap_record_count: None,
             bootstrap_end_time_ns: None,
             test_run_reaction_id,
@@ -416,6 +447,73 @@ mod tests {
 
         assert!(logger.start_time_ns.is_some());
         assert_eq!(logger.record_count, 1);
+    }
+
+    #[tokio::test]
+    async fn bounded_measurement_keeps_receiving_without_changing_window() {
+        let (mut logger, _temp_dir) = create_test_logger().await;
+        logger.measurement_record_count = Some(2);
+        logger.bootstrap_record_count = Some(2);
+        let record = HandlerRecord {
+            id: "test_id".to_string(),
+            sequence: 1,
+            created_time_ns: 1000,
+            processed_time_ns: 2000,
+            traceparent: None,
+            tracestate: None,
+            payload: HandlerPayload::ReactionOutput {
+                reaction_output: serde_json::json!({"value": 1}),
+            },
+        };
+        logger.log_handler_record(&record).await.unwrap();
+        assert!(logger
+            .end_test_run()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Incomplete performance measurement"));
+        logger.log_handler_record(&record).await.unwrap();
+        let measured_end = logger.end_time_ns;
+        assert!(measured_end > 0);
+        for _record in 0..10 {
+            logger.log_handler_record(&record).await.unwrap();
+        }
+        assert_eq!(logger.record_count, 2);
+        assert_eq!(logger.end_time_ns, measured_end);
+        let summary = logger.end_test_run().await.unwrap().summary.unwrap();
+        assert_eq!(summary["record_count"], 2);
+        assert_eq!(summary["end_time_ns"], measured_end);
+        assert_eq!(summary["bootstrap"]["end_time_ns"], measured_end);
+        assert_eq!(summary["bootstrap"]["duration_ns"], summary["duration_ns"]);
+        assert_eq!(summary["steady_state"]["record_count"], 0);
+        assert_eq!(summary["steady_state"]["duration_ns"], 0);
+    }
+
+    #[tokio::test]
+    async fn zero_record_measurement_is_rejected() {
+        let (logger, _temp_dir) = create_test_logger().await;
+        let config = PerformanceMetricsOutputLoggerConfig {
+            filename: None,
+            bootstrap_record_count: None,
+            measurement_record_count: Some(0),
+        };
+        let result = PerformanceMetricsOutputLogger::new(
+            logger.test_run_reaction_id.clone(),
+            &config,
+            &logger.output_storage,
+        )
+        .await;
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("must be positive"));
+    }
+
+    #[test]
+    fn existing_metrics_configs_remain_unbounded() {
+        let config: PerformanceMetricsOutputLoggerConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.measurement_record_count, None);
     }
 
     #[tokio::test]

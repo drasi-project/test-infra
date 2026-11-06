@@ -4,6 +4,33 @@ The stock market example provides multiple configuration options to demonstrate 
 
 ## Available Configurations
 
+### CI Cross-Source Join
+
+The [HTTP + gRPC join](ci/drasi_server_http_grpc_join/README.md) runs on both
+GitHub-hosted runners and ephemeral Azure VMs. Check `adaptive` to
+enable adaptive batching on both source dispatchers, or check both `standard`
+and `adaptive` to compare it
+with the standard dispatcher profile used by building comfort: unbatched HTTP
+and batched, non-adaptive gRPC. The query and HTTP reaction stay fixed.
+Both workflows support independent RocksDB `persist_index` and redb `state_store`
+checkboxes. Every run validates the final query snapshot against an independent
+join of the completed input streams; output order does not affect the verdict.
+
+The shared [Nightly workflow](../../../.github/workflows/nightly.yml) also runs
+both join variants daily at 22:00 UTC against Drasi Server and drasi-core `main`
+with `drasi-nightly-test` plugins. The release-based performance schedules remain
+separate and unchanged.
+
+### SIGKILL Recovery
+
+The separate [SIGKILL recovery test](recovery/README.md) runs standard and adaptive
+HTTP/gRPC dispatchers against a fixed scripted join workload. It waits for both
+sources to drain, kills and restarts the server with persistence, and requires
+the recovered query snapshot to match a versioned golden. It does not change the
+performance workload or claim exactly-once HTTP delivery. Both dispatcher
+variants run clean-control and SIGKILL checks daily at 22:00 UTC using the same
+server/core `main` and nightly plugin settings as building comfort.
+
 ### 1. Basic Local Configuration (`/local/`)
 - **Purpose**: Simple standalone testing without Drasi integration
 - **Use Case**: Testing the StockTradeDataGenerator in isolation

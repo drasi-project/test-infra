@@ -260,7 +260,8 @@ def arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("clean", "sigkill"), default="sigkill")
     parser.add_argument("--variant", choices=("standard", "adaptive"), default="standard")
-    parser.add_argument("--batch-size", type=int, choices=(5000, 10000, 50000), default=10000)
+    parser.add_argument("--batch-size", type=int, choices=(5000, 10000, 50000), default=10000,
+                        help="Maximum events per adaptive batch; ignored for standard")
     parser.add_argument("--work-dir", required=True, type=Path)
     parser.add_argument("--drasi-server-bin", default=os.environ.get("DRASI_SERVER_BIN", ""))
     parser.add_argument("--test-service-bin", default=os.environ.get("TEST_SERVICE_BIN", ""))

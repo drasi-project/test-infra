@@ -100,10 +100,11 @@ def prepare(work, args):
             "spacing_mode": "none", "time_mode": "recorded", "ignore_scripted_pause_commands": False,
         }
         dispatcher = source["source_change_dispatchers"][0]
-        dispatcher.update(source_id=source_id, batch_events=True,
-                          adaptive_enabled=args.variant == "adaptive",
-                          batch_size=args.batch_size, batch_timeout_ms=50,
+        dispatcher.update(source_id=source_id,
                           port=args.http_port if source_id == "stock-trades-db" else args.grpc_port)
+        if args.variant == "adaptive":
+            dispatcher.update(batch_events=True, adaptive_enabled=True,
+                              batch_size=args.batch_size, batch_timeout_ms=50)
         if source_id == "stock-trades-db":
             dispatcher["url"] = "http://127.0.0.1"
         else:

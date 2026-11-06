@@ -130,7 +130,7 @@ cross-source join contract:
 
 | Input | Values | Effect |
 | --- | --- | --- |
-| `standard` | checkbox (checked by default) | Runs the original HTTP + gRPC join. |
+| `standard` | checkbox (checked by default) | Runs the join with building comfort's standard profile: unbatched HTTP and batched, non-adaptive gRPC. |
 | `adaptive` | checkbox (unchecked by default) | Runs adaptive dispatch on both sources; check both boxes to compare variants. |
 | `batching_speed` | `5000`, `10000` (default), `50000` | Maximum events per adaptive batch for both dispatchers; maximum wait is 50 ms. Standard dispatchers are unchanged. |
 | `workload_size` | `100000`, `250000`, `500000` | Number of stock changes; the measured reaction-record window is 75% of the workload. |
@@ -148,7 +148,11 @@ bootstrap data, so `workload_size` is the scenario's data-volume control.
 
 ### Adaptive join
 
-`drasi_server_http_grpc_join` retains the committed standard dispatchers.
+`drasi_server_http_grpc_join` uses building comfort's standard dispatcher profile:
+unbatched HTTP and batched, non-adaptive gRPC. The `batching_speed` input does not
+change either standard dispatcher. Recovery uses the same profile. This replaces
+the older stock-market standard batching settings; take a fresh performance
+baseline when comparing standard throughput.
 `drasi_server_http_grpc_join_adaptive` enables the framework's adaptive
 dispatchers for **both** `stock-trades-db` (HTTP) and `watchlist-db` (gRPC).
 HTTP sends to the stock source's `/events/batch` endpoint; gRPC uses its
@@ -263,6 +267,42 @@ freshly built binary. The step summary labels the run with the resolved source
 be pushed and public (the clone is anonymous). Locally, export `DRASI_SERVER_REF`
 (and optionally `DRASI_REPO`) before running the script for the same effect.
 
+## Nightly full-stack coverage
+
+The shared [Nightly workflow](../../../../../.github/workflows/nightly.yml)
+runs daily at **22:00 UTC** and includes both stock-market join variants alongside
+the four building-comfort variants. Each stock-market job reuses building
+comfort's server preparation to build Drasi Server `main`, patch and verify its
+drasi-core dependencies against core `main`, and use `drasi-nightly-test`
+plugins. The stock runner receives that prepared binary and the prebuilt
+test-service; it does not download a release or rebuild an unpatched server.
+
+Nightly joins use the fixed 100,000-event workload, the same source-drain and
+input-derived snapshot gates, and the default adaptive batch limit of 10,000
+events with a 50 ms wait. Artifacts and failure reporting use the shared Nightly
+workflow. No nightly results are published to the release-based performance
+history, whose existing schedules remain unchanged.
+
+For a manual stock-only run:
+
+```bash
+gh workflow run nightly.yml \
+  -f variants="drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive"
+```
+
+The Nightly form's server/core repository/ref and plugin-tag overrides apply to
+stock-market jobs too; its bootstrap preset applies only to building comfort.
+The mutable nightly plugin tag can lag current core `main`; build or plugin
+mismatches fail normally rather than falling back to a release. Scheduled
+coverage becomes active after these changes reach the repository's default
+branch and the workflow is enabled.
+
+Regression check from the repository root:
+
+```bash
+ruby e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join/test_nightly_workflow.rb
+```
+
 ## Running on an Azure VM
 
 Use **Actions > Stock market Azure > Run workflow** via
@@ -298,7 +338,7 @@ resources exist.
 
 **Stock market Azure** runs daily at **07:30 UTC** from the default branch,
 offset from building comfort's 07:00 UTC schedule. It reuses the same hardware
-matrix: `Standard_D4s_v3`, `Standard_D4s_v6`, and `Standard_F4as_v7`. VM jobs run
+matrix: `Standard_D4s_v4`, `Standard_D4s_v6`, and `Standard_F4as_v7`. VM jobs run
 sequentially, and each VM runs both `standard` and `adaptive`, producing six
 performance records. The shared concurrency lock queues this workflow while
 another Azure test is running, so the actual start may be later.

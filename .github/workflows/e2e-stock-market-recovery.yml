@@ -1,6 +1,8 @@
 name: E2E - stock_market recovery
 
 on:
+  schedule:
+    - cron: "0 22 * * *"
   workflow_dispatch:
     inputs:
       standard:
@@ -55,11 +57,11 @@ jobs:
       - name: Validate settings
         id: settings
         env:
-          V_STANDARD: ${{ inputs.standard }}
-          V_ADAPTIVE: ${{ inputs.adaptive }}
-          MINUTES: ${{ inputs.timeout_minutes }}
-          CORE_REF: ${{ inputs.drasi_core_ref }}
-          SERVER_REF: ${{ inputs.drasi_server_ref }}
+          V_STANDARD: ${{ github.event_name == 'schedule' && 'true' || inputs.standard }}
+          V_ADAPTIVE: ${{ github.event_name == 'schedule' && 'true' || inputs.adaptive }}
+          MINUTES: ${{ github.event_name == 'schedule' && '45' || inputs.timeout_minutes }}
+          CORE_REF: ${{ github.event_name == 'schedule' && 'main' || inputs.drasi_core_ref }}
+          SERVER_REF: ${{ github.event_name == 'schedule' && 'main' || inputs.drasi_server_ref }}
         run: |
           set -euo pipefail
           variants=()
@@ -102,10 +104,10 @@ jobs:
       - name: Prepare Drasi Server and bundle
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DRASI_REPO: ${{ inputs.drasi_server_repo }}
-          DRASI_SERVER_REF: ${{ inputs.drasi_server_ref }}
+          DRASI_REPO: ${{ github.event_name == 'schedule' && 'drasi-project/drasi-server' || inputs.drasi_server_repo }}
+          DRASI_SERVER_REF: ${{ github.event_name == 'schedule' && 'main' || inputs.drasi_server_ref }}
           DRASI_CORE_REPO: drasi-project/drasi-core
-          DRASI_CORE_REF: ${{ inputs.drasi_core_ref }}
+          DRASI_CORE_REF: ${{ github.event_name == 'schedule' && 'main' || inputs.drasi_core_ref }}
           DRASI_SERVER_VERSION: ${{ inputs.drasi_server_version }}
           WORK_DIR: ${{ runner.temp }}/server-build
           ARTIFACTS_DIR: ${{ runner.temp }}/build-artifacts
@@ -143,10 +145,10 @@ jobs:
         variant: ${{ fromJSON(needs.prepare.outputs.variants) }}
     env:
       VARIANT: ${{ matrix.variant }}
-      BATCH_SIZE: ${{ inputs.batching_speed }}
+      BATCH_SIZE: ${{ github.event_name == 'schedule' && '10000' || inputs.batching_speed }}
       TIMEOUT_SECS: ${{ needs.prepare.outputs.timeout_seconds }}
-      DRASI_PLUGIN_REGISTRY: ${{ inputs.plugin_registry }}
-      DRASI_PLUGIN_TAG: ${{ inputs.plugin_tag }}
+      DRASI_PLUGIN_REGISTRY: ${{ github.event_name == 'schedule' && 'ghcr.io/drasi-project' || inputs.plugin_registry }}
+      DRASI_PLUGIN_TAG: ${{ github.event_name == 'schedule' && 'drasi-nightly-test' || inputs.plugin_tag }}
     steps:
       - uses: actions/checkout@v5
       - name: Install runtime dependencies

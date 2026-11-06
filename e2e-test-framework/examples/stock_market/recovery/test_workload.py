@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import json
 from pathlib import Path
 import tempfile
@@ -37,10 +38,15 @@ class WorkloadTest(unittest.TestCase):
 
     def test_variants_share_inputs_and_golden_without_performance_cutoff(self):
         artifacts = []
-        for variant in ("standard", "adaptive"):
+        original = json.loads((workload.REFERENCE / "config.json").read_text())
+        standard_dispatchers = {
+            source["test_source_id"]: source["source_change_dispatchers"][0]
+            for source in original["data_store"]["test_repos"][0]["local_tests"][0]["sources"]
+        }
+        for variant, batch_size in itertools.product(("standard", "adaptive"), (5000, 10000, 50000)):
             with tempfile.TemporaryDirectory() as directory:
                 work = Path(directory)
-                args = argparse.Namespace(variant=variant, batch_size=10000, admin_port=8091,
+                args = argparse.Namespace(variant=variant, batch_size=batch_size, admin_port=8091,
                                           http_port=9005, grpc_port=50061, reaction_port=9006)
                 artifacts.append(workload.prepare(work, args))
                 config = json.loads((work / "config.json").read_text())
@@ -51,15 +57,24 @@ class WorkloadTest(unittest.TestCase):
                 for source in test["sources"]:
                     self.assertEqual("Script", source["kind"])
                     dispatcher = source["source_change_dispatchers"][0]
-                    self.assertEqual(variant == "adaptive", dispatcher["adaptive_enabled"])
+                    self.assertEqual(variant == "adaptive", dispatcher.get("adaptive_enabled", False))
                     self.assertEqual(source["test_source_id"], dispatcher["source_id"])
+                    if variant == "adaptive":
+                        self.assertTrue(dispatcher["batch_events"])
+                        self.assertEqual(batch_size, dispatcher["batch_size"])
+                        self.assertEqual(50, dispatcher["batch_timeout_ms"])
+                    else:
+                        expected = standard_dispatchers[source["test_source_id"]]
+                        for field in ("batch_events", "adaptive_enabled", "batch_size", "batch_timeout_ms"):
+                            self.assertEqual(expected.get(field), dispatcher.get(field), field)
                 server = json.loads((work / "server.yaml").read_text())
                 self.assertTrue(server["persistConfig"])
                 self.assertTrue(server["persistIndex"])
                 self.assertEqual("redb", server["stateStore"]["kind"])
                 self.assertTrue(all(source["durability"]["enabled"] for source in server["sources"]))
                 self.assertEqual("strict", server["reactions"][0]["recoveryPolicy"])
-        self.assertEqual(artifacts[0], artifacts[1])
+        for artifact in artifacts[1:]:
+            self.assertEqual(artifacts[0], artifact)
 
 
 if __name__ == "__main__":

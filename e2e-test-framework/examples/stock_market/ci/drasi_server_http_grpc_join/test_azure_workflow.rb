@@ -114,11 +114,22 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     assert_equal "always()", cleanup["if"]
   end
 
+  def test_manual_hardware_matches_building_comfort
+    stock_inputs = triggers(@workflow).fetch("workflow_dispatch").fetch("inputs")
+    comfort_inputs = triggers(@shared).fetch("workflow_dispatch").fetch("inputs")
+    %w[location vm_size os_disk_type os_disk_size_gb].each do |name|
+      expected = comfort_inputs.fetch(name)
+      actual = stock_inputs.fetch(name)
+      assert_equal expected.fetch("default"), actual.fetch("default"), "#{name} default"
+      assert_equal expected.fetch("options"), actual.fetch("options"), "#{name} options" if expected.key?("options")
+    end
+  end
+
   def test_daily_schedule_reuses_three_vm_matrix_and_publishes_both_variants
     assert_equal [{ "cron" => "30 7 * * *" }], triggers(@workflow).fetch("schedule")
     job = @shared.fetch("jobs").fetch("test")
     strategy = job.fetch("strategy")
-    vm_sizes = %w[Standard_D4s_v3 Standard_D4s_v6 Standard_F4as_v7]
+    vm_sizes = %w[Standard_D4s_v4 Standard_D4s_v6 Standard_F4as_v7]
     assert_equal false, strategy["fail-fast"]
     assert_equal 1, strategy["max-parallel"]
     assert_equal "${{ fromJSON(github.event_name == 'schedule' && '#{JSON.dump(vm_sizes)}' || format('[\"{0}\"]', inputs.vm_size || 'Standard_D4s_v6')) }}", strategy.dig("matrix", "vm_size")
@@ -169,7 +180,7 @@ class StockMarketAzureWorkflowTest < Minitest::Test
     assert_equal "summary-", triggers(publisher).dig("workflow_call", "inputs", "artifact_prefix", "default")
     summaries_dir = File.join(@directory, "summaries")
     FileUtils.mkdir_p(summaries_dir)
-    vm_sizes = %w[Standard_D4s_v3 Standard_D4s_v6 Standard_F4as_v7]
+    vm_sizes = %w[Standard_D4s_v4 Standard_D4s_v6 Standard_F4as_v7]
     variants = %w[drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive]
     expected = vm_sizes.product(variants).map do |vm_size, variant|
       profile = "azure-ephemeral-#{vm_size}-Premium_LRS-128gb"

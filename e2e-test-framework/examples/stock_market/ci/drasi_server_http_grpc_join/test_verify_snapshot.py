@@ -74,6 +74,22 @@ class SnapshotTest(unittest.TestCase):
         server = checker.load_server(Path(__file__).parent / "drasi_server_config.yaml")
         checker.validate_query(server)
 
+    def test_standard_dispatcher_batching_matches_building_comfort(self):
+        config_dir = Path(__file__).parent
+        config = json.loads((config_dir / "config.json").read_text())
+        sources = config["data_store"]["test_repos"][0]["local_tests"][0]["sources"]
+        dispatchers = {dispatcher["kind"]: dispatcher for source in sources
+                       for dispatcher in source["source_change_dispatchers"]
+                       if dispatcher["kind"] in ("Http", "Grpc")}
+        comfort_dir = config_dir.parents[2] / "building_comfort/dynamic"
+        for kind, filename in (("Http", "config.http.json"), ("Grpc", "config.json")):
+            comfort = json.loads((comfort_dir / filename).read_text())
+            expected = next(dispatcher
+                            for source in comfort["data_store"]["test_repos"][0]["local_tests"][0]["sources"]
+                            for dispatcher in source["source_change_dispatchers"] if dispatcher["kind"] == kind)
+            for field in ("batch_events", "adaptive_enabled", "batch_size", "batch_timeout_ms"):
+                self.assertEqual(expected.get(field), dispatchers[kind].get(field), f"{kind}.{field}")
+
     def test_both_variants_accept_all_persistence_profiles_without_changing_oracle(self):
         script = Path(__file__).parent / "run_test_ci.sh"
         original = json.loads((script.parent / "config.json").read_text())

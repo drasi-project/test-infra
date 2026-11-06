@@ -24,7 +24,7 @@ on:
         description: "4-vCPU hardware tier."
         type: choice
         options:
-          - Standard_D4s_v3
+          - Standard_D4s_v4
           - Standard_D4s_v6
           - Standard_F4as_v7
         default: Standard_D4s_v6

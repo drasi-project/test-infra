@@ -28,7 +28,7 @@
                                       "url": "http://localhost",
                                       "port": 9000,
                                       "timeout_seconds": 60,
-                                      "batch_events": true
+                                      "batch_events": false
                                   },
                                   {
                                       "kind": "JsonlFile",
@@ -84,7 +84,7 @@
                                       "host": "localhost",
                                       "port": 50051,
                                       "timeout_seconds": 60,
-                                      "batch_events": false,
+                                      "batch_events": true,
                                       "tls": false,
                                       "source_id": "watchlist-db"
                                   },

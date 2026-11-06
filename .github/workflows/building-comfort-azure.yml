@@ -72,11 +72,11 @@ on:
         required: true
         default: "westus3"
       vm_size:
-        description: "4-vCPU hardware tier: D4s_v3, D4s_v6 (baseline), or F4as_v7 (high-performance candidate)."
+        description: "4-vCPU hardware tier: D4s_v4, D4s_v6 (baseline), or F4as_v7 (high-performance candidate)."
         required: true
         type: choice
         options:
-          - Standard_D4s_v3
+          - Standard_D4s_v4
           - Standard_D4s_v6
           - Standard_F4as_v7
         default: Standard_D4s_v6
@@ -234,7 +234,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        vm_size: ${{ fromJSON(github.event_name == 'schedule' && '["Standard_D4s_v3","Standard_D4s_v6","Standard_F4as_v7"]' || format('["{0}"]', inputs.vm_size || 'Standard_D4s_v6')) }}
+        vm_size: ${{ fromJSON(github.event_name == 'schedule' && '["Standard_D4s_v4","Standard_D4s_v6","Standard_F4as_v7"]' || format('["{0}"]', inputs.vm_size || 'Standard_D4s_v6')) }}
 
     steps:
       - name: Checkout
@@ -725,6 +725,13 @@ jobs:
             local resource_type="$1"
             local resource_name="$2"
             local resource_id=""
+            local -a api_version_args=()
+
+            # Match main.bicep: discovery can advertise network API versions
+            # that are not yet supported in the deployment region.
+            if [[ "$resource_type" == Microsoft.Network/* ]]; then
+              api_version_args=(--api-version 2024-05-01)
+            fi
 
             for attempt in $(seq 1 3); do
               if ! resource_id="$(
@@ -740,14 +747,14 @@ jobs:
                 return 0
               else
                 echo "Deleting $resource_type/$resource_name (attempt $attempt/3)"
-                local resource_args=(--ids "$resource_id")
-                if [[ "$resource_type" == Microsoft.Network/* ]]; then
-                  resource_args+=(--api-version 2024-05-01)
-                fi
-                if az resource delete "${resource_args[@]}" --verbose &&
+                if az resource delete \
+                     --ids "$resource_id" \
+                     "${api_version_args[@]}" \
+                     --verbose &&
                    az resource wait \
                      --deleted \
-                     "${resource_args[@]}" \
+                     --ids "$resource_id" \
+                     "${api_version_args[@]}" \
                      --interval 10 \
                      --timeout 600; then
                   return 0
@@ -776,7 +783,8 @@ jobs:
             --output none 2>/dev/null; then
             if ! az deployment group delete \
               --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$DEPLOYMENT_NAME"; then
+              --name "$DEPLOYMENT_NAME" \
+              --verbose; then
               echo "Could not delete deployment record $DEPLOYMENT_NAME; continuing verification" >&2
             fi
           else

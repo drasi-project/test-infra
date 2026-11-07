@@ -42,6 +42,8 @@ pub struct StatusResponse {
     "status": "running"
 }))]
 pub struct SourceInfo {
+    /// Runtime-assigned component UUID; the test API addresses slots by name.
+    pub id: String,
     pub name: String,
     pub source_type: String,
     pub status: ComponentStatus,
@@ -60,6 +62,7 @@ pub struct SourceInfo {
     }
 }))]
 pub struct SourceDetails {
+    pub id: String,
     pub name: String,
     pub source_type: String,
     pub status: ComponentStatus,
@@ -97,6 +100,7 @@ pub struct UpdateSourceRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SourceCreatedResponse {
+    pub id: String,
     pub name: String,
     pub message: String,
 }
@@ -110,6 +114,7 @@ pub struct SourceCreatedResponse {
     "status": "running"
 }))]
 pub struct QueryInfo {
+    pub id: String,
     pub name: String,
     pub inputs: Vec<String>,
     pub status: ComponentStatus,
@@ -125,6 +130,7 @@ pub struct QueryInfo {
     "profiling": false
 }))]
 pub struct QueryDetails {
+    pub id: String,
     pub name: String,
     pub query: String,
     pub inputs: Vec<String>,
@@ -162,6 +168,7 @@ pub struct UpdateQueryRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct QueryCreatedResponse {
+    pub id: String,
     pub name: String,
     pub message: String,
 }
@@ -176,6 +183,7 @@ pub struct QueryCreatedResponse {
     "status": "running"
 }))]
 pub struct ReactionInfo {
+    pub id: String,
     pub name: String,
     pub reaction_type: String,
     pub queries: Vec<String>,
@@ -198,6 +206,7 @@ pub struct ReactionInfo {
     }
 }))]
 pub struct ReactionDetails {
+    pub id: String,
     pub name: String,
     pub reaction_type: String,
     pub queries: Vec<String>,
@@ -239,6 +248,7 @@ pub struct UpdateReactionRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ReactionCreatedResponse {
+    pub id: String,
     pub name: String,
     pub message: String,
 }

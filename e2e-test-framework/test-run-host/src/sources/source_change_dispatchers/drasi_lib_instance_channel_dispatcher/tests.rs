@@ -42,7 +42,7 @@ fn input() -> Result<(NativeApplicationSource, ApplicationSourceHandle)> {
     NativeApplicationSource::channel(
         "test",
         "graph",
-        "input",
+        "6f0111c4-805d-427c-ac84-3c33c5915b45",
         StreamId::try_new("input/out")?,
         NonZeroUsize::new(1).context("test capacity")?,
     )
@@ -130,6 +130,7 @@ async fn invalid_batches_are_rejected_before_acceptance() -> Result<()> {
 
 async fn cancelled_close() -> Result<()> {
     let (mut source, handle) = input()?;
+    source.initialize().await?;
     let mut dispatcher = dispatcher();
     let sender = dispatcher.start_receiver(handle).await?;
     let expected = (0..3)
@@ -163,6 +164,7 @@ async fn cancelled_close() -> Result<()> {
     assert_eq!(delivered?, expected);
     assert!(dispatcher.receiver_task.get_mut().is_none());
     source.stop().await?;
+    source.dispose().await?;
     Ok(())
 }
 
@@ -179,6 +181,7 @@ async fn cancelled_close_retains_the_worker_and_drains_multi_thread() -> Result<
 #[tokio::test]
 async fn cancelled_queued_flush_preserves_accepted_records() -> Result<()> {
     let (mut source, handle) = input()?;
+    source.initialize().await?;
     let mut dispatcher = dispatcher();
     let sender = dispatcher.start_receiver(handle).await?;
     let expected = (0..4)
@@ -209,6 +212,7 @@ async fn cancelled_queued_flush_preserves_accepted_records() -> Result<()> {
     assert_eq!(delivered?, expected);
     assert!(dispatcher.queued_events.is_empty());
     source.stop().await?;
+    source.dispose().await?;
     Ok(())
 }
 

@@ -259,7 +259,8 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
                 ReactionControlSignal::Start
             ))
         ));
-        let mut query = core.subscribe_query_results("names").await?.stream;
+        let query_id = core.component_by_name("names")?.id().to_string();
+        let mut query = core.subscribe_query_results(&query_id).await?.stream;
         handler.pause().await?;
         let mut expected = Vec::new();
         for value in 0..3 {
@@ -313,7 +314,7 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
                 let metadata = invocation.payload.metadata.context("channel metadata")?;
                 assert_eq!(metadata["reaction_id"], "sink");
                 if include_profiling {
-                    assert_eq!(metadata["profiling"]["query_id"], "names");
+                    assert_eq!(metadata["profiling"]["query_id"], query_id);
                     assert_eq!(metadata["profiling"]["query_sequence"], result.sequence);
                     assert_eq!(
                         metadata["profiling"]["timestamps"],

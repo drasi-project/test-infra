@@ -245,6 +245,10 @@ async fn embedded_native_application_reaction_preserves_result_order_and_count()
             .as_ref(),
         "drasi.experimental/indexed-query/ordinary"
     );
+    wait_named_started(&instance, &["source1", "query1", "reaction1"])
+        .await
+        .unwrap();
+    let query_id = instance.get_query("query1").await.unwrap().id;
     let source = instance.get_source_handle("source1").await.unwrap();
     let mut subscription = instance.take_reaction_receiver("reaction1").await.unwrap();
     assert!(instance.take_reaction_receiver("reaction1").await.is_err());
@@ -281,7 +285,7 @@ async fn embedded_native_application_reaction_preserves_result_order_and_count()
         })
         .await
         .expect("application reaction did not receive the source change");
-        assert_eq!(result.query_id, "query1");
+        assert_eq!(result.query_id, query_id);
         assert_eq!(result.results.len(), 1);
         if let Some(previous) = previous_sequence {
             assert!(result.sequence > previous);
@@ -359,6 +363,110 @@ async fn expect_row(
     Ok(())
 }
 
+async fn wait_named_started(
+    instance: &super::TestRunDrasiLibInstance,
+    names: &[&str],
+) -> Result<()> {
+    let core = instance.get_drasi_lib().await.context("instance owner")?;
+    for name in names {
+        let handle = core.component_by_name(name)?;
+        tokio::time::timeout(Duration::from_secs(5), handle.wait_started())
+            .await
+            .with_context(|| {
+                let control = core.computation_control().expect("test graph");
+                let topology = control.desired_snapshot();
+                let nodes: Vec<_> = topology.nodes.iter().map(|node| (
+                    node.name.to_string(),
+                    node.descriptor.id().to_string(),
+                    node.descriptor.ports().iter().map(|port| port.id().to_string()).collect::<Vec<_>>(),
+                )).collect();
+                let edges: Vec<_> = topology.edges.iter().map(|edge| edge.definition.clone()).collect();
+                let accepted = core.desired_configuration().expect("test configuration");
+                format!("{name} did not start: nodes={nodes:?}; edges={edges:?}; unbound={:?}; accepted_native_edges={:?}; ordinary={:?}",
+                    topology.unbound_relationships, accepted.desired.topology.relationships, accepted.desired.ordinary)
+            })??;
+    }
+    Ok(())
+}
+
+async fn native_identity_bindings_do_not_follow_reused_names() -> Result<()> {
+    use super::api_models::*;
+    let (instance, _directory) = native_instance(json!({}))?;
+    instance.start().await?;
+    let result = async {
+        let name = "e91ec818-e5c0-457b-b8a0-4b0803fcb13b";
+        let first = instance
+            .create_source(CreateSourceRequest {
+                name: name.into(),
+                source_type: "application".into(),
+                auto_start: false,
+                properties: json!({"tag": "first"}),
+            })
+            .await?;
+        ComponentId::try_new(first.id.as_str())?;
+        assert_eq!(first.name, name);
+        assert_ne!(
+            first.id, name,
+            "a UUID-looking name is not an external ID request"
+        );
+        let core = instance.get_drasi_lib().await.context("instance owner")?;
+        assert!(!core.allow_external_component_ids());
+        assert_eq!(core.component_by_name(name)?.id().as_str(), first.id);
+        let old_handle = instance.get_source_handle(name).await?;
+        assert!(instance
+            .update_source(
+                name,
+                UpdateSourceRequest {
+                    source_type: None,
+                    auto_start: None,
+                    properties: Some(json!({"tag": "changed"})),
+                }
+            )
+            .await
+            .is_err());
+        let unchanged = instance.get_source(name).await?;
+        assert_eq!(unchanged.id, first.id);
+        assert_eq!(unchanged.properties, json!({"tag": "first"}));
+        instance.delete_source(name).await?;
+        let second = instance
+            .create_source(CreateSourceRequest {
+                name: name.into(),
+                source_type: "application".into(),
+                auto_start: false,
+                properties: json!({"tag": "second"}),
+            })
+            .await?;
+        assert_ne!(first.id, second.id);
+        assert_eq!(second.name, name);
+        assert!(
+            old_handle
+                .send_node_insert(
+                    "old-handle",
+                    vec!["Item"],
+                    PropertyMapBuilder::new().build(),
+                )
+                .await
+                .is_err(),
+            "an old handle must not reach a replacement object"
+        );
+        instance.delete_source(name).await?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    let cleanup = instance.stop().await;
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(error),
+        (Err(error), Err(cleanup)) => Err(error.context(format!("cleanup also failed: {cleanup}"))),
+    }
+}
+
+#[test]
+fn native_instance_uuid_assignment_and_stale_handle_fencing() -> Result<()> {
+    both_runtimes(native_identity_bindings_do_not_follow_reused_names)
+}
+
 fn both_runtimes<F, Fut>(case: F) -> Result<()>
 where
     F: Fn() -> Fut,
@@ -386,17 +494,28 @@ async fn native_programmatic_lifecycle() -> Result<()> {
     assert!(instance.get_drasi_lib().await.is_none());
     instance.start().await?;
     let result = async {
+        assert!(instance
+            .create_reaction(CreateReactionRequest {
+                name: "unbound-input".into(),
+                reaction_type: "application".into(),
+                queries: vec!["names".into()],
+                auto_start: true,
+                properties: json!({}),
+            })
+            .await
+            .is_err());
+        assert!(instance.list_reactions().await?.is_empty());
         instance
             .create_reaction(CreateReactionRequest {
                 name: "sink".into(),
                 reaction_type: "application".into(),
-                queries: vec!["names".into()],
+                queries: vec![],
                 auto_start: true,
                 properties: json!({"tag":"observer"}),
             })
             .await?;
         let reaction = instance.get_reaction("sink").await?;
-        assert_eq!(reaction.queries, ["names"]);
+        assert!(reaction.queries.is_empty());
         assert_eq!(reaction.reaction_type, "application");
         assert_eq!(reaction.properties, json!({"tag":"observer"}));
         assert!(reaction.auto_start);
@@ -431,6 +550,26 @@ async fn native_programmatic_lifecycle() -> Result<()> {
         assert_eq!(instance.list_queries().await?.len(), 1);
         assert_eq!(instance.list_reactions().await?.len(), 1);
         let core = instance.get_drasi_lib().await.context("instance owner")?;
+        assert!(!core.allow_external_component_ids());
+        let query_id = core.component_by_name("names")?.id().clone();
+        let reaction_id = core.component_by_name("sink")?.id().clone();
+        let mut current = core.desired_configuration()?;
+        current
+            .desired
+            .topology
+            .relationships
+            .push(DesiredRelationship {
+                definition: EdgeDefinition::new(
+                    Endpoint::new(query_id.clone(), PortId::try_new("out")?),
+                    Endpoint::new(reaction_id, PortId::try_new("in")?),
+                ),
+                policy: RelationshipPolicy::default(),
+                pipe: DesiredPipe::Bounded { capacity: 1000 },
+            });
+        core.apply_desired_state(current.revision, "connect-native-observer", current.desired)
+            .await?;
+        core.reconcile_desired_state().await?;
+        assert_eq!(instance.get_reaction("sink").await?.queries, ["names"]);
         let snapshot = core.computation_control()?.desired_snapshot();
         let legacy_source = SourcePluginAdapterFactory::default()
             .descriptor()
@@ -443,7 +582,7 @@ async fn native_programmatic_lifecycle() -> Result<()> {
         assert!(!snapshot.specifications.values().any(|spec| {
             spec.implementation == legacy_source || spec.implementation == legacy_reaction
         }));
-        let source_generation = core.computation_component("input")?.generation();
+        let source_generation = core.component_by_name("input")?.generation();
         let input = instance.get_source_handle("input").await?;
         input
             .send_node_insert(
@@ -456,8 +595,8 @@ async fn native_programmatic_lifecycle() -> Result<()> {
             .await?;
         assert!(receiver.try_recv().is_err());
         instance.start_source("input").await?;
-        expect_row(&mut receiver, "names", json!({"name":"Buffered"})).await?;
-        let updated = instance
+        expect_row(&mut receiver, query_id.as_str(), json!({"name":"Buffered"})).await?;
+        let update = instance
             .update_query(
                 "names",
                 UpdateQueryRequest {
@@ -467,14 +606,21 @@ async fn native_programmatic_lifecycle() -> Result<()> {
                     profiling: None,
                 },
             )
-            .await?;
-        assert!(updated.query.contains("updated"));
+            .await;
         assert!(
-            !core.get_query_config("names").await?.enable_bootstrap,
+            update.is_err(),
+            "semantic changes cannot silently reset live-only inputs"
+        );
+        assert!(!instance.get_query("names").await?.query.contains("updated"));
+        assert!(
+            !core
+                .get_query_config(query_id.as_str())
+                .await?
+                .enable_bootstrap,
             "an update must preserve the explicit live-only input"
         );
         assert_eq!(
-            core.computation_component("input")?.generation(),
+            core.component_by_name("input")?.generation(),
             source_generation
         );
         input
@@ -486,12 +632,7 @@ async fn native_programmatic_lifecycle() -> Result<()> {
                     .build(),
             )
             .await?;
-        expect_row(
-            &mut receiver,
-            "names",
-            json!({"name":"Updated","updated":true}),
-        )
-        .await?;
+        expect_row(&mut receiver, query_id.as_str(), json!({"name":"Updated"})).await?;
         instance.stop_query("names").await?;
         input
             .send_node_insert(
@@ -503,12 +644,7 @@ async fn native_programmatic_lifecycle() -> Result<()> {
             )
             .await?;
         instance.start_query("names").await?;
-        expect_row(
-            &mut receiver,
-            "names",
-            json!({"name":"Paused","updated":true}),
-        )
-        .await?;
+        expect_row(&mut receiver, query_id.as_str(), json!({"name":"Paused"})).await?;
         instance.stop_source("input").await?;
         input
             .send_node_insert(
@@ -522,8 +658,8 @@ async fn native_programmatic_lifecycle() -> Result<()> {
         instance.start_source("input").await?;
         expect_row(
             &mut receiver,
-            "names",
-            json!({"name":"Restarted","updated":true}),
+            query_id.as_str(),
+            json!({"name":"Restarted"}),
         )
         .await?;
         assert!(instance.delete_source("input").await.is_err());
@@ -553,6 +689,9 @@ async fn native_multi_query_results() -> Result<()> {
     }))?;
     instance.start().await?;
     let result = async {
+        wait_named_started(&instance, &["input", "first", "second", "sink"]).await?;
+        let first = instance.get_query("first").await?.id;
+        let second = instance.get_query("second").await?.id;
         let input = instance.get_source_handle("input").await?;
         let mut receiver = instance.take_reaction_receiver("sink").await?;
         for index in 0..5 {
@@ -583,10 +722,7 @@ async fn native_multi_query_results() -> Result<()> {
         let expected = (0..5).map(|index| json!(index)).collect::<Vec<_>>();
         assert_eq!(
             rows,
-            std::collections::BTreeMap::from([
-                ("first".into(), expected.clone()),
-                ("second".into(), expected),
-            ])
+            std::collections::BTreeMap::from([(first, expected.clone()), (second, expected),])
         );
         assert!(receiver.try_recv().is_err(), "unexpected duplicate result");
         Ok::<_, anyhow::Error>(())
@@ -645,6 +781,34 @@ struct StopGate {
     release: Arc<tokio::sync::Notify>,
 }
 
+struct StopGateFactory {
+    descriptor: FactoryDescriptor,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl ComponentFactory for StopGateFactory {
+    fn descriptor(&self) -> &FactoryDescriptor {
+        &self.descriptor
+    }
+
+    fn validate(&self, _: &ComponentSpecification) -> Result<()> {
+        Ok(())
+    }
+
+    async fn create(
+        &self,
+        context: ConstructionContext,
+    ) -> Result<ConstructedComponent, ComponentCreationError> {
+        Ok(ConstructedComponent::service(Box::new(StopGate {
+            descriptor: context.specification.descriptor.clone(),
+            entered: self.entered.clone(),
+            release: self.release.clone(),
+        })))
+    }
+}
+
 #[async_trait::async_trait]
 impl ComputationComponent for StopGate {
     fn descriptor(&self) -> &ComponentDescriptor {
@@ -673,18 +837,42 @@ async fn native_cancelled_stop_retains_owner() -> Result<()> {
     let core = instance.get_drasi_lib().await.context("instance owner")?;
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
-    let service = core
-        .add_computation_component(ComponentAddition::new(ConstructedComponent::service(
-            Box::new(StopGate {
-                descriptor: ComponentDescriptor::try_new(
-                    ComponentId::try_new("stop-gate")?,
-                    vec![],
-                )?,
-                entered: entered.clone(),
-                release: release.clone(),
-            }),
-        )))
+    let factory = Arc::new(StopGateFactory {
+        descriptor: FactoryDescriptor {
+            implementation: ImplementationIdentity::try_new("test-infra/stop-gate", "1")?,
+            role: ComponentRole::Service,
+            configuration_version: 1,
+            configuration: ConfigurationSchema::default(),
+            dependencies: Default::default(),
+        },
+        entered: entered.clone(),
+        release: release.clone(),
+    });
+    let receipt = core
+        .create_components(move |ids| {
+            let id = ids.allocate()?;
+            let specification = ComponentSpecification {
+                descriptor: ComponentDescriptor::try_new(id, vec![])?,
+                implementation: factory.descriptor.implementation.clone(),
+                configuration_version: 1,
+                role: ComponentRole::Service,
+                completion: None,
+                configuration: Default::default(),
+                dependencies: Default::default(),
+            };
+            ComponentBatch::builder()
+                .component(ComponentName::try_new("stop-gate")?, specification, factory)
+                .build()
+        })
         .await?;
+    let id = &receipt
+        .creation
+        .as_ref()
+        .context("missing gate identity")?
+        .components[0]
+        .id;
+    core.reconcile_desired_state().await?;
+    let service = core.computation_component(id.as_str())?;
     service.wait_started().await?;
     let mut stopping = Box::pin(instance.stop());
     tokio::select! {

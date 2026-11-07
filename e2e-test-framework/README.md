@@ -1113,9 +1113,17 @@ for the component definitions and their channel connections.
 Embedded instances always use ComputationGraph, including builds without
 drasi-lib's default features. There is no engine feature or configuration opt-in.
 Application inputs and reactions are native graph nodes. Queries use the shared
-native pipeline builder, not Source/Reaction execution adapters or another query
-runtime. The embedded host no longer depends on the old plugin SDK/FFI or unused
-application/noop bootstrap crates.
+query authoring path with the explicitly selected native query constructor, not
+another query runtime. Application endpoints use registered, creation-only
+factories, so their metadata and complete declarations are accepted before their
+channels are constructed.
+
+Component `id` fields in test definitions identify named test slots, not runtime
+UUID assignments. DrasiLib allocates the real component UUIDs. The named test API
+returns both `id` (that UUID) and `name`; even a UUID-looking name is a name, not
+an external-ID request. Native result envelopes and their `query_id` fields use
+the actual query UUID. Existing source handles and receiver bindings remain tied
+to their original objects and do not follow a reused name.
 
 The source channel, query input and reaction pipes are bounded. Volatile input can
 buffer while its source is stopped, up to its capacity; no persistence is implied.
@@ -1124,9 +1132,14 @@ admission requires an actual native `SourceAdmission`/QoS binding, not a flag on
 this volatile test-host channel.
 
 Source/query/reaction `auto_start` values and application properties are retained
-by both initial configuration and the programmatic APIs. Queries and reactions
-can be declared before their upstream components. The graph resolves those
-connections when the missing components arrive, without re-adding the consumers.
+by both initial configuration and the programmatic APIs. Ordinary query
+declarations can wait for named sources. Native reaction creation resolves its
+`queries` names to already declared query UUIDs. To declare a native reaction
+before its inputs, create it disconnected and then submit explicit managed UUID
+relationships after those inputs exist; do not await activation before wiring
+its required input. Deferred bind-once native name endpoints are tracked in
+Core's remaining-work document as CW-93, rather than approximated with
+name-derived IDs or a second graph registry.
 Native reaction connections in this host use bounded delivery; a query's
 `dispatch_mode` still controls its separate result-catalogue subscriptions, not
 these explicitly configured graph pipes.
@@ -1135,9 +1148,13 @@ Channel and callback-style test handlers share one owned native-envelope reader.
 Channel handlers preserve per-change JSON and optional profiling; callback-style
 handlers preserve whole-result batches. Pause retains input, full output
 backpressures, and stop wakes waits and joins the worker. A reaction receiver
-transfers exactly once. Updating an already transferred binding requires stopping
-its observer and explicitly deleting/recreating the reaction; it is not silently
-replaced underneath that reader.
+transfers exactly once. Application source/reaction configuration updates are
+rejected because these factories do not implement an update manager. Explicitly
+disconnect dependents and delete/recreate the endpoint when a new binding is
+required; the replacement receives a new UUID. Stop a reaction's observer before
+replacing its receiver. Semantic query updates requiring rebootstrap are also
+rejected by Core (CW-92); the test host must not silently delete state or rebuild
+a live-only query as an update fallback.
 
 Instance owners are registered before startup. A failed start or cancelled stop
 retains the core for inspection and awaited cleanup. `Stopping` does not permit a

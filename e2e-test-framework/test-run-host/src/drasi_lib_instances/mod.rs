@@ -16,7 +16,10 @@ use std::{collections::HashMap, fmt, sync::Arc};
 
 use anyhow::Context;
 use derive_more::Debug;
-use drasi_lib::{computation::v1::InputEnvelope, DrasiLib, QueryConfig};
+use drasi_lib::{
+    computation::v1::{FactoryRegistry, InputEnvelope},
+    DrasiLib, QueryConfig,
+};
 use drasi_source_application::ApplicationSourceHandle;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -33,6 +36,7 @@ use test_data_store::{
 };
 
 pub mod api_models;
+mod application_factories;
 pub mod programmatic_api;
 
 #[cfg(test)]
@@ -232,11 +236,19 @@ impl TestRunDrasiLibInstance {
         let query_plugin = drasi_host_sdk::computation::NativePlugin::from_definition(
             drasi_computation_transformer_query::plugin()?,
         ).context("registering the embedded native query plugin")?;
+        let mut factories = FactoryRegistry::default();
+        factories.register(Arc::new(application_factories::ApplicationFactory::source(
+            self.source_handles.clone(),
+        )))?;
+        factories.register(Arc::new(application_factories::ApplicationFactory::reaction(
+            self.reaction_receivers.clone(),
+        )))?;
         let mut owner = self.core.write().await;
         let core = Arc::new(
             DrasiLib::builder()
                 .with_id(self.id.to_string())
                 .with_query_factory(query_plugin.query_factory()?)
+                .with_component_factories(factories)
                 .build()
                 .await?,
         );
@@ -255,14 +267,12 @@ impl TestRunDrasiLibInstance {
             } else {
                 source_config.config.clone()
             };
-            let handle = Self::add_native_application_source(
+            self.add_native_application_source(
                 &core,
-                &self.id.to_string(),
                 &source_config.id,
                 &options,
                 source_config.auto_start,
             ).await?;
-            self.source_handles.write().await.insert(source_config.id.clone(), handle);
         }
 
         for query_config in &config.queries {
@@ -271,9 +281,13 @@ impl TestRunDrasiLibInstance {
                 query_config.query.clone(),
                 query_config.inputs.clone(),
                 query_config.auto_start,
-            );
+            )?;
             let mut options = serde_json::to_value(&defaults)?;
             if let Some(overrides) = query_config.config.as_object() {
+                anyhow::ensure!(
+                    !overrides.contains_key("id"),
+                    "query options cannot assign a component UUID"
+                );
                 options
                     .as_object_mut()
                     .context("QueryConfig must serialize as an object")?
@@ -284,6 +298,7 @@ impl TestRunDrasiLibInstance {
             let mut query: QueryConfig = serde_json::from_value(options)
                 .with_context(|| format!("Invalid query config: {}", query_config.id))?;
             query.id = defaults.id;
+            query.name = defaults.name;
             query.query = defaults.query;
             query.auto_start = defaults.auto_start;
             query.inputs = defaults.inputs;
@@ -303,14 +318,13 @@ impl TestRunDrasiLibInstance {
             } else {
                 reaction_config.config.clone()
             };
-            let receiver = Self::add_native_application_reaction(
+            self.add_native_application_reaction(
                 &core,
                 &reaction_config.id,
                 &reaction_config.queries,
                 reaction_config.auto_start,
                 &properties,
             ).await?;
-            self.reaction_receivers.write().await.insert(reaction_config.id.clone(), receiver);
         }
 
         self.storage

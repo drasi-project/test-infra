@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::path::{Path, PathBuf};
-use chrono::{DateTime, FixedOffset, Utc, NaiveDateTime};
+use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
+use csv::ReaderBuilder;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use tokio::fs::{create_dir_all, File};
 use tokio::io::AsyncWriteExt;
-use csv::ReaderBuilder;
 
 // Re-create the structs from test-data-store/src/scripts/mod.rs to match the expected format
 
@@ -174,12 +174,14 @@ impl ScriptGenerator {
         // Write header to the first file
         let header_file = bootstrap_path.join(format!("{}_header.jsonl", source_type));
         let mut file = File::create(&header_file).await?;
-        file.write_all(format!("{}\n", serde_json::to_string(&header)?).as_bytes()).await?;
+        file.write_all(format!("{}\n", serde_json::to_string(&header)?).as_bytes())
+            .await?;
 
         // Process each source file and convert to node records
         for (idx, source_file) in source_files.iter().enumerate() {
             let output_file = bootstrap_path.join(format!("{}_{:05}.jsonl", source_type, idx));
-            self.convert_to_bootstrap_nodes(&source_file, &output_file, source_type).await?;
+            self.convert_to_bootstrap_nodes(source_file, &output_file, source_type)
+                .await?;
         }
 
         // Create finish record
@@ -189,7 +191,8 @@ impl ScriptGenerator {
 
         let finish_file = bootstrap_path.join(format!("{}_finish.jsonl", source_type));
         let mut file = File::create(&finish_file).await?;
-        file.write_all(format!("{}\n", serde_json::to_string(&finish)?).as_bytes()).await?;
+        file.write_all(format!("{}\n", serde_json::to_string(&finish)?).as_bytes())
+            .await?;
 
         Ok(())
     }
@@ -202,7 +205,7 @@ impl ScriptGenerator {
     ) -> anyhow::Result<()> {
         // Ensure output directory exists
         create_dir_all(&self.output_path).await?;
-        
+
         let change_file = self.output_path.join("source_change_scripts_00000.jsonl");
         let mut output = File::create(&change_file).await?;
 
@@ -211,12 +214,15 @@ impl ScriptGenerator {
             start_time,
             description: format!("GDELT {} changes", source_type),
         });
-        
-        output.write_all(format!("{}\n", serde_json::to_string(&header)?).as_bytes()).await?;
+
+        output
+            .write_all(format!("{}\n", serde_json::to_string(&header)?).as_bytes())
+            .await?;
 
         // Process each source file
         for source_file in source_files {
-            self.append_change_events(&source_file, &mut output, source_type, start_time).await?;
+            self.append_change_events(&source_file, &mut output, source_type, start_time)
+                .await?;
         }
 
         // Create finish record
@@ -224,8 +230,10 @@ impl ScriptGenerator {
             offset_ns: 0,
             description: format!("Completed {} changes", source_type),
         });
-        
-        output.write_all(format!("{}\n", serde_json::to_string(&finish)?).as_bytes()).await?;
+
+        output
+            .write_all(format!("{}\n", serde_json::to_string(&finish)?).as_bytes())
+            .await?;
 
         Ok(())
     }
@@ -247,7 +255,7 @@ impl ScriptGenerator {
 
         for result in rdr.records() {
             let record = result?;
-            
+
             let node = match source_type {
                 "event" => self.parse_event_to_node(&record)?,
                 "graph" => self.parse_graph_to_node(&record)?,
@@ -256,7 +264,9 @@ impl ScriptGenerator {
             };
 
             let bootstrap_record = BootstrapScriptRecord::Node(node);
-            output.write_all(format!("{}\n", serde_json::to_string(&bootstrap_record)?).as_bytes()).await?;
+            output
+                .write_all(format!("{}\n", serde_json::to_string(&bootstrap_record)?).as_bytes())
+                .await?;
         }
 
         Ok(())
@@ -283,7 +293,7 @@ impl ScriptGenerator {
 
         for result in rdr.records() {
             let record = result?;
-            
+
             let (before, after) = match source_type {
                 "event" => self.parse_event_change(&record)?,
                 "graph" => self.parse_graph_change(&record)?,
@@ -312,7 +322,9 @@ impl ScriptGenerator {
                 source_change_event,
             });
 
-            output.write_all(format!("{}\n", serde_json::to_string(&change_record)?).as_bytes()).await?;
+            output
+                .write_all(format!("{}\n", serde_json::to_string(&change_record)?).as_bytes())
+                .await?;
         }
 
         Ok(())
@@ -321,11 +333,14 @@ impl ScriptGenerator {
     fn parse_event_to_node(&self, record: &csv::StringRecord) -> anyhow::Result<NodeRecord> {
         // GDELT event has 61 fields
         if record.len() < 61 {
-            anyhow::bail!("Invalid event record: expected 61 fields, got {}", record.len());
+            anyhow::bail!(
+                "Invalid event record: expected 61 fields, got {}",
+                record.len()
+            );
         }
 
         let id = record.get(0).unwrap_or("").to_string(); // GlobalEventID
-        
+
         let properties = json!({
             "GlobalEventID": record.get(0).unwrap_or(""),
             "Day": record.get(1).unwrap_or(""),
@@ -361,7 +376,7 @@ impl ScriptGenerator {
     fn parse_graph_to_node(&self, record: &csv::StringRecord) -> anyhow::Result<NodeRecord> {
         // GKG records have variable fields but we'll use what's available
         let id = record.get(0).unwrap_or("").to_string(); // Record ID or Date
-        
+
         let properties = json!({
             "RecordID": record.get(0).unwrap_or(""),
             "Date": record.get(1).unwrap_or(""),
@@ -388,7 +403,7 @@ impl ScriptGenerator {
         let global_event_id = record.get(0).unwrap_or("").to_string();
         let mention_time = record.get(2).unwrap_or("").to_string();
         let id = format!("{}-{}", global_event_id, mention_time);
-        
+
         let properties = json!({
             "GlobalEventID": record.get(0).unwrap_or(""),
             "EventTimeDate": record.get(1).unwrap_or(""),
@@ -444,15 +459,16 @@ impl ScriptGenerator {
     }
 
     fn extract_timestamp_from_filename(&self, path: &Path) -> anyhow::Result<NaiveDateTime> {
-        let filename = path.file_stem()
+        let filename = path
+            .file_stem()
             .and_then(|s| s.to_str())
             .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
-        
+
         // Extract YYYYMMDDHHMMSS from filename
         // Filename can be like "20240101000000.export" or just "20240101000000"
         let parts: Vec<&str> = filename.split('.').collect();
-        let timestamp_str = parts.get(0).unwrap_or(&"");
-        
+        let timestamp_str = parts.first().unwrap_or(&"");
+
         if timestamp_str.len() >= 14 {
             let year = timestamp_str[0..4].parse::<i32>()?;
             let month = timestamp_str[4..6].parse::<u32>()?;
@@ -460,19 +476,23 @@ impl ScriptGenerator {
             let hour = timestamp_str[8..10].parse::<u32>()?;
             let minute = timestamp_str[10..12].parse::<u32>()?;
             let second = timestamp_str[12..14].parse::<u32>()?;
-            
+
             let date = chrono::NaiveDate::from_ymd_opt(year, month, day)
                 .ok_or_else(|| anyhow::anyhow!("Invalid date: {}-{}-{}", year, month, day))?;
             let time = chrono::NaiveTime::from_hms_opt(hour, minute, second)
                 .ok_or_else(|| anyhow::anyhow!("Invalid time: {}:{}:{}", hour, minute, second))?;
-            
+
             Ok(NaiveDateTime::new(date, time))
         } else {
             anyhow::bail!("Invalid timestamp in filename: {}", filename)
         }
     }
 
-    fn calculate_offset_ns(&self, event_time: NaiveDateTime, start_time: DateTime<FixedOffset>) -> u64 {
+    fn calculate_offset_ns(
+        &self,
+        event_time: NaiveDateTime,
+        start_time: DateTime<FixedOffset>,
+    ) -> u64 {
         let event_datetime = event_time.and_utc();
         let start_datetime = start_time.with_timezone(&Utc);
         let duration = event_datetime.signed_duration_since(start_datetime);

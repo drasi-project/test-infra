@@ -15,7 +15,7 @@
 use std::{fmt::Write, path::PathBuf};
 
 use csv::ReaderBuilder;
-use tokio_postgres::{Client, NoTls, types};
+use tokio_postgres::{types, Client, NoTls};
 
 use crate::{gdelt::GdeltEvent, DataType, FileInfo};
 
@@ -95,8 +95,10 @@ pub struct DbInfo {
 }
 
 async fn create_client(dbinfo: &DbInfo) -> anyhow::Result<Client> {
-    let conn_string = format!("host={} user={} password={} dbname={}", 
-        dbinfo.host, dbinfo.user, dbinfo.password, dbinfo.dbname);
+    let conn_string = format!(
+        "host={} user={} password={} dbname={}",
+        dbinfo.host, dbinfo.user, dbinfo.password, dbinfo.dbname
+    );
 
     let (client, connection) = tokio_postgres::connect(&conn_string, NoTls).await?;
     tokio::spawn(async move {
@@ -118,7 +120,6 @@ async fn create_database(dbinfo: &DbInfo, overwrite: bool) -> anyhow::Result<()>
     };
 
     let client = create_client(&adm_db_info).await?;
-
 
     if overwrite {
         // If overwrite is true, drop and recreate the database
@@ -149,7 +150,6 @@ async fn create_database(dbinfo: &DbInfo, overwrite: bool) -> anyhow::Result<()>
 }
 
 pub async fn initialize(dbinfo: &DbInfo, overwrite: bool) -> anyhow::Result<()> {
-
     // Create the Database
     create_database(dbinfo, overwrite).await?;
 
@@ -162,36 +162,41 @@ pub async fn initialize(dbinfo: &DbInfo, overwrite: bool) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub async fn load_gdelt_files(dbinfo: &DbInfo, mut files_to_load: Vec<FileInfo>) -> anyhow::Result<Vec<FileInfo>> {
+pub async fn load_gdelt_files(
+    dbinfo: &DbInfo,
+    mut files_to_load: Vec<FileInfo>,
+) -> anyhow::Result<Vec<FileInfo>> {
     let batch_size = 10;
 
     let client = create_client(dbinfo).await?;
-    
+
     for file_info in files_to_load.iter_mut() {
         match &file_info.file_type {
             DataType::Event => {
                 let res = load_gdelt_event_file(&file_info.unzip_path, batch_size, &client).await;
                 file_info.set_load_result(res);
-            },
-            DataType::Mention => {
-            },
-            DataType::Graph => {
-            },
-        }        
+            }
+            DataType::Mention => {}
+            DataType::Graph => {}
+        }
     }
 
     Ok(files_to_load)
 }
 
-async fn load_gdelt_event_file(file_path: &PathBuf, batch_size: usize, client: &Client) -> anyhow::Result<()> {
+async fn load_gdelt_event_file(
+    file_path: &PathBuf,
+    batch_size: usize,
+    client: &Client,
+) -> anyhow::Result<()> {
     let mut rdr = ReaderBuilder::new()
         .has_headers(false)
-        .delimiter(b'\t')  // Set tab as the delimiter
+        .delimiter(b'\t') // Set tab as the delimiter
         .from_path(file_path)?;
-    
+
     let mut batch: Vec<GdeltEvent> = Vec::with_capacity(batch_size);
 
-    for result in rdr.deserialize()  {
+    for result in rdr.deserialize() {
         let event: GdeltEvent = result?;
 
         log::trace!("Processing event: {:?}", event);
@@ -206,7 +211,7 @@ async fn load_gdelt_event_file(file_path: &PathBuf, batch_size: usize, client: &
 
             // Clear the batch for the next set of events
             batch.clear();
-        }        
+        }
     }
 
     // Insert any remaining records that didn't complete a full batch
@@ -218,7 +223,7 @@ async fn load_gdelt_event_file(file_path: &PathBuf, batch_size: usize, client: &
     Ok(())
 }
 
-async fn insert_gdelt_events(client: &Client, events: &Vec<GdeltEvent>) -> anyhow::Result<()> {
+async fn insert_gdelt_events(client: &Client, events: &[GdeltEvent]) -> anyhow::Result<()> {
     if events.is_empty() {
         return Ok(());
     }

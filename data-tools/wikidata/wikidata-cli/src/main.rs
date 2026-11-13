@@ -17,11 +17,13 @@ use std::path::PathBuf;
 use chrono::NaiveDateTime;
 use clap::{Args, Parser, Subcommand};
 use script::create_test_scripts;
-use wikidata::{download_item_list, download_item_type, ItemListQueryArgs, ItemType, ItemTypeQueryArgs };
+use wikidata::{
+    download_item_list, download_item_type, ItemListQueryArgs, ItemType, ItemTypeQueryArgs,
+};
 
 mod script;
-mod wikidata;
 mod types;
+mod wikidata;
 
 use types::MakeScriptCommandArgs;
 
@@ -68,7 +70,7 @@ enum Commands {
         /// A flag to indicate whether scripts should be automatically generated from the downloaded data
         #[arg(short = 'g', long, default_value_t = false)]
         script: bool,
-    },    
+    },
     /// Generate test scripts from the downloaded item data.
     MakeScript {
         #[command(flatten)]
@@ -87,7 +89,13 @@ struct GetTypeCommandArgs {
     batch_size: usize,
 
     /// The types of WikiData Items to get
-    #[arg(short = 't', long, value_enum, default_value = "", value_delimiter=',')]
+    #[arg(
+        short = 't',
+        long,
+        value_enum,
+        default_value = "",
+        value_delimiter = ','
+    )]
     item_types: Vec<ItemType>,
 
     /// The maximum number of Item Revisions to get
@@ -107,8 +115,11 @@ struct GetTypeCommandArgs {
 }
 
 impl GetTypeCommandArgs {
-    fn get_type_query_args(&self, parent_path: PathBuf, overwrite: bool) -> anyhow::Result<Vec<ItemTypeQueryArgs>> {
-
+    fn get_type_query_args(
+        &self,
+        parent_path: PathBuf,
+        overwrite: bool,
+    ) -> anyhow::Result<Vec<ItemTypeQueryArgs>> {
         let rev_count = match (self.rev_start, self.rev_end) {
             // For a date range, the default is to retrieve all revisions; we use a large number,
             // otherwise the default is to retrieve only 1 revision.
@@ -122,11 +133,11 @@ impl GetTypeCommandArgs {
             queries.push(ItemTypeQueryArgs {
                 batch_size: self.batch_size,
                 folder_path: parent_path.join(item_type.to_string()),
-                item_type: item_type.clone(),
+                item_type: *item_type,
                 overwrite,
                 rev_count,
-                rev_end: self.rev_end.clone(),
-                rev_start: self.rev_start.clone()
+                rev_end: self.rev_end,
+                rev_start: self.rev_start,
             });
         }
         Ok(queries)
@@ -140,7 +151,13 @@ struct GetItemCommandArgs {
     batch_size: usize,
 
     /// The Item Ids to get
-    #[arg(short = 'i', long, value_enum, default_value = "Q84", value_delimiter=',')]
+    #[arg(
+        short = 'i',
+        long,
+        value_enum,
+        default_value = "Q84",
+        value_delimiter = ','
+    )]
     item_ids: Vec<String>,
 
     /// The type of WikiData Item to get
@@ -164,8 +181,11 @@ struct GetItemCommandArgs {
 }
 
 impl GetItemCommandArgs {
-    fn get_item_list_query_args(&self, parent_path: PathBuf, overwrite: bool) -> anyhow::Result<ItemListQueryArgs> {
-
+    fn get_item_list_query_args(
+        &self,
+        parent_path: PathBuf,
+        overwrite: bool,
+    ) -> anyhow::Result<ItemListQueryArgs> {
         let rev_count = match (self.rev_start, self.rev_end) {
             // For a date range, the default is to retrieve all revisions; w use a large number,
             // otherwise the default is to retrieve only 1 revision.
@@ -180,8 +200,8 @@ impl GetItemCommandArgs {
             item_ids: self.item_ids.clone(),
             overwrite,
             rev_count,
-            rev_end: self.rev_end.clone(),
-            rev_start: self.rev_start.clone()
+            rev_end: self.rev_end,
+            rev_start: self.rev_start,
         })
     }
 }
@@ -192,18 +212,25 @@ async fn main() {
 
     let params = Params::parse();
 
-    let cache_folder_path = params.cache_folder_path.unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_FOLDER_PATH));
+    let cache_folder_path = params
+        .cache_folder_path
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_FOLDER_PATH));
 
     let res = match params.command {
-        Commands::GetTypes { data_selection, overwrite, script } => {
-            handle_get_types_command(data_selection, cache_folder_path, overwrite, script).await
-        },
-        Commands::GetItems { data_selection, overwrite, script } => {
-            handle_get_items_command(data_selection, cache_folder_path, overwrite, script).await
-        }
-        Commands::MakeScript { data_selection, overwrite } => {
-            handle_make_script_command(data_selection, cache_folder_path, overwrite).await
-        }
+        Commands::GetTypes {
+            data_selection,
+            overwrite,
+            script,
+        } => handle_get_types_command(data_selection, cache_folder_path, overwrite, script).await,
+        Commands::GetItems {
+            data_selection,
+            overwrite,
+            script,
+        } => handle_get_items_command(data_selection, cache_folder_path, overwrite, script).await,
+        Commands::MakeScript {
+            data_selection,
+            overwrite,
+        } => handle_make_script_command(data_selection, cache_folder_path, overwrite).await,
     };
 
     match res {
@@ -216,13 +243,18 @@ async fn main() {
     }
 }
 
-async fn handle_get_types_command(args: GetTypeCommandArgs, cache_folder_path: PathBuf, overwrite: bool, script: bool ) -> anyhow::Result<()> {
+async fn handle_get_types_command(
+    args: GetTypeCommandArgs,
+    cache_folder_path: PathBuf,
+    overwrite: bool,
+    script: bool,
+) -> anyhow::Result<()> {
     log::info!("Get Types command using {:?}", args);
 
     // Display a summary of what the command is going to do.
     println!("Getting WikiData Types:");
     println!("  - batch size: {}", args.batch_size);
-    println!("  - date range: {:?} to {:?}", &args.rev_start, &args.rev_end);
+    println!("  - date range: {:?} to {:?}", args.rev_start, args.rev_end);
     println!("  - item types: {:?}", args.item_types);
     println!("  - cache folder: {:?}", cache_folder_path);
     println!("  - overwrite: {}", overwrite);
@@ -234,18 +266,23 @@ async fn handle_get_types_command(args: GetTypeCommandArgs, cache_folder_path: P
     let query_args = args.get_type_query_args(item_folder, overwrite)?;
     for query_arg in query_args {
         download_item_type(&query_arg).await?;
-    };
+    }
 
     Ok(())
 }
 
-async fn handle_get_items_command(args: GetItemCommandArgs, cache_folder_path: PathBuf, overwrite: bool, script: bool ) -> anyhow::Result<()> {
+async fn handle_get_items_command(
+    args: GetItemCommandArgs,
+    cache_folder_path: PathBuf,
+    overwrite: bool,
+    script: bool,
+) -> anyhow::Result<()> {
     log::info!("Get Items command using {:?}", args);
 
     // Display a summary of what the command is going to do.
     println!("Getting WikiData Items:");
     println!("  - batch size: {}", args.batch_size);
-    println!("  - date range: {:?} to {:?}", &args.rev_start, &args.rev_end);
+    println!("  - date range: {:?} to {:?}", args.rev_start, args.rev_end);
     println!("  - item type: {:?}", args.item_type);
     println!("  - item ids: {:?}", args.item_ids);
     println!("  - cache folder: {:?}", cache_folder_path);
@@ -261,15 +298,19 @@ async fn handle_get_items_command(args: GetItemCommandArgs, cache_folder_path: P
     Ok(())
 }
 
-async fn handle_make_script_command(args: MakeScriptCommandArgs, cache_folder_path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
+async fn handle_make_script_command(
+    args: MakeScriptCommandArgs,
+    cache_folder_path: PathBuf,
+    overwrite: bool,
+) -> anyhow::Result<()> {
     log::info!("Make Script command using {:?}", args);
 
     // Display a summary of what the command is going to do.
     println!("Scripting WikiData Types:");
-    println!("  - test ID: {:?}", &args.test_id);
-    println!("  - source ID: {:?}", &args.source_id);
-    println!("  - date range: {:?} to {:?}", &args.rev_start, &args.rev_end);
-    println!("  - item types: {:?}", &args.item_types);
+    println!("  - test ID: {:?}", args.test_id);
+    println!("  - source ID: {:?}", args.source_id);
+    println!("  - date range: {:?} to {:?}", args.rev_start, args.rev_end);
+    println!("  - item types: {:?}", args.item_types);
     println!("  - cache folder: {:?}", cache_folder_path);
     println!("  - overwrite: {}", overwrite);
 

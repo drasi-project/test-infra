@@ -12,13 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::{HashMap, HashSet}, hash::{Hash, Hasher}, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
+    path::PathBuf,
+};
 
 use async_zip::tokio::read::seek::ZipFileReader;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
-use tokio::{fs::{File, OpenOptions}, io::{AsyncWriteExt, BufReader}};
+use tokio::{
+    fs::{File, OpenOptions},
+    io::{AsyncWriteExt, BufReader},
+};
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
 use postgres::{initialize, load_gdelt_files, DbInfo};
@@ -29,7 +36,7 @@ mod postgres;
 mod script_generator;
 mod types;
 
-use types::{DataType, DataSelectionArgs, GenerateScriptsArgs, FileInfo};
+use types::{DataSelectionArgs, DataType, FileInfo, GenerateScriptsArgs};
 
 /// String constant representing the default GDELT data cache folder path
 /// This is the folder where GDELT data files are downloaded and stored if not provided by the user.
@@ -107,12 +114,11 @@ enum Commands {
 
         /// A flag to indicate whether existing tables should be overwritten
         #[arg(short = 'o', long, default_value_t = false)]
-        overwrite: bool,        
+        overwrite: bool,
     },
     /// Generates bootstrap and change scripts for E2E test framework
     GenerateScripts(GenerateScriptsArgs),
 }
-
 
 #[tokio::main]
 async fn main() {
@@ -120,23 +126,50 @@ async fn main() {
 
     let params = Params::parse();
 
-    let cache_folder_path = params.cache_folder_path.unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_FOLDER_PATH));
+    let cache_folder_path = params
+        .cache_folder_path
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_FOLDER_PATH));
 
     let res = match params.command {
-        Commands::Get { data_selection, overwrite, unzip } => {
-            handle_get_command(data_selection, cache_folder_path, overwrite, unzip).await
+        Commands::Get {
+            data_selection,
+            overwrite,
+            unzip,
+        } => handle_get_command(data_selection, cache_folder_path, overwrite, unzip).await,
+        Commands::Unzip {
+            data_selection,
+            overwrite,
+        } => handle_unzip_command(data_selection, cache_folder_path, overwrite).await,
+        Commands::Load {
+            data_selection,
+            database_url,
+            database_user,
+            database_password,
+        } => {
+            handle_load_command(
+                data_selection,
+                cache_folder_path,
+                database_url,
+                database_user,
+                database_password,
+            )
+            .await
         }
-        Commands::Unzip { data_selection, overwrite } => {
-            handle_unzip_command(data_selection, cache_folder_path, overwrite).await
-        }
-        Commands::Load { data_selection, database_url, database_user, database_password } => {
-            handle_load_command(data_selection, cache_folder_path, database_url, database_user, database_password).await
-        },
-        Commands::InitDB { database_url, database_user, database_password , overwrite} => {
-            handle_initdb_command(database_url, database_user, database_password, overwrite).await
-        }
+        Commands::InitDB {
+            database_url,
+            database_user,
+            database_password,
+            overwrite,
+        } => handle_initdb_command(database_url, database_user, database_password, overwrite).await,
         Commands::GenerateScripts(args) => {
-            handle_generate_scripts_command(args.data_selection, cache_folder_path, args.output_path, args.bootstrap, args.changes).await
+            handle_generate_scripts_command(
+                args.data_selection,
+                cache_folder_path,
+                args.output_path,
+                args.bootstrap,
+                args.changes,
+            )
+            .await
         }
     };
 
@@ -161,7 +194,11 @@ fn parse_start_datetime(datetime_str: &str) -> anyhow::Result<NaiveDateTime> {
     let seconds_into_interval = dt.num_seconds_from_midnight() as i64 % seconds_per_15_min;
     match seconds_into_interval {
         0 => Ok(dt),
-        _ => Ok(dt.checked_add_signed(TimeDelta::seconds(seconds_per_15_min - seconds_into_interval)).unwrap())
+        _ => Ok(dt
+            .checked_add_signed(TimeDelta::seconds(
+                seconds_per_15_min - seconds_into_interval,
+            ))
+            .unwrap()),
     }
 }
 
@@ -176,7 +213,9 @@ fn parse_end_datetime(datetime_str: &str) -> anyhow::Result<NaiveDateTime> {
     let seconds_into_interval = dt.num_seconds_from_midnight() as i64 % seconds_per_15_min;
     match seconds_into_interval {
         0 => Ok(dt),
-        _ => Ok(dt.checked_add_signed(TimeDelta::seconds(-seconds_into_interval)).unwrap())
+        _ => Ok(dt
+            .checked_add_signed(TimeDelta::seconds(-seconds_into_interval))
+            .unwrap()),
     }
 }
 
@@ -248,14 +287,18 @@ fn parse_datetime(datetime_str: &str) -> anyhow::Result<NaiveDateTime> {
     Ok(NaiveDateTime::new(date, time))
 }
 
-fn get_date_range(data_selection: &DataSelectionArgs) -> anyhow::Result<(NaiveDateTime, NaiveDateTime)> {
-
+fn get_date_range(
+    data_selection: &DataSelectionArgs,
+) -> anyhow::Result<(NaiveDateTime, NaiveDateTime)> {
     // If there is a start date and end date, parse them and validate that the end date is equal to or after the start date
     // If there is only a start date, use the start date as both the start date and the end date
     // If there is only an end date return an error
     // If there is no date use the current date as both the start date and the end date
 
-    match (data_selection.file_start.as_ref(), data_selection.file_end.as_ref()) {
+    match (
+        data_selection.file_start.as_ref(),
+        data_selection.file_end.as_ref(),
+    ) {
         (Some(start_str), Some(end_str)) => {
             let start_datetime = parse_start_datetime(start_str)?;
             let end_datetime = parse_end_datetime(end_str)?;
@@ -274,31 +317,36 @@ fn get_date_range(data_selection: &DataSelectionArgs) -> anyhow::Result<(NaiveDa
             let current_datetime = parse_start_datetime(&current_datetime_str)?;
 
             Ok((current_datetime, current_datetime))
-        },
+        }
     }
-
 }
 
-async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, overwrite: bool, unzip: bool) -> anyhow::Result<()> {
+async fn handle_get_command(
+    data_selection: DataSelectionArgs,
+    cache_folder_path: PathBuf,
+    overwrite: bool,
+    unzip: bool,
+) -> anyhow::Result<()> {
     log::debug!("Get command:");
 
     let (start_datetime, end_datetime) = get_date_range(&data_selection)?;
 
     // Display a summary of what the command is going to do based on the input parameters and the calculated date range
     println!("Getting GDELT Data:");
-    println!("  - date range: {} to {}", &start_datetime, &end_datetime);
+    println!("  - date range: {} to {}", start_datetime, end_datetime);
     println!("  - data types: {:?}", data_selection.data_type);
     println!("  - cache folder: {:?}", cache_folder_path);
     println!("  - overwrite: {}", overwrite);
     println!("  - unzip: {}", unzip);
 
     let downloads = create_gdelt_file_list(
-        start_datetime, 
+        start_datetime,
         end_datetime,
         data_selection.data_type.iter().cloned().collect(),
         cache_folder_path,
         overwrite,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Display the list of files to be downloaded, without taking ownership of the list or content
     // println!("Download Tasks:");
@@ -324,7 +372,6 @@ async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path
         // }
 
         summarize_fileinfo_results(unzip_results);
-
     } else {
         summarize_fileinfo_results(download_results);
     }
@@ -332,26 +379,30 @@ async fn handle_get_command(data_selection: DataSelectionArgs, cache_folder_path
     Ok(())
 }
 
-
-async fn handle_unzip_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
+async fn handle_unzip_command(
+    data_selection: DataSelectionArgs,
+    cache_folder_path: PathBuf,
+    overwrite: bool,
+) -> anyhow::Result<()> {
     log::debug!("Unzip command:");
 
     let (start_datetime, end_datetime) = get_date_range(&data_selection)?;
 
     // Display a summary of what the command is going to do based on the input parameters and the calculated date range
     println!("Unzipping GDELT Data:");
-    println!("  - date range: {} to {}", &start_datetime, &end_datetime);
+    println!("  - date range: {} to {}", start_datetime, end_datetime);
     println!("  - data types: {:?}", data_selection.data_type);
     println!("  - cache folder: {:?}", cache_folder_path);
     println!("  - overwrite: {}", overwrite);
 
     let files_to_unzip = create_gdelt_file_list(
-        start_datetime, 
+        start_datetime,
         end_datetime,
         data_selection.data_type.iter().cloned().collect(),
         cache_folder_path,
         overwrite,
-    ).unwrap();
+    )
+    .unwrap();
 
     let unzip_results = unzip_gdelt_files(files_to_unzip).await.unwrap();
 
@@ -365,7 +416,13 @@ async fn handle_unzip_command(data_selection: DataSelectionArgs, cache_folder_pa
     Ok(())
 }
 
-async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_path: PathBuf, database_url: Option<String>, database_user: Option<String>, database_password: Option<String>) -> anyhow::Result<()>  {
+async fn handle_load_command(
+    data_selection: DataSelectionArgs,
+    cache_folder_path: PathBuf,
+    database_url: Option<String>,
+    database_user: Option<String>,
+    database_password: Option<String>,
+) -> anyhow::Result<()> {
     log::debug!("Load command:");
 
     let (start_datetime, end_datetime) = get_date_range(&data_selection)?;
@@ -378,16 +435,22 @@ async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_pat
           - Database URL: {:?}\n\
           - Database User: {:?}\n\
           - Database Password: *****",
-        &start_datetime, &end_datetime, data_selection.data_type, cache_folder_path, database_url, database_user
+        start_datetime,
+        end_datetime,
+        data_selection.data_type,
+        cache_folder_path,
+        database_url,
+        database_user
     );
 
     let files_to_load = create_gdelt_file_list(
-        start_datetime, 
+        start_datetime,
         end_datetime,
         data_selection.data_type.iter().cloned().collect(),
         cache_folder_path,
         false,
-    ).unwrap();
+    )
+    .unwrap();
 
     // println!("Files to load:");
     // for file_info in &files_to_load {
@@ -415,7 +478,12 @@ async fn handle_load_command(data_selection: DataSelectionArgs, cache_folder_pat
     Ok(())
 }
 
-async fn handle_initdb_command(database_url: Option<String>, database_user: Option<String>, database_password: Option<String>, overwrite: bool) -> anyhow::Result<()>  {
+async fn handle_initdb_command(
+    database_url: Option<String>,
+    database_user: Option<String>,
+    database_password: Option<String>,
+    overwrite: bool,
+) -> anyhow::Result<()> {
     log::debug!("InitDB command:");
 
     println!(
@@ -423,7 +491,7 @@ async fn handle_initdb_command(database_url: Option<String>, database_user: Opti
           - Database URL: {:?}\n\
           - Database User: {:?}\n\
           - Database Password: *****",
-        database_url, database_user, 
+        database_url, database_user,
     );
 
     let db_info = DbInfo {
@@ -440,9 +508,13 @@ async fn handle_initdb_command(database_url: Option<String>, database_user: Opti
     Ok(())
 }
 
-
-fn create_gdelt_file_list(start_datetime: NaiveDateTime, end_datetime: NaiveDateTime, file_types: HashSet<DataType>, cache_folder_path: PathBuf, overwrite: bool) -> anyhow::Result<Vec<FileInfo>> {
-
+fn create_gdelt_file_list(
+    start_datetime: NaiveDateTime,
+    end_datetime: NaiveDateTime,
+    file_types: HashSet<DataType>,
+    cache_folder_path: PathBuf,
+    overwrite: bool,
+) -> anyhow::Result<Vec<FileInfo>> {
     let mut download_tasks: Vec<FileInfo> = Vec::new();
 
     // Create the cache_folder_path if it does not exist
@@ -458,28 +530,44 @@ fn create_gdelt_file_list(start_datetime: NaiveDateTime, end_datetime: NaiveDate
 
         // Events
         if file_types.contains(&DataType::Event) {
-            download_tasks.push(FileInfo::new_event_file(cache_folder_path.clone(), &timestamp, overwrite));
+            download_tasks.push(FileInfo::new_event_file(
+                cache_folder_path.clone(),
+                &timestamp,
+                overwrite,
+            ));
         }
 
         // Graph
         if file_types.contains(&DataType::Graph) {
-            download_tasks.push(FileInfo::new_graph_file(cache_folder_path.clone(), &timestamp, overwrite));
+            download_tasks.push(FileInfo::new_graph_file(
+                cache_folder_path.clone(),
+                &timestamp,
+                overwrite,
+            ));
         }
 
         // Mentions
         if file_types.contains(&DataType::Mention) {
-            download_tasks.push(FileInfo::new_mention_file(cache_folder_path.clone(), &timestamp, overwrite));
+            download_tasks.push(FileInfo::new_mention_file(
+                cache_folder_path.clone(),
+                &timestamp,
+                overwrite,
+            ));
         }
 
         // Increment the current_datetime by 15 minutes
-        current_datetime = current_datetime.checked_add_signed(TimeDelta::minutes(15)).unwrap();
+        current_datetime = current_datetime
+            .checked_add_signed(TimeDelta::minutes(15))
+            .unwrap();
     }
 
     // Return a Vec of the urls and local paths for the files to be downloaded
     Ok(download_tasks)
 }
 
-async fn download_gdelt_zip_files(mut download_tasks: Vec<FileInfo>) -> anyhow::Result<Vec<FileInfo>> {
+async fn download_gdelt_zip_files(
+    mut download_tasks: Vec<FileInfo>,
+) -> anyhow::Result<Vec<FileInfo>> {
     let client = Client::new();
 
     // Create a collection of futures for downloading files
@@ -491,15 +579,17 @@ async fn download_gdelt_zip_files(mut download_tasks: Vec<FileInfo>) -> anyhow::
         let client = client.clone();
 
         // Spawn the download task and update the result in the FileInfo
-        let fut = async move {
-            download_file(client, url, path, task.overwrite).await
-        };
+        let fut = async move { download_file(client, url, path, task.overwrite).await };
 
         tasks.push(fut);
     }
 
     // Await all the tasks and update the results
-    for (i, task_result) in futures::future::join_all(tasks).await.into_iter().enumerate() {
+    for (i, task_result) in futures::future::join_all(tasks)
+        .await
+        .into_iter()
+        .enumerate()
+    {
         download_tasks[i].set_download_result(task_result);
     }
 
@@ -507,8 +597,12 @@ async fn download_gdelt_zip_files(mut download_tasks: Vec<FileInfo>) -> anyhow::
 }
 
 // Helper function to download a file from the URL and save it to the given path
-async fn download_file(client: Client, url: String, path: PathBuf, overwrite: bool) -> anyhow::Result<()> {
-
+async fn download_file(
+    client: Client,
+    url: String,
+    path: PathBuf,
+    overwrite: bool,
+) -> anyhow::Result<()> {
     if !overwrite && path.exists() {
         log::info!("File already exists: {:?}", path);
         return Ok(());
@@ -539,25 +633,25 @@ async fn unzip_gdelt_files(mut unzip_tasks: Vec<FileInfo>) -> anyhow::Result<Vec
         let src_path = task.zip_path.clone();
         let dest_path = task.unzip_path.clone();
 
-        let fut = async move {
-            unzip_file(src_path, dest_path, task.overwrite).await
-        };
+        let fut = async move { unzip_file(src_path, dest_path, task.overwrite).await };
 
         tasks.push(fut);
     }
 
     // Await all the tasks and update the results
-    for (i, task_result) in futures::future::join_all(tasks).await.into_iter().enumerate() {
+    for (i, task_result) in futures::future::join_all(tasks)
+        .await
+        .into_iter()
+        .enumerate()
+    {
         unzip_tasks[i].set_extract_result(task_result);
     }
 
     Ok(unzip_tasks)
 }
 
-
 // Helper function to unzip a file from the source PathBuf and save it in the dest PathBuf
 async fn unzip_file(src: PathBuf, dest: PathBuf, overwrite: bool) -> anyhow::Result<()> {
-
     // Make sure the source file exists
     if !src.exists() {
         anyhow::bail!("File does not exist: {:?}", src);
@@ -583,7 +677,10 @@ async fn unzip_file(src: PathBuf, dest: PathBuf, overwrite: bool) -> anyhow::Res
 
     // There SHOULD be only 1 entry in each zip file. If there are more, we will only process the first one.
     if zip_reader.file().entries().len() > 1 {
-        log::warn!("Zip file contains more than one entry. Only the first entry will be processed - {:?}", src);
+        log::warn!(
+            "Zip file contains more than one entry. Only the first entry will be processed - {:?}",
+            src
+        );
     }
 
     let mut entry_reader = zip_reader.reader_with_entry(0).await?;
@@ -594,10 +691,9 @@ async fn unzip_file(src: PathBuf, dest: PathBuf, overwrite: bool) -> anyhow::Res
         .open(&dest)
         .await?;
 
-    futures_lite::io::copy(&mut entry_reader, &mut writer.compat_write())
-        .await?;
+    futures_lite::io::copy(&mut entry_reader, &mut writer.compat_write()).await?;
 
-    Ok(())    
+    Ok(())
 }
 
 async fn handle_generate_scripts_command(
@@ -619,7 +715,13 @@ async fn handle_generate_scripts_command(
           - output path: {:?}\n\
           - bootstrap: {}\n\
           - changes: {}",
-        &start_datetime, &end_datetime, data_selection.data_type, cache_folder_path, output_path, bootstrap, changes
+        start_datetime,
+        end_datetime,
+        data_selection.data_type,
+        cache_folder_path,
+        output_path,
+        bootstrap,
+        changes
     );
 
     // Create the script generator
@@ -653,21 +755,31 @@ async fn handle_generate_scripts_command(
             .collect();
 
         if unzipped_files.is_empty() {
-            println!("No unzipped files found for {:?}. Please run 'unzip' command first.", data_type);
+            println!(
+                "No unzipped files found for {:?}. Please run 'unzip' command first.",
+                data_type
+            );
             continue;
         }
 
         // Generate bootstrap scripts
         if bootstrap {
             println!("Generating bootstrap scripts for {:?}...", data_type);
-            generator.generate_bootstrap_scripts(unzipped_files.clone(), data_type_str).await?;
+            generator
+                .generate_bootstrap_scripts(unzipped_files.clone(), data_type_str)
+                .await?;
         }
 
         // Generate change scripts
         if changes {
             println!("Generating change scripts for {:?}...", data_type);
-            let start_time = chrono::DateTime::parse_from_rfc3339(&format!("{}+00:00", start_datetime.format("%Y-%m-%dT%H:%M:%S")))?;
-            generator.generate_change_scripts(unzipped_files, data_type_str, start_time).await?;
+            let start_time = chrono::DateTime::parse_from_rfc3339(&format!(
+                "{}+00:00",
+                start_datetime.format("%Y-%m-%dT%H:%M:%S")
+            ))?;
+            generator
+                .generate_change_scripts(unzipped_files, data_type_str, start_time)
+                .await?;
         }
     }
 
@@ -680,7 +792,8 @@ fn summarize_fileinfo_results(file_infos: Vec<FileInfo>) {
     let mut summary: HashMap<DataType, (usize, usize, usize, usize)> = HashMap::new();
 
     for file_info in file_infos {
-        let (total, successful, failed, skipped) = summary.entry(file_info.file_type).or_insert((0, 0, 0, 0));
+        let (total, successful, failed, skipped) =
+            summary.entry(file_info.file_type).or_insert((0, 0, 0, 0));
 
         *total += 1; // Increment total
 
@@ -709,9 +822,18 @@ fn summarize_fileinfo_results(file_infos: Vec<FileInfo>) {
     // Print the summary
     for (data_type, (total, successful, failed, skipped)) in summary {
         println!("{:?} Files:", data_type);
-        println!("Downloads - Total: {}, Successful: {}, Failed: {}, Skipped: {}", total, successful, failed, skipped);
-        println!("Extractions - Total: {}, Successful: {}, Failed: {}, Skipped: {}", total, successful, failed, skipped);
-        println!("Loads - Total: {}, Successful: {}, Failed: {}, Skipped: {}", total, successful, failed, skipped);
+        println!(
+            "Downloads - Total: {}, Successful: {}, Failed: {}, Skipped: {}",
+            total, successful, failed, skipped
+        );
+        println!(
+            "Extractions - Total: {}, Successful: {}, Failed: {}, Skipped: {}",
+            total, successful, failed, skipped
+        );
+        println!(
+            "Loads - Total: {}, Successful: {}, Failed: {}, Skipped: {}",
+            total, successful, failed, skipped
+        );
         println!(); // Print a newline for better readability
     }
 }

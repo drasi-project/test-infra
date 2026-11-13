@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{cmp, fmt::Display, hash::{Hash, Hasher}, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    cmp,
+    fmt::Display,
+    hash::{Hash, Hasher},
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+};
 
 use anyhow::Error;
 use chrono::NaiveDateTime;
@@ -27,11 +34,13 @@ use tokio::{fs, io::AsyncWriteExt, sync::Semaphore};
 pub mod extractors;
 
 /// Enum representing the different types of WikiData Item that can be downloaded
-#[derive(Copy, Clone, Debug, PartialEq, EnumIter, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, EnumIter, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize,
+)]
 pub enum ItemType {
     City,
     Continent,
-    Country
+    Country,
 }
 
 impl ItemType {
@@ -95,7 +104,6 @@ impl Hash for ItemType {
     }
 }
 
-
 #[derive(Deserialize, Debug)]
 pub struct ApiResponse {
     #[serde(rename = "continue")]
@@ -121,7 +129,7 @@ pub struct Query {
 pub struct Page {
     pub pageid: u32,
     pub ns: u32,
-    pub title: String,    
+    pub title: String,
     pub revisions: Option<Vec<Revision>>,
 }
 
@@ -167,7 +175,7 @@ impl ItemRevisionFileContent {
             parent_id: revision.parentid,
             timestamp: revision.timestamp.clone(),
             user: revision.user.clone(),
-            user_id: revision.userid.clone(),
+            user_id: revision.userid,
             comment: revision.comment.clone(),
             content: None,
         };
@@ -176,7 +184,7 @@ impl ItemRevisionFileContent {
             if let Some(slot) = slots.get("main") {
                 if let Some(content) = &slot.content {
                     // Parse the content as JSON
-                    irfc.content = Some(serde_json::from_str(&content)?);
+                    irfc.content = Some(serde_json::from_str(content)?);
                 }
             }
         }
@@ -220,7 +228,7 @@ struct ItemRevsQueryArgs {
     pub rev_start: Option<NaiveDateTime>,
 }
 
-pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Result<()> {        
+pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Result<()> {
     log::info!("Download Item Types using {:?}", query_args);
 
     if query_args.overwrite && query_args.folder_path.exists() {
@@ -232,13 +240,13 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
     }
 
     // SPARQL query for items of the specified type
-    let sparql_query = format!( 
-        r#"SELECT ?item WHERE {{ ?item wdt:P31 wd:{}.}}"#, 
-        query_args.item_type.as_wikidata_id() 
+    let sparql_query = format!(
+        r#"SELECT ?item WHERE {{ ?item wdt:P31 wd:{}.}}"#,
+        query_args.item_type.as_wikidata_id()
     );
 
     let client = Client::new();
-    let request  = client
+    let request = client
         .get("https://query.wikidata.org/sparql")
         .query(&[("query", sparql_query), ("format", "json".to_string())])
         .header("User-Agent", "DrasiWikiDataCli/0.1 (info@drasi.io)")
@@ -250,7 +258,11 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
 
     let mut item_rev_queries: Vec<ItemRevsQueryArgs> = Vec::new();
 
-    println!("Downloading {} Items of type {}:", response.results.bindings.len(), query_args.item_type.as_label());
+    println!(
+        "Downloading {} Items of type {}:",
+        response.results.bindings.len(),
+        query_args.item_type.as_label()
+    );
 
     for binding in response.results.bindings {
         let uri = binding.item.value;
@@ -262,11 +274,11 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
             item_id: item_id.to_string(),
             folder_path: query_args.folder_path.join(item_id),
             overwrite: query_args.overwrite,
-            rev_count: query_args.rev_count.clone(),
-            rev_end: query_args.rev_end.clone(),
-            rev_start: query_args.rev_start.clone(),
+            rev_count: query_args.rev_count,
+            rev_end: query_args.rev_end,
+            rev_start: query_args.rev_start,
         });
-    };
+    }
 
     let semaphore = Arc::new(Semaphore::new(2));
 
@@ -279,7 +291,7 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
             tokio::spawn(async move {
                 // Acquire a permit (await ensures semaphore limit)
                 let _permit = permit.await.unwrap();
-                
+
                 download_item_revisions(query.clone()).await?;
                 Ok::<_, Error>(())
             })
@@ -294,23 +306,25 @@ pub async fn download_item_type(query_args: &ItemTypeQueryArgs) -> anyhow::Resul
     Ok(())
 }
 
-pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Result<()> {        
+pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Result<()> {
     log::info!("Download Item List using {:?}", query_args);
 
     // SPARQL query for items of the specified type that match the provided item ids
-    let item_list_string = query_args.item_ids.iter()
+    let item_list_string = query_args
+        .item_ids
+        .iter()
         .map(|id| format!("wd:{}", id))
         .collect::<Vec<String>>()
         .join(" ");
 
-    let sparql_query = format!( 
-        r#"SELECT ?item WHERE {{ ?item wdt:P31 wd:{}. VALUES ?item {{ {} }} }}"#, 
-        query_args.item_type.as_wikidata_id(), 
+    let sparql_query = format!(
+        r#"SELECT ?item WHERE {{ ?item wdt:P31 wd:{}. VALUES ?item {{ {} }} }}"#,
+        query_args.item_type.as_wikidata_id(),
         item_list_string
     );
 
     let client = Client::new();
-    let request  = client
+    let request = client
         .get("https://query.wikidata.org/sparql")
         .query(&[("query", sparql_query), ("format", "json".to_string())])
         .header("User-Agent", "DrasiWikiDataCli/0.1 (info@drasi.io)")
@@ -320,7 +334,11 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
 
     let response: ItemListResponse = client.execute(request).await?.json().await?;
 
-    println!("Downloading {} Items of type {}:", response.results.bindings.len(), query_args.item_type.as_label());
+    println!(
+        "Downloading {} Items of type {}:",
+        response.results.bindings.len(),
+        query_args.item_type.as_label()
+    );
 
     let mut item_rev_queries: Vec<ItemRevsQueryArgs> = Vec::new();
 
@@ -334,11 +352,11 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
             item_id: item_id.to_string(),
             folder_path: query_args.folder_path.join(item_id),
             overwrite: query_args.overwrite,
-            rev_count: query_args.rev_count.clone(),
-            rev_end: query_args.rev_end.clone(),
-            rev_start: query_args.rev_start.clone(),
+            rev_count: query_args.rev_count,
+            rev_end: query_args.rev_end,
+            rev_start: query_args.rev_start,
         });
-    };
+    }
 
     let semaphore = Arc::new(Semaphore::new(2));
 
@@ -351,7 +369,7 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
             tokio::spawn(async move {
                 // Acquire a permit (await ensures semaphore limit)
                 let _permit = permit.await.unwrap();
-                
+
                 download_item_revisions(query.clone()).await?;
                 Ok::<_, Error>(())
             })
@@ -366,7 +384,7 @@ pub async fn download_item_list(query_args: &ItemListQueryArgs) -> anyhow::Resul
     Ok(())
 }
 
-async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Result<()> {        
+async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Result<()> {
     log::info!("Download Item Revisions using {:?}", query_args);
 
     if query_args.overwrite && query_args.folder_path.exists() {
@@ -384,10 +402,13 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
     let mut total_revision_count = 0;
     let mut revision_ids: Vec<String> = Vec::new();
     loop {
-        let request = create_item_revision_list_request(
-            &client, &query_args, continuation_token)?.build()?;
+        let request =
+            create_item_revision_list_request(&client, &query_args, continuation_token)?.build()?;
 
-        log::debug!("Downloading Item Revision List URL: {}", request.url().as_str());
+        log::debug!(
+            "Downloading Item Revision List URL: {}",
+            request.url().as_str()
+        );
 
         let response: ApiResponse = client.execute(request).await?.json().await?;
 
@@ -396,7 +417,10 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
                 for revision in revisions {
                     log::trace!(
                         "Item ID {:?}, Revision ID: {}, Parent ID: {}, Timestamp: {}",
-                        &query_args.item_id, revision.revid, revision.parentid, revision.timestamp
+                        query_args.item_id,
+                        revision.revid,
+                        revision.parentid,
+                        revision.timestamp
                     );
 
                     total_revision_count += 1;
@@ -404,11 +428,15 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
                     // Create a file name and path from the Revision Timestamp
                     let filename = revision.timestamp.replace(":", "-").replace("T", "_");
                     let revision_file = query_args.folder_path.join(format!("{}.json", filename));
-                    
+
                     // If the revision file already exists, dont rewrite it.
                     // This will allow for incremental fetching of content over multiiple runs in case of failure
                     if revision_file.exists() {
-                        log::trace!("Revision {:?} already exists in Item {:?}", revision.revid, &query_args.item_id);
+                        log::trace!(
+                            "Revision {:?} already exists in Item {:?}",
+                            revision.revid,
+                            query_args.item_id
+                        );
                     } else {
                         revision_ids.push(revision.revid.to_string());
                     }
@@ -424,13 +452,17 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
         }
     }
 
-    println!("  Item {:?} - downloading {} of {} available revisions.", 
-        &query_args.item_id, revision_ids.len(), total_revision_count);
+    println!(
+        "  Item {:?} - downloading {} of {} available revisions.",
+        query_args.item_id,
+        revision_ids.len(),
+        total_revision_count
+    );
 
     // Fetch the revisions in batches
     let revision_id_chunks: Vec<Vec<String>> = revision_ids
-        .chunks(query_args.batch_size) 
-        .map(|chunk| chunk.to_vec()) 
+        .chunks(query_args.batch_size)
+        .map(|chunk| chunk.to_vec())
         .collect();
 
     let semaphore = Arc::new(Semaphore::new(5));
@@ -449,12 +481,14 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
 
                 let item_id = &query_args.item_id.clone();
                 let revision_ids = revision_id_chunk.join("|");
-                
-                match download_item_revisions_chunk(client, query_args, revision_id_chunk.clone()).await {
-                    Ok(_) => {},
+
+                match download_item_revisions_chunk(client, query_args, revision_id_chunk.clone())
+                    .await
+                {
+                    Ok(_) => {}
                     Err(err) => {
                         log::error!("Chunk download failed - Item ID: {:?}. Revision IDs: {:?}. Error: {:?}.", item_id, revision_ids, err);
-                    },
+                    }
                 }
             })
         })
@@ -462,10 +496,10 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
 
     let results: Vec<_> = future::join_all(tasks).await;
 
-    // Handle results    
+    // Handle results
     for result in results.into_iter() {
         match result {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(err) => log::error!("Task failed: {:?}", err),
         }
     }
@@ -473,17 +507,23 @@ async fn download_item_revisions(query_args: ItemRevsQueryArgs) -> anyhow::Resul
     // for task in tasks {
     //     task.await??;
     // }
-    
+
     Ok(())
 }
 
-async fn download_item_revisions_chunk(client: Client, query_args: ItemRevsQueryArgs, revision_id_chunk: Vec<String>) -> anyhow::Result<()> {        
+async fn download_item_revisions_chunk(
+    client: Client,
+    query_args: ItemRevsQueryArgs,
+    revision_id_chunk: Vec<String>,
+) -> anyhow::Result<()> {
     log::info!("Download Item Revisions Chunk using {:?}", query_args);
 
-    let request = create_item_revisions_request(
-        &client, &revision_id_chunk)?.build()?;
+    let request = create_item_revisions_request(&client, &revision_id_chunk)?.build()?;
 
-    log::trace!("Downloading Item Revisions URL: {:?}", &request.url().as_str());
+    log::trace!(
+        "Downloading Item Revisions URL: {:?}",
+        request.url().as_str()
+    );
 
     let response: ApiResponse = client.execute(request).await?.json().await?;
 
@@ -492,32 +532,47 @@ async fn download_item_revisions_chunk(client: Client, query_args: ItemRevsQuery
             for revision in revisions {
                 log::trace!(
                     "Item ID {:?}, Revision ID: {}, Timestamp: {}, User: {:?}, UserId: {:?}, Comment: {:?}",
-                    &query_args.item_id, revision.revid, revision.timestamp, revision.user, revision.userid, revision.comment
+                    query_args.item_id, revision.revid, revision.timestamp, revision.user, revision.userid, revision.comment
                 );
 
                 // Construct the revision
-                let item_rev_content = ItemRevisionFileContent::new(query_args.item_id.clone(), query_args.item_type, revision)?;
+                let item_rev_content = ItemRevisionFileContent::new(
+                    query_args.item_id.clone(),
+                    query_args.item_type,
+                    revision,
+                )?;
 
                 // Create a file name and path from the Revision Timestamp
-                let filename = item_rev_content.timestamp.replace(":", "-").replace("T", "_");
+                let filename = item_rev_content
+                    .timestamp
+                    .replace(":", "-")
+                    .replace("T", "_");
                 let revision_file = query_args.folder_path.join(format!("{}.json", filename));
-                
+
                 // If the revision file already exists, dont rewrite it.
                 // This will allow for incremental fetching of content over multiiple runs in case of failure
                 if revision_file.exists() {
-                    log::warn!("Revision {:?} already exists in Item {:?}", revision.revid, &query_args.item_id);
+                    log::warn!(
+                        "Revision {:?} already exists in Item {:?}",
+                        revision.revid,
+                        query_args.item_id
+                    );
                     continue;
                 }
 
-                if item_rev_content.content.is_some() {
+                if let Some(content) = &item_rev_content.content {
                     // Skip the revision if its claims don't exist or are empty.
-                    let has_claims = item_rev_content.content
-                        .as_ref().unwrap()
+                    let has_claims = content
                         .get("claims")
-                        .map_or(true, |claims| !claims.is_array() || claims.as_array().unwrap().is_empty());
+                        .and_then(Value::as_object)
+                        .is_some_and(|claims| !claims.is_empty());
 
                     if !has_claims {
-                        log::error!("No claims found in Item {:?} Revision {:?}", &query_args.item_id, revision.revid);
+                        log::error!(
+                            "No claims found in Item {:?} Revision {:?}",
+                            query_args.item_id,
+                            revision.revid
+                        );
                         continue;
                     }
 
@@ -527,9 +582,14 @@ async fn download_item_revisions_chunk(client: Client, query_args: ItemRevsQuery
 
                     // Save the revision to a file in the item folder
                     let mut file = fs::File::create(revision_file).await?;
-                    file.write_all(serde_json::to_string(&item_rev_content)?.as_bytes()).await?;
-                } else  {
-                    log::warn!("No slots found in Item {:?} Revision {:?}", &query_args.item_id, revision.revid);
+                    file.write_all(serde_json::to_string(&item_rev_content)?.as_bytes())
+                        .await?;
+                } else {
+                    log::warn!(
+                        "No slots found in Item {:?} Revision {:?}",
+                        query_args.item_id,
+                        revision.revid
+                    );
                 }
             }
         }
@@ -538,8 +598,11 @@ async fn download_item_revisions_chunk(client: Client, query_args: ItemRevsQuery
     Ok(())
 }
 
-fn create_item_revision_list_request(client: &Client, query_args: &ItemRevsQueryArgs, continuation: Option<Continuation>) -> anyhow::Result<RequestBuilder> {
-
+fn create_item_revision_list_request(
+    client: &Client,
+    query_args: &ItemRevsQueryArgs,
+    continuation: Option<Continuation>,
+) -> anyhow::Result<RequestBuilder> {
     let rvlimit: usize = 50;
 
     let mut request = client
@@ -572,7 +635,10 @@ fn create_item_revision_list_request(client: &Client, query_args: &ItemRevsQuery
             request
                 .query(&[("rvstart", start_datetime.to_string())])
                 .query(&[("rvdir", "newer")])
-                .query(&[("rvlimit", cmp::min(rvlimit, query_args.rev_count).to_string())])
+                .query(&[(
+                    "rvlimit",
+                    cmp::min(rvlimit, query_args.rev_count).to_string(),
+                )])
         }
         (None, Some(end_datetime)) => {
             // Get revisions prior to the end date
@@ -581,28 +647,36 @@ fn create_item_revision_list_request(client: &Client, query_args: &ItemRevsQuery
             request
                 .query(&[("rvstart", end_datetime.to_string())])
                 .query(&[("rvdir", "older")])
-                .query(&[("rvlimit", cmp::min(rvlimit, query_args.rev_count).to_string())])
-            },
+                .query(&[(
+                    "rvlimit",
+                    cmp::min(rvlimit, query_args.rev_count).to_string(),
+                )])
+        }
         (None, None) => {
             // Get revisions prior to NOW.
             // If a rev_count is provided, get that number of revisions, otherwise get 1.
             // Set rvlimit to be smart about how many to fetch with each request.
             request
-            .query(&[("rvstart", "now")])
-            .query(&[("rvdir", "older")])
-            .query(&[("rvlimit", cmp::min(rvlimit, query_args.rev_count).to_string())])
-        },
+                .query(&[("rvstart", "now")])
+                .query(&[("rvdir", "older")])
+                .query(&[(
+                    "rvlimit",
+                    cmp::min(rvlimit, query_args.rev_count).to_string(),
+                )])
+        }
     };
 
-    Ok(if continuation.is_some() {
-        request.query(&[("rvcontinue", continuation.unwrap().rvcontinue)])
+    Ok(if let Some(continuation) = continuation {
+        request.query(&[("rvcontinue", continuation.rvcontinue)])
     } else {
         request
     })
 }
 
-fn create_item_revisions_request(client: &Client, revision_ids: &Vec<String>) -> anyhow::Result<RequestBuilder> {
-
+fn create_item_revisions_request(
+    client: &Client,
+    revision_ids: &[String],
+) -> anyhow::Result<RequestBuilder> {
     Ok(client
         .get("https://www.wikidata.org/w/api.php")
         .query(&[("action", "query")])

@@ -11,6 +11,7 @@ azure_storage_blobs = "0.20.0"
 base64 = "0.22"
 chrono = { version = "0.4.38", features = ["serde"] }
 derive_more = { version = "1.0.0", features = ["debug"] }
+drasi-core-types = { path = "../../../drasi-core/core-types" }
 futures = "0.3.3"
 log = "0.4"
 quick-xml = "0.41"

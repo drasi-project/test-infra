@@ -43,6 +43,12 @@ COPY ./test-data-store ./test-data-store
 COPY ./data-collector ./data-collector
 COPY ./test-run-host ./test-run-host
 COPY ./test-service ./test-service
+# The development workspace resolves the embedded host against the matched
+# sibling Core checkout. A named build context keeps that source available
+# without expanding the main image context to the entire multi-repo folder.
+COPY --from=drasi-core . /drasi-core
+RUN sed -i 's#path = "../../../drasi-core/#path = "/drasi-core/#g' \
+    /usr/src/test-run-host/Cargo.toml
 
 WORKDIR /usr/src/test-service
 # Set JQ_LIB_DIR dynamically for multiarch support — Debian's libjq-dev does

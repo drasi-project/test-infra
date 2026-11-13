@@ -22,9 +22,10 @@
                 "source_change_dispatchers": [
                   {
                     "kind": "DrasiLibInstanceChannel",
-                    "source_id": "stock-trades-db",
+                    "source_id": "20000000-0000-4000-8000-000000000001",
                     "buffer_size": 2048,
-                    "drasi_lib_instance_id": "internal-drasi-server"
+                    "drasi_lib_instance_id": "internal-drasi-server",
+                    "source_name": "stock-trades-db"
                   },
                   {
                     "kind": "JsonlFile",
@@ -129,9 +130,10 @@
                 "test_reaction_id": "stock-market",
                 "output_handler": {
                   "kind": "DrasiLibInstanceChannel",
-                  "reaction_id": "stock-market-alerts",
+                  "reaction_id": "20000000-0000-4000-8000-000000000201",
                   "buffer_size": 1024,
-                  "drasi_lib_instance_id": "internal-drasi-server"
+                  "drasi_lib_instance_id": "internal-drasi-server",
+                  "reaction_name": "stock-market-alerts"
                 },
                 "stop_triggers": [
                   {
@@ -150,52 +152,57 @@
                   "log_level": "info",
                   "sources": [
                     {
-                      "id": "stock-trades-db",
+                      "id": "20000000-0000-4000-8000-000000000001",
                       "kind": "application",
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "stock-trades-db"
                     }
                   ],
                   "queries": [
                     {
-                      "id": "all-stocks",
+                      "id": "20000000-0000-4000-8000-000000000101",
                       "query": "MATCH (s:Stock) RETURN elementId(s) AS StockId, s.symbol, s.name, s.price, s.volume, s.daily_open, s.price_change",
                       "inputs": [
-                        "stock-trades-db"
+                        "20000000-0000-4000-8000-000000000001"
                       ],
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "all-stocks"
                     },
                     {
-                      "id": "high-volume-trades",
+                      "id": "20000000-0000-4000-8000-000000000102",
                       "query": "MATCH (s:Stock) WHERE s.volume > 50000000 RETURN elementId(s) AS StockId, s.symbol, s.volume, s.price",
                       "inputs": [
-                        "stock-trades-db"
+                        "20000000-0000-4000-8000-000000000001"
                       ],
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "high-volume-trades"
                     },
                     {
-                      "id": "price-movements",
+                      "id": "20000000-0000-4000-8000-000000000103",
                       "query": "MATCH (s:Stock) WHERE abs(s.price - s.daily_open) > (s.daily_open * 0.05) RETURN elementId(s) AS StockId, s.symbol, s.price, s.daily_open, s.price_change",
                       "inputs": [
-                        "stock-trades-db"
+                        "20000000-0000-4000-8000-000000000001"
                       ],
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "price-movements"
                     }
                   ],
                   "reactions": [
                     {
-                      "id": "stock-market-alerts",
+                      "id": "20000000-0000-4000-8000-000000000201",
                       "kind": "application",
                       "queries": [
-                        "all-stocks",
-                        "high-volume-trades",
-                        "price-movements"
+                        "20000000-0000-4000-8000-000000000101",
+                        "20000000-0000-4000-8000-000000000102",
+                        "20000000-0000-4000-8000-000000000103"
                       ],
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "stock-market-alerts"
                     }
                   ]
                 }

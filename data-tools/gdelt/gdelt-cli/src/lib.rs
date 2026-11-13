@@ -20,4 +20,4 @@ pub mod types;
 // Re-export commonly used types
 pub use gdelt::{GdeltEvent, GdeltGraph, GdeltMention};
 pub use script_generator::ScriptGenerator;
-pub use types::{DataType, DataSelectionArgs, GenerateScriptsArgs, FileInfo};
+pub use types::{DataSelectionArgs, DataType, FileInfo, GenerateScriptsArgs};

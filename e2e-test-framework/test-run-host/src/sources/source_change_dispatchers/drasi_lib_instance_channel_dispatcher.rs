@@ -28,6 +28,7 @@ use std::{
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
+use drasi_lib::{ComponentId, ComponentName};
 use drasi_source_application::ApplicationSourceHandle;
 
 use test_data_store::{
@@ -41,7 +42,8 @@ use super::SourceChangeDispatcher;
 #[derive(Debug)]
 pub struct DrasiLibInstanceChannelSourceChangeDispatcherSettings {
     pub drasi_lib_instance_id: TestRunDrasiLibInstanceId,
-    pub source_id: String,
+    pub source_id: ComponentId,
+    pub source_name: ComponentName,
     pub buffer_size: usize,
 }
 
@@ -60,11 +62,10 @@ impl DrasiLibInstanceChannelSourceChangeDispatcherSettings {
             buffer_size > 0 && buffer_size <= tokio::sync::Semaphore::MAX_PERMITS,
             "application input dispatcher capacity is outside the supported range"
         );
-        drasi_lib::computation::v1::ComponentId::try_new(definition.source_id.as_str())?;
-
         Ok(Self {
             drasi_lib_instance_id,
             source_id: definition.source_id.clone(),
+            source_name: definition.source_name.clone(),
             buffer_size,
         })
     }
@@ -260,7 +261,7 @@ impl SourceChangeDispatcher for DrasiLibInstanceChannelSourceChangeDispatcher {
         }
         let changes = events
             .into_iter()
-            .map(|event| source_change(event, &self.settings.source_id))
+            .map(|event| source_change(event, self.settings.source_name.as_str()))
             .collect::<Result<Vec<_>>>()?;
         if self.test_run_host.is_none() {
             self.queued_events.extend(changes);

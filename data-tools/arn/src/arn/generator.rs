@@ -44,14 +44,15 @@ impl ArnDataGenerator {
     /// Generate a set of Management Groups with hierarchical relationships
     pub fn generate_management_groups(&mut self) -> Vec<ManagementGroupResource> {
         let mut management_groups = Vec::new();
-        let users = vec![
+        let users = [
             "admin@contoso.com",
             "user@contoso.com",
             "sysadmin@contoso.com",
         ];
 
         // Create root management group
-        let root_id = format!("mg-root-{}", Uuid::new_v4().to_string()[..8].to_string());
+        let root_uuid = Uuid::new_v4().to_string();
+        let root_id = format!("mg-root-{}", &root_uuid[..8]);
         let root_mg = ManagementGroupResource::new(
             root_id.clone(),
             root_id.clone(),
@@ -71,8 +72,7 @@ impl ArnDataGenerator {
         let remaining_groups = self.config.management_group_count - 1;
         let levels = self.config.hierarchy_depth.min(remaining_groups);
 
-        if levels > 0 {
-            let groups_per_remaining_level = remaining_groups / levels;
+        if let Some(groups_per_remaining_level) = remaining_groups.checked_div(levels) {
             for _ in 0..levels {
                 groups_per_level.push(groups_per_remaining_level);
             }
@@ -93,10 +93,7 @@ impl ArnDataGenerator {
                 }
 
                 // Pick a random parent from the current level
-                let parent_id = current_level_groups
-                    .choose(&mut self.rng)
-                    .unwrap()
-                    .clone();
+                let parent_id = current_level_groups.choose(&mut self.rng).unwrap().clone();
 
                 let mg_id = format!("mg-l{}-{:03}", level, i);
                 let mg_name = format!("Management Group L{} #{}", level, i + 1);
@@ -126,12 +123,12 @@ impl ArnDataGenerator {
     /// Generate Service Groups
     pub fn generate_service_groups(&mut self) -> Vec<ServiceGroupResource> {
         let mut service_groups = Vec::new();
-        let users = vec![
+        let users = [
             "admin@contoso.com",
             "user@contoso.com",
             "sysadmin@contoso.com",
         ];
-        let service_types = vec![
+        let service_types = [
             "Compute",
             "Storage",
             "Networking",
@@ -171,7 +168,7 @@ impl ArnDataGenerator {
         service_groups: &[ServiceGroupResource],
     ) -> Vec<RelationshipResource> {
         let mut relationships = Vec::new();
-        let users = vec![
+        let users = [
             "admin@contoso.com",
             "user@contoso.com",
             "sysadmin@contoso.com",
@@ -218,7 +215,7 @@ impl ArnDataGenerator {
         duration_secs: u64,
     ) -> Vec<ChangeEvent> {
         let mut events = Vec::new();
-        let users = vec![
+        let users = [
             "admin@contoso.com",
             "user@contoso.com",
             "operator@contoso.com",
@@ -271,7 +268,9 @@ impl ArnDataGenerator {
                     users.choose(&mut self.rng).unwrap().to_string(),
                 );
 
-                events.push(ChangeEvent::Insert { management_group: mg });
+                events.push(ChangeEvent::Insert {
+                    management_group: mg,
+                });
             }
         }
 

@@ -13,10 +13,10 @@
 // limitations under the License.
 
 pub mod script;
-pub mod wikidata;
 pub mod types;
+pub mod wikidata;
 
 // Re-export commonly used types
-pub use wikidata::{ItemType, ItemRevisionFileContent};
 pub use script::create_test_scripts;
 pub use types::MakeScriptCommandArgs;
+pub use wikidata::{ItemRevisionFileContent, ItemType};

@@ -6,12 +6,14 @@ use test_data_store::test_run_storage::TestRunId;
 fn profiling_capture_is_opt_in_and_preserves_query_identity_and_timestamps() {
     let definition: DrasiLibInstanceChannelReactionHandlerDefinition =
         serde_json::from_value(serde_json::json!({
-            "drasi_lib_instance_id": "instance", "reaction_id": "reaction"
+            "drasi_lib_instance_id": "instance",
+            "reaction_id": "00000000-0000-4000-8000-000000000201",
+            "reaction_name": "reaction"
         }))
         .unwrap();
     assert!(!definition.include_profiling);
     let mut result = QueryResult::with_profiling(
-        "query".into(),
+        drasi_lib::ComponentId::try_new("00000000-0000-4000-8000-000000000101").unwrap(),
         7,
         chrono::Utc::now(),
         Vec::new(),
@@ -24,7 +26,7 @@ fn profiling_capture_is_opt_in_and_preserves_query_identity_and_timestamps() {
     );
     assert!(result_profiling(&result, false).unwrap().is_none());
     let profile = result_profiling(&result, true).unwrap().unwrap();
-    assert_eq!(profile["query_id"], "query");
+    assert_eq!(profile["query_id"], "00000000-0000-4000-8000-000000000101");
     assert_eq!(profile["query_sequence"], 7);
     assert_eq!(
         profile["timestamps"],
@@ -128,7 +130,10 @@ async fn stopping_before_host_binding_joins_the_only_worker() {
     let handler = DrasiLibInstanceHandler::create_channel(
         TestRunQueryId::new(&TestRunId::new("repo", "test", "run"), "query"),
         serde_json::from_value(serde_json::json!({
-            "drasi_lib_instance_id": "instance", "reaction_id": "reaction", "buffer_size": 1
+            "drasi_lib_instance_id": "instance",
+            "reaction_id": "00000000-0000-4000-8000-000000000201",
+            "reaction_name": "reaction",
+            "buffer_size": 1
         }))
         .unwrap(),
     )
@@ -159,7 +164,10 @@ async fn zero_handler_capacity_is_rejected_before_channel_creation() {
     assert!(DrasiLibInstanceHandler::create_channel(
         TestRunQueryId::new(&TestRunId::new("repo", "test", "run"), "query"),
         serde_json::from_value(serde_json::json!({
-            "drasi_lib_instance_id": "instance", "reaction_id": "reaction", "buffer_size": 0
+            "drasi_lib_instance_id": "instance",
+            "reaction_id": "00000000-0000-4000-8000-000000000201",
+            "reaction_name": "reaction",
+            "buffer_size": 0
         }))
         .unwrap(),
     )
@@ -183,9 +191,9 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
         serde_json::from_value(serde_json::json!({
             "test_drasi_lib_instance_id":"instance",
             "config":{
-                "sources":[{"id":"input","kind":"application"}],
-                "queries":[{"id":"names","query":"MATCH (n:Item) RETURN n.value AS value","inputs":["input"]}],
-                "reactions":[{"id":"sink","kind":"application","queries":["names"]}]
+                "sources":[{"id":"00000000-0000-4000-8000-000000000001","name":"input","kind":"application"}],
+                "queries":[{"id":"00000000-0000-4000-8000-000000000101","name":"names","query":"MATCH (n:Item) RETURN n.value AS value","inputs":["00000000-0000-4000-8000-000000000001"]}],
+                "reactions":[{"id":"00000000-0000-4000-8000-000000000201","name":"sink","kind":"application","queries":["00000000-0000-4000-8000-000000000101"]}]
             }
         }))?,
     )?;
@@ -228,7 +236,11 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
                 .get_drasi_lib()
                 .await
                 .context("native instance owner")?,
-            instance.get_source_handle("input").await?,
+            instance
+                .get_source_handle(&drasi_lib::ComponentId::try_new(
+                    "00000000-0000-4000-8000-000000000001",
+                )?)
+                .await?,
         )
     };
     let id = TestRunQueryId::new(&run_id, "observer");
@@ -236,7 +248,9 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
         DrasiLibInstanceHandler::create_callback(
             id,
             serde_json::from_value(serde_json::json!({
-                "drasi_lib_instance_id":"instance", "reaction_id":"sink"
+                "drasi_lib_instance_id":"instance",
+                "reaction_id":"00000000-0000-4000-8000-000000000201",
+                "reaction_name":"sink"
             }))?,
         )
         .await?
@@ -244,7 +258,9 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
         DrasiLibInstanceHandler::create_channel(
             id,
             serde_json::from_value(serde_json::json!({
-                "drasi_lib_instance_id":"instance", "reaction_id":"sink",
+                "drasi_lib_instance_id":"instance",
+                "reaction_id":"00000000-0000-4000-8000-000000000201",
+                "reaction_name":"sink",
                 "buffer_size":1, "include_profiling":include_profiling
             }))?,
         )
@@ -259,7 +275,12 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
                 ReactionControlSignal::Start
             ))
         ));
-        let mut query = core.subscribe_query_results("names").await?.stream;
+        let mut query = core
+            .subscribe_query_results_by_id(&drasi_lib::ComponentId::try_new(
+                "00000000-0000-4000-8000-000000000101",
+            )?)
+            .await?
+            .stream;
         handler.pause().await?;
         let mut expected = Vec::new();
         for value in 0..3 {
@@ -311,9 +332,16 @@ async fn native_handler_projection(batch: bool, include_profiling: bool) -> Resu
                 );
                 assert!(invocation.payload.invocation_id.is_some());
                 let metadata = invocation.payload.metadata.context("channel metadata")?;
-                assert_eq!(metadata["reaction_id"], "sink");
+                assert_eq!(
+                    metadata["reaction_id"],
+                    "00000000-0000-4000-8000-000000000201"
+                );
+                assert_eq!(metadata["reaction_name"], "sink");
                 if include_profiling {
-                    assert_eq!(metadata["profiling"]["query_id"], "names");
+                    assert_eq!(
+                        metadata["profiling"]["query_id"],
+                        "00000000-0000-4000-8000-000000000101"
+                    );
                     assert_eq!(metadata["profiling"]["query_sequence"], result.sequence);
                     assert_eq!(
                         metadata["profiling"]["timestamps"],
@@ -360,7 +388,9 @@ async fn unavailable_instance_reports_an_error_and_joins_the_worker() -> Result<
     let handler = DrasiLibInstanceHandler::create_channel(
         TestRunQueryId::new(&TestRunId::new("repo", "test", "run"), "query"),
         serde_json::from_value(serde_json::json!({
-            "drasi_lib_instance_id":"missing", "reaction_id":"sink"
+            "drasi_lib_instance_id":"missing",
+            "reaction_id":"00000000-0000-4000-8000-000000000201",
+            "reaction_name":"sink"
         }))?,
     )
     .await?;

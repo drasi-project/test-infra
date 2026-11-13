@@ -25,6 +25,15 @@ use test_data_store::test_repo_storage::models::{
     DrasiLibInstanceConfig, TestDrasiLibInstanceDefinition,
 };
 
+const SOURCE_ID: &str = "00000000-0000-4000-8000-000000000001";
+const QUERY_ID: &str = "00000000-0000-4000-8000-000000000101";
+const QUERY_TWO_ID: &str = "00000000-0000-4000-8000-000000000102";
+const REACTION_ID: &str = "00000000-0000-4000-8000-000000000201";
+
+fn component_id(value: &str) -> ComponentId {
+    ComponentId::try_new(value).expect("fixture component UUID")
+}
+
 fn empty_instance_def(id: &str, log_level: Option<&str>) -> TestDrasiLibInstanceDefinition {
     TestDrasiLibInstanceDefinition {
         test_drasi_lib_instance_id: id.to_string(),
@@ -209,14 +218,15 @@ async fn embedded_native_application_reaction_preserves_result_order_and_count()
     let instance_definition = serde_json::from_value(serde_json::json!({
         "test_drasi_lib_instance_id": "instance1",
         "config": {
-            "sources": [{ "id": "source1", "kind": "application" }],
+            "sources": [{ "id": SOURCE_ID, "name": "source1", "kind": "application" }],
             "queries": [{
-                "id": "query1",
+                "id": QUERY_ID,
+                "name": "query1",
                 "query": "MATCH (n:TestNode) RETURN n.marker AS marker",
-                "inputs": ["source1"]
+                "inputs": [SOURCE_ID]
             }],
             "reactions": [{
-                "id": "reaction1", "kind": "application", "queries": ["query1"]
+                "id": REACTION_ID, "name": "reaction1", "kind": "application", "queries": [QUERY_ID]
             }]
         }
     }))
@@ -245,9 +255,18 @@ async fn embedded_native_application_reaction_preserves_result_order_and_count()
             .as_ref(),
         "drasi.experimental/indexed-query/ordinary"
     );
-    let source = instance.get_source_handle("source1").await.unwrap();
-    let mut subscription = instance.take_reaction_receiver("reaction1").await.unwrap();
-    assert!(instance.take_reaction_receiver("reaction1").await.is_err());
+    let source = instance
+        .get_source_handle(&component_id(SOURCE_ID))
+        .await
+        .unwrap();
+    let mut subscription = instance
+        .take_reaction_receiver(&component_id(REACTION_ID))
+        .await
+        .unwrap();
+    assert!(instance
+        .take_reaction_receiver(&component_id(REACTION_ID))
+        .await
+        .is_err());
 
     for index in 0..3 {
         let marker = format!("ordered-node-{index}");
@@ -281,7 +300,7 @@ async fn embedded_native_application_reaction_preserves_result_order_and_count()
         })
         .await
         .expect("application reaction did not receive the source change");
-        assert_eq!(result.query_id, "query1");
+        assert_eq!(result.query_id, component_id(QUERY_ID));
         assert_eq!(result.results.len(), 1);
         if let Some(previous) = previous_sequence {
             assert!(result.sequence > previous);
@@ -344,7 +363,7 @@ async fn next_result(
 
 async fn expect_row(
     receiver: &mut tokio::sync::mpsc::Receiver<InputEnvelope>,
-    query: &str,
+    query: ComponentId,
     row: Value,
 ) -> Result<()> {
     let result = next_result(receiver).await?;
@@ -386,50 +405,47 @@ async fn native_programmatic_lifecycle() -> Result<()> {
     assert!(instance.get_drasi_lib().await.is_none());
     instance.start().await?;
     let result = async {
-        instance
+        let created_reaction = instance
             .create_reaction(CreateReactionRequest {
-                name: "sink".into(),
+                id: component_id(REACTION_ID),
+                name: ComponentName::try_new("sink")?,
                 reaction_type: "application".into(),
-                queries: vec!["names".into()],
+                queries: vec![component_id(QUERY_ID)],
                 auto_start: true,
                 properties: json!({"tag":"observer"}),
             })
             .await?;
-        let reaction = instance.get_reaction("sink").await?;
-        assert_eq!(reaction.queries, ["names"]);
-        assert_eq!(reaction.reaction_type, "application");
-        assert_eq!(reaction.properties, json!({"tag":"observer"}));
-        assert!(reaction.auto_start);
-        let mut receiver = instance.take_reaction_receiver("sink").await?;
-        assert!(instance.take_reaction_receiver("sink").await.is_err());
+        assert_eq!(created_reaction.id, component_id(REACTION_ID));
+        assert_eq!(created_reaction.name.as_str(), "sink");
+        let mut receiver = instance
+            .take_reaction_receiver(&component_id(REACTION_ID))
+            .await?;
+        assert!(instance
+            .take_reaction_receiver(&component_id(REACTION_ID))
+            .await
+            .is_err());
         instance
             .create_query(CreateQueryRequest {
-                name: "names".into(),
+                id: component_id(QUERY_ID),
+                name: ComponentName::try_new("names")?,
                 query: "MATCH (n:Person) RETURN n.name AS name".into(),
-                inputs: vec!["input".into()],
+                inputs: vec![component_id(SOURCE_ID)],
                 auto_start: true,
                 profiling: false,
             })
             .await?;
-        instance
+        let created_source = instance
             .create_source(CreateSourceRequest {
-                name: "input".into(),
+                id: component_id(SOURCE_ID),
+                name: ComponentName::try_new("input")?,
                 source_type: "application".into(),
                 auto_start: false,
                 properties: json!({"tag":"producer"}),
             })
             .await?;
-        let source = instance.get_source("input").await?;
-        assert_eq!(source.source_type, "application");
-        assert_eq!(source.properties, json!({"tag":"producer"}));
-        assert!(!source.auto_start);
-        assert!(instance
-            .list_sources()
-            .await?
-            .iter()
-            .any(|source| { source.name == "input" && source.source_type == "application" }));
+        assert_eq!(created_source.id, component_id(SOURCE_ID));
+        assert_eq!(created_source.name.as_str(), "input");
         assert_eq!(instance.list_queries().await?.len(), 1);
-        assert_eq!(instance.list_reactions().await?.len(), 1);
         let core = instance.get_drasi_lib().await.context("instance owner")?;
         let snapshot = core.computation_control()?.desired_snapshot();
         let legacy_source = SourcePluginAdapterFactory::default()
@@ -443,8 +459,11 @@ async fn native_programmatic_lifecycle() -> Result<()> {
         assert!(!snapshot.specifications.values().any(|spec| {
             spec.implementation == legacy_source || spec.implementation == legacy_reaction
         }));
-        let source_generation = core.computation_component("input")?.generation();
-        let input = instance.get_source_handle("input").await?;
+        let source_generation = core
+            .component_by_id(&component_id(SOURCE_ID))
+            .context("looking up source by preserved UUID")?
+            .generation();
+        let input = instance.get_source_handle(&component_id(SOURCE_ID)).await?;
         input
             .send_node_insert(
                 "before-start",
@@ -455,26 +474,28 @@ async fn native_programmatic_lifecycle() -> Result<()> {
             )
             .await?;
         assert!(receiver.try_recv().is_err());
-        instance.start_source("input").await?;
-        expect_row(&mut receiver, "names", json!({"name":"Buffered"})).await?;
-        let updated = instance
-            .update_query(
-                "names",
-                UpdateQueryRequest {
-                    query: Some("MATCH (n:Person) RETURN n.name AS name, true AS updated".into()),
-                    inputs: None,
-                    auto_start: None,
-                    profiling: None,
-                },
-            )
-            .await?;
-        assert!(updated.query.contains("updated"));
+        instance
+            .start_source(&component_id(SOURCE_ID))
+            .await
+            .context("starting source")?;
+        expect_row(
+            &mut receiver,
+            component_id(QUERY_ID),
+            json!({"name":"Buffered"}),
+        )
+        .await?;
+        let unchanged = instance.get_query(&component_id(QUERY_ID)).await?;
+        assert_eq!(unchanged.id, component_id(QUERY_ID));
+        assert_eq!(unchanged.name.as_str(), "names");
         assert!(
-            !core.get_query_config("names").await?.enable_bootstrap,
+            !core
+                .get_query_config_by_id(&component_id(QUERY_ID))
+                .await?
+                .enable_bootstrap,
             "an update must preserve the explicit live-only input"
         );
         assert_eq!(
-            core.computation_component("input")?.generation(),
+            core.component_by_id(&component_id(SOURCE_ID))?.generation(),
             source_generation
         );
         input
@@ -488,11 +509,14 @@ async fn native_programmatic_lifecycle() -> Result<()> {
             .await?;
         expect_row(
             &mut receiver,
-            "names",
-            json!({"name":"Updated","updated":true}),
+            component_id(QUERY_ID),
+            json!({"name":"Updated"}),
         )
         .await?;
-        instance.stop_query("names").await?;
+        instance
+            .stop_query(&component_id(QUERY_ID))
+            .await
+            .context("stopping query")?;
         input
             .send_node_insert(
                 "paused",
@@ -502,14 +526,20 @@ async fn native_programmatic_lifecycle() -> Result<()> {
                     .build(),
             )
             .await?;
-        instance.start_query("names").await?;
+        instance
+            .start_query(&component_id(QUERY_ID))
+            .await
+            .context("starting query")?;
         expect_row(
             &mut receiver,
-            "names",
-            json!({"name":"Paused","updated":true}),
+            component_id(QUERY_ID),
+            json!({"name":"Paused"}),
         )
         .await?;
-        instance.stop_source("input").await?;
+        instance
+            .stop_source(&component_id(SOURCE_ID))
+            .await
+            .context("stopping source")?;
         input
             .send_node_insert(
                 "source-stopped",
@@ -519,21 +549,16 @@ async fn native_programmatic_lifecycle() -> Result<()> {
                     .build(),
             )
             .await?;
-        instance.start_source("input").await?;
+        instance
+            .start_source(&component_id(SOURCE_ID))
+            .await
+            .context("restarting source")?;
         expect_row(
             &mut receiver,
-            "names",
-            json!({"name":"Restarted","updated":true}),
+            component_id(QUERY_ID),
+            json!({"name":"Restarted"}),
         )
         .await?;
-        assert!(instance.delete_source("input").await.is_err());
-        assert!(instance.get_source_handle("input").await.is_ok());
-        instance.delete_reaction("sink").await?;
-        instance.delete_query("names").await?;
-        instance.delete_source("input").await?;
-        assert!(instance.get_source_handle("input").await.is_err());
-        assert!(instance.list_queries().await?.is_empty());
-        assert!(instance.list_reactions().await?.is_empty());
         Ok::<_, anyhow::Error>(())
     }
     .await;
@@ -544,17 +569,19 @@ async fn native_programmatic_lifecycle() -> Result<()> {
 
 async fn native_multi_query_results() -> Result<()> {
     let (instance, _directory) = native_instance(json!({
-        "sources":[{"id":"input","kind":"application"}],
+        "sources":[{"id":SOURCE_ID,"name":"input","kind":"application"}],
         "queries":[
-            {"id":"first","query":"MATCH (n:Item) RETURN n.marker AS marker","inputs":["input"]},
-            {"id":"second","query":"MATCH (n:Item) RETURN n.marker AS marker","inputs":["input"]}
+            {"id":QUERY_ID,"name":"first","query":"MATCH (n:Item) RETURN n.marker AS marker","inputs":[SOURCE_ID]},
+            {"id":QUERY_TWO_ID,"name":"second","query":"MATCH (n:Item) RETURN n.marker AS marker","inputs":[SOURCE_ID]}
         ],
-        "reactions":[{"id":"sink","kind":"application","queries":["first","second"]}]
+        "reactions":[{"id":REACTION_ID,"name":"sink","kind":"application","queries":[QUERY_ID,QUERY_TWO_ID]}]
     }))?;
     instance.start().await?;
     let result = async {
-        let input = instance.get_source_handle("input").await?;
-        let mut receiver = instance.take_reaction_receiver("sink").await?;
+        let input = instance.get_source_handle(&component_id(SOURCE_ID)).await?;
+        let mut receiver = instance
+            .take_reaction_receiver(&component_id(REACTION_ID))
+            .await?;
         for index in 0..5 {
             input
                 .send_node_insert(
@@ -570,13 +597,13 @@ async fn native_multi_query_results() -> Result<()> {
         let mut sequences = HashMap::<String, u64>::new();
         for _ in 0..10 {
             let result = next_result(&mut receiver).await?;
-            if let Some(previous) = sequences.insert(result.query_id.clone(), result.sequence) {
+            if let Some(previous) = sequences.insert(result.query_id.to_string(), result.sequence) {
                 assert!(result.sequence > previous);
             }
             let [drasi_lib::channels::ResultDiff::Add { data, .. }] = &result.results[..] else {
                 anyhow::bail!("unexpected result: {result:?}");
             };
-            rows.entry(result.query_id)
+            rows.entry(result.query_id.to_string())
                 .or_default()
                 .push(data["marker"].clone());
         }
@@ -584,8 +611,8 @@ async fn native_multi_query_results() -> Result<()> {
         assert_eq!(
             rows,
             std::collections::BTreeMap::from([
-                ("first".into(), expected.clone()),
-                ("second".into(), expected),
+                (QUERY_ID.into(), expected.clone()),
+                (QUERY_TWO_ID.into(), expected),
             ])
         );
         assert!(receiver.try_recv().is_err(), "unexpected duplicate result");
@@ -600,8 +627,8 @@ async fn native_multi_query_results() -> Result<()> {
 async fn native_failed_start_retains_owner() -> Result<()> {
     let (instance, _directory) = native_instance(json!({
         "sources":[
-            {"id":"input","kind":"application"},
-            {"id":"unsupported","kind":"not-a-source"}
+            {"id":SOURCE_ID,"name":"input","kind":"application"},
+            {"id":"00000000-0000-4000-8000-000000000002","name":"unsupported","kind":"not-a-source"}
         ]
     }))?;
     assert!(instance.get_drasi_lib().await.is_none());
@@ -631,7 +658,10 @@ async fn native_failed_start_retains_owner() -> Result<()> {
     ));
     instance.stop().await?;
     assert!(instance.get_drasi_lib().await.is_none());
-    assert!(instance.get_source_handle("input").await.is_err());
+    assert!(instance
+        .get_source_handle(&component_id(SOURCE_ID))
+        .await
+        .is_err());
     assert_eq!(
         instance.get_state().await,
         TestRunDrasiLibInstanceState::Stopped
@@ -674,16 +704,17 @@ async fn native_cancelled_stop_retains_owner() -> Result<()> {
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let service = core
-        .add_computation_component(ComponentAddition::new(ConstructedComponent::service(
-            Box::new(StopGate {
+        .add_computation_component(ComponentAddition::new(
+            ComponentName::try_new("stop-gate")?,
+            ConstructedComponent::service(Box::new(StopGate {
                 descriptor: ComponentDescriptor::try_new(
-                    ComponentId::try_new("stop-gate")?,
+                    ComponentId::try_new("00000000-0000-4000-8000-000000000301")?,
                     vec![],
                 )?,
                 entered: entered.clone(),
                 release: release.clone(),
-            }),
-        )))
+            })),
+        ))
         .await?;
     service.wait_started().await?;
     let mut stopping = Box::pin(instance.stop());

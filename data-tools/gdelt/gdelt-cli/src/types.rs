@@ -12,22 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{self, Display};
-use std::str::FromStr;
-use std::path::PathBuf;
 use clap::{Args, ValueEnum};
+use std::fmt::{self, Display};
+use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(Args, Debug)]
 pub struct DataSelectionArgs {
     /// The types of GDELT data to process
-    #[arg(short = 't', long, value_enum, default_value = "event,graph,mention", value_delimiter=',')]
+    #[arg(
+        short = 't',
+        long,
+        value_enum,
+        default_value = "event,graph,mention",
+        value_delimiter = ','
+    )]
     pub data_type: Vec<DataType>,
-    
+
     /// The datetime from which to start processing files.
     /// In the format YYYYMMDDHHMMSS. Defaults for missing fields
     #[arg(short = 's', long)]
     pub file_start: Option<String>,
-    
+
     /// The datetime at which to stop processing files
     /// In the format YYYYMMDDHHMMSS. Defaults for missing fields
     #[arg(short = 'e', long)]
@@ -38,15 +44,15 @@ pub struct DataSelectionArgs {
 pub struct GenerateScriptsArgs {
     #[command(flatten)]
     pub data_selection: DataSelectionArgs,
-    
+
     /// Output directory for generated scripts
     #[arg(short = 'o', long = "output", default_value = "./scripts_output")]
     pub output_path: PathBuf,
-    
+
     /// Generate bootstrap scripts
     #[arg(short = 'b', long, default_value_t = true)]
     pub bootstrap: bool,
-    
+
     /// Generate change scripts
     #[arg(short = 'c', long, default_value_t = true)]
     pub changes: bool,

@@ -16,7 +16,7 @@ use std::{collections::HashMap, fmt, sync::Arc};
 
 use anyhow::Context;
 use derive_more::Debug;
-use drasi_lib::{computation::v1::InputEnvelope, DrasiLib, QueryConfig};
+use drasi_lib::{computation::v1::InputEnvelope, ComponentId, DrasiLib, QueryConfig};
 use drasi_source_application::ApplicationSourceHandle;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -183,9 +183,9 @@ pub struct TestRunDrasiLibInstance {
     #[debug(skip)]
     pub core: Arc<RwLock<Option<Arc<DrasiLib>>>>,
     #[debug(skip)]
-    pub source_handles: Arc<RwLock<HashMap<String, ApplicationSourceHandle>>>,
+    pub source_handles: Arc<RwLock<HashMap<ComponentId, ApplicationSourceHandle>>>,
     #[debug(skip)]
-    pub reaction_receivers: Arc<RwLock<HashMap<String, mpsc::Receiver<InputEnvelope>>>>,
+    pub reaction_receivers: Arc<RwLock<HashMap<ComponentId, mpsc::Receiver<InputEnvelope>>>>,
     pub state: Arc<RwLock<TestRunDrasiLibInstanceState>>,
     pub storage: TestRunDrasiLibInstanceStorage,
     pub id: TestRunDrasiLibInstanceId,
@@ -236,6 +236,7 @@ impl TestRunDrasiLibInstance {
         let core = Arc::new(
             DrasiLib::builder()
                 .with_id(self.id.to_string())
+                .with_allow_external_component_ids(true)
                 .with_query_factory(query_plugin.query_factory()?)
                 .build()
                 .await?,
@@ -247,7 +248,7 @@ impl TestRunDrasiLibInstance {
                 anyhow::bail!(
                     "Unsupported drasi-lib instance source kind '{}' for source '{}' (only 'application' is supported)",
                     source_config.kind,
-                    source_config.id
+                    source_config.name
                 );
             }
             let options = if source_config.config.is_null() {
@@ -258,20 +259,25 @@ impl TestRunDrasiLibInstance {
             let handle = Self::add_native_application_source(
                 &core,
                 &self.id.to_string(),
-                &source_config.id,
+                source_config.id.clone(),
+                source_config.name.clone(),
                 &options,
                 source_config.auto_start,
             ).await?;
-            self.source_handles.write().await.insert(source_config.id.clone(), handle);
+            self.source_handles
+                .write()
+                .await
+                .insert(source_config.id.clone(), handle);
         }
 
         for query_config in &config.queries {
             let defaults = programmatic_api::query_config_from_request(
-                &query_config.id,
+                query_config.id.clone(),
+                query_config.name.clone(),
                 query_config.query.clone(),
                 query_config.inputs.clone(),
                 query_config.auto_start,
-            );
+            )?;
             let mut options = serde_json::to_value(&defaults)?;
             if let Some(overrides) = query_config.config.as_object() {
                 options
@@ -279,10 +285,10 @@ impl TestRunDrasiLibInstance {
                     .context("QueryConfig must serialize as an object")?
                     .extend(overrides.clone());
             } else if !query_config.config.is_null() {
-                anyhow::bail!("Query options must be an object: {}", query_config.id);
+                anyhow::bail!("Query options must be an object: {}", query_config.name);
             }
             let mut query: QueryConfig = serde_json::from_value(options)
-                .with_context(|| format!("Invalid query config: {}", query_config.id))?;
+                .with_context(|| format!("Invalid query config: {}", query_config.name))?;
             query.id = defaults.id;
             query.query = defaults.query;
             query.auto_start = defaults.auto_start;
@@ -295,7 +301,7 @@ impl TestRunDrasiLibInstance {
                 anyhow::bail!(
                     "Unsupported drasi-lib instance reaction kind '{}' for reaction '{}' (only 'application' is supported)",
                     reaction_config.kind,
-                    reaction_config.id
+                    reaction_config.name
                 );
             }
             let properties = if reaction_config.config.is_null() {
@@ -305,12 +311,16 @@ impl TestRunDrasiLibInstance {
             };
             let receiver = Self::add_native_application_reaction(
                 &core,
-                &reaction_config.id,
+                reaction_config.id.clone(),
+                reaction_config.name.clone(),
                 &reaction_config.queries,
                 reaction_config.auto_start,
                 &properties,
             ).await?;
-            self.reaction_receivers.write().await.insert(reaction_config.id.clone(), receiver);
+            self.reaction_receivers
+                .write()
+                .await
+                .insert(reaction_config.id.clone(), receiver);
         }
 
         self.storage
@@ -373,27 +383,30 @@ impl TestRunDrasiLibInstance {
     }
 
     /// Get an application source handle by source name.
-    pub async fn get_source_handle(&self, name: &str) -> anyhow::Result<ApplicationSourceHandle> {
+    pub async fn get_source_handle(
+        &self,
+        id: &ComponentId,
+    ) -> anyhow::Result<ApplicationSourceHandle> {
         self.source_handles
             .read()
             .await
-            .get(name)
+            .get(id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("drasi-lib instance source handle not found: {name}"))
+            .ok_or_else(|| anyhow::anyhow!("drasi-lib instance source handle not found: {id}"))
     }
 
     /// Transfer the application's native reaction receiver to its one consumer.
     pub async fn take_reaction_receiver(
         &self,
-        name: &str,
+        id: &ComponentId,
     ) -> anyhow::Result<mpsc::Receiver<InputEnvelope>> {
         let _lifecycle = self.lifecycle.lock().await;
         self.reaction_receivers
             .write()
             .await
-            .remove(name)
+            .remove(id)
             .ok_or_else(|| {
-                anyhow::anyhow!("reaction receiver '{name}' is unavailable or already taken")
+                anyhow::anyhow!("reaction receiver '{id}' is unavailable or already taken")
             })
     }
 

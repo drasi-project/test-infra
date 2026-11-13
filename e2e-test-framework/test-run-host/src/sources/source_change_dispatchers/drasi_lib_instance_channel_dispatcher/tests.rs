@@ -2,10 +2,19 @@ use super::*;
 use drasi_lib::computation::v1::{
     ComputationComponent, EnvelopeSource, GraphChangeCodec, QueryChangeCodec, StreamId,
 };
+use drasi_lib::{ComponentId, ComponentName};
 use drasi_source_application::NativeApplicationSource;
 use serde_json::{json, Value};
 use std::{collections::HashMap, num::NonZeroUsize};
 use test_data_store::test_run_storage::TestRunId;
+
+const SOURCE_ID: &str = "00000000-0000-4000-8000-000000000001";
+const QUERY_ID: &str = "00000000-0000-4000-8000-000000000101";
+const REACTION_ID: &str = "00000000-0000-4000-8000-000000000201";
+
+fn component_id(value: &str) -> ComponentId {
+    ComponentId::try_new(value).expect("fixture component UUID")
+}
 
 fn event(value: usize) -> SourceChangeEvent {
     serde_json::from_value(json!({
@@ -26,7 +35,8 @@ fn dispatcher() -> DrasiLibInstanceChannelSourceChangeDispatcher {
                 &TestRunId::new("test_repo", "test", "test_run_001"),
                 "instance1",
             ),
-            source_id: "input".into(),
+            source_id: component_id(SOURCE_ID),
+            source_name: ComponentName::try_new("input").expect("fixture component name"),
             buffer_size: 1,
         },
         test_run_host: None,
@@ -42,7 +52,7 @@ fn input() -> Result<(NativeApplicationSource, ApplicationSourceHandle)> {
     NativeApplicationSource::channel(
         "test",
         "graph",
-        "input",
+        component_id(SOURCE_ID),
         StreamId::try_new("input/out")?,
         NonZeroUsize::new(1).context("test capacity")?,
     )
@@ -246,9 +256,9 @@ async fn worker_failure_is_reported_and_remains_latched() -> Result<()> {
 #[tokio::test]
 async fn forwarding_does_not_hold_the_test_run_registry_lock() -> Result<()> {
     let (instance, _directory) = crate::drasi_lib_instances::tests::native_instance(json!({
-        "sources":[{"id":"input","kind":"application"}],
-        "queries":[{"id":"values","query":"MATCH (n:Item) RETURN n.value AS value","inputs":["input"]}],
-        "reactions":[{"id":"sink","kind":"application","queries":["values"]}]
+        "sources":[{"id":SOURCE_ID,"name":"input","kind":"application"}],
+        "queries":[{"id":QUERY_ID,"name":"values","query":"MATCH (n:Item) RETURN n.value AS value","inputs":[SOURCE_ID]}],
+        "reactions":[{"id":REACTION_ID,"name":"sink","kind":"application","queries":[QUERY_ID]}]
     }))?;
     let run_id = instance.id.test_run_id.clone();
     let host = Arc::new(
@@ -275,7 +285,9 @@ async fn forwarding_does_not_hold_the_test_run_registry_lock() -> Result<()> {
         let runs = host.test_runs.read().await;
         let instance = &runs[&run_id].drasi_lib_instances["instance1"];
         instance.start().await?;
-        instance.take_reaction_receiver("sink").await?
+        instance
+            .take_reaction_receiver(&component_id(REACTION_ID))
+            .await?
     };
     let mut dispatcher = dispatcher();
     dispatcher

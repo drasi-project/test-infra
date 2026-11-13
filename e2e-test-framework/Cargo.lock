@@ -890,6 +890,7 @@ dependencies = [
  "drasi-query-ast",
  "futures-core",
  "imbl",
+ "jsonschema",
  "log",
  "rmp-serde",
  "serde",
@@ -1003,8 +1004,11 @@ dependencies = [
  "rand 0.8.6",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "time",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]
@@ -1037,6 +1041,7 @@ dependencies = [
  "drasi-computation-plugin-abi",
  "drasi-computation-plugin-sdk",
  "drasi-core",
+ "drasi-core-types",
  "drasi-ffi-primitives",
  "drasi-lib",
  "drasi-plugin-sdk",
@@ -1047,6 +1052,7 @@ dependencies = [
  "libloading",
  "log",
  "ordered-float",
+ "rmp-serde",
  "semver",
  "serde",
  "serde_json",
@@ -1123,6 +1129,7 @@ dependencies = [
  "bytes",
  "chrono",
  "drasi-core",
+ "drasi-core-types",
  "drasi-ffi-primitives",
  "drasi-lib",
  "jsonschema",
@@ -1213,6 +1220,7 @@ dependencies = [
 name = "drasi-reaction-common"
 version = "0.11.3"
 dependencies = [
+ "drasi-computation-contracts",
  "serde",
 ]
 
@@ -4276,6 +4284,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "derive_more",
+ "drasi-core-types",
  "env_logger",
  "futures",
  "log",
@@ -4305,6 +4314,7 @@ dependencies = [
  "drasi-comms-dapr",
  "drasi-computation-transformer-query",
  "drasi-core",
+ "drasi-core-types",
  "drasi-host-sdk",
  "drasi-lib",
  "drasi-reaction-application",

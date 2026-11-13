@@ -22,9 +22,10 @@
                 "source_change_dispatchers": [
                   {
                     "kind": "DrasiLibInstanceChannel",
-                    "source_id": "facilities-db",
+                    "source_id": "10000000-0000-4000-8000-000000000001",
                     "buffer_size": 2048,
-                    "drasi_lib_instance_id": "internal-drasi-lib"
+                    "drasi_lib_instance_id": "internal-drasi-lib",
+                    "source_name": "facilities-db"
                   }
                 ],
                 "model_data_generator": {
@@ -126,9 +127,10 @@
                 "test_reaction_id": "building-comfort",
                 "output_handler": {
                   "kind": "DrasiLibInstanceChannel",
-                  "reaction_id": "building-comfort-alerts",
+                  "reaction_id": "10000000-0000-4000-8000-000000000201",
                   "buffer_size": 1024,
-                  "drasi_lib_instance_id": "internal-drasi-lib"
+                  "drasi_lib_instance_id": "internal-drasi-lib",
+                  "reaction_name": "building-comfort-alerts"
                 },
                 "stop_triggers": [
                   {
@@ -141,9 +143,10 @@
                 "test_reaction_id": "building-comfort-floor-agg",
                 "output_handler": {
                   "kind": "DrasiLibInstanceChannel",
-                  "reaction_id": "building-comfort-floor-agg-alerts",
+                  "reaction_id": "10000000-0000-4000-8000-000000000202",
                   "buffer_size": 1024,
-                  "drasi_lib_instance_id": "internal-drasi-lib"
+                  "drasi_lib_instance_id": "internal-drasi-lib",
+                  "reaction_name": "building-comfort-floor-agg-alerts"
                 },
                 "stop_triggers": [
                   {
@@ -162,50 +165,55 @@
                   "log_level": "info",
                   "sources": [
                     {
-                      "id": "facilities-db",
+                      "id": "10000000-0000-4000-8000-000000000001",
                       "kind": "application",
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "facilities-db"
                     }
                   ],
                   "queries": [
                     {
-                      "id": "all-rooms",
+                      "id": "10000000-0000-4000-8000-000000000101",
                       "query": "MATCH (r:Room) RETURN elementId(r) AS RoomId, r.temperature, r.humidity, r.co2",
                       "inputs": [
-                        "facilities-db"
+                        "10000000-0000-4000-8000-000000000001"
                       ],
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "all-rooms"
                     },
                     {
-                      "id": "floor-agg",
+                      "id": "10000000-0000-4000-8000-000000000102",
                       "query": "MATCH (f:Floor)-[:FLOOR_ROOM]->(r:Room) WITH f, avg(r.temperature) AS AvgTemperature, max(r.co2) AS MaxCo2, min(r.humidity) AS MinHumidity, count(r) AS RoomCount RETURN elementId(f) AS FloorId, AvgTemperature, MaxCo2, MinHumidity, RoomCount",
                       "inputs": [
-                        "facilities-db"
+                        "10000000-0000-4000-8000-000000000001"
                       ],
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "floor-agg"
                     }
                   ],
                   "reactions": [
                     {
-                      "id": "building-comfort-alerts",
+                      "id": "10000000-0000-4000-8000-000000000201",
                       "kind": "application",
                       "queries": [
-                        "all-rooms"
+                        "10000000-0000-4000-8000-000000000101"
                       ],
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "building-comfort-alerts"
                     },
                     {
-                      "id": "building-comfort-floor-agg-alerts",
+                      "id": "10000000-0000-4000-8000-000000000202",
                       "kind": "application",
                       "queries": [
-                        "floor-agg"
+                        "10000000-0000-4000-8000-000000000102"
                       ],
                       "auto_start": true,
-                      "config": {}
+                      "config": {},
+                      "name": "building-comfort-floor-agg-alerts"
                     }
                   ]
                 }

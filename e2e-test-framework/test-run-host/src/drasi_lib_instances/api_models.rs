@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use drasi_lib::{ComponentId, ComponentName};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -37,18 +38,21 @@ pub struct StatusResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000001",
     "name": "postgresql-source",
     "source_type": "PostgreSQL",
     "status": "running"
 }))]
 pub struct SourceInfo {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub source_type: String,
     pub status: ComponentStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000001",
     "name": "postgresql-source",
     "source_type": "PostgreSQL",
     "status": "running",
@@ -60,7 +64,8 @@ pub struct SourceInfo {
     }
 }))]
 pub struct SourceDetails {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub source_type: String,
     pub status: ComponentStatus,
     pub auto_start: bool,
@@ -69,6 +74,7 @@ pub struct SourceDetails {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000001",
     "name": "postgresql-source",
     "source_type": "PostgreSQL",
     "auto_start": true,
@@ -81,7 +87,8 @@ pub struct SourceDetails {
     }
 }))]
 pub struct CreateSourceRequest {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub source_type: String,
     #[serde(default)]
     pub auto_start: bool,
@@ -97,7 +104,8 @@ pub struct UpdateSourceRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SourceCreatedResponse {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub message: String,
 }
 
@@ -105,29 +113,33 @@ pub struct SourceCreatedResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000101",
     "name": "active-users",
-    "inputs": ["postgresql-source"],
+    "inputs": ["00000000-0000-4000-8000-000000000001"],
     "status": "running"
 }))]
 pub struct QueryInfo {
-    pub name: String,
-    pub inputs: Vec<String>,
+    pub id: ComponentId,
+    pub name: ComponentName,
+    pub inputs: Vec<ComponentId>,
     pub status: ComponentStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000101",
     "name": "active-users",
     "query": "MATCH (u:User)-[:LOGGED_IN]->(s:Session) WHERE s.active = true RETURN u",
-    "inputs": ["postgresql-source"],
+    "inputs": ["00000000-0000-4000-8000-000000000001"],
     "status": "running",
     "auto_start": true,
     "profiling": false
 }))]
 pub struct QueryDetails {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub query: String,
-    pub inputs: Vec<String>,
+    pub inputs: Vec<ComponentId>,
     pub status: ComponentStatus,
     pub auto_start: bool,
     #[serde(default)]
@@ -136,16 +148,18 @@ pub struct QueryDetails {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000101",
     "name": "active-users",
     "query": "MATCH (u:User)-[:LOGGED_IN]->(s:Session) WHERE s.active = true RETURN u",
-    "inputs": ["postgresql-source"],
+    "inputs": ["00000000-0000-4000-8000-000000000001"],
     "auto_start": true,
     "profiling": false
 }))]
 pub struct CreateQueryRequest {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub query: String,
-    pub inputs: Vec<String>,
+    pub inputs: Vec<ComponentId>,
     #[serde(default)]
     pub auto_start: bool,
     #[serde(default)]
@@ -155,14 +169,15 @@ pub struct CreateQueryRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateQueryRequest {
     pub query: Option<String>,
-    pub inputs: Option<Vec<String>>,
+    pub inputs: Option<Vec<ComponentId>>,
     pub auto_start: Option<bool>,
     pub profiling: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct QueryCreatedResponse {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub message: String,
 }
 
@@ -170,23 +185,26 @@ pub struct QueryCreatedResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000201",
     "name": "user-notification",
     "reaction_type": "HttpReaction",
-    "queries": ["active-users"],
+    "queries": ["00000000-0000-4000-8000-000000000101"],
     "status": "running"
 }))]
 pub struct ReactionInfo {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub reaction_type: String,
-    pub queries: Vec<String>,
+    pub queries: Vec<ComponentId>,
     pub status: ComponentStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000201",
     "name": "user-notification",
     "reaction_type": "HttpReaction",
-    "queries": ["active-users"],
+    "queries": ["00000000-0000-4000-8000-000000000101"],
     "status": "running",
     "auto_start": true,
     "properties": {
@@ -198,9 +216,10 @@ pub struct ReactionInfo {
     }
 }))]
 pub struct ReactionDetails {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub reaction_type: String,
-    pub queries: Vec<String>,
+    pub queries: Vec<ComponentId>,
     pub status: ComponentStatus,
     pub auto_start: bool,
     pub properties: serde_json::Value,
@@ -208,9 +227,10 @@ pub struct ReactionDetails {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
+    "id": "00000000-0000-4000-8000-000000000201",
     "name": "user-notification",
     "reaction_type": "HttpReaction",
-    "queries": ["active-users"],
+    "queries": ["00000000-0000-4000-8000-000000000101"],
     "auto_start": true,
     "properties": {
         "endpoint": "https://api.example.com/notify",
@@ -221,9 +241,10 @@ pub struct ReactionDetails {
     }
 }))]
 pub struct CreateReactionRequest {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub reaction_type: String,
-    pub queries: Vec<String>,
+    pub queries: Vec<ComponentId>,
     #[serde(default)]
     pub auto_start: bool,
     pub properties: serde_json::Value,
@@ -232,14 +253,15 @@ pub struct CreateReactionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateReactionRequest {
     pub reaction_type: Option<String>,
-    pub queries: Option<Vec<String>>,
+    pub queries: Option<Vec<ComponentId>>,
     pub auto_start: Option<bool>,
     pub properties: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ReactionCreatedResponse {
-    pub name: String,
+    pub id: ComponentId,
+    pub name: ComponentName,
     pub message: String,
 }
 
@@ -250,12 +272,12 @@ pub struct ReactionCreatedResponse {
     "error": "ComponentNotFound",
     "message": "Source 'postgresql-source' not found",
     "instance_id": "drasi-instance-1",
-    "component_id": "postgresql-source"
+    "component_id": "00000000-0000-4000-8000-000000000001"
 }))]
 pub struct DrasiLibInstanceError {
     pub error: String,
     pub message: String,
     pub instance_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub component_id: Option<String>,
+    pub component_id: Option<ComponentId>,
 }

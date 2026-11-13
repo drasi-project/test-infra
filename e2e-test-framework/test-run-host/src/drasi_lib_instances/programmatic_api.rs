@@ -23,13 +23,14 @@ impl TestRunDrasiLibInstance {
         self.with_core(|core| async move {
             let sources = core.list_sources().await?;
             let mut infos = Vec::new();
-            for (name, status) in sources {
-                let info = core.get_source_info(&name).await?;
+            for entry in sources {
+                let info = core.get_source_info_by_id(&entry.id).await?;
                 let (source_type, _) = component_properties(info.source_type, info.properties)?;
                 infos.push(SourceInfo {
-                    name: info.id,
+                    id: info.id,
+                    name: info.name,
                     source_type,
-                    status: convert_component_status(status),
+                    status: convert_component_status(entry.status),
                 });
             }
             Ok(infos)
@@ -37,15 +38,16 @@ impl TestRunDrasiLibInstance {
         .await
     }
 
-    pub async fn get_source(&self, source_id: &str) -> Result<SourceDetails> {
-        let source_id = source_id.to_string();
+    pub async fn get_source(&self, source_id: &ComponentId) -> Result<SourceDetails> {
+        let source_id = source_id.clone();
         self.with_core(|core| async move {
-            let info = core.get_source_info(&source_id).await?;
+            let info = core.get_source_info_by_id(&source_id).await?;
             let auto_start = component_auto_start(&core, &source_id)?;
             let (source_type, properties) =
                 component_properties(info.source_type, info.properties)?;
             Ok(SourceDetails {
-                name: info.id,
+                id: info.id,
+                name: info.name,
                 source_type,
                 status: convert_component_status(info.status),
                 auto_start,
@@ -67,13 +69,15 @@ impl TestRunDrasiLibInstance {
             ));
         }
         let scope = self.id.to_string();
+        let id = request.id.clone();
         let name = request.name.clone();
         let handle = self
             .with_core(|core| async move {
                 Self::add_native_application_source(
                     &core,
                     &scope,
-                    &name,
+                    id.clone(),
+                    name.clone(),
                     &request.properties,
                     request.auto_start,
                 )
@@ -83,8 +87,9 @@ impl TestRunDrasiLibInstance {
         self.source_handles
             .write()
             .await
-            .insert(request.name.clone(), handle);
+            .insert(request.id.clone(), handle);
         Ok(SourceCreatedResponse {
+            id: request.id.clone(),
             name: request.name.clone(),
             message: format!("Source '{}' created successfully", request.name),
         })
@@ -92,13 +97,14 @@ impl TestRunDrasiLibInstance {
 
     pub async fn update_source(
         &self,
-        source_id: &str,
+        source_id: &ComponentId,
         request: UpdateSourceRequest,
     ) -> Result<SourceDetails> {
         let _lifecycle = self.lifecycle.lock().await;
         let existing = self.get_source(source_id).await?;
         let create = CreateSourceRequest {
-            name: source_id.to_string(),
+            id: existing.id.clone(),
+            name: existing.name.clone(),
             source_type: request.source_type.unwrap_or(existing.source_type),
             auto_start: request.auto_start.unwrap_or(existing.auto_start),
             properties: request.properties.unwrap_or(existing.properties),
@@ -113,12 +119,13 @@ impl TestRunDrasiLibInstance {
             .get_drasi_lib()
             .await
             .context("drasi-lib instance is not running")?;
-        core.remove_source(source_id, false).await?;
+        core.remove_source_by_id(source_id, false).await?;
         self.source_handles.write().await.remove(source_id);
         let handle = Self::add_native_application_source(
             &core,
             &self.id.to_string(),
-            source_id,
+            create.id.clone(),
+            create.name.clone(),
             &create.properties,
             create.auto_start,
         )
@@ -126,37 +133,43 @@ impl TestRunDrasiLibInstance {
         self.source_handles
             .write()
             .await
-            .insert(source_id.to_string(), handle);
+            .insert(source_id.clone(), handle);
         self.get_source(source_id).await
     }
 
-    pub async fn delete_source(&self, source_id: &str) -> Result<()> {
+    pub async fn delete_source(&self, source_id: &ComponentId) -> Result<()> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = source_id.to_string();
-        self.with_core(
-            |core| async move { core.remove_source(&id, false).await.map_err(Into::into) },
-        )
+        let id = source_id.clone();
+        self.with_core(|core| async move {
+            core.remove_source_by_id(&id, false)
+                .await
+                .map_err(Into::into)
+        })
         .await?;
         self.source_handles.write().await.remove(source_id);
         Ok(())
     }
 
-    pub async fn start_source(&self, source_id: &str) -> Result<StatusResponse> {
+    pub async fn start_source(&self, source_id: &ComponentId) -> Result<StatusResponse> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = source_id.to_string();
-        self.with_core(|core| async move { core.start_source(&id).await.map_err(Into::into) })
-            .await?;
+        let id = source_id.clone();
+        self.with_core(|core| async move {
+            core.component_by_id(&id)?.start().await.map_err(Into::into)
+        })
+        .await?;
         Ok(StatusResponse {
             status: "started".to_string(),
             message: Some(format!("Source '{source_id}' started successfully")),
         })
     }
 
-    pub async fn stop_source(&self, source_id: &str) -> Result<StatusResponse> {
+    pub async fn stop_source(&self, source_id: &ComponentId) -> Result<StatusResponse> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = source_id.to_string();
-        self.with_core(|core| async move { core.stop_source(&id).await.map_err(Into::into) })
-            .await?;
+        let id = source_id.clone();
+        self.with_core(|core| async move {
+            core.component_by_id(&id)?.stop().await.map_err(Into::into)
+        })
+        .await?;
         Ok(StatusResponse {
             status: "stopped".to_string(),
             message: Some(format!("Source '{source_id}' stopped successfully")),
@@ -167,16 +180,23 @@ impl TestRunDrasiLibInstance {
         self.with_core(|core| async move {
             let queries = core.list_queries().await?;
             let mut infos = Vec::new();
-            for (name, status) in queries {
-                let info = core.get_query_info(&name).await?;
+            for entry in queries {
+                let info = core.get_query_info_by_id(&entry.id).await?;
                 infos.push(QueryInfo {
-                    name: info.id,
+                    id: info.id,
+                    name: info.name,
                     inputs: info
                         .inputs
                         .into_iter()
-                        .map(|input| input.component)
-                        .collect(),
-                    status: convert_component_status(status),
+                        .map(|input| {
+                            input
+                                .component
+                                .as_id()
+                                .cloned()
+                                .context("resolved query input")
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                    status: convert_component_status(entry.status),
                 });
             }
             Ok(infos)
@@ -184,19 +204,26 @@ impl TestRunDrasiLibInstance {
         .await
     }
 
-    pub async fn get_query(&self, query_id: &str) -> Result<QueryDetails> {
-        let id = query_id.to_string();
+    pub async fn get_query(&self, query_id: &ComponentId) -> Result<QueryDetails> {
+        let id = query_id.clone();
         self.with_core(|core| async move {
-            let info = core.get_query_info(&id).await?;
-            let config = core.get_query_config(&id).await?;
+            let info = core.get_query_info_by_id(&id).await?;
+            let config = core.get_query_config_by_id(&id).await?;
             Ok(QueryDetails {
-                name: info.id,
+                id: info.id,
+                name: info.name,
                 query: info.query,
                 inputs: info
                     .inputs
                     .into_iter()
-                    .map(|input| input.component)
-                    .collect(),
+                    .map(|input| {
+                        input
+                            .component
+                            .as_id()
+                            .cloned()
+                            .context("resolved query input")
+                    })
+                    .collect::<Result<Vec<_>>>()?,
                 status: convert_component_status(info.status),
                 auto_start: config.auto_start,
                 profiling: false,
@@ -208,15 +235,18 @@ impl TestRunDrasiLibInstance {
     pub async fn create_query(&self, request: CreateQueryRequest) -> Result<QueryCreatedResponse> {
         let _lifecycle = self.lifecycle.lock().await;
         let config = query_config_from_request(
-            &request.name,
+            request.id.clone(),
+            request.name.clone(),
             request.query,
             request.inputs,
             request.auto_start,
-        );
+        )?;
+        let id = request.id.clone();
         let name = request.name.clone();
         self.with_core(|core| async move { Self::add_native_query(&core, config).await })
             .await?;
         Ok(QueryCreatedResponse {
+            id,
             name: name.clone(),
             message: format!("Query '{name}' created successfully"),
         })
@@ -224,36 +254,39 @@ impl TestRunDrasiLibInstance {
 
     pub async fn update_query(
         &self,
-        query_id: &str,
+        query_id: &ComponentId,
         request: UpdateQueryRequest,
     ) -> Result<QueryDetails> {
         let _lifecycle = self.lifecycle.lock().await;
         let existing = self.get_query(query_id).await?;
         let config = query_config_from_request(
-            query_id,
+            existing.id.clone(),
+            existing.name.clone(),
             request.query.unwrap_or(existing.query),
             request.inputs.unwrap_or(existing.inputs),
             request.auto_start.unwrap_or(existing.auto_start),
-        );
-        let id = query_id.to_string();
-        self.with_core(
-            |core| async move { core.update_query(&id, config).await.map_err(Into::into) },
-        )
+        )?;
+        let id = query_id.clone();
+        self.with_core(|core| async move {
+            core.update_query_by_id(&id, config)
+                .await
+                .map_err(Into::into)
+        })
         .await?;
         self.get_query(query_id).await
     }
 
-    pub async fn delete_query(&self, query_id: &str) -> Result<()> {
+    pub async fn delete_query(&self, query_id: &ComponentId) -> Result<()> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = query_id.to_string();
-        self.with_core(|core| async move { core.remove_query(&id).await.map_err(Into::into) })
+        let id = query_id.clone();
+        self.with_core(|core| async move { core.remove_query_by_id(&id).await.map_err(Into::into) })
             .await
     }
 
-    pub async fn start_query(&self, query_id: &str) -> Result<StatusResponse> {
+    pub async fn start_query(&self, query_id: &ComponentId) -> Result<StatusResponse> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = query_id.to_string();
-        self.with_core(|core| async move { core.start_query(&id).await.map_err(Into::into) })
+        let id = query_id.clone();
+        self.with_core(|core| async move { core.start_query_by_id(&id).await.map_err(Into::into) })
             .await?;
         Ok(StatusResponse {
             status: "started".to_string(),
@@ -261,10 +294,10 @@ impl TestRunDrasiLibInstance {
         })
     }
 
-    pub async fn stop_query(&self, query_id: &str) -> Result<StatusResponse> {
+    pub async fn stop_query(&self, query_id: &ComponentId) -> Result<StatusResponse> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = query_id.to_string();
-        self.with_core(|core| async move { core.stop_query(&id).await.map_err(Into::into) })
+        let id = query_id.clone();
+        self.with_core(|core| async move { core.stop_query_by_id(&id).await.map_err(Into::into) })
             .await?;
         Ok(StatusResponse {
             status: "stopped".to_string(),
@@ -276,19 +309,23 @@ impl TestRunDrasiLibInstance {
         self.with_core(|core| async move {
             let reactions = core.list_reactions().await?;
             let mut infos = Vec::new();
-            for (name, status) in reactions {
-                let info = core.get_reaction_info(&name).await?;
+            for entry in reactions {
+                let info = core.get_reaction_info_by_id(&entry.id).await?;
                 let (reaction_type, _) = component_properties(info.reaction_type, info.properties)?;
                 let queries = if reaction_type == "application" {
-                    reaction_inputs(&core, &name)?
+                    reaction_inputs(&core, &entry.id)?
                 } else {
                     info.queries
+                        .into_iter()
+                        .map(|query| query.as_id().cloned().context("resolved reaction input"))
+                        .collect::<Result<Vec<_>>>()?
                 };
                 infos.push(ReactionInfo {
-                    name: info.id,
+                    id: info.id,
+                    name: info.name,
                     reaction_type,
                     queries,
-                    status: convert_component_status(status),
+                    status: convert_component_status(entry.status),
                 });
             }
             Ok(infos)
@@ -296,10 +333,10 @@ impl TestRunDrasiLibInstance {
         .await
     }
 
-    pub async fn get_reaction(&self, reaction_id: &str) -> Result<ReactionDetails> {
-        let id = reaction_id.to_string();
+    pub async fn get_reaction(&self, reaction_id: &ComponentId) -> Result<ReactionDetails> {
+        let id = reaction_id.clone();
         self.with_core(|core| async move {
-            let info = core.get_reaction_info(&id).await?;
+            let info = core.get_reaction_info_by_id(&id).await?;
             let auto_start = component_auto_start(&core, &id)?;
             let (reaction_type, properties) =
                 component_properties(info.reaction_type, info.properties)?;
@@ -307,9 +344,13 @@ impl TestRunDrasiLibInstance {
                 reaction_inputs(&core, &id)?
             } else {
                 info.queries
+                    .into_iter()
+                    .map(|query| query.as_id().cloned().context("resolved reaction input"))
+                    .collect::<Result<Vec<_>>>()?
             };
             Ok(ReactionDetails {
-                name: info.id,
+                id: info.id,
+                name: info.name,
                 reaction_type,
                 queries,
                 status: convert_component_status(info.status),
@@ -331,12 +372,14 @@ impl TestRunDrasiLibInstance {
                 request.reaction_type
             ));
         }
+        let id = request.id.clone();
         let name = request.name.clone();
         let receiver = self
             .with_core(|core| async move {
                 Self::add_native_application_reaction(
                     &core,
-                    &request.name,
+                    request.id.clone(),
+                    request.name.clone(),
                     &request.queries,
                     request.auto_start,
                     &request.properties,
@@ -347,8 +390,9 @@ impl TestRunDrasiLibInstance {
         self.reaction_receivers
             .write()
             .await
-            .insert(name.clone(), receiver);
+            .insert(id.clone(), receiver);
         Ok(ReactionCreatedResponse {
+            id,
             name: name.clone(),
             message: format!("Reaction '{name}' created successfully"),
         })
@@ -356,13 +400,14 @@ impl TestRunDrasiLibInstance {
 
     pub async fn update_reaction(
         &self,
-        reaction_id: &str,
+        reaction_id: &ComponentId,
         request: UpdateReactionRequest,
     ) -> Result<ReactionDetails> {
         let _lifecycle = self.lifecycle.lock().await;
         let existing = self.get_reaction(reaction_id).await?;
         let create = CreateReactionRequest {
-            name: reaction_id.to_string(),
+            id: existing.id.clone(),
+            name: existing.name.clone(),
             reaction_type: request.reaction_type.unwrap_or(existing.reaction_type),
             queries: request.queries.unwrap_or(existing.queries),
             auto_start: request.auto_start.unwrap_or(existing.auto_start),
@@ -374,9 +419,6 @@ impl TestRunDrasiLibInstance {
             create.reaction_type
         );
         application_properties(&create.properties)?;
-        for query in &create.queries {
-            ComponentId::try_new(query.as_str())?;
-        }
         anyhow::ensure!(
             self.reaction_receivers.read().await.contains_key(reaction_id),
             "reaction '{reaction_id}' has an application-owned receiver; stop its observer and explicitly replace the reaction binding"
@@ -385,11 +427,12 @@ impl TestRunDrasiLibInstance {
             .get_drasi_lib()
             .await
             .context("drasi-lib instance is not running")?;
-        core.remove_reaction(reaction_id, false).await?;
+        core.remove_reaction_by_id(reaction_id, false).await?;
         self.reaction_receivers.write().await.remove(reaction_id);
         let receiver = Self::add_native_application_reaction(
             &core,
-            reaction_id,
+            create.id.clone(),
+            create.name.clone(),
             &create.queries,
             create.auto_start,
             &create.properties,
@@ -398,16 +441,18 @@ impl TestRunDrasiLibInstance {
         self.reaction_receivers
             .write()
             .await
-            .insert(reaction_id.to_string(), receiver);
+            .insert(reaction_id.clone(), receiver);
         self.get_reaction(reaction_id).await
     }
 
-    pub async fn delete_reaction(&self, reaction_id: &str) -> Result<()> {
+    pub async fn delete_reaction(&self, reaction_id: &ComponentId) -> Result<()> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = reaction_id.to_string();
-        self.with_core(
-            |core| async move { core.remove_reaction(&id, false).await.map_err(Into::into) },
-        )
+        let id = reaction_id.clone();
+        self.with_core(|core| async move {
+            core.remove_reaction_by_id(&id, false)
+                .await
+                .map_err(Into::into)
+        })
         .await?;
         self.reaction_receivers.write().await.remove(reaction_id);
         Ok(())
@@ -415,21 +460,22 @@ impl TestRunDrasiLibInstance {
 
     pub(super) async fn add_native_application_reaction(
         core: &DrasiLib,
-        id: &str,
-        queries: &[String],
+        id: ComponentId,
+        name: ComponentName,
+        queries: &[ComponentId],
         auto_start: bool,
         properties: &serde_json::Value,
     ) -> Result<tokio::sync::mpsc::Receiver<InputEnvelope>> {
         let properties = application_properties(properties)?;
         let capacity = std::num::NonZeroUsize::new(1000).context("reaction capacity")?;
         let (reaction, receiver) = NativeApplicationReaction::channel(
-            id,
+            id.clone(),
             QueryChangeCodec::schema().descriptor().clone(),
             capacity,
         )?;
         let input = reaction.input();
         let mut batch = ComponentBatch::builder()
-            .sink(Box::new(reaction.with_properties(properties)))
+            .sink(name, Box::new(reaction.with_properties(properties)))
             .input_merge(
                 input.component.clone(),
                 InputMergePolicy::EventTimeAcrossStreams,
@@ -442,10 +488,7 @@ impl TestRunDrasiLibInstance {
                 .boundary_relationships
                 .push(DesiredRelationship {
                     definition: EdgeDefinition::new(
-                        Endpoint::new(
-                            ComponentId::try_new(query.as_str())?,
-                            PortId::try_new("out")?,
-                        ),
+                        Endpoint::new(query.clone(), PortId::try_new("out")?),
                         input.clone(),
                     ),
                     policy: RelationshipPolicy::default(),
@@ -454,30 +497,31 @@ impl TestRunDrasiLibInstance {
                     },
                 });
         }
-        let report = core.add_components(batch).await?;
-        anyhow::ensure!(
-            report.committed,
-            "reaction declaration was rejected: {report:?}"
-        );
+        let receipt = core.add_components(batch).await?;
+        ensure_component_assignment(&receipt, &id)?;
         Ok(receiver)
     }
 
-    pub async fn start_reaction(&self, reaction_id: &str) -> Result<StatusResponse> {
+    pub async fn start_reaction(&self, reaction_id: &ComponentId) -> Result<StatusResponse> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = reaction_id.to_string();
-        self.with_core(|core| async move { core.start_reaction(&id).await.map_err(Into::into) })
-            .await?;
+        let id = reaction_id.clone();
+        self.with_core(|core| async move {
+            core.component_by_id(&id)?.start().await.map_err(Into::into)
+        })
+        .await?;
         Ok(StatusResponse {
             status: "started".to_string(),
             message: Some(format!("Reaction '{reaction_id}' started successfully")),
         })
     }
 
-    pub async fn stop_reaction(&self, reaction_id: &str) -> Result<StatusResponse> {
+    pub async fn stop_reaction(&self, reaction_id: &ComponentId) -> Result<StatusResponse> {
         let _lifecycle = self.lifecycle.lock().await;
-        let id = reaction_id.to_string();
-        self.with_core(|core| async move { core.stop_reaction(&id).await.map_err(Into::into) })
-            .await?;
+        let id = reaction_id.clone();
+        self.with_core(|core| async move {
+            core.component_by_id(&id)?.stop().await.map_err(Into::into)
+        })
+        .await?;
         Ok(StatusResponse {
             status: "stopped".to_string(),
             message: Some(format!("Reaction '{reaction_id}' stopped successfully")),
@@ -489,33 +533,32 @@ impl TestRunDrasiLibInstance {
     pub(super) async fn add_native_application_source(
         core: &DrasiLib,
         scope: &str,
-        id: &str,
+        id: ComponentId,
+        name: ComponentName,
         properties: &serde_json::Value,
         auto_start: bool,
     ) -> Result<ApplicationSourceHandle> {
         let properties = application_source_properties(properties)?;
-        let stream = StreamId::try_new(format!("{id}/out"))?;
+        let stream = StreamId::try_new(format!("{name}/out"))?;
         let (source, handle) = NativeApplicationSource::channel(
             scope,
             core.computation_control()?
                 .desired_snapshot()
                 .id
                 .to_string(),
-            id,
+            id.clone(),
             stream.clone(),
             NonZeroUsize::new(1000).context("application input capacity")?,
         )?;
         let output = source.output();
         let batch = ComponentBatch::builder()
-            .source(Box::new(source.with_properties(properties)))
+            .source(name, Box::new(source.with_properties(properties)))
             .lifecycle_policy(output.component.clone(), LifecyclePolicy { auto_start })
             .bind_stream(output, stream)
             .build()?;
-        let report = core.add_components(batch).await?;
-        anyhow::ensure!(
-            report.committed,
-            "source declaration was rejected: {report:?}"
-        );
+        let receipt = core.add_components(batch).await?;
+        ensure_component_assignment(&receipt, &id)?;
+        wait_component(core, &id).await?;
         Ok(handle)
     }
 
@@ -523,17 +566,54 @@ impl TestRunDrasiLibInstance {
         let mut builder = core.computation_pipeline()?;
         for input in &config.inputs {
             builder = builder.native_source(Endpoint::new(
-                ComponentId::try_new(input.component.as_str())?,
-                PortId::try_new(input.port.as_deref().unwrap_or("out"))?,
+                input
+                    .component
+                    .as_id()
+                    .cloned()
+                    .context("query input must select a component UUID")?,
+                input.port.clone().unwrap_or(PortId::try_new("out")?),
             ))?;
         }
-        let report = core.add_components(builder.query(config).build()?).await?;
-        anyhow::ensure!(
-            report.committed,
-            "query declaration was rejected: {report:?}"
-        );
+        let id = config
+            .id
+            .clone()
+            .context("query component UUID is required")?;
+        let receipt = core
+            .add_components(builder.query(config.with_assigned_id(id.clone())).build()?)
+            .await?;
+        ensure_component_assignment(&receipt, &id)?;
+        wait_component(core, &id).await?;
         Ok(())
     }
+}
+
+fn ensure_component_assignment(
+    receipt: &drasi_lib::management::AcceptanceReceipt,
+    expected: &ComponentId,
+) -> Result<()> {
+    anyhow::ensure!(
+        receipt.creation.as_ref().is_some_and(|creation| {
+            creation
+                .components
+                .iter()
+                .any(|component| &component.id == expected)
+        }),
+        "component admission did not preserve requested UUID {expected}"
+    );
+    Ok(())
+}
+
+async fn wait_component(core: &DrasiLib, id: &ComponentId) -> Result<()> {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match core.component_by_id(id) {
+                Ok(_) => return Ok(()),
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        }
+    })
+    .await
+    .with_context(|| format!("component {id} was accepted but not created"))?
 }
 
 fn application_properties(value: &serde_json::Value) -> Result<HashMap<String, serde_json::Value>> {
@@ -551,11 +631,11 @@ fn application_source_properties(
     Ok(properties)
 }
 
-fn component_auto_start(core: &DrasiLib, id: &str) -> Result<bool> {
+fn component_auto_start(core: &DrasiLib, id: &ComponentId) -> Result<bool> {
     core.computation_control()?
         .desired_snapshot()
         .lifecycle_policies
-        .get(&ComponentId::try_new(id)?)
+        .get(id)
         .map(|policy| policy.auto_start)
         .context("component lifecycle policy is unavailable")
 }
@@ -580,7 +660,7 @@ fn component_properties(
     }
 }
 
-fn reaction_inputs(core: &DrasiLib, id: &str) -> Result<Vec<String>> {
+fn reaction_inputs(core: &DrasiLib, id: &ComponentId) -> Result<Vec<ComponentId>> {
     let snapshot = core.computation_control()?.desired_snapshot();
     Ok(snapshot
         .edges
@@ -592,27 +672,29 @@ fn reaction_inputs(core: &DrasiLib, id: &str) -> Result<Vec<String>> {
                 .iter()
                 .map(|edge| &edge.definition),
         )
-        .filter(|edge| edge.to.component.as_str() == id)
-        .map(|edge| edge.from.component.to_string())
+        .filter(|edge| &edge.to.component == id)
+        .map(|edge| edge.from.component.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect())
 }
 
 pub(super) fn query_config_from_request(
-    id: &str,
+    id: ComponentId,
+    name: ComponentName,
     query: String,
-    inputs: Vec<String>,
+    inputs: Vec<ComponentId>,
     auto_start: bool,
-) -> QueryConfig {
+) -> Result<QueryConfig> {
     // Embedded application sources are live-only inputs with no snapshot provider, so
     // their queries explicitly opt out of bootstrap rather than relying on a default.
-    let mut builder = drasi_lib::Query::cypher(id)
+    let mut builder = drasi_lib::Query::cypher(name)
+        .with_id(id)
         .query(query)
         .auto_start(auto_start)
         .enable_bootstrap(false);
     for input in inputs {
-        builder = builder.from_input(input);
+        builder = builder.from_input_by_id(input);
     }
     builder.build()
 }

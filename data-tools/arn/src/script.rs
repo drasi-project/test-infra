@@ -23,8 +23,8 @@ use test_data_store::scripts::change_script_file_writer::{
     ChangeScriptWriter, ChangeScriptWriterSettings,
 };
 use test_data_store::scripts::{
-    BootstrapHeaderRecord, BootstrapScriptRecord, ChangeHeaderRecord,
-    ChangeScriptRecord, NodeRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo,
+    BootstrapHeaderRecord, BootstrapScriptRecord, ChangeHeaderRecord, ChangeScriptRecord,
+    NodeRecord, SourceChangeEvent, SourceChangeEventPayload, SourceChangeEventSourceInfo,
     SourceChangeRecord,
 };
 use tokio::fs;
@@ -70,7 +70,10 @@ pub async fn generate_test_scripts(
         "batched-ids" => NotificationFormat::BatchedIds,
         "batched-payloads" => NotificationFormat::BatchedPayloads,
         _ => {
-            eprintln!("Invalid notification format: {}. Using full-payload.", args.notification_format);
+            eprintln!(
+                "Invalid notification format: {}. Using full-payload.",
+                args.notification_format
+            );
             NotificationFormat::FullPayload
         }
     };
@@ -95,10 +98,12 @@ pub async fn generate_test_scripts(
     println!("Generating resources...");
     let management_groups = generator.generate_management_groups();
     let service_groups = generator.generate_service_groups();
-    let relationships =
-        generator.generate_relationships(&management_groups, &service_groups);
+    let relationships = generator.generate_relationships(&management_groups, &service_groups);
 
-    println!("  - Generated {} management groups", management_groups.len());
+    println!(
+        "  - Generated {} management groups",
+        management_groups.len()
+    );
     println!("  - Generated {} service groups", service_groups.len());
     println!("  - Generated {} relationships", relationships.len());
 
@@ -242,7 +247,8 @@ pub async fn generate_test_scripts(
 
                 // Generate realistic reactivator timing (processing takes 1-10ms)
                 let reactivator_start_ns = ts_ns + rng.gen_range(1_000_000..5_000_000);
-                let reactivator_end_ns = reactivator_start_ns + rng.gen_range(1_000_000..10_000_000);
+                let reactivator_end_ns =
+                    reactivator_start_ns + rng.gen_range(1_000_000..10_000_000);
 
                 let source_info = SourceChangeEventSourceInfo {
                     db: args.source_id.clone(),
@@ -279,14 +285,18 @@ pub async fn generate_test_scripts(
                 updated_by,
             } => {
                 let before_arn = management_group.to_arn_resource("Create");
-                let after_arn =
-                    management_group.to_updated_arn_resource(new_display_name, updated_at, updated_by);
+                let after_arn = management_group.to_updated_arn_resource(
+                    new_display_name,
+                    updated_at,
+                    updated_by,
+                );
 
                 let ts_ns = start_datetime_ns + current_offset_ns;
 
                 // Generate realistic reactivator timing (processing takes 1-10ms)
                 let reactivator_start_ns = ts_ns + rng.gen_range(1_000_000..5_000_000);
-                let reactivator_end_ns = reactivator_start_ns + rng.gen_range(1_000_000..10_000_000);
+                let reactivator_end_ns =
+                    reactivator_start_ns + rng.gen_range(1_000_000..10_000_000);
 
                 let source_info = SourceChangeEventSourceInfo {
                     db: args.source_id.clone(),

@@ -28,9 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /usr/src
 COPY ./reactivator ./reactivator
 # This image builds reactivator as a standalone crate (no workspace root
-# copied), so strip the `[lints] workspace = true` stanza which would
-# otherwise fail to resolve.
-RUN sed -i '/^\[lints\]$/,/^workspace = true$/d' /usr/src/reactivator/Cargo.toml
+# copied), so materialize inherited package metadata and strip the workspace
+# lint stanza.
+RUN sed -i 's/^rust-version\.workspace = true$/rust-version = "1.95.0"/' /usr/src/reactivator/Cargo.toml \
+    && sed -i '/^\[lints\]$/,/^workspace = true$/d' /usr/src/reactivator/Cargo.toml
 
 WORKDIR /usr/src/reactivator
 

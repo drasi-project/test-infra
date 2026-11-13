@@ -12,15 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde_json::{json, Value, Map};
+use serde_json::{json, Map, Value};
 use test_data_store::scripts::{BootstrapScriptRecord, NodeRecord, RelationRecord};
 
 use super::{ItemRevisionFileContent, ItemType};
 
-fn extract_property_value(claims: &Map<String, Value>, prop: &str, get_first: bool) -> Option<Value> {
-    claims.get(prop)
+fn extract_property_value(
+    claims: &Map<String, Value>,
+    prop: &str,
+    get_first: bool,
+) -> Option<Value> {
+    claims
+        .get(prop)
         .and_then(|values| values.as_array())
-        .and_then(|array| if get_first { array.first() } else { array.last() })
+        .and_then(|array| {
+            if get_first {
+                array.first()
+            } else {
+                array.last()
+            }
+        })
         .and_then(|claim| claim.get("mainsnak"))
         .and_then(|mainsnak| mainsnak.get("datavalue"))
         .and_then(|datavalue| datavalue.get("value"))
@@ -28,10 +39,14 @@ fn extract_property_value(claims: &Map<String, Value>, prop: &str, get_first: bo
 }
 
 // Extract Area Property (P2046)
-fn extract_area_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
+fn extract_area_property(
+    claims: &Map<String, Value>,
+    properties: &mut Map<String, Value>,
+) -> anyhow::Result<()> {
     let val_opt = extract_property_value(claims, "P2046", true);
     if let Some(val) = val_opt {
-        let val = val.get("amount")
+        let val = val
+            .get("amount")
             .and_then(|val| val.as_str())
             .unwrap()
             .parse::<f64>()?;
@@ -44,12 +59,13 @@ fn extract_area_property(claims: &Map<String, Value>, properties: &mut Map<Strin
 
 // Extract Continent Property (P30)
 // This is the ID of the Continent to which some entity is located in, e.g. a Country has this property.
-fn extract_continent_id_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
+fn extract_continent_id_property(
+    claims: &Map<String, Value>,
+    properties: &mut Map<String, Value>,
+) -> anyhow::Result<()> {
     let val_opt = extract_property_value(claims, "P30", true);
     if let Some(val) = val_opt {
-        let val = val.get("id")
-            .and_then(|val| val.as_str())
-            .unwrap();
+        let val = val.get("id").and_then(|val| val.as_str()).unwrap();
 
         properties.insert("continent_id".to_string(), val.into());
     };
@@ -58,7 +74,10 @@ fn extract_continent_id_property(claims: &Map<String, Value>, properties: &mut M
 }
 
 // Extract Coordinate Location Property (P625)
-fn extract_coordinate_location_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
+fn extract_coordinate_location_property(
+    claims: &Map<String, Value>,
+    properties: &mut Map<String, Value>,
+) -> anyhow::Result<()> {
     let val_opt = extract_property_value(claims, "P625", false);
     if let Some(val) = val_opt {
         let lat = val.get("latitude").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -73,12 +92,13 @@ fn extract_coordinate_location_property(claims: &Map<String, Value>, properties:
 
 // Extract Country Property (P17)
 // This is the ID of the Country to which some entity is located in, e.g. a City has this property.
-fn extract_country_id_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
+fn extract_country_id_property(
+    claims: &Map<String, Value>,
+    properties: &mut Map<String, Value>,
+) -> anyhow::Result<()> {
     let val_opt = extract_property_value(claims, "P17", true);
     if let Some(val) = val_opt {
-        let val = val.get("id")
-            .and_then(|val| val.as_str())
-            .unwrap();
+        let val = val.get("id").and_then(|val| val.as_str()).unwrap();
 
         properties.insert("country_id".to_string(), val.into());
     };
@@ -87,10 +107,14 @@ fn extract_country_id_property(claims: &Map<String, Value>, properties: &mut Map
 }
 
 // Extract Population Property (P1082)
-fn extract_population_property(claims: &Map<String, Value>, properties: &mut Map<String, Value>) -> anyhow::Result<()> {
+fn extract_population_property(
+    claims: &Map<String, Value>,
+    properties: &mut Map<String, Value>,
+) -> anyhow::Result<()> {
     let val_opt = extract_property_value(claims, "P1082", false);
     if let Some(val) = val_opt {
-        let val = val.get("amount")
+        let val = val
+            .get("amount")
             .and_then(|val| val.as_str())
             .unwrap()
             .parse::<i64>()?;
@@ -101,31 +125,28 @@ fn extract_population_property(claims: &Map<String, Value>, properties: &mut Map
     Ok(())
 }
 
-fn extract_name_label(content: &Value, properties: &mut Map<String, Value>, lang: &str) -> anyhow::Result<()> {
-
-    match content.get("labels").and_then(|v| v.as_object()) {
-        Some(labels) => {
-            match labels.get(lang) {
-                Some(label) => {
-                    match label.get("value").and_then(|v| v.as_str()) {
-                        Some(value) => {
-                            properties.insert("name".to_string(), value.into());
-                        },
-                        None => {},
-                    };
-                },
-                None => {}
-            };
-        },
-        None => {}
-    };
+fn extract_name_label(
+    content: &Value,
+    properties: &mut Map<String, Value>,
+    lang: &str,
+) -> anyhow::Result<()> {
+    if let Some(value) = content
+        .get("labels")
+        .and_then(|value| value.as_object())
+        .and_then(|labels| labels.get(lang))
+        .and_then(|label| label.get("value"))
+        .and_then(|value| value.as_str())
+    {
+        properties.insert("name".to_string(), value.into());
+    }
 
     Ok(())
 }
 
-
-pub fn parse_item_revision(item_type:ItemType, revision: &ItemRevisionFileContent) -> anyhow::Result<Value> {
-
+pub fn parse_item_revision(
+    item_type: ItemType,
+    revision: &ItemRevisionFileContent,
+) -> anyhow::Result<Value> {
     let content = match revision.content {
         Some(ref content) => content,
         None => anyhow::bail!("No content found in revision"),
@@ -146,8 +167,10 @@ pub fn parse_item_revision(item_type:ItemType, revision: &ItemRevisionFileConten
     Ok(value)
 }
 
-pub fn item_revision_to_bootstrap_data_record(item_type:ItemType, revision: &ItemRevisionFileContent) -> anyhow::Result<BootstrapScriptRecord> {
-
+pub fn item_revision_to_bootstrap_data_record(
+    item_type: ItemType,
+    revision: &ItemRevisionFileContent,
+) -> anyhow::Result<BootstrapScriptRecord> {
     let id = revision.item_id.clone();
 
     let content = match revision.content {
@@ -162,13 +185,13 @@ pub fn item_revision_to_bootstrap_data_record(item_type:ItemType, revision: &Ite
     }?;
 
     if item_type.is_node() {
-        return Ok(BootstrapScriptRecord::Node(NodeRecord {
+        Ok(BootstrapScriptRecord::Node(NodeRecord {
             id,
             labels: vec![item_type.as_label().to_string()],
             properties: json!(properties),
-        }));
+        }))
     } else {
-        return Ok(BootstrapScriptRecord::Relation(RelationRecord {
+        Ok(BootstrapScriptRecord::Relation(RelationRecord {
             id,
             labels: vec![item_type.as_label().to_string()],
             start_id: "".to_string(),
@@ -176,12 +199,11 @@ pub fn item_revision_to_bootstrap_data_record(item_type:ItemType, revision: &Ite
             end_id: "".to_string(),
             properties: json!(properties),
             end_label: None,
-    }));
+        }))
     }
 }
 
 fn parse_city_item_props(content: &Value) -> anyhow::Result<Map<String, Value>> {
-
     let claims = match content.get("claims").and_then(|v| v.as_object()) {
         Some(claims) => claims,
         None => anyhow::bail!("No claims found in revision"),
@@ -191,18 +213,17 @@ fn parse_city_item_props(content: &Value) -> anyhow::Result<Map<String, Value>> 
     let mut properties = serde_json::Map::new();
 
     // Check if "claims" field exists and is an object
-    extract_area_property(claims, &mut properties)?;    
+    extract_area_property(claims, &mut properties)?;
     extract_coordinate_location_property(claims, &mut properties)?;
-    extract_country_id_property(claims, &mut properties)?;    
+    extract_country_id_property(claims, &mut properties)?;
     extract_population_property(claims, &mut properties)?;
 
     extract_name_label(content, &mut properties, "en")?;
-    
+
     Ok(properties)
 }
 
 fn parse_continent_item_props(content: &Value) -> anyhow::Result<Map<String, Value>> {
-
     let claims = match content.get("claims").and_then(|v| v.as_object()) {
         Some(claims) => claims,
         None => anyhow::bail!("No claims found in revision"),
@@ -217,12 +238,11 @@ fn parse_continent_item_props(content: &Value) -> anyhow::Result<Map<String, Val
     extract_coordinate_location_property(claims, &mut properties)?;
 
     extract_name_label(content, &mut properties, "en")?;
-    
+
     Ok(properties)
 }
 
 fn parse_country_item_props(content: &Value) -> anyhow::Result<Map<String, Value>> {
-
     let claims = match content.get("claims").and_then(|v| v.as_object()) {
         Some(claims) => claims,
         None => anyhow::bail!("No claims found in revision"),
@@ -234,10 +254,10 @@ fn parse_country_item_props(content: &Value) -> anyhow::Result<Map<String, Value
     // Check if "claims" field exists and is an object
     extract_area_property(claims, &mut properties)?;
     extract_population_property(claims, &mut properties)?;
-    extract_continent_id_property(claims, &mut properties)?;    
+    extract_continent_id_property(claims, &mut properties)?;
     extract_coordinate_location_property(claims, &mut properties)?;
 
     extract_name_label(content, &mut properties, "en")?;
-    
+
     Ok(properties)
 }

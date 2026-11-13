@@ -524,7 +524,8 @@ pub struct GrpcSourceChangeDispatcherDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrasiLibInstanceChannelSourceChangeDispatcherDefinition {
     pub drasi_lib_instance_id: String,
-    pub source_id: String,
+    pub source_id: drasi_core_types::ComponentId,
+    pub source_name: drasi_core_types::ComponentName,
     pub buffer_size: Option<usize>,
 }
 
@@ -622,14 +623,16 @@ pub struct GrpcReactionHandlerDefinition {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrasiLibInstanceCallbackReactionHandlerDefinition {
     pub drasi_lib_instance_id: String,
-    pub reaction_id: String,
+    pub reaction_id: drasi_core_types::ComponentId,
+    pub reaction_name: drasi_core_types::ComponentName,
     pub callback_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrasiLibInstanceChannelReactionHandlerDefinition {
     pub drasi_lib_instance_id: String,
-    pub reaction_id: String,
+    pub reaction_id: drasi_core_types::ComponentId,
+    pub reaction_name: drasi_core_types::ComponentName,
     pub buffer_size: Option<usize>,
     #[serde(default)]
     pub include_profiling: bool,
@@ -729,8 +732,11 @@ fn default_true() -> bool {
 /// Source configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DrasiLibSourceConfig {
-    /// Unique identifier for the source.
-    pub id: String,
+    /// Immutable component UUID.
+    pub id: drasi_core_types::ComponentId,
+
+    /// Unique, editable component name.
+    pub name: drasi_core_types::ComponentName,
 
     /// Source kind, such as application.
     pub kind: String,
@@ -747,14 +753,17 @@ pub struct DrasiLibSourceConfig {
 /// Query configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DrasiLibQueryConfig {
-    /// Unique identifier for the query.
-    pub id: String,
+    /// Immutable component UUID.
+    pub id: drasi_core_types::ComponentId,
+
+    /// Unique, editable component name.
+    pub name: drasi_core_types::ComponentName,
 
     /// Cypher query string.
     pub query: String,
 
-    /// IDs of upstream components (sources, queries or transformers) this query consumes.
-    pub inputs: Vec<String>,
+    /// Immutable IDs of upstream components this query consumes.
+    pub inputs: Vec<drasi_core_types::ComponentId>,
 
     /// Whether to automatically start this query.
     #[serde(default = "default_true")]
@@ -768,14 +777,17 @@ pub struct DrasiLibQueryConfig {
 /// Reaction configuration for an embedded drasi-lib instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DrasiLibReactionConfig {
-    /// Unique identifier for the reaction.
-    pub id: String,
+    /// Immutable component UUID.
+    pub id: drasi_core_types::ComponentId,
+
+    /// Unique, editable component name.
+    pub name: drasi_core_types::ComponentName,
 
     /// Reaction kind, such as application.
     pub kind: String,
 
-    /// IDs of queries this reaction subscribes to.
-    pub queries: Vec<String>,
+    /// Immutable IDs of queries this reaction subscribes to.
+    pub queries: Vec<drasi_core_types::ComponentId>,
 
     /// Whether to automatically start this reaction.
     #[serde(default = "default_true")]
@@ -804,6 +816,35 @@ mod tests {
         writeln!(file, "{content}").unwrap();
         file.sync_all().unwrap();
         File::open(file_path).unwrap()
+    }
+
+    #[test]
+    fn embedded_component_identity_requires_distinct_uuid_and_name_fields() {
+        let valid: DrasiLibSourceConfig = serde_json::from_value(serde_json::json!({
+            "id": "00000000-0000-4000-8000-000000000001",
+            "name": "source",
+            "kind": "application"
+        }))
+        .unwrap();
+        assert_eq!(
+            valid.id,
+            drasi_core_types::ComponentId::try_new("00000000-0000-4000-8000-000000000001").unwrap()
+        );
+        assert_eq!(valid.name.as_str(), "source");
+
+        for invalid in [
+            serde_json::json!({"id": "source", "name": "source", "kind": "application"}),
+            serde_json::json!({
+                "id": "00000000-0000-4000-8000-000000000001",
+                "kind": "application"
+            }),
+            serde_json::json!({"name": "source", "kind": "application"}),
+        ] {
+            assert!(
+                serde_json::from_value::<DrasiLibSourceConfig>(invalid).is_err(),
+                "accepted invalid embedded component identity"
+            );
+        }
     }
 
     #[test]

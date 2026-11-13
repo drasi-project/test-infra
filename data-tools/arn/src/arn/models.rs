@@ -88,24 +88,6 @@ pub enum ResourceType {
     Relationship,
 }
 
-impl ResourceType {
-    pub fn as_label(&self) -> &str {
-        match self {
-            ResourceType::ManagementGroup => "ManagementGroup",
-            ResourceType::ServiceGroup => "ServiceGroup",
-            ResourceType::Relationship => "Relationship",
-        }
-    }
-
-    pub fn as_arm_type(&self) -> &str {
-        match self {
-            ResourceType::ManagementGroup => "Microsoft.Management/managementGroups",
-            ResourceType::ServiceGroup => "Microsoft.Management/serviceGroups",
-            ResourceType::Relationship => "microsoft.relationships/servicegroupmember",
-        }
-    }
-}
-
 /// Base ARN Resource structure that maps to Drasi Node format
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArnResource {
@@ -237,7 +219,10 @@ impl ManagementGroupResource {
     }
 
     pub fn to_arn_resource(&self, change_action: &str) -> ArnResource {
-        let resource_id = format!("/providers/Microsoft.Management/managementGroups/{}", self.id);
+        let resource_id = format!(
+            "/providers/Microsoft.Management/managementGroups/{}",
+            self.id
+        );
         let correlation_id = Uuid::new_v4().to_string();
 
         let parent_value = match &self.parent_id {
@@ -298,7 +283,10 @@ impl ManagementGroupResource {
         updated_at: DateTime<Utc>,
         updated_by: String,
     ) -> ArnResource {
-        let resource_id = format!("/providers/Microsoft.Management/managementGroups/{}", self.id);
+        let resource_id = format!(
+            "/providers/Microsoft.Management/managementGroups/{}",
+            self.id
+        );
         let correlation_id = Uuid::new_v4().to_string();
 
         let parent_value = match &self.parent_id {
@@ -526,10 +514,12 @@ impl RelationshipResource {
 impl ManagementGroupResource {
     /// Create Event Grid event with full payload
     pub fn to_event_grid_event_full(&self, change_action: &str) -> EventGridEvent {
-        let resource_id = format!("/providers/Microsoft.Management/managementGroups/{}", self.id);
+        let resource_id = format!(
+            "/providers/Microsoft.Management/managementGroups/{}",
+            self.id
+        );
         let correlation_id = Uuid::new_v4().to_string();
-        let event_type = format!("Microsoft.Management/managementGroups/{}",
-            if change_action == "Create" { "write" } else { "write" });
+        let event_type = "Microsoft.Management/managementGroups/write".to_string();
 
         let parent_value = match &self.parent_id {
             Some(parent_id) => json!({
@@ -574,7 +564,7 @@ impl ManagementGroupResource {
         };
 
         EventGridEvent {
-            topic: format!("custom-domain-topic/eg-topic"),
+            topic: "custom-domain-topic/eg-topic".to_string(),
             subject: resource_id.clone(),
             event_type,
             event_time: self.created_at.to_rfc3339(),
@@ -592,7 +582,10 @@ impl ManagementGroupResource {
 
     /// Create Event Grid event with payload-less format (resourceId only)
     pub fn to_event_grid_event_payloadless(&self) -> EventGridEvent {
-        let resource_id = format!("/providers/Microsoft.Management/managementGroups/{}", self.id);
+        let resource_id = format!(
+            "/providers/Microsoft.Management/managementGroups/{}",
+            self.id
+        );
         let correlation_id = Uuid::new_v4().to_string();
         let event_type = "Microsoft.Management/managementGroups/write".to_string();
 
@@ -611,7 +604,7 @@ impl ManagementGroupResource {
         };
 
         EventGridEvent {
-            topic: format!("custom-domain-topic/eg-topic"),
+            topic: "custom-domain-topic/eg-topic".to_string(),
             subject: resource_id.clone(),
             event_type,
             event_time: self.created_at.to_rfc3339(),
@@ -635,7 +628,10 @@ pub fn create_batched_event_grid_event(
     subscription_id: &str,
 ) -> EventGridEvent {
     let subject = format!("/subscriptions/{}", subscription_id);
-    let event_time = resources.first().map(|r| r.created_at).unwrap_or_else(|| Utc::now());
+    let event_time = resources
+        .first()
+        .map(|r| r.created_at)
+        .unwrap_or_else(Utc::now);
 
     let resources_data: Vec<ArnResourcesData> = resources.iter().map(|mg| {
         let resource_id = format!("/providers/Microsoft.Management/managementGroups/{}", mg.id);

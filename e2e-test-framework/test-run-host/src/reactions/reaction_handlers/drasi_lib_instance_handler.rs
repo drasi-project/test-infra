@@ -9,6 +9,7 @@ use drasi_lib::{
     channels::QueryResult,
     computation::v1::{InputEnvelope, QueryChangeCodec},
     context::workers::{join_owned_worker, spawn_owned_worker, WorkerCompletion},
+    ComponentId, ComponentName,
 };
 use test_data_store::{
     test_repo_storage::models::{
@@ -36,7 +37,8 @@ enum Projection {
 #[derive(Clone)]
 struct Settings {
     instance: TestRunDrasiLibInstanceId,
-    reaction: String,
+    reaction_id: ComponentId,
+    reaction_name: ComponentName,
     capacity: usize,
     projection: Projection,
 }
@@ -128,7 +130,8 @@ impl DrasiLibInstanceHandler {
                 &id.test_run_id,
                 &definition.drasi_lib_instance_id,
             ),
-            reaction: definition.reaction_id,
+            reaction_id: definition.reaction_id,
+            reaction_name: definition.reaction_name,
             capacity: definition.buffer_size.unwrap_or(1024),
             projection: Projection::Changes {
                 include_profiling: definition.include_profiling,
@@ -145,7 +148,8 @@ impl DrasiLibInstanceHandler {
                 &id.test_run_id,
                 &definition.drasi_lib_instance_id,
             ),
-            reaction: definition.reaction_id,
+            reaction_id: definition.reaction_id,
+            reaction_name: definition.reaction_name,
             capacity: 1024,
             projection: Projection::Batch {
                 callback_type: definition.callback_type.unwrap_or_else(|| "default".into()),
@@ -173,7 +177,7 @@ impl DrasiLibInstanceHandler {
                         .drasi_lib_instances
                         .get(&settings.instance.test_drasi_lib_instance_id)
                         .context("application handler instance is unavailable")?;
-                    instance.take_reaction_receiver(&settings.reaction).await
+                    instance.take_reaction_receiver(&settings.reaction_id).await
                 };
                 tokio::select! {
                     result = bind => return result.map(Some),
@@ -236,7 +240,8 @@ impl DrasiLibInstanceHandler {
                 Projection::Changes { include_profiling } => {
                     let mut metadata = serde_json::json!({
                         "drasi_lib_instance_id": settings.instance.to_string(),
-                        "reaction_id": settings.reaction,
+                        "reaction_id": settings.reaction_id,
+                        "reaction_name": settings.reaction_name,
                     });
                     if let Some(profiling) = result_profiling(&result, *include_profiling)? {
                         metadata["profiling"] = profiling;
@@ -304,7 +309,7 @@ impl ReactionOutputHandler for DrasiLibInstanceHandler {
             if let Err(error) = &result {
                 log::error!(
                     "Application reaction '{}' failed: {error:#}",
-                    settings.reaction
+                    settings.reaction_name
                 );
                 send(
                     &sender,
@@ -390,7 +395,8 @@ impl ReactionOutputHandler for DrasiLibInstanceHandler {
     async fn metrics(&self) -> Option<serde_json::Value> {
         let mut metrics = serde_json::json!({
             "drasi_lib_instance_id": self.settings.instance.to_string(),
-            "reaction_id": self.settings.reaction,
+            "reaction_id": self.settings.reaction_id,
+            "reaction_name": self.settings.reaction_name,
         });
         match &self.settings.projection {
             Projection::Changes { .. } => {

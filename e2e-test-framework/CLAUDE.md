@@ -191,9 +191,29 @@ Schema shape:
     "description": "Embedded drasi-lib instance for testing",
     "config": {
       "log_level": "info",
-      "sources": [{ "id": "source1", "kind": "application", "auto_start": true, "config": {} }],
-      "queries": [{ "id": "query1", "query": "MATCH (n) RETURN n", "inputs": ["source1"], "auto_start": true, "config": {} }],
-      "reactions": [{ "id": "reaction1", "kind": "application", "queries": ["query1"], "auto_start": true, "config": {} }]
+      "sources": [{
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "source1",
+        "kind": "application",
+        "auto_start": true,
+        "config": {}
+      }],
+      "queries": [{
+        "id": "00000000-0000-4000-8000-000000000101",
+        "name": "query1",
+        "query": "MATCH (n) RETURN n",
+        "inputs": ["00000000-0000-4000-8000-000000000001"],
+        "auto_start": true,
+        "config": {}
+      }],
+      "reactions": [{
+        "id": "00000000-0000-4000-8000-000000000201",
+        "name": "reaction1",
+        "kind": "application",
+        "queries": ["00000000-0000-4000-8000-000000000101"],
+        "auto_start": true,
+        "config": {}
+      }]
     }
   }]
 }

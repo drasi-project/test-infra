@@ -21,6 +21,7 @@ drasi-lib = { path = "../../../drasi-core/lib", features = [
 
 # Core models (for SourceMiddlewareConfig and other shared types)
 drasi-core = { path = "../../../drasi-core/core" }
+drasi-core-types = { path = "../../../drasi-core/core-types", features = ["openapi"] }
 
 # Use the native query plugin through its validated in-process ABI.
 drasi-host-sdk = { path = "../../../drasi-core/components/host-sdk" }

@@ -4,6 +4,7 @@ IMAGE_PREFIX ?= drasi-project
 DOCKER_TAG_VERSION ?= latest
 TAG_SUFFIX ?=
 DOCKERX_OPTS ?= --load --cache-to type=inline,mode=max
+CONTAINER_BUILD ?= docker buildx build
 BUILD_CONFIG ?= default
 
 ifneq ($(BUILD_CONFIG), default)
@@ -17,7 +18,7 @@ endif
 default: docker-build
 
 docker-build:
-	docker buildx build .. -f Dockerfile.$(BUILD_CONFIG) -t $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS)
+	$(CONTAINER_BUILD) .. -f Dockerfile.$(BUILD_CONFIG) -t $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) $(DOCKERX_OPTS)
 
 kind-load:
 	kind load docker-image $(IMAGE_PREFIX)/e2e-reactivator:$(DOCKER_TAG_VERSION) --name $(if $(CLUSTER_NAME),$(CLUSTER_NAME),kind)

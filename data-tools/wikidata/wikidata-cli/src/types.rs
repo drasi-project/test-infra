@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::wikidata::ItemType;
 use chrono::NaiveDateTime;
 use clap::Args;
-use crate::wikidata::ItemType;
 
 #[derive(Args, Debug)]
 pub struct MakeScriptCommandArgs {
     /// The types of WikiData Items to script
-    #[arg(short = 't', long, value_enum, value_delimiter=',')]
+    #[arg(short = 't', long, value_enum, value_delimiter = ',')]
     pub item_types: Vec<ItemType>,
-    
+
     /// Supported formats are here https://docs.rs/chrono/latest/chrono/naive/struct.NaiveDateTime.html#method.parse_from_str
     #[arg(short = 'e', long)]
     pub rev_end: Option<NaiveDateTime>,
@@ -33,8 +33,8 @@ pub struct MakeScriptCommandArgs {
     /// The source ID to use for naming the source folder.
     #[arg(short = 'd', long)]
     pub source_id: Option<String>,
-    
+
     /// The ID of the test to generate scipts for.
-    #[arg(short = 'i', long, )]
+    #[arg(short = 'i', long)]
     pub test_id: String,
 }

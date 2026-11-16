@@ -121,7 +121,9 @@ The CI script will:
   `ci_artifacts/summary.md` and append it to `$GITHUB_STEP_SUMMARY` when set.
 
 Artifacts (logs, captured JSONL, reaction state) land in
-`./ci_artifacts/`.
+`./ci_artifacts/`. Cleanup also copies `drasi_server_config.ci.yaml` and
+`config.ci.json` there whenever they have been created, including on failed runs,
+without changing the original test exit status.
 
 ## Configuration controls
 

@@ -171,6 +171,12 @@ cleanup() {
     # Best-effort artifact collection.
     [[ -d "$DATA_CACHE" ]] && { rm -rf "$ARTIFACTS_DIR/test_data_cache"; cp -R "$DATA_CACHE" "$ARTIFACTS_DIR/test_data_cache" 2>/dev/null; }
     [[ -d "$LOG_DIR"   ]] && { rm -rf "$ARTIFACTS_DIR/logs";            cp -R "$LOG_DIR"   "$ARTIFACTS_DIR/logs" 2>/dev/null; }
+    local config_file
+    for config_file in "$DRASI_CFG_CI" "$TEST_CFG_CI"; do
+        if [[ -f "$config_file" ]] && ! cp "$config_file" "$ARTIFACTS_DIR/"; then
+            log "WARNING: Failed to collect rendered config: $config_file" >&2
+        fi
+    done
     exit "$exit_code"
 }
 trap cleanup EXIT INT TERM

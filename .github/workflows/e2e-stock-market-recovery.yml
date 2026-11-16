@@ -46,7 +46,7 @@ permissions:
 jobs:
   prepare:
     if: github.event_name != 'schedule' || (github.repository == 'drasi-project/test-infra' && github.ref == 'refs/heads/main')
-    name: Build recovery binaries
+    name: Download or build recovery binaries
     runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:

@@ -157,6 +157,40 @@ write_step_summary() { :; }
             self.assertEqual(exit_code, result.returncode, result.stderr)
             self.assertIn("snapshot checked", result.stdout)
 
+    def test_cleanup_retains_rendered_configs_without_changing_exit_status(self):
+        script = (Path(__file__).parent / "run_test_ci.sh").read_text()
+        cleanup = re.search(r"^cleanup\(\) \{\n.*?^trap cleanup EXIT INT TERM\n",
+                            script, re.MULTILINE | re.DOTALL)[0]
+        configs = {
+            "drasi_server_config.ci.yaml": "persistIndex: true\n",
+            "config.ci.json": '{"workload": 100000}\n',
+        }
+        cases = ((0, tuple(configs)), (23, tuple(configs)),
+                 (23, ("drasi_server_config.ci.yaml",)), (23, ()))
+        for index, (exit_code, available) in enumerate(cases):
+            with self.subTest(exit_code=exit_code, available=available):
+                work = self.root / f"cleanup {index}/work"
+                artifacts = self.root / f"cleanup {index}/artifacts"
+                work.mkdir(parents=True)
+                artifacts.mkdir()
+                for filename in available:
+                    (work / filename).write_text(configs[filename])
+                result = subprocess.run(
+                    ["bash"], text=True, capture_output=True,
+                    env=dict(os.environ, WORK_DIR=str(work), ARTIFACTS_DIR=str(artifacts),
+                             TEST_EXIT_CODE=str(exit_code)),
+                    input='set -euo pipefail\nSERVICE_PID=""\nDRASI_PID=""\n'
+                          'DATA_CACHE="$WORK_DIR/cache"\nLOG_DIR="$WORK_DIR/logs"\n'
+                          'DRASI_CFG_CI="$WORK_DIR/drasi_server_config.ci.yaml"\n'
+                          'TEST_CFG_CI="$WORK_DIR/config.ci.json"\n'
+                          'log() { printf "%s\\n" "$*"; }\n' + cleanup + '\nexit "$TEST_EXIT_CODE"\n',
+                )
+                self.assertEqual(exit_code, result.returncode, result.stdout + result.stderr)
+                self.assertEqual("", result.stderr)
+                self.assertEqual(set(available), {filename.name for filename in artifacts.iterdir()})
+                for filename in available:
+                    self.assertEqual(configs[filename], (artifacts / filename).read_text())
+
     def test_stopped_observer_requires_finalized_metrics(self):
         script = (Path(__file__).parent / "run_test_ci.sh").read_text()
         function = re.search(r"^fetch_final_reaction_state\(\) \{\n.*?^\}\n", script, re.MULTILINE | re.DOTALL)[0]

@@ -253,7 +253,7 @@ async fn embedded_native_application_reaction_preserves_result_order_and_count()
             .expect("registered native query factory")
             .name
             .as_ref(),
-        "drasi.experimental/indexed-query/ordinary"
+        "drasi.query/continuous"
     );
     let source = instance
         .get_source_handle(&component_id(SOURCE_ID))

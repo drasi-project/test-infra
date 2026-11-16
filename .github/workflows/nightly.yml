@@ -12,7 +12,7 @@ on:
       variants:
         description: "Comma/space-separated variants."
         required: false
-        default: "http_standard http_adaptive grpc_standard grpc_adaptive"
+        default: "http_standard http_adaptive grpc_standard grpc_adaptive drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive"
       drasi_server_repo:
         description: "drasi-server repository to build (owner/name)."
         required: false
@@ -34,7 +34,7 @@ on:
         required: false
         default: "drasi-nightly-test"
       bootstrap_size:
-        description: "Optional large-bootstrap preset; off uses the small functional scenario."
+        description: "Building-comfort bootstrap preset; stock market keeps its fixed join workload."
         type: choice
         options:
           - "off"
@@ -54,7 +54,7 @@ permissions:
   contents: read
 
 env:
-  DEFAULT_VARIANTS: "http_standard http_adaptive grpc_standard grpc_adaptive"
+  DEFAULT_VARIANTS: "http_standard http_adaptive grpc_standard grpc_adaptive drasi_server_http_grpc_join drasi_server_http_grpc_join_adaptive"
   DEFAULT_SERVER_REPO: "drasi-project/drasi-server"
   DEFAULT_SERVER_REF: "main"
   DEFAULT_CORE_REPO: "drasi-project/drasi-core"
@@ -65,6 +65,7 @@ env:
 
 jobs:
   select-variants:
+    if: github.event_name != 'schedule' || (github.repository == 'drasi-project/test-infra' && github.ref == 'refs/heads/main')
     name: Select variants
     runs-on: ubuntu-latest
     outputs:
@@ -142,7 +143,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            jq curl build-essential pkg-config libssl-dev libjq-dev libonig-dev \
+            jq curl ruby build-essential pkg-config libssl-dev libjq-dev libonig-dev \
             libprotobuf-dev protobuf-compiler cmake clang libclang-dev
 
       - name: Set JQ_LIB_DIR
@@ -150,14 +151,28 @@ jobs:
 
       - name: Build test-service
         working-directory: e2e-test-framework
-        run: cargo build --release --manifest-path test-service/Cargo.toml
+        run: |
+          cargo build --release --manifest-path test-service/Cargo.toml
+          echo "TEST_SERVICE_BIN=$GITHUB_WORKSPACE/e2e-test-framework/target/release/test-service" >> "$GITHUB_ENV"
 
       - name: Run test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_DIR: ${{ runner.temp }}/artifacts
           WORK_DIR: ${{ runner.temp }}/ci_work
-        run: bash e2e-test-framework/examples/building_comfort/run_variant.sh
+        run: |
+          set -euo pipefail
+          case "$VARIANT" in
+            drasi_server_http_grpc_join|drasi_server_http_grpc_join_adaptive)
+              bash e2e-test-framework/examples/building_comfort/dynamic/run_dynamic.sh --prepare-server
+              DRASI_SERVER_BIN="$(jq -er '.binary | select(type == "string" and length > 0)' "$ARTIFACTS_DIR/server-build.json")"
+              export DRASI_SERVER_BIN
+              bash e2e-test-framework/examples/stock_market/ci/drasi_server_http_grpc_join/run_test_ci.sh
+              ;;
+            *)
+              bash e2e-test-framework/examples/building_comfort/run_variant.sh
+              ;;
+          esac
 
       - name: Upload artifacts
         if: always()

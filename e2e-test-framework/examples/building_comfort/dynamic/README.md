@@ -321,15 +321,16 @@ The **Nightly** workflow in
 [.github/workflows/nightly.yml](../../../../.github/workflows/nightly.yml)
 runs daily at 22:00 UTC on GitHub-hosted runners. Core's nightly starts at
 14:00 UTC; the gap allows for GitHub scheduling delays and its roughly 2.5-hour
-plugin build. It can also be started manually. Scheduled workflows run from the
-repository's default branch.
+plugin build. Scheduled E2E, Azure, and recovery jobs run only in
+`drasi-project/test-infra` on `main`. Fork schedules skip tests and performance
+publication; manual dispatches remain available in forks and on other branches.
 
-Scheduled and manual runs always attempt the selected tests, without checking
+Allowed scheduled and manual runs attempt the selected tests, without checking
 the upstream nightly's status or freshness. Build, plugin-loading, and test
 failures fail the run normally. If plugin publishing failed, the
 `drasi-nightly-test` tag may still point to an earlier build.
 
-Each E2E job:
+Each building-comfort E2E job:
 
 1. builds drasi-server from `main`;
 2. patches its drasi-core dependencies to drasi-core `main`;
@@ -339,6 +340,13 @@ Each E2E job:
   the shared variant runner and the committed small scenario
   (`bootstrap_size: off`) with its determinism baselines; and
 5. uploads diagnostic artifacts, including determinism verdicts and logs.
+
+The default matrix also includes the stock-market
+`drasi_server_http_grpc_join` and `drasi_server_http_grpc_join_adaptive` variants.
+They reuse the same server/core preparation and nightly plugin tag, then run the
+fixed join workload with input-derived snapshot validation. See the
+[stock-market nightly coverage](../../stock_market/ci/drasi_server_http_grpc_join/README.md#nightly-full-stack-coverage)
+for details. Bootstrap presets apply only to building-comfort jobs.
 
 This is a functional regression check, not a performance reporting run. No
 results are published to `drasi-project/test-results`. Large-bootstrap presets

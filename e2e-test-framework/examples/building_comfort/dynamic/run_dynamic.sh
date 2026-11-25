@@ -1598,17 +1598,26 @@ apply_server_components() {
     while IFS= read -r q; do
         [[ -z "$q" ]] && continue
         local qid; qid="$(printf '%s' "$q" | jq -r '.id')"
+        # queries.json keeps the readable query id because the recovery goldens
+        # fingerprint it. The server now takes that as `name` and requires `id`
+        # to be a UUID, so send a UUID derived from the name: the same on every
+        # run, which keeps reaction output reproducible.
+        local q_uuid
+        q_uuid="$(python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, "drasi-test-infra/building_comfort/query/" + sys.argv[1]))' "$qid")"
         # Apply the query-tuning preset (camelCase; the server DTO uses
         # rename_all=camelCase + deny_unknown_fields, so exact casing matters).
         local q_body
         q_body="$(printf '%s' "$q" | jq \
+            --arg uuid "$q_uuid" \
             --argjson pq "$PRIORITY_QUEUE_CAP" \
             --argjson db "$DISPATCH_BUFFER_CAP" \
             --arg outbox "${OUTBOX_CAPACITY:-}" '
-            .priorityQueueCapacity = $pq
+            .name = .id
+            | .id = $uuid
+            | .priorityQueueCapacity = $pq
             | .dispatchBufferCapacity = $db
             | if $outbox != "" then .outboxCapacity = ($outbox | tonumber) else . end')"
-        log "  -> query $qid (priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP)"
+        log "  -> query $qid (id=$q_uuid, priorityQueueCapacity=$PRIORITY_QUEUE_CAP, dispatchBufferCapacity=$DISPATCH_BUFFER_CAP)"
         log "  -> query $qid outboxCapacity=$(printf '%s' "$q_body" | jq -r '.outboxCapacity // "server default"')"
         drasi_apply "/queries" "$q_body"
     done < <(jq -c --argjson sel "$SELECTED_QUERIES_JSON" "$q_select" "$qry_file")

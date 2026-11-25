@@ -892,6 +892,8 @@ dependencies = [
  "imbl",
  "jsonschema",
  "log",
+ "metrics",
+ "pin-project-lite",
  "rmp-serde",
  "serde",
  "serde_bytes",
@@ -899,6 +901,8 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
+ "tracing",
  "uuid",
 ]
 
@@ -918,11 +922,17 @@ dependencies = [
  "drasi-core-types",
  "futures-core",
  "futures-util",
+ "log",
+ "metrics",
  "rmp-serde",
  "serde",
  "serde_bytes",
  "serde_json",
  "tokio",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -938,7 +948,6 @@ dependencies = [
  "drasi-core",
  "drasi-middleware",
  "drasi-query-common",
- "futures-util",
  "imbl",
  "log",
  "ordered-float",
@@ -1086,6 +1095,7 @@ dependencies = [
  "futures",
  "imbl",
  "log",
+ "metrics",
  "ordered-float",
  "rmp-serde",
  "serde",
@@ -2371,6 +2381,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "metrics"
+version = "0.24.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89550ee9f79e88fef3119de263694973a8adb26c21d75322164fb8c493039fe2"
+dependencies = [
+ "portable-atomic",
+ "rapidhash",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3579,6 +3599,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f703f4665700daf5512dcca5f43afa6af89f09db47fb56be587f80636bda2d41"
 dependencies = [
  "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rapidhash"
+version = "4.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5da7e78a036ce858e8d55b7e7dc8ba3a88b78350fd2155d3591bbd966b58589e"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
